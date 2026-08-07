@@ -1,0 +1,12 @@
+.pytest_cache/
+.ruff_cache/
+.venv/
+.coverage
+coverage.xml
+dist/
+build/
+*.egg-info/
+__pycache__/
+*.pyc
+.eidolon-ops/
+diagnostics/

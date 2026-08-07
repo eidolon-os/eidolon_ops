@@ -1,0 +1,53 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "eidolon-ops"
+version = "0.1.0"
+description = "Mac operator CLI for commit-pinned Eidolon OS Raspberry Pi releases"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+  "jsonschema>=4.21",
+  "pytest>=8.0",
+  "pytest-cov>=6.0",
+  "ruff>=0.4",
+]
+
+[project.scripts]
+eidolon-pi = "eidolon_ops.cli:run"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/eidolon_ops"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+markers = [
+  "unit: pure configuration and command construction",
+  "component: isolated target filesystem or state-machine behavior",
+  "contract: compatibility with the existing eidolon-release wire contract",
+  "integration: real local subprocesses with fake SSH/SCP executables",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["eidolon_ops"]
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
+skip_covered = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = ["E501", "RUF001", "RUF002", "RUF003"]

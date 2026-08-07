@@ -1,0 +1,63 @@
+schema_version = 1
+
+[host]
+user = "pi"
+hostname = "192.168.1.26"
+port = 22
+identity_file = "/absolute/path/to/id_ed25519_eidolon_pi"
+known_hosts_file = "/absolute/path/to/eidolon_pi_known_hosts"
+connect_timeout_seconds = 10
+remote_uv = "/usr/local/bin/uv"
+
+[workspace]
+bundle_root = "/private/tmp/eidolon-release-bundles"
+release_cli = "../../eidolon_kernel/.venv/bin/eidolon-release"
+
+[sources.eidolon_kernel]
+path = "../../eidolon_kernel"
+revision = "27dd8c9ed47ca8eeb0776abdadb3ff3dd0631e9e"
+
+[sources.eidolon_data]
+path = "../../eidolon_data"
+revision = "e3afb78ccd0b42b01614fe3d6e9d89733798ebc9"
+
+[sources.eidolon_hub]
+path = "../../eidolon_hub"
+revision = "96438a2507fb76ad025824873a99b213a99016ad"
+
+[sources.eidolon_admin]
+path = "../../eidolon_admin"
+revision = "41b15d14b8597b87849664cb35a63d985e02d727"
+
+[sources.eidolon_sdk]
+path = "../../eidolon_sdk"
+revision = "d76fe046bc6eb21d584c20c6613d0918acbf76e6"
+
+[services]
+units = [
+  "eidolon-bootstrapd.service",
+  "eidolond.service",
+  "eidolon-data.service",
+  "eidolon-data-workspace.service",
+  "eidolon-hub.service",
+  "eidolon-kernel.service",
+  "eidolon-local-api.service",
+  "eidolon-admin.service",
+]
+
+[data]
+system_database = "/var/lib/eidolon/eidolon-system.sqlite3"
+object_store = "/var/lib/eidolon/objects"
+bootstrap_database = "/var/lib/eidolon-bootstrap/bootstrap.sqlite3"
+deployment_evidence = "/var/lib/eidolon/deployments"
+
+# Values stay in local mode-0600 files. The CLI copies bytes through a private
+# staging directory and removes that staging directory after every attempt.
+[install.files]
+data_env = "/absolute/private/path/data.env"
+hub_env = "/absolute/private/path/hub.env"
+kernel_env = "/absolute/private/path/kernel.env"
+admin_env = "/absolute/private/path/admin.env"
+local_api_env = "/absolute/private/path/local-api.env"
+bootstrap_env = "/absolute/private/path/bootstrap.env"
+host_identity = "/absolute/private/path/host_identity.ed25519"
