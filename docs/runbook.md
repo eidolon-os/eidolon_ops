@@ -39,7 +39,8 @@ validate Mac commands, SSH files, 8 repos/commits, 14 private inputs
   -> foundation platform/capacity/package/artifact/service doctor
   -> if needed: Python bootstrap -> apt -> hash-pinned NATS/LiveKit/uv/Node -> BlueZ/NM/Avahi
   -> exact Foundation evidence outside the product authority namespace
-  -> exact 8-commit bundle -> digest-guarded resumable SSH/rsync staging -> Pi-native prepare/seal
+  -> exact 8-commit bundle -> digest-guarded resumable SSH/rsync staging
+  -> explicit HTTPS Python index + bounded timeout/retries -> frozen Pi-native prepare/seal
   -> private staging -> exclusive first-install lock -> clean namespace proof
   -> identities/directories -> exact 14 input bytes -> fresh Data V2 baseline
   -> 23 assets + 7 links -> enable 4 top-level units -> ordered start

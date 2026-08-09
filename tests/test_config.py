@@ -22,6 +22,9 @@ def test_loads_strict_config(config_path: Path) -> None:
     assert config.host.target == "pi@pi.example"
     assert config.foundation_profile == FOUNDATION_PROFILE
     assert config.host.port == 2222
+    assert config.workspace.python_index_url == "https://pypi.org/simple"
+    assert config.workspace.python_http_timeout_seconds == 120
+    assert config.workspace.python_http_retries == 8
     assert config.units == PRODUCT_UNITS
     assert set(config.sources) == {
         "eidolon_kernel",
@@ -84,6 +87,56 @@ def test_rejects_unreviewed_foundation_profile(config_path: Path) -> None:
     ],
 )
 def test_rejects_unsafe_host_fields(config_path: Path, old: str, new: str, message: str) -> None:
+    _replace(config_path, old, new)
+
+    with pytest.raises(ConfigurationError, match=message):
+        load_config(config_path)
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "message"),
+    [
+        (
+            'python_index_url = "https://pypi.org/simple"',
+            'python_index_url = "http://pypi.org/simple"',
+            "HTTPS",
+        ),
+        (
+            'python_index_url = "https://pypi.org/simple"',
+            'python_index_url = "https://user:secret@pypi.org/simple"',
+            "without credentials",
+        ),
+        (
+            'python_index_url = "https://pypi.org/simple"',
+            'python_index_url = "https://pypi.org:invalid/simple"',
+            "valid HTTPS",
+        ),
+        (
+            'python_index_url = "https://pypi.org/simple"',
+            'python_index_url = "https://pypi.org/simple?channel=unstable"',
+            "without credentials",
+        ),
+        (
+            'python_index_url = "https://pypi.org/simple"',
+            'python_index_url = "https://pypi.org"',
+            "without credentials",
+        ),
+        (
+            'python_index_url = "https://pypi.org/simple"',
+            'python_index_url = "https://pypi.org/simple path"',
+            "bounded HTTPS",
+        ),
+        (
+            "python_http_timeout_seconds = 120",
+            "python_http_timeout_seconds = 9",
+            "between",
+        ),
+        ("python_http_retries = 8", "python_http_retries = 21", "between"),
+    ],
+)
+def test_rejects_unsafe_python_resolver_fields(
+    config_path: Path, old: str, new: str, message: str
+) -> None:
     _replace(config_path, old, new)
 
     with pytest.raises(ConfigurationError, match=message):

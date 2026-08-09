@@ -47,9 +47,9 @@ uv run ruff format --check .
 35 files already formatted
 
 pytest --cov=eidolon_ops --cov-branch --cov-report=term-missing --cov-fail-under=90 -q
-304 passed, 0 failed, 0 skipped
-branch-aware coverage: 90.01%
-pytest runtime reported: 3.10 seconds
+312 passed, 0 failed, 0 skipped
+branch-aware coverage: 90.06%
+pytest runtime reported: 4.18 seconds
 
 uv build --out-dir /private/tmp/eidolon-ops-build-20260809-final-1
 sdist: 158,426 bytes; wheel: 62,154 bytes
@@ -103,9 +103,12 @@ SDK      8108970514d9fefd3d93e7466e91706a1681c331
 
 Local preflight proves that the release CLI itself is a clean worktree at the exact pinned Kernel commit, all 15 unit
 blobs pass the FHS matrix, and the regenerated 14-file input set passes the new Hub/Admin/Provider token relations.
-The obsolete 494-MiB candidate proved guarded resumable upload and Pi-native execution but failed on the network
-timeout recorded above. The selected matrix's new exact bundle and complete native preparation remain the immediate
-next gate; it must not reuse the obsolete bundle identity.
+The selected matrix's 480-MiB exact bundle passed local digest validation and guarded resumable upload. Its first
+target-native attempt completed Data and entered Hub, but the official PyPI path stopped making progress while
+downloading `cryptography`; the unsealed release root was removed by the preparer's failure path, the immutable
+staging remained, and zero product units were installed. Ops now requires an explicit credential-free HTTPS Python
+index plus bounded uv timeout/retry values and records them in preflight evidence. Every component still installs with
+`uv sync --frozen`; the next run must reuse this same bundle identity and prove complete native preparation.
 
 ## Foundation artifact evidence
 
@@ -136,8 +139,9 @@ client may learn trust from mDNS or disable certificate verification.
 - Permanent deletion of the three old authority roots; the user authorized clean replacement, but the final matrix
   gate has not yet reached the destructive install phase. Their metadata-only inventory includes old Data/Hub/Kernel/eidolond SQLite files, release receipts,
   Admin job roots and Bootstrap identity/TLS/database files.
-- Complete Pi-native preparation for all seven component environments. The first real attempt proved resumable upload
-  and Kernel preparation, then failed closed on a PyPI timeout during Data.
+- Complete Pi-native preparation for all seven component environments. The exact selected matrix completed Data and
+  reached Hub, then failed closed on an unavailable official PyPI download path. The resumable retry now uses the
+  explicitly configured HTTPS mirror with frozen locks, bounded timeout and bounded retries.
 - Real `systemd-analyze verify`, 15-unit start order and health after clean install; Local API/Hub/provider ports and
   mDNS must be re-measured after activation.
 - Full reboot recovery, concurrent operator race, disk-full/power-loss/failure auto-restore and explicit rollback on

@@ -68,6 +68,9 @@ remote_uv = "/usr/local/bin/uv"
 [workspace]
 bundle_root = "{tmp_path / "bundles"}"
 release_cli = "{release_cli}"
+python_index_url = "https://pypi.org/simple"
+python_http_timeout_seconds = 120
+python_http_retries = 8
 
 {_source_tables(tmp_path, revisions)}
 [services]

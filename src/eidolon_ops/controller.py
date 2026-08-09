@@ -295,6 +295,12 @@ class EidolonPiController:
                 "batch_mode": True,
                 "strict_host_key_checking": True,
             },
+            "python_resolver": {
+                "index_url": self.config.workspace.python_index_url,
+                "http_timeout_seconds": self.config.workspace.python_http_timeout_seconds,
+                "http_retries": self.config.workspace.python_http_retries,
+                "locked": True,
+            },
             "install_prerequisites_checked": require_install_files,
             "install_input_contract": install_input_contract,
         }
@@ -911,6 +917,10 @@ class EidolonPiController:
         prepare = self._remote_json(
             "target-native release preparation",
             (
+                "/usr/bin/env",
+                f"UV_DEFAULT_INDEX={self.config.workspace.python_index_url}",
+                f"UV_HTTP_TIMEOUT={self.config.workspace.python_http_timeout_seconds}",
+                f"UV_HTTP_RETRIES={self.config.workspace.python_http_retries}",
                 "/usr/bin/python3",
                 f"{remote_bundle}/prepare_target.py",
                 remote_bundle,

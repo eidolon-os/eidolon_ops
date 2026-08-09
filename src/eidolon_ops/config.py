@@ -9,6 +9,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import MappingProxyType
+from urllib.parse import urlsplit
 
 from eidolon_ops.foundation import FOUNDATION_PROFILE
 
@@ -75,6 +76,9 @@ _REVISION = re.compile(r"^[0-9a-f]{40}$")
 _HOST = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$")
 _USER = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
 _RELEASE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_PYTHON_INDEX_URL = re.compile(
+    r"^https://[A-Za-z0-9.-]+(?::[0-9]{1,5})?/[A-Za-z0-9_./:=+@,-]*$"
+)
 
 
 class ConfigurationError(ValueError):
@@ -100,6 +104,9 @@ class HostConfig:
 class WorkspaceConfig:
     bundle_root: Path
     release_cli: Path
+    python_index_url: str
+    python_http_timeout_seconds: int
+    python_http_retries: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -208,12 +215,33 @@ def load_config(path: Path) -> OperationsConfig:
     workspace_wire = _mapping(document["workspace"], "workspace")
     _require_keys(
         workspace_wire,
-        required={"bundle_root", "release_cli"},
+        required={
+            "bundle_root",
+            "release_cli",
+            "python_index_url",
+            "python_http_timeout_seconds",
+            "python_http_retries",
+        },
         label="workspace",
     )
     workspace = WorkspaceConfig(
         bundle_root=_local_path(workspace_wire["bundle_root"], base, "workspace.bundle_root"),
         release_cli=_local_path(workspace_wire["release_cli"], base, "workspace.release_cli"),
+        python_index_url=_https_index_url(
+            workspace_wire["python_index_url"], "workspace.python_index_url"
+        ),
+        python_http_timeout_seconds=_integer(
+            workspace_wire["python_http_timeout_seconds"],
+            "workspace.python_http_timeout_seconds",
+            minimum=10,
+            maximum=600,
+        ),
+        python_http_retries=_integer(
+            workspace_wire["python_http_retries"],
+            "workspace.python_http_retries",
+            minimum=0,
+            maximum=20,
+        ),
     )
 
     sources_wire = _mapping(document["sources"], "sources")
@@ -340,6 +368,32 @@ def _absolute_remote_path(value: object, label: str) -> Path:
     if not path.is_absolute() or ".." in path.parts:
         raise ConfigurationError(f"{label} must be a safe absolute path")
     return path
+
+
+def _https_index_url(value: object, label: str) -> str:
+    text = _string(value, label)
+    if len(text) > 2048 or any(character.isspace() for character in text):
+        raise ConfigurationError(f"{label} must be a bounded HTTPS URL")
+    try:
+        parsed = urlsplit(text)
+        port = parsed.port
+    except ValueError as exc:
+        raise ConfigurationError(f"{label} must be a valid HTTPS URL") from exc
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname is None
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or not parsed.path.startswith("/")
+        or (port is not None and not 1 <= port <= 65535)
+        or _PYTHON_INDEX_URL.fullmatch(text) is None
+    ):
+        raise ConfigurationError(
+            f"{label} must be HTTPS without credentials, query parameters, or fragments"
+        )
+    return text
 
 
 def _require_revision(value: str, label: str) -> None:

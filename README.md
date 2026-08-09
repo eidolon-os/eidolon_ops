@@ -74,8 +74,10 @@ chmod 600 config/eidolon-pi.toml
 Mac 还必须安装 `git-lfs`；bundle 只从 exact commit pointer 导出 Channel 模型并验证 LFS object digest，
 不会读取 Channel working tree 中的 hydrated 文件。
 
-配置显式固定 foundation profile、目标/SSH、8 个 repo/commit、15 个 unit、authority 数据路径和 14 个
-私密输入文件。SSH 强制 BatchMode、独立 key、`StrictHostKeyChecking=yes` 和显式 known_hosts。
+配置显式固定 foundation profile、目标/SSH、8 个 repo/commit、15 个 unit、authority 数据路径、14 个
+私密输入文件，以及 target-native Python 索引/超时/重试策略。Python 依赖仍由各仓库的 frozen
+`uv.lock` 精确约束；替代 HTTPS 索引只改变下载来源，不允许重新解析版本。SSH 强制 BatchMode、独立
+key、`StrictHostKeyChecking=yes` 和显式 known_hosts。
 示例见 [`config/eidolon-pi.example.toml`](config/eidolon-pi.example.toml)。
 
 ## 统一路径契约

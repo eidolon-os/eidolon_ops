@@ -222,6 +222,12 @@ def test_local_preflight_proves_exact_commits(config) -> None:
     assert result["install_prerequisites_checked"] is True
     assert result["release_cli_revision"] == config.sources["eidolon_kernel"].revision
     assert result["install_input_contract"] == {"status": "compatible"}
+    assert result["python_resolver"] == {
+        "index_url": "https://pypi.org/simple",
+        "http_timeout_seconds": 120,
+        "http_retries": 8,
+        "locked": True,
+    }
 
 
 def test_local_preflight_rejects_revision_alias(config) -> None:
@@ -415,6 +421,18 @@ def test_deploy_defaults_to_prepare_and_dry_run(setup_controller) -> None:
     ]
     assert transport.resumable_uploads[0][1] == "/var/tmp/eidolon-release-r1"
     assert transport.resumable_uploads[0][0].name == "r1"
+    prepare_command = next(
+        remote
+        for remote, _sudo in transport.remote_calls
+        if any(token.endswith("/prepare_target.py") for token in remote)
+    )
+    assert prepare_command[:5] == (
+        "/usr/bin/env",
+        "UV_DEFAULT_INDEX=https://pypi.org/simple",
+        "UV_HTTP_TIMEOUT=120",
+        "UV_HTTP_RETRIES=8",
+        "/usr/bin/python3",
+    )
 
 
 def test_deploy_resume_activate_skips_transfer(setup_controller) -> None:
