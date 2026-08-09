@@ -33,11 +33,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 release_id=arguments.release_id,
                 resume=arguments.resume,
                 apply=arguments.apply,
+                reset_existing=arguments.reset_existing,
+                wipe_authority_data=arguments.wipe_authority_data,
             )
-        elif arguments.operation == "expand":
-            result = controller.expand(
-                release_id=arguments.release_id,
-                resume=arguments.resume,
+        elif arguments.operation == "reset":
+            result = controller.reset(
+                wipe_authority_data=arguments.wipe_authority_data,
                 apply=arguments.apply,
             )
         elif arguments.operation in {"deploy", "update"}:
@@ -118,13 +119,12 @@ def _parser() -> argparse.ArgumentParser:
     install.add_argument("--release-id", required=True)
     install.add_argument("--resume", action="store_true")
     install.add_argument("--apply", action="store_true")
+    install.add_argument("--reset-existing", action="store_true")
+    install.add_argument("--wipe-authority-data", action="store_true")
 
-    expand = operations.add_parser(
-        "expand", help="expand an owned core release into the full product topology"
-    )
-    expand.add_argument("--release-id", required=True)
-    expand.add_argument("--resume", action="store_true")
-    expand.add_argument("--apply", action="store_true")
+    reset = operations.add_parser("reset", help="remove the fixed Eidolon deployment namespace")
+    reset.add_argument("--wipe-authority-data", action="store_true")
+    reset.add_argument("--apply", action="store_true")
 
     for name in ("deploy", "update"):
         deploy = operations.add_parser(

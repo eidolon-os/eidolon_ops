@@ -37,6 +37,9 @@ class FakeHostController:
     def install(self, **kwargs):
         return self._result("install", **kwargs)
 
+    def reset(self, **kwargs):
+        return self._result("reset", **kwargs)
+
     def deploy(self, **kwargs):
         return self._result("deploy", **kwargs)
 
@@ -75,10 +78,21 @@ def fake_host(monkeypatch) -> None:
         (["app-ready"], "app-ready"),
         (["doctor", "--release-id", "r1"], "doctor"),
         (["provision", "--apply"], "provision"),
-        (["install", "--release-id", "r1", "--resume", "--apply"], "install"),
+        (
+            [
+                "install",
+                "--release-id",
+                "r1",
+                "--resume",
+                "--reset-existing",
+                "--wipe-authority-data",
+                "--apply",
+            ],
+            "install",
+        ),
+        (["reset", "--wipe-authority-data", "--apply"], "reset"),
         (["deploy", "--release-id", "r1", "--activate"], "deploy"),
         (["update", "--release-id", "r1"], "deploy"),
-        (["expand", "--release-id", "r1", "--apply"], "expand"),
         (
             ["rollback", "--release-id", "r1", "--snapshot", "/var/lib/eidolon/deployments/r1-x"],
             "rollback",

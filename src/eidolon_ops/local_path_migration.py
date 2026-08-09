@@ -106,12 +106,9 @@ class LocalPathMigrator:
     def _require_stopped(self) -> None:
         live = self._live_processes()
         if live:
-            details = ", ".join(
-                f"{item['pid_file']}:{item['pid']}" for item in live
-            )
+            details = ", ".join(f"{item['pid_file']}:{item['pid']}" for item in live)
             raise OperationsError(
-                "stop the local Eidolon stack before migrating state paths: "
-                + details
+                "stop the local Eidolon stack before migrating state paths: " + details
             )
 
     def _live_processes(self) -> list[dict[str, object]]:

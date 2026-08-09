@@ -34,18 +34,33 @@ class HostController:
     def provision(self, *, apply: bool) -> dict[str, object]:
         return self._require_pi("provision").provision(apply=apply)
 
-    def install(self, *, release_id: str, resume: bool, apply: bool) -> dict[str, object]:
+    def install(
+        self,
+        *,
+        release_id: str,
+        resume: bool,
+        apply: bool,
+        reset_existing: bool = False,
+        wipe_authority_data: bool = False,
+    ) -> dict[str, object]:
         return self._require_pi("install").install(
-            release_id=release_id, resume=resume, apply=apply
+            release_id=release_id,
+            resume=resume,
+            apply=apply,
+            reset_existing=reset_existing,
+            wipe_authority_data=wipe_authority_data,
+        )
+
+    def reset(self, *, wipe_authority_data: bool, apply: bool) -> dict[str, object]:
+        return self._require_pi("reset").reset(
+            wipe_authority_data=wipe_authority_data,
+            apply=apply,
         )
 
     def deploy(self, *, release_id: str, resume: bool, activate: bool) -> dict[str, object]:
         return self._require_pi("deploy").deploy(
             release_id=release_id, resume=resume, activate=activate
         )
-
-    def expand(self, *, release_id: str, resume: bool, apply: bool) -> dict[str, object]:
-        return self._require_pi("expand").expand(release_id=release_id, resume=resume, apply=apply)
 
     def rollback(self, *, release_id: str, snapshot: Path, apply: bool) -> dict[str, object]:
         return self._require_pi("rollback").rollback(

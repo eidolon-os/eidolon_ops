@@ -37,27 +37,30 @@ validate Mac commands, SSH files, 8 repos/commits, 14 private inputs
 An existing unowned Eidolon database/link/secret/unit namespace fails closed. A partial install can resume only with
 the same release ID and identical input digests. Temporary secret staging is removed after success or failure.
 
-## Managed core Host: expand to the full App backend
+## Existing Host: clean reinstall, not `/srv` migration
 
-An older Host whose Kernel/Data/Hub/Admin links all point into one managed release is not a new install. Inspect and
-then expand it explicitly:
+The product path does not migrate or adopt an older deployment. First inspect the fixed deletion boundary:
 
 ```bash
 uv run eidolon-ops --config /absolute/path/hosts/pi5.toml \
-  expand --release-id 20260809-product-full
-
-uv run eidolon-ops --config /absolute/path/hosts/pi5.toml \
-  expand --release-id 20260809-product-full --apply
+  reset --wipe-authority-data
 ```
 
-The read-only plan accepts either one managed `/opt` core release or one owned legacy `/srv` core release. It rejects
-missing/mixed core links, any partial Agent/Channel/Memory link set, or an existing unowned new input. Apply provisions
-missing foundation dependencies, materializes `/etc/eidolon/host.env`, prepares the exact `/opt` release, installs
-only the seven new Agent/Channel/Memory/LiveKit env/settings inputs, then activates through the normal sealed
-transaction. No release file or symlink is migrated out of `/srv`: it is used only as ownership evidence. If a gate
-fails, rollback restores the old system assets and removes the introduced `/opt` links. Only after `/opt` doctor and
-App-ready both pass does Ops delete the exact `/srv/eidolon` tree. `/var/lib`, `/etc/eidolon` and Bootstrap state are
-not part of that deletion.
+For a complete replacement, the same install command performs the exact-commit local gates before any deletion,
+then resets the old Host, re-provisions the foundation and installs the full product:
+
+```bash
+uv run eidolon-ops --config /absolute/path/hosts/pi5.toml \
+  install --release-id 20260809-product-full \
+  --reset-existing --wipe-authority-data --apply
+```
+
+`reset --apply` without the wipe flag removes the fixed code, unit, config, runtime, log and private staging paths,
+but preserves `/var/lib/eidolon` and `/var/lib/eidolon-bootstrap`; it is an uninstall boundary, not a schema migration.
+`--wipe-authority-data` additionally removes those authority roots and the old `/var/lib/eidolon-admin` root. It is
+irreversible. Foundation packages/artifacts and service identities are preserved. Reset stops and disables only the
+fixed 14 units, refuses an active unit that cannot stop, refuses mounted deletion roots, reloads systemd and is
+idempotent when units or paths are already absent.
 
 ## App-ready meaning
 
@@ -112,8 +115,7 @@ uv run eidolon-ops --config ... rollback --release-id <id> \
   --snapshot /var/lib/eidolon/deployments/<id>-<tx> --apply
 ```
 
-Rollback restores only 22 allowlist system assets and component links that existed in that exact snapshot; a normal
-update has seven, while a core-to-full expansion has four and removes the three newly introduced links. It never
+Rollback restores only 22 allowlist system assets and component links that existed in that exact snapshot. It never
 restores secret, Host identity or database. Schema changes and data backup are independent authority-owned procedures;
 descriptor requires `database_migrations=[]`. If automatic restore reports `rollback_failed`, stop automation and
 collect status/logs/diagnose instead of retrying blindly.

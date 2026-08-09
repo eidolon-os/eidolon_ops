@@ -27,6 +27,10 @@ from eidolon_ops.foundation import (
     python_probe_script,
 )
 from eidolon_ops.process import ProcessRunner, checked
+from eidolon_ops.release_matrix import (
+    ReleaseMatrixError,
+    validate_release_systemd_matrix,
+)
 from eidolon_ops.transport import SSHTransport
 
 _STAGED_INSTALL_NAMES = {
@@ -213,11 +217,19 @@ class EidolonPiController:
                     f"source revision is not the exact commit object: {source_id}"
                 )
             source_evidence[source_id] = source.revision
+        try:
+            release_matrix = validate_release_systemd_matrix(
+                source_evidence,
+                self._read_exact_source_file,
+            )
+        except ReleaseMatrixError as exc:
+            raise OperationsError(str(exc)) from exc
         if require_install_files:
             self._validate_install_inputs(INSTALL_FILE_NAMES)
         return {
             "release_cli": str(release_cli),
             "sources": source_evidence,
+            "release_matrix": release_matrix,
             "ssh": {
                 "target": self.config.host.target,
                 "port": self.config.host.port,
@@ -226,6 +238,24 @@ class EidolonPiController:
             },
             "install_prerequisites_checked": require_install_files,
         }
+
+    def _read_exact_source_file(self, source_id: str, revision: str, path: str) -> str:
+        source = self.config.sources[source_id]
+        if source.revision != revision:
+            raise OperationsError(f"release revision drifted during matrix validation: {source_id}")
+        result = checked(
+            f"exact systemd asset verification for {source_id}:{path}",
+            self.runner.run(
+                (
+                    self.git,
+                    "-C",
+                    str(source.path),
+                    "show",
+                    f"{revision}:{path}",
+                )
+            ),
+        )
+        return result.stdout
 
     def _validate_install_inputs(self, names: tuple[str, ...]) -> None:
         if set(self.config.install_files) != set(INSTALL_FILE_NAMES):
@@ -325,17 +355,35 @@ class EidolonPiController:
         release_id: str,
         resume: bool,
         apply: bool,
+        reset_existing: bool = False,
+        wipe_authority_data: bool = False,
     ) -> dict[str, object]:
         release_id = validate_release_id(release_id)
+        if wipe_authority_data and not reset_existing:
+            raise OperationsError("--wipe-authority-data requires --reset-existing")
+        if reset_existing and not wipe_authority_data:
+            raise OperationsError(
+                "clean reinstall requires both --reset-existing and --wipe-authority-data"
+            )
         if not apply:
             local = self.local_preflight(require_install_files=False)
             foundation = self.provision(apply=False)
+            reset = self.reset(wipe_authority_data=True, apply=False) if reset_existing else None
             return {
                 "status": "planned",
                 "release_id": release_id,
                 "local": local,
                 "foundation": foundation,
+                "reset": reset,
                 "mutations": [
+                    *(
+                        [
+                            "stop and remove the existing Eidolon deployment",
+                            "permanently wipe Eidolon and Bootstrap authority data",
+                        ]
+                        if reset_existing
+                        else []
+                    ),
                     "install the pinned non-Eidolon Raspberry Pi foundation",
                     "prepare exact commit-pinned native release",
                     "create/reuse dedicated service identities and directories",
@@ -344,11 +392,14 @@ class EidolonPiController:
                     "install descriptor-allowlisted assets and component links",
                     "enable Bootstrap/eidolond/Local API/Admin and require release doctor",
                 ],
-                "next": "rerun with --apply after confirming this is a new Eidolon namespace",
+                "next": "rerun with --apply after reviewing every planned mutation",
             }
         local = self.local_preflight(require_install_files=True)
-        foundation = self.provision(apply=True)
         phases: list[dict[str, object]] = []
+        if reset_existing:
+            reset = self.reset(wipe_authority_data=True, apply=True)
+            phases.append({"phase": "reset_existing", "result": reset})
+        foundation = self.provision(apply=True)
         if not resume:
             phases.extend(self._bundle_upload_prepare(release_id))
         stage = f"/var/tmp/eidolon-secrets-{release_id}"
@@ -389,6 +440,30 @@ class EidolonPiController:
             "local": local,
             "phases": phases,
         }
+
+    def reset(
+        self,
+        *,
+        wipe_authority_data: bool,
+        apply: bool,
+    ) -> dict[str, object]:
+        """Plan or remove only the fixed Eidolon Host deployment namespace."""
+
+        self._validate_ssh_material()
+        payload = self._target_payload()
+        payload["wipe_authority_data"] = wipe_authority_data
+        plan = self.transport.run_agent("reset-plan", payload, timeout=180)
+        if plan.get("status") != "planned":
+            raise OperationsError("Host reset plan returned invalid evidence")
+        if not apply:
+            return {
+                **plan,
+                "next": "rerun reset --apply after reviewing the detected paths",
+            }
+        result = self.transport.run_agent("reset-host", payload, timeout=600)
+        if result.get("status") != "reset":
+            raise OperationsError("Host reset returned invalid evidence")
+        return result
 
     def expand(
         self,

@@ -9,11 +9,9 @@ The probe verified a Raspberry Pi 5 Model B, Debian 13 arm64, systemd PID 1, 8-G
 Bootstrap preflight and Local API HTTPS descriptor, and correct Host identity/TLS modes. It also found that this is
 not a blank Host: the active release manages Kernel/Data/Hub/Admin under the legacy `/srv/eidolon` namespace. The six
 new NATS/LiveKit/Memory/Agent/Channel units are not installed, and seven foundation packages plus the pinned
-uv/Node/NATS/LiveKit artifacts remain absent. Consequently first install is correctly inapplicable; a reviewed
-core-to-full expansion is required. This observed `/srv/eidolon` tree is legacy state, not the new path contract.
-The reviewed target layout is `/opt/eidolon/{releases,current}` plus FHS config/state/runtime/log/cache roots. The
-online Host requires an explicit cutover: activate and gate the new `/opt` release, then delete `/srv/eidolon`
-without copying it. That destructive operation was not performed by this read-only probe.
+uv/Node/NATS/LiveKit artifacts remain absent. Consequently a normal first install is correctly inapplicable. The
+selected operational policy is now a clean reset/reinstall, not core expansion or `/srv` migration. That destructive
+operation was not performed by this read-only probe.
 
 ## Workstation operations project
 
@@ -22,25 +20,24 @@ uv run ruff check .
 All checks passed
 
 uv run ruff format --check .
-31 files already formatted
+33 files already formatted
 
 pytest --cov=eidolon_ops --cov-branch --cov-report=term-missing --cov-fail-under=90 -q
-245 passed, 0 failed, 0 skipped
-branch-aware coverage: 90.30%
-pytest runtime reported: 2.47 seconds
+266 passed, 0 failed, 0 skipped
+branch-aware coverage: 90.17%
+pytest runtime reported: 2.83 seconds
 
-committed isolated clone (no sibling repositories):
-244 passed, 2 skipped; branch-aware coverage 90.30%; 3.99 seconds
-the two skips are the optional Kernel and Data/Hub cross-repository contract modules
+committed isolated clone (no sibling repositories): 264 passed, 2 skipped; branch-aware coverage 90.17%; 3.47
+seconds. The two skips are the optional Kernel and Data/Hub cross-repository contract modules.
 
-uv build --out-dir /private/tmp/eidolon-ops-build-final
-sdist: 137,021 bytes; wheel: 49,297 bytes
+uv build --out-dir /private/tmp/eidolon-ops-build-20260809-reset-b29c
+sdist: 144,714 bytes; wheel: 53,937 bytes
 
-python3 -m venv /private/tmp/eidolon-ops-wheel-final
+python3 -m venv /private/tmp/eidolon-ops-wheel-20260809-reset-b29c
 .../pip install --no-deps .../eidolon_ops-0.1.0-py3-none-any.whl
 .../eidolon-ops --help
 .../eidolon-pi --help
-wheel install plus unified 17-operation and compatibility 14-operation parser smoke: passed
+wheel install plus unified and lower-level Pi parser smoke: passed; neither public parser exposes legacy `expand`
 ```
 
 Tests cover strict config, shell-free SSH/SCP construction, Python-missing bootstrap, foundation platform/package/
@@ -67,7 +64,7 @@ readiness checks. Tests include exact Git object verification, exclusion of work
 LFS pointer rejection, target preparation cleanup, snapshot/automatic/explicit rollback, concurrency, TCP/systemd/
 generic-2xx probes and systemd verification command failure injection.
 
-## Exact repository bundle smoke
+## Exact repository bundle and systemd matrix smoke
 
 The final smoke used the committed Kernel revision plus these selected commits:
 
@@ -82,7 +79,7 @@ Memory   303b6004c58abbf86eb311de1f4002748fa9457d
 SDK      8108970514d9fefd3d93e7466e91706a1681c331
 ```
 
-The final matrix produced 8 exact-commit source archives plus the preparer, totalling 480 MiB under
+The archive smoke produced 8 exact-commit source archives plus the preparer, totalling 480 MiB under
 `/private/tmp/eidolon-full-product-bundle-20260809-final`. Channel accounts for 467 MiB after
 hydrating its 8 Git LFS model objects from the exact commit pointers. Each object was checked against the pointer
 SHA-256 and size;
@@ -94,6 +91,12 @@ to their selected Git blobs. This smoke stopped after
 local bundle validation; it performed no upload or Pi-native preparation.
 
 The final matrix was followed by 14/14 passing Kernel focused `tests/deploy/test_bundle.py` tests.
+
+The archive is **not a release candidate**. A later fail-closed Ops gate read all 14 systemd assets from the exact Git
+objects and rejected Admin `02f96b7ca4fc...`: `eidolon-bootstrapd.service`, `eidolon-local-api.service` and
+`eidolon-admin.service` each omit `/etc/eidolon/host.env`, contain `/srv/eidolon`, and fail the exact Admin `/opt`
+ExecStart contract. The gate exits before reset, bundle upload or activation. A new Admin commit and new exact bundle
+are required; working-tree edits are not accepted as release evidence.
 
 ## Foundation artifact evidence
 

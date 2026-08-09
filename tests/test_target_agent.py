@@ -333,6 +333,131 @@ def test_first_install_refuses_unowned_existing_namespace(install_fixture, confl
         installer.install()
 
 
+def _reset_payload(*, wipe_authority_data: bool = False) -> dict[str, object]:
+    return {
+        "units": list(target_agent.PRODUCT_UNITS),
+        "data": {name: str(path) for name, path in target_agent.FIXED_DATA.items()},
+        "wipe_authority_data": wipe_authority_data,
+    }
+
+
+def _materialize_reset_fixture(root: Path) -> None:
+    for value in (
+        Path("/opt/eidolon/releases/old/code.py"),
+        Path("/srv/eidolon/current/old"),
+        Path("/etc/systemd/system/eidolond.service"),
+        Path("/etc/eidolon/data.env"),
+        Path("/var/lib/eidolon/eidolon-system.sqlite3"),
+        Path("/var/lib/eidolon-bootstrap/bootstrap.sqlite3"),
+        Path("/var/lib/eidolon-admin/old.sqlite3"),
+        Path("/var/tmp/eidolon-release-old/archive.tar"),
+        Path("/var/tmp/not-eidolon/keep"),
+    ):
+        path = root / value.relative_to("/")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("old", encoding="utf-8")
+
+
+def test_reset_plan_is_read_only_and_preserves_authority_data_by_default(tmp_path: Path) -> None:
+    _materialize_reset_fixture(tmp_path)
+
+    result = target_agent.reset_plan(_reset_payload(), root=tmp_path)
+
+    assert result["status"] == "planned"
+    assert result["wipe_authority_data"] is False
+    assert "/opt/eidolon" in result["detected"]
+    assert "/var/lib/eidolon" not in result["detected"]
+    assert "/var/tmp/eidolon-release-old" in result["staging"]
+    assert (tmp_path / "opt/eidolon/releases/old/code.py").is_file()
+
+
+def test_reset_removes_deployment_but_preserves_data_and_is_idempotent(tmp_path: Path) -> None:
+    _materialize_reset_fixture(tmp_path)
+
+    result = target_agent.reset_host(_reset_payload(), root=tmp_path, manage_services=False)
+
+    assert result["status"] == "reset"
+    assert not (tmp_path / "opt/eidolon").exists()
+    assert not (tmp_path / "srv/eidolon").exists()
+    assert not (tmp_path / "etc/eidolon").exists()
+    assert not (tmp_path / "etc/systemd/system/eidolond.service").exists()
+    assert not (tmp_path / "var/tmp/eidolon-release-old").exists()
+    assert (tmp_path / "var/tmp/not-eidolon/keep").is_file()
+    assert (tmp_path / "var/lib/eidolon/eidolon-system.sqlite3").is_file()
+    assert (tmp_path / "var/lib/eidolon-bootstrap/bootstrap.sqlite3").is_file()
+
+    repeated = target_agent.reset_host(_reset_payload(), root=tmp_path, manage_services=False)
+    assert repeated["removed"] == []
+
+
+def test_reset_can_explicitly_wipe_all_authority_data_for_clean_install(tmp_path: Path) -> None:
+    _materialize_reset_fixture(tmp_path)
+
+    result = target_agent.reset_host(
+        _reset_payload(wipe_authority_data=True),
+        root=tmp_path,
+        manage_services=False,
+    )
+
+    assert result["wipe_authority_data"] is True
+    for value in target_agent.RESET_AUTHORITY_ROOTS:
+        assert not (tmp_path / value.relative_to("/")).exists()
+
+
+def test_reset_stops_and_disables_fixed_units_before_deletion(tmp_path: Path) -> None:
+    _materialize_reset_fixture(tmp_path)
+    command = FakeCommand()
+
+    target_agent.reset_host(_reset_payload(), root=tmp_path, command=command)
+
+    stop_units = [call[2] for call in command.calls if call[1] == "stop"]
+    disable_units = [call[2] for call in command.calls if call[1] == "disable"]
+    assert stop_units == list(reversed(target_agent.PRODUCT_UNITS))
+    assert disable_units == list(reversed(target_agent.PRODUCT_UNITS))
+    assert ("/usr/bin/systemctl", "daemon-reload") in command.calls
+
+
+def test_reset_treats_missing_units_as_already_clean(tmp_path: Path) -> None:
+    _materialize_reset_fixture(tmp_path)
+    calls: list[tuple[str, ...]] = []
+
+    def missing(command, **_kwargs):
+        command = tuple(command)
+        calls.append(command)
+        output = "not-found\n" if command[1] == "show" else ""
+        return subprocess.CompletedProcess(command, 0, output, "")
+
+    result = target_agent.reset_host(_reset_payload(), root=tmp_path, command=missing)
+
+    assert all(item["state"] == "absent" for item in result["services"])
+    assert not any(call[1] in {"stop", "disable"} for call in calls)
+    assert not (tmp_path / "opt/eidolon").exists()
+
+
+def test_reset_refuses_to_delete_when_an_active_unit_cannot_stop(tmp_path: Path) -> None:
+    _materialize_reset_fixture(tmp_path)
+
+    def fail_stop(command, **_kwargs):
+        command = tuple(command)
+        if command[1] == "stop":
+            return subprocess.CompletedProcess(command, 1, "", "stop failed")
+        if command[1] == "is-active":
+            return subprocess.CompletedProcess(command, 0, "active\n", "")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    with pytest.raises(TargetError, match="could not stop"):
+        target_agent.reset_host(_reset_payload(), root=tmp_path, command=fail_stop)
+    assert (tmp_path / "opt/eidolon/releases/old/code.py").is_file()
+
+
+def test_reset_rejects_non_boolean_authority_wipe(tmp_path: Path) -> None:
+    payload = _reset_payload()
+    payload["wipe_authority_data"] = "yes"
+
+    with pytest.raises(TargetError, match="must be a boolean"):
+        target_agent.reset_plan(payload, root=tmp_path)
+
+
 def test_concurrent_install_lock_fails_fast(install_fixture) -> None:
     installer, _host, _command, _stage, _release, _data = install_fixture
 

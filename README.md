@@ -110,17 +110,22 @@ eidolon-ops --config HOST.toml os-control-plane prepare|validate|start|stop|rest
 
 # Pi release/install capabilities
 eidolon-ops --config HOST.toml provision [--apply]
-eidolon-ops --config HOST.toml install|expand --release-id ID [--resume] [--apply]
+eidolon-ops --config HOST.toml install --release-id ID [--resume] [--apply]
+eidolon-ops --config HOST.toml reset [--wipe-authority-data] [--apply]
+eidolon-ops --config HOST.toml install --release-id ID \
+  --reset-existing --wipe-authority-data [--apply]
 eidolon-ops --config HOST.toml deploy|update --release-id ID [--resume] [--activate]
 eidolon-ops --config HOST.toml app-ready
 eidolon-ops --config HOST.toml rollback --release-id ID --snapshot /var/lib/eidolon/deployments/... [--apply]
 eidolon-ops --config HOST.toml diagnose --output /absolute/path/to/report.tar.gz
 ```
 
-所有有破坏性的入口默认计划/dry-run；`install --apply` 只接受全新 Eidolon namespace。已由旧 4-component
-core release 管理的 Host 使用 `expand --apply`：它只新增 Agent/Channel/Memory/LiveKit 输入，再复用同一
-release snapshot/activation/App-ready 门禁完成 4→7 component 扩容。`deploy/update` 必须追加 `--activate`
-才切换，`rollback` 必须追加 `--apply` 才恢复。详细状态机见
+所有有破坏性的入口默认计划/dry-run；`install --apply` 只接受全新 Eidolon namespace。旧部署不再走
+`/srv` 兼容迁移：先用 `reset` 查看精确删除范围；需要一条命令全新重装时，显式同时传入
+`--reset-existing --wipe-authority-data --apply`。这会永久删除 Eidolon/Bootstrap 权威数据，基础系统包、
+固定版本 NATS/LiveKit/Node/uv 和 service identity 保留并重新门禁。单独 `reset --apply` 默认只删除代码、
+unit、配置和运行态，保留 `/var/lib`；它不会让已有数据自动兼容新 schema。`deploy/update` 必须追加
+`--activate` 才切换，`rollback` 必须追加 `--apply` 才恢复。详细状态机见
 [`docs/runbook.md`](docs/runbook.md)，代码证据与方案选择见
 [`docs/architecture-audit.md`](docs/architecture-audit.md)，真实验证结果见
 [`docs/verification.md`](docs/verification.md)。

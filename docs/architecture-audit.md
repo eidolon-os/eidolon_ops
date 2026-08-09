@@ -8,7 +8,7 @@ The multi-repository root is not Git. The selected release commits remain explic
 
 | Source | Selected exact release input | Role |
 | --- | --- | --- |
-| Kernel | `7de97bd8d87b7e3a84109053d1dd98e5f19b0058` | FHS release authority + rollback-safe `/srv` replacement |
+| Kernel | `7de97bd8d87b7e3a84109053d1dd98e5f19b0058` | FHS release authority |
 | Data | `d81086e2807f44ca0c0e43e31103cd85e6165a46` | Data V2 + Workspace/runtime authority |
 | Hub | `96438a2507fb76ad025824873a99b213a99016ad` | Device/Hub authority |
 | Admin | `02f96b7ca4fc0b662dcfdfdb0c8d2293d3cfd8d0` | merged control-plane semantics + owner runtime projection |
@@ -17,12 +17,12 @@ The multi-repository root is not Git. The selected release commits remain explic
 | Memory | `303b6004c58abbf86eb311de1f4002748fa9457d` | supervisor/discovery, no direct Data integration |
 | SDK | `8108970514d9fefd3d93e7466e91706a1681c331` | runtime-authority/session support source |
 
-These exact commits form one compatible runtime-session set: Data publishes runtime snapshots, SDK consumes them,
-Admin includes the merged production control-plane/workspace-policy fixes, Channel resolves Data/Kernel state, and
-Agent/SDK bind access to immutable LiveKit sessions. Current sibling branches and dirty working trees are deliberately
-outside the release input: Ops does not stage, overwrite or copy them. Bundle construction uses
-`git archive <exact commit>`, never the working tree. The earlier Mac observation (`admin-api` and Agent stopped,
-Hub fatal, other development processes running) was not modified and is not used as the Pi product topology.
+The application commits contain the required runtime-session changes, but this exact matrix is **not a deployable
+release**. The upload preflight reads all 14 systemd units directly from their Git objects and rejects the three Admin
+units in `02f96b7`: they omit `/etc/eidolon/host.env`, execute from `/srv/eidolon`, and do not use the exact
+`/opt/eidolon/current/eidolon_admin/` component root. No Pi cleanup/upload/activation may run until Admin has a clean
+commit containing FHS-correct units and the matrix pin is updated. Current sibling branches and dirty working trees are
+deliberately outside the release input: Ops does not stage, overwrite or copy them.
 
 ## Authority and dependency topology
 
@@ -72,7 +72,7 @@ foundation provision, first install, 14-unit lifecycle/status/logs/diagnostics a
 | Newly flashed Pi | one `install --apply` provisions foundation, installs and starts full backend | SSH/known_hosts/sudo and 14 private inputs exist |
 | Environment audit only | `provision` and `doctor` are read-only and return nonzero when degraded | Pi reachable |
 | First install interruption | durable foundation/install phases; same commit/input digests resume | retain release ID and inputs |
-| Managed 4-component Pi | `expand` proves the old release, activates/gates exact `/opt`, then deletes legacy `/srv` code | old tree must match the exact owned cleanup shape |
+| Existing Pi replacement | reset plan, then explicit data-wiping clean install; no `/srv` migration/adoption | exact matrix must pass before install deletes anything |
 | Daily commit update | bundle/prepare/dry-run, then explicit resume+activate | schema gate must remain compatible |
 | Activation/health gate failure | exact system asset/link snapshot auto-restored; evidence retained | `rollback_failed` requires manual stop |
 | Explicit rollback | restores selected code/assets snapshot only | never restores DB/secrets |
@@ -82,6 +82,7 @@ foundation provision, first install, 14-unit lifecycle/status/logs/diagnostics a
 
 ## Safety conclusion
 
-The implementation is complete enough for review and isolated execution. It is not yet approved for a formal Pi:
-full native build, systemd verify, network transition, reboot, rollback injection, thermal/resource soak and real-phone
-commissioning must pass on isolated hardware after explicit authorization.
+The implementation is ready for further isolated review, but the selected release matrix is currently blocked by the
+three Admin systemd assets above. It is not safe to run the destructive install against the Pi until a corrected Admin
+commit is pinned and a new exact bundle passes. Native build, systemd verify, network transition, reboot, rollback
+injection, thermal/resource soak and real-phone commissioning also remain hardware acceptance work.

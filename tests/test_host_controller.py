@@ -172,11 +172,11 @@ def test_pi_adapter_delegates_every_remote_capability(monkeypatch, tmp_path: Pat
         def install(self, **kwargs):
             return self._result("install", kwargs)
 
+        def reset(self, **kwargs):
+            return self._result("reset", kwargs)
+
         def deploy(self, **kwargs):
             return self._result("deploy", kwargs)
-
-        def expand(self, **kwargs):
-            return self._result("expand", kwargs)
 
         def rollback(self, **kwargs):
             return self._result("rollback", kwargs)
@@ -203,8 +203,8 @@ def test_pi_adapter_delegates_every_remote_capability(monkeypatch, tmp_path: Pat
     controller.app_ready()
     controller.provision(apply=False)
     controller.install(release_id="r1", resume=True, apply=True)
+    controller.reset(wipe_authority_data=False, apply=False)
     controller.deploy(release_id="r1", resume=True, activate=True)
-    controller.expand(release_id="r1", resume=False, apply=True)
     controller.rollback(release_id="r1", snapshot=Path("/snapshot"), apply=False)
     controller.diagnose(output=tmp_path / "report.tar.gz")
     assert controller.doctor(release_id="r1")["status"] == "healthy"

@@ -114,6 +114,30 @@ FIXED_DATA = {
     "bootstrap_database": Path("/var/lib/eidolon-bootstrap/bootstrap.sqlite3"),
     "deployment_evidence": Path("/var/lib/eidolon/deployments"),
 }
+MANAGED_SYSTEM_ASSETS = (
+    *(Path("/etc/systemd/system") / unit for unit in PRODUCT_UNITS),
+    Path("/etc/eidolon/eidolond.yaml"),
+    Path("/etc/eidolon/kernel.yaml"),
+    Path("/etc/eidolon/hub.yaml"),
+    Path("/etc/eidolon/system-services.systemd.example.yaml"),
+    Path("/etc/polkit-1/rules.d/60-eidolon-system-manager.rules"),
+    Path("/etc/polkit-1/rules.d/60-eidolon-bootstrap-network.rules"),
+    Path("/etc/avahi/services/eidolon-local-api.service"),
+    Path("/usr/local/libexec/eidolon-livekit-launch"),
+)
+RESET_DEPLOYMENT_ROOTS = (
+    Path("/opt/eidolon"),
+    Path("/srv/eidolon"),
+    Path("/etc/eidolon"),
+    Path("/run/eidolon"),
+    Path("/run/eidolon-bootstrap"),
+    Path("/var/log/eidolon"),
+)
+RESET_AUTHORITY_ROOTS = (
+    Path("/var/lib/eidolon"),
+    Path("/var/lib/eidolon-bootstrap"),
+    Path("/var/lib/eidolon-admin"),
+)
 _RELEASE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _STAGING_NAME = re.compile(r"^eidolon-(?:release|secrets)-[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _VAR_TMP = Path("/var/tmp")
@@ -1915,14 +1939,14 @@ def _require_active_replacement(
 
 
 def _refuse_nested_mounts(path: Path) -> None:
-    """Never let recursive legacy cleanup cross a mounted filesystem boundary."""
+    """Never let recursive cleanup cross a mounted filesystem boundary."""
 
     for directory, names, _files in os.walk(path, followlinks=False):
         parent = Path(directory)
         for name in names:
             candidate = parent / name
             if not candidate.is_symlink() and os.path.ismount(candidate):
-                raise TargetError(f"legacy code root contains a mount: {candidate}")
+                raise TargetError(f"removal root contains a mount: {candidate}")
 
 
 def cleanup_legacy(
@@ -2030,6 +2054,150 @@ def abort_replacement(
     )
     _atomic_json(journal_path, journal)
     return {"status": "aborted", "removed_links": removed}
+
+
+def _reset_wipes_authority_data(payload: Mapping[str, object]) -> bool:
+    value = payload.get("wipe_authority_data", False)
+    if type(value) is not bool:
+        raise TargetError("wipe_authority_data must be a boolean")
+    return value
+
+
+def _reset_paths(*, wipe_authority_data: bool) -> tuple[Path, ...]:
+    paths = set(MANAGED_SYSTEM_ASSETS) | set(RESET_DEPLOYMENT_ROOTS)
+    if wipe_authority_data:
+        paths.update(RESET_AUTHORITY_ROOTS)
+    return tuple(sorted(paths, key=str))
+
+
+def reset_plan(
+    payload: Mapping[str, object],
+    *,
+    root: Path = Path("/"),
+) -> dict[str, object]:
+    """Describe a clean reinstall boundary without changing the Host."""
+
+    _fixed_units(payload)
+    _fixed_data(payload)
+    wipe_authority_data = _reset_wipes_authority_data(payload)
+    root = root.resolve()
+    detected = [
+        str(path)
+        for path in _reset_paths(wipe_authority_data=wipe_authority_data)
+        if (_host_path(root, path).exists() or _host_path(root, path).is_symlink())
+    ]
+    staging = _host_path(root, _VAR_TMP)
+    staged = []
+    if staging.is_dir() and not staging.is_symlink():
+        staged = sorted(
+            str(_VAR_TMP / path.name)
+            for path in staging.iterdir()
+            if _STAGING_NAME.fullmatch(path.name) is not None
+        )
+    return {
+        "status": "planned",
+        "wipe_authority_data": wipe_authority_data,
+        "detected": detected,
+        "staging": staged,
+        "preserved": [
+            "foundation packages and pinned NATS/LiveKit/Node/uv installations",
+            "service identities",
+            *(
+                []
+                if wipe_authority_data
+                else ["/var/lib/eidolon and /var/lib/eidolon-bootstrap authority data"]
+            ),
+        ],
+    }
+
+
+def _remove_reset_path(path: Path, *, display: Path) -> bool:
+    if not (path.exists() or path.is_symlink()):
+        return False
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+        return True
+    if not path.is_dir() or os.path.ismount(path):
+        raise TargetError(f"reset target is not a removable owned path: {display}")
+    _refuse_nested_mounts(path)
+    shutil.rmtree(path)
+    return True
+
+
+def reset_host(
+    payload: Mapping[str, object],
+    *,
+    root: Path = Path("/"),
+    command: Callable[..., subprocess.CompletedProcess[str]] = _run,
+    manage_services: bool = True,
+) -> dict[str, object]:
+    """Remove the fixed Eidolon deployment namespace for a clean reinstall."""
+
+    if os.geteuid() != 0 and root == Path("/"):
+        raise TargetError("Host reset requires root")
+    plan = reset_plan(payload, root=root)
+    wipe_authority_data = bool(plan["wipe_authority_data"])
+    root = root.resolve()
+    removed: list[str] = []
+    service_results: list[dict[str, object]] = []
+    lock_path = _host_path(root, Path("/run/lock/eidolon-install.lock"))
+    with _exclusive(lock_path):
+        if manage_services:
+            for unit in reversed(PRODUCT_UNITS):
+                observed = command(
+                    (
+                        "/usr/bin/systemctl",
+                        "show",
+                        "--property",
+                        "LoadState",
+                        "--value",
+                        unit,
+                    ),
+                    timeout=20,
+                )
+                if observed.returncode != 0:
+                    detail = observed.stderr.strip() or observed.stdout.strip() or unit
+                    raise TargetError(f"reset could not inspect product unit: {detail}")
+                if observed.stdout.strip() == "not-found":
+                    service_results.append({"unit": unit, "state": "absent"})
+                    continue
+                stopped = command(("/usr/bin/systemctl", "stop", unit), timeout=120)
+                if stopped.returncode != 0:
+                    state = command(("/usr/bin/systemctl", "is-active", unit), timeout=20)
+                    if state.stdout.strip() not in {"inactive", "failed", "unknown"}:
+                        detail = stopped.stderr.strip() or stopped.stdout.strip() or unit
+                        raise TargetError(f"reset could not stop product unit: {detail}")
+                disabled = command(("/usr/bin/systemctl", "disable", unit), timeout=120)
+                service_results.append(
+                    {
+                        "unit": unit,
+                        "stop_returncode": stopped.returncode,
+                        "disable_returncode": disabled.returncode,
+                    }
+                )
+        for value in _reset_paths(wipe_authority_data=wipe_authority_data):
+            if _remove_reset_path(_host_path(root, value), display=value):
+                removed.append(str(value))
+        staging = _host_path(root, _VAR_TMP)
+        if staging.is_dir() and not staging.is_symlink():
+            for path in sorted(staging.iterdir()):
+                if _STAGING_NAME.fullmatch(path.name) is None:
+                    continue
+                display = _VAR_TMP / path.name
+                if _remove_reset_path(path, display=display):
+                    removed.append(str(display))
+        if manage_services:
+            reloaded = command(("/usr/bin/systemctl", "daemon-reload"), timeout=120)
+            if reloaded.returncode != 0:
+                detail = reloaded.stderr.strip() or reloaded.stdout.strip() or "no output"
+                raise TargetError(f"systemd daemon-reload failed after reset: {detail}")
+            command(("/usr/bin/systemctl", "reset-failed"), timeout=120)
+    return {
+        "status": "reset",
+        "wipe_authority_data": wipe_authority_data,
+        "removed": removed,
+        "services": service_results,
+    }
 
 
 def lifecycle(action: str, payload: Mapping[str, object]) -> dict[str, object]:
@@ -2187,6 +2355,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = cleanup_legacy(payload)
         elif action == "abort-replacement":
             result = abort_replacement(payload)
+        elif action == "reset-plan":
+            result = reset_plan(payload)
+        elif action == "reset-host":
+            result = reset_host(payload)
         elif action in {"start", "stop", "restart"}:
             result = lifecycle(action, payload)
         elif action == "rollback-plan":

@@ -38,18 +38,19 @@ def main(argv: Sequence[str] | None = None) -> int:
                 release_id=arguments.release_id,
                 resume=arguments.resume,
                 apply=arguments.apply,
+                reset_existing=arguments.reset_existing,
+                wipe_authority_data=arguments.wipe_authority_data,
+            )
+        elif arguments.operation == "reset":
+            result = controller.reset(
+                wipe_authority_data=arguments.wipe_authority_data,
+                apply=arguments.apply,
             )
         elif arguments.operation in {"deploy", "update"}:
             result = controller.deploy(
                 release_id=arguments.release_id,
                 resume=arguments.resume,
                 activate=arguments.activate,
-            )
-        elif arguments.operation == "expand":
-            result = controller.expand(
-                release_id=arguments.release_id,
-                resume=arguments.resume,
-                apply=arguments.apply,
             )
         elif arguments.operation == "rollback":
             result = controller.rollback(
@@ -106,8 +107,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         "installed",
         "dry_run",
         "activated",
-        "expanded",
-        "already_expanded",
         "started",
         "stopped",
         "restarted",
@@ -121,6 +120,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "migration_required",
         "clean",
         "migrated",
+        "reset",
     }
     return 0 if result.get("status") in success else 1
 
@@ -153,15 +153,16 @@ def _parser() -> argparse.ArgumentParser:
     install.add_argument("--release-id", required=True)
     install.add_argument("--resume", action="store_true")
     install.add_argument("--apply", action="store_true")
+    install.add_argument("--reset-existing", action="store_true")
+    install.add_argument("--wipe-authority-data", action="store_true")
+    reset = operations.add_parser("reset")
+    reset.add_argument("--wipe-authority-data", action="store_true")
+    reset.add_argument("--apply", action="store_true")
     for name in ("deploy", "update"):
         deploy = operations.add_parser(name)
         deploy.add_argument("--release-id", required=True)
         deploy.add_argument("--resume", action="store_true")
         deploy.add_argument("--activate", action="store_true")
-    expand = operations.add_parser("expand")
-    expand.add_argument("--release-id", required=True)
-    expand.add_argument("--resume", action="store_true")
-    expand.add_argument("--apply", action="store_true")
     rollback = operations.add_parser("rollback")
     rollback.add_argument("--release-id", required=True)
     rollback.add_argument("--snapshot", type=Path, required=True)

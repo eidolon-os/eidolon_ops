@@ -9,14 +9,22 @@ import pytest
 from eidolon_ops.config import SOURCE_IDS, ConfigurationError
 from eidolon_ops.controller import EidolonPiController, OperationsError
 from eidolon_ops.process import ProcessResult
+from eidolon_ops.release_matrix import SYSTEMD_ASSET_CONTRACTS
 
 pytestmark = pytest.mark.component
 
 
 class ControllerRunner:
-    def __init__(self, config, *, wrong_revision: bool = False) -> None:
+    def __init__(
+        self,
+        config,
+        *,
+        wrong_revision: bool = False,
+        invalid_release_matrix: bool = False,
+    ) -> None:
         self.config = config
         self.wrong_revision = wrong_revision
+        self.invalid_release_matrix = invalid_release_matrix
         self.calls: list[tuple[str, ...]] = []
 
     def run(self, command, **kwargs):
@@ -27,6 +35,28 @@ class ControllerRunner:
             if self.wrong_revision:
                 revision = "f" * 40
             return ProcessResult(0, revision + "\n", "")
+        if "show" in command:
+            path = command[-1].partition(":")[2]
+            contract = next(item for item in SYSTEMD_ASSET_CONTRACTS if item.path == path)
+            if self.invalid_release_matrix:
+                return ProcessResult(
+                    0,
+                    "[Unit]\nDescription=test\n[Service]\n"
+                    "ExecStart=/srv/eidolon/current/component/service\n",
+                    "",
+                )
+            executable = (
+                f"/opt/eidolon/current/{contract.component_root}/.venv/bin/service"
+                if contract.component_root is not None
+                else "/usr/local/bin/service"
+            )
+            return ProcessResult(
+                0,
+                "[Unit]\nDescription=test\n"
+                "[Service]\nEnvironmentFile=/etc/eidolon/host.env\n"
+                f"ExecStart={executable}\n",
+                "",
+            )
         if len(command) > 1 and command[1] == "bundle":
             output = Path(command[3])
             output.mkdir(parents=True)
@@ -65,6 +95,16 @@ class FakeTransport:
             "cleanup-stage": {"status": "cleaned"},
             "retire-legacy-root": {"status": "retired"},
             "abort-replacement": {"status": "aborted"},
+            "reset-plan": {
+                "status": "planned",
+                "wipe_authority_data": payload.get("wipe_authority_data", False),
+                "detected": ["/opt/eidolon"],
+            },
+            "reset-host": {
+                "status": "reset",
+                "wipe_authority_data": payload.get("wipe_authority_data", False),
+                "removed": ["/opt/eidolon"],
+            },
             "install": {"status": "installed"},
             "expand": {"status": "inputs_installed", "source_release": "core-release"},
             "start": {"status": "started"},
@@ -471,6 +511,82 @@ def test_install_apply_stages_exact_files_and_cleans(setup_controller) -> None:
     actions = [call[0] for call in transport.agent_calls]
     assert actions[-2:] == ["install", "cleanup-stage"]
     assert actions[0] == "foundation-doctor"
+
+
+def test_install_can_reset_and_wipe_existing_host_before_provision(setup_controller) -> None:
+    controller, _runner, transport = setup_controller
+
+    result = controller.install(
+        release_id="r1",
+        resume=False,
+        apply=True,
+        reset_existing=True,
+        wipe_authority_data=True,
+    )
+
+    actions = [call[0] for call in transport.agent_calls]
+    assert actions[:3] == [
+        "reset-plan",
+        "reset-host",
+        "foundation-doctor",
+    ]
+    assert result["phases"][0]["phase"] == "reset_existing"
+
+
+def test_install_release_matrix_failure_happens_before_destructive_reset(config) -> None:
+    transport = FakeTransport()
+    controller = EidolonPiController(
+        config,
+        ControllerRunner(config, invalid_release_matrix=True),
+        transport=transport,
+    )
+
+    with pytest.raises(OperationsError, match="release systemd matrix is incompatible"):
+        controller.install(
+            release_id="r1",
+            resume=False,
+            apply=True,
+            reset_existing=True,
+            wipe_authority_data=True,
+        )
+
+    assert transport.agent_calls == []
+
+
+@pytest.mark.parametrize(
+    ("reset_existing", "wipe_authority_data"),
+    [(True, False), (False, True)],
+)
+def test_install_refuses_ambiguous_destructive_flags(
+    setup_controller, reset_existing: bool, wipe_authority_data: bool
+) -> None:
+    controller, _runner, transport = setup_controller
+
+    with pytest.raises(OperationsError, match="requires"):
+        controller.install(
+            release_id="r1",
+            resume=False,
+            apply=False,
+            reset_existing=reset_existing,
+            wipe_authority_data=wipe_authority_data,
+        )
+    assert transport.agent_calls == []
+
+
+def test_reset_defaults_to_read_only_and_requires_apply_for_mutation(setup_controller) -> None:
+    controller, _runner, transport = setup_controller
+
+    plan = controller.reset(wipe_authority_data=False, apply=False)
+
+    assert plan["status"] == "planned"
+    assert [call[0] for call in transport.agent_calls] == ["reset-plan"]
+
+    result = controller.reset(wipe_authority_data=True, apply=True)
+    assert result["status"] == "reset"
+    assert [call[0] for call in transport.agent_calls][-2:] == [
+        "reset-plan",
+        "reset-host",
+    ]
 
 
 def test_install_failure_still_cleans_secret_stage(setup_controller) -> None:
