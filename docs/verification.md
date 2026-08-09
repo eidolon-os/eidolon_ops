@@ -49,7 +49,7 @@ uv run ruff format --check .
 pytest --cov=eidolon_ops --cov-branch --cov-report=term-missing --cov-fail-under=90 -q
 313 passed, 0 failed, 0 skipped
 branch-aware coverage: 90.06%
-pytest runtime reported: 3.44 seconds
+pytest runtime reported: 3.46 seconds
 
 uv build --out-dir /private/tmp/eidolon-ops-build-20260809-final-1
 sdist: 158,426 bytes; wheel: 62,154 bytes
@@ -116,6 +116,11 @@ The next retry additionally caps uv downloads at two on this Pi. The preceding A
 concurrent waves of the same twelve 1.1--16.2 MiB wheels over a lossy WLAN (`-68 dBm`, driver retry count 3072), while
 TCP collapsed to a congestion window of three. Limiting concurrency is therefore a measured target-network policy,
 not a dependency or lock relaxation.
+
+Long-running SSH, SCP and rsync transports also send a 15-second server keepalive and tolerate twenty missed replies.
+The prior controller had no protocol keepalive while the target-native command buffered all uv output; the WLAN reset
+that idle-looking SSH connection even though uv was active. This transport change preserves strict host-key and
+BatchMode authentication and does not weaken any release gate.
 
 ## Foundation artifact evidence
 

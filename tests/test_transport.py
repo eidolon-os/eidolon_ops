@@ -31,6 +31,9 @@ def test_ssh_run_uses_strict_batch_mode(config) -> None:
     assert "BatchMode=yes" in command
     assert "StrictHostKeyChecking=yes" in command
     assert f"UserKnownHostsFile={config.host.known_hosts_file}" in command
+    assert "ServerAliveInterval=15" in command
+    assert "ServerAliveCountMax=20" in command
+    assert "TCPKeepAlive=yes" in command
     assert command[-2:] == (config.host.target, "/usr/bin/true")
 
 
@@ -114,6 +117,8 @@ def test_upload_uses_scp_port_and_recursive(config, tmp_path: Path) -> None:
     command = runner.calls[0]["command"]
     assert command[:3] == ("scp", "-P", "2222")
     assert "-r" in command
+    assert "ServerAliveInterval=15" in command
+    assert "ServerAliveCountMax=20" in command
     assert command[-1] == f"{config.host.target}:/var/tmp/eidolon-release-r1"
 
 
@@ -139,6 +144,8 @@ def test_resumable_directory_upload_uses_strict_rsync(config, tmp_path: Path) ->
     remote_shell = command[command.index("-e") + 1]
     assert "BatchMode=yes" in remote_shell
     assert "StrictHostKeyChecking=yes" in remote_shell
+    assert "ServerAliveInterval=15" in remote_shell
+    assert "ServerAliveCountMax=20" in remote_shell
     assert command[-2:] == (
         f"{source}/",
         f"{config.host.target}:/var/tmp/eidolon-release-r1/",

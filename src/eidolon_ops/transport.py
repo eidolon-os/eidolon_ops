@@ -103,6 +103,12 @@ class SSHTransport:
             f"UserKnownHostsFile={self.host.known_hosts_file}",
             "-o",
             f"ConnectTimeout={self.host.connect_timeout_seconds}",
+            "-o",
+            "ServerAliveInterval=15",
+            "-o",
+            "ServerAliveCountMax=20",
+            "-o",
+            "TCPKeepAlive=yes",
         ]
         if recursive:
             options.append("-r")
@@ -155,4 +161,10 @@ class SSHTransport:
             f"UserKnownHostsFile={self.host.known_hosts_file}",
             "-o",
             f"ConnectTimeout={self.host.connect_timeout_seconds}",
+            "-o",
+            "ServerAliveInterval=15",
+            "-o",
+            "ServerAliveCountMax=20",
+            "-o",
+            "TCPKeepAlive=yes",
         )
