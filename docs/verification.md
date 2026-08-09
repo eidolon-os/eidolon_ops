@@ -1,8 +1,9 @@
 # Verification report
 
-Updated: 2026-08-09 (Asia/Shanghai). No real Pi, formal database, Mac service lifecycle or sibling working tree was
-modified. A strict read-only SSH attempt reached `192.168.100.15` but authentication failed before any remote
-command ran.
+Updated: 2026-08-09 (Asia/Shanghai). No Pi state, formal database, Mac service lifecycle or sibling working tree was
+modified. Password authentication to `192.168.100.15` succeeded and the only remote command executed was the
+read-only `/usr/bin/id`; the session was closed immediately when the release matrix changed, before environment
+probing, upload or activation.
 
 ## Workstation operations project
 
@@ -13,7 +14,7 @@ All checks passed
 uv run pytest --cov=eidolon_ops --cov-report=term-missing --cov-fail-under=90 -q
 167 passed, 0 failed, 0 skipped
 branch-aware coverage: 91.91%
-final pytest runtime reported: 1.97 seconds
+revised-matrix pytest runtime reported: 1.15 seconds
 marker breakdown: 60 unit, 102 component, 4 Kernel-contract, 1 subprocess integration
 
 uv build --out-dir /private/tmp/eidolon-ops-build-final2
@@ -54,18 +55,22 @@ The final smoke used the committed Kernel revision plus these selected commits:
 Kernel   cf668a338c0f6305164cccd49df16eaa7e92aa04
 Data     d81086e2807f44ca0c0e43e31103cd85e6165a46
 Hub      96438a2507fb76ad025824873a99b213a99016ad
-Admin    7ed63835f04a45b15496609681601bc65bfe2960
-Agent    2ae449982efe8cf8fede6a32d950111e1290ad15
-Channel  fdf7dd42f5d38e14ae05be6fbcf7febf10908397
+Admin    02f96b7ca4fc0b662dcfdfdb0c8d2293d3cfd8d0
+Agent    309ba573f249f9376275e14a5cc2f5ea1049b022
+Channel  3bc7e3303fa2c06bcfe0a82dacacd390f7deb372
 Memory   303b6004c58abbf86eb311de1f4002748fa9457d
 SDK      8108970514d9fefd3d93e7466e91706a1681c331
 ```
 
-The command completed in 1.37 seconds and produced 8 exact-commit source archives plus the preparer, totalling
-480 MiB under `/private/tmp/eidolon-full-product-bundle-cf668a3`. Channel accounts for 467 MiB after hydrating its 8
-Git LFS model objects from the exact commit pointers. Each object was checked against the pointer SHA-256 and size;
-the final archive was scanned again and contained no LFS pointer payload. This smoke stopped after local bundle
-validation; it performed no SSH, upload or Pi-native preparation.
+The revised-matrix command completed in 1.98 seconds and produced 8 exact-commit source archives plus the preparer,
+totalling 480 MiB under `/private/tmp/eidolon-full-product-bundle-matrix2`. Channel accounts for 467 MiB after
+hydrating its 8 Git LFS model objects from the exact commit pointers. Each object was checked against the pointer
+SHA-256 and size;
+the final archive was scanned again and contained no LFS pointer payload. Four changed Admin production files were
+independently compared with their `02f96b7` Git blobs and matched byte-for-byte. This smoke stopped after local bundle
+validation; it performed no upload or Pi-native preparation.
+
+The revised matrix was followed by `14 passed in 7.65s` for Kernel's focused `tests/deploy/test_bundle.py` suite.
 
 ## Foundation artifact evidence
 
@@ -79,7 +84,7 @@ reject incomplete cache content.
 
 ## Not executed; hardware acceptance remains
 
-- Real SSH/SCP/sudo and Raspberry Pi foundation mutation.
+- Real SCP/sudo and Raspberry Pi foundation mutation; SSH authentication and `/usr/bin/id` only were exercised.
 - `apt` and fixed artifact downloads on Raspberry Pi OS 12/13; package availability on both versions.
 - Pi-native `uv sync` for all 7 environments, model load time, disk/RAM/thermal profile.
 - Real `systemd-analyze verify`, 14-unit start order, BlueZ/NetworkManager/Avahi and NetworkManager SSH continuity.

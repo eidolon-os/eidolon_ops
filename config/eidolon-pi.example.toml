@@ -30,15 +30,15 @@ revision = "96438a2507fb76ad025824873a99b213a99016ad"
 
 [sources.eidolon_admin]
 path = "../../eidolon_admin"
-revision = "7ed63835f04a45b15496609681601bc65bfe2960"
+revision = "02f96b7ca4fc0b662dcfdfdb0c8d2293d3cfd8d0"
 
 [sources.eidolon_agent]
 path = "../../eidolon_agent"
-revision = "2ae449982efe8cf8fede6a32d950111e1290ad15"
+revision = "309ba573f249f9376275e14a5cc2f5ea1049b022"
 
 [sources.eidolon_channel]
 path = "../../eidolon_channel"
-revision = "fdf7dd42f5d38e14ae05be6fbcf7febf10908397"
+revision = "3bc7e3303fa2c06bcfe0a82dacacd390f7deb372"
 
 [sources.eidolon_memory]
 path = "../../eidolon_memory"

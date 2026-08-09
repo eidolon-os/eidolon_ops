@@ -11,15 +11,16 @@ The multi-repository root is not Git. The selected release commits remain explic
 | Kernel | `cf668a338c0f6305164cccd49df16eaa7e92aa04` | release authority/system assets |
 | Data | `d81086e2807f44ca0c0e43e31103cd85e6165a46` | Data V2 + Workspace/runtime authority |
 | Hub | `96438a2507fb76ad025824873a99b213a99016ad` | Device/Hub authority |
-| Admin | `7ed63835f04a45b15496609681601bc65bfe2960` | Bootstrap, Local API, owner runtime projection |
-| Agent | `2ae449982efe8cf8fede6a32d950111e1290ad15` | session-authorized Companion brain |
-| Channel | `fdf7dd42f5d38e14ae05be6fbcf7febf10908397` | Data/Kernel runtime resolver + LiveKit session binding |
+| Admin | `02f96b7ca4fc0b662dcfdfdb0c8d2293d3cfd8d0` | merged control-plane semantics + owner runtime projection |
+| Agent | `309ba573f249f9376275e14a5cc2f5ea1049b022` | session-authorized Companion brain + authority E2E |
+| Channel | `3bc7e3303fa2c06bcfe0a82dacacd390f7deb372` | Data/Kernel resolver + LiveKit v5 token E2E |
 | Memory | `303b6004c58abbf86eb311de1f4002748fa9457d` | supervisor/discovery, no direct Data integration |
 | SDK | `8108970514d9fefd3d93e7466e91706a1681c331` | runtime-authority/session support source |
 
 These exact commits form one compatible runtime-session set: Data publishes runtime snapshots, SDK consumes them,
-Channel resolves Data/Kernel state, and Agent/SDK bind access to immutable LiveKit sessions. Dirty Agent/Channel test
-changes and Admin `.coverage` are not staged, overwritten or copied. Bundle construction uses
+Admin includes the merged production control-plane/workspace-policy fixes, Channel resolves Data/Kernel state, and
+Agent/SDK bind access to immutable LiveKit sessions. The Admin checkout's unrelated `.coverage` is not staged,
+overwritten or copied. Bundle construction uses
 `git archive <exact commit>`, never the working tree. The earlier Mac observation (`admin-api` and Agent stopped,
 Hub fatal, other development processes running) was not modified and is not used as the Pi product topology.
 
