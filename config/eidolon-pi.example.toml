@@ -20,6 +20,7 @@ release_cli = "../../eidolon_kernel/.venv/bin/eidolon-release"
 python_index_url = "https://pypi.org/simple"
 python_http_timeout_seconds = 120
 python_http_retries = 8
+python_concurrent_downloads = 4
 
 [sources.eidolon_kernel]
 path = "../../eidolon_kernel"

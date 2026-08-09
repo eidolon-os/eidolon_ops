@@ -25,6 +25,7 @@ def test_loads_strict_config(config_path: Path) -> None:
     assert config.workspace.python_index_url == "https://pypi.org/simple"
     assert config.workspace.python_http_timeout_seconds == 120
     assert config.workspace.python_http_retries == 8
+    assert config.workspace.python_concurrent_downloads == 4
     assert config.units == PRODUCT_UNITS
     assert set(config.sources) == {
         "eidolon_kernel",
@@ -132,6 +133,11 @@ def test_rejects_unsafe_host_fields(config_path: Path, old: str, new: str, messa
             "between",
         ),
         ("python_http_retries = 8", "python_http_retries = 21", "between"),
+        (
+            "python_concurrent_downloads = 4",
+            "python_concurrent_downloads = 17",
+            "between",
+        ),
     ],
 )
 def test_rejects_unsafe_python_resolver_fields(

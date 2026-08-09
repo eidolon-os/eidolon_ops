@@ -228,6 +228,7 @@ def test_local_preflight_proves_exact_commits(config) -> None:
         "index_url": "https://pypi.org/simple",
         "http_timeout_seconds": 120,
         "http_retries": 8,
+        "concurrent_downloads": 4,
         "locked": True,
     }
 
@@ -428,11 +429,12 @@ def test_deploy_defaults_to_prepare_and_dry_run(setup_controller) -> None:
         for remote, _sudo in transport.remote_calls
         if any(token.endswith("/prepare_target.py") for token in remote)
     )
-    assert prepare_command[:5] == (
+    assert prepare_command[:6] == (
         "/usr/bin/env",
         "UV_DEFAULT_INDEX=https://pypi.org/simple",
         "UV_HTTP_TIMEOUT=120",
         "UV_HTTP_RETRIES=8",
+        "UV_CONCURRENT_DOWNLOADS=4",
         "/usr/bin/python3",
     )
     prepare_index = next(

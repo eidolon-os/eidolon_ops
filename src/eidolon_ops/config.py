@@ -105,6 +105,7 @@ class WorkspaceConfig:
     python_index_url: str
     python_http_timeout_seconds: int
     python_http_retries: int
+    python_concurrent_downloads: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -219,6 +220,7 @@ def load_config(path: Path) -> OperationsConfig:
             "python_index_url",
             "python_http_timeout_seconds",
             "python_http_retries",
+            "python_concurrent_downloads",
         },
         label="workspace",
     )
@@ -239,6 +241,12 @@ def load_config(path: Path) -> OperationsConfig:
             "workspace.python_http_retries",
             minimum=0,
             maximum=20,
+        ),
+        python_concurrent_downloads=_integer(
+            workspace_wire["python_concurrent_downloads"],
+            "workspace.python_concurrent_downloads",
+            minimum=1,
+            maximum=16,
         ),
     )
 

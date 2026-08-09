@@ -71,6 +71,7 @@ release_cli = "{release_cli}"
 python_index_url = "https://pypi.org/simple"
 python_http_timeout_seconds = 120
 python_http_retries = 8
+python_concurrent_downloads = 4
 
 {_source_tables(tmp_path, revisions)}
 [services]
