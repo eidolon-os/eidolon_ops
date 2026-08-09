@@ -40,8 +40,9 @@ Git commit；7 个运行 component 一起切换，SDK 只作构建输入。
 
 当前固定发布矩阵仍有产品级硬门禁：没有进程实现 Hub 配置所需的 8090 Channel Provider
 `device-channels/provision|revoke`，固定 Admin 也没有 Mobile 消费的 Local API onboarding target/admission
-端点。因此 14 个 unit 即使全部健康，也只能报告为后端运行，不能报告为“App 开箱即管/可对话”。Ops
-不会用 mDNS listener 或临时兼容服务掩盖这些缺口。
+端点；8090 实际由不同契约的 `eidolond` 占用。Hub 还只有 loopback 8082 明文监听，却会宣告 HTTPS
+443，而 release 没有 TLS 终止器/证书。因此 14 个 unit 即使全部健康，也只能报告为后端运行，不能
+报告为“App 开箱即管/可对话”。Ops 不会用 mDNS listener 或临时兼容服务掩盖这些缺口。
 
 ## 基础环境 profile
 

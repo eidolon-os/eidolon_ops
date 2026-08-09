@@ -49,10 +49,18 @@ atomicity. Data V2 begins only at its tracked baseline; old migrations and old `
 
 Two consumer paths are currently outside the selected release contract. First, Hub is only a client of the
 `/v1/device-channels/provision|revoke` Provider contract; none of the eight pinned repositories implements those
-routes, and no product unit owns port 8090. Second, pinned Admin does not implement Controller-authenticated Local API
-`GET /api/local/v1/device-onboarding/target` or `PUT /api/local/v1/device-admissions/{setup_id}`. A newer dirty Hub
-working tree contains a design document for the latter, but it is neither a committed release input nor an Admin
-implementation. Ops must report both as product blockers rather than inventing cross-authority compatibility logic.
+routes. Port 8090 is actually assigned to `eidolond`'s system-directory HTTP API, which is a different contract, so
+Hub would call the wrong process rather than a Channel Provider. Second, pinned Admin does not implement
+Controller-authenticated Local API `GET /api/local/v1/device-onboarding/target` or
+`PUT /api/local/v1/device-admissions/{setup_id}`. A newer dirty Hub working tree contains a design document for the
+latter, but it is neither a committed release input nor an Admin implementation. Ops must report both as product
+blockers rather than inventing cross-authority compatibility logic.
+
+The public Hub transport is also incomplete in the release assets. `eidolon-hub.service` binds plaintext HTTP only to
+`127.0.0.1:8082`, while the pinned Hub config and mDNS advertiser claim `https://eidolon-hub.local` on port 443. No
+unit, reverse proxy, Hub certificate input or readiness check owns that TLS endpoint. The Local API certificate/SPKI
+cannot be reused by assumption. A started Hub may therefore advertise an unreachable/untrusted endpoint; process and
+mDNS health are not sufficient onboarding evidence.
 
 ## Existing capability, previous gap, implemented closure
 

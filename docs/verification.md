@@ -130,7 +130,9 @@ resolution to the exact official aarch64 wheel, verified in cache and installed 
 The eight pinned Git objects were searched independently for the Hub Channel Provider routes. Hub contains only the
 outbound client for `POST /v1/device-channels/provision` and `revoke`; the other seven release inputs contain no
 production handler. `channel_provider.contract_url=http://127.0.0.1:8090/v1` therefore has no deployable owner in
-this matrix. Hub process/readiness alone cannot prove device conversation, and no compatibility Provider was added.
+this matrix. Exact Kernel config assigns 8090 to `eidolond`'s unrelated `/api/system/v1` service-directory API, so
+the configured call targets the wrong contract. Hub process/readiness alone cannot prove device conversation, and no
+compatibility Provider was added.
 
 The current empty target confirms no listener on 8090. Until a real Provider commit, process owner and health
 contract are added to the reviewed release matrix, onboarding cannot return a usable Channel Assignment. This is a
@@ -142,6 +144,12 @@ neither `GET /api/local/v1/device-onboarding/target` nor
 dirty Hub working tree, which is outside the fixed `96438a2` release input and is not executable Admin code; the
 former has no workspace match. Ownership belongs to the Admin Local API/control orchestration boundary, not Ops.
 Until committed, pinned and exercised, Mobile must not establish Hub TLS trust from mDNS or reuse the Host SPKI.
+
+Pinned transport assets have a separate trust blocker: Hub listens on plaintext loopback `127.0.0.1:8082`, but its
+public base URL and `_eidolon-hub._tcp` advertiser claim HTTPS port 443. The 14-unit matrix contains no TLS terminator,
+Hub certificate/secret input or readiness probe for 443. A future activation could therefore publish mDNS while no
+usable Hub HTTPS endpoint exists; Mobile is correct to require a Local API-supplied, verified Hub SPKI instead of
+trusting that advertisement.
 
 ## Not executed; hardware acceptance remains
 

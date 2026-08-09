@@ -86,8 +86,9 @@ the Pi side only. A real phone must still validate BLE discovery, Host proof, TL
 checkpoint and Workspace setup.
 
 `app-ready` does not prove Hub trust selection or device conversation. The current pinned matrix has no production
-owner for Hub's `POST /v1/device-channels/provision|revoke` dependency on port 8090, and pinned Admin has neither
-`GET /api/local/v1/device-onboarding/target` nor
+handler for Hub's `POST /v1/device-channels/provision|revoke` dependency: port 8090 belongs to the unrelated
+`eidolond` system-directory contract. Hub itself binds plaintext loopback 8082 while mDNS claims HTTPS 443, with no
+TLS terminator/certificate asset in the release. Pinned Admin also has neither `GET /api/local/v1/device-onboarding/target` nor
 `PUT /api/local/v1/device-admissions/{setup_id}`. Treat those as hard product gates. Do not let a client derive Hub
 TLS trust from mDNS alone, substitute the Host SPKI, or interpret a healthy Hub listener as a usable Channel Provider.
 
