@@ -176,6 +176,44 @@ def test_start_failure_stops_services_and_preserves_phase(install_fixture) -> No
     assert resumed_host.calls == ["start_release", "wait_ready", "doctor"]
 
 
+def test_app_gate_failure_is_not_committed_and_resumes_from_assets(install_fixture) -> None:
+    installer, host, _command, stage, release, data = install_fixture
+    failing = TargetInstaller(
+        release=release,
+        secret_stage=stage,
+        data=data,
+        host=host,
+        root=installer.root,
+        command=FakeCommand(),
+        manage_ownership=False,
+        app_check=lambda: {"status": "degraded"},
+    )
+
+    with pytest.raises(TargetError, match="App commissioning"):
+        failing.install()
+
+    journal = json.loads(failing.journal_path.read_text(encoding="utf-8"))
+    assert journal["phase"] == "assets"
+    assert journal["status"] == "failed"
+    assert host.calls[-1] == "quiesce"
+
+    resumed_host = FakeHost(installer.root, release)
+    resumed = TargetInstaller(
+        release=release,
+        secret_stage=stage,
+        data=data,
+        host=resumed_host,
+        root=installer.root,
+        command=FakeCommand(),
+        manage_ownership=False,
+        app_check=lambda: {"status": "app_ready"},
+    )
+    result = resumed.install()
+
+    assert result["app"] == {"status": "app_ready"}
+    assert resumed_host.calls == ["start_release", "wait_ready", "doctor"]
+
+
 def test_baseline_failure_does_not_attempt_service_stop(install_fixture) -> None:
     installer, host, _command, stage, release, data = install_fixture
     failing = TargetInstaller(

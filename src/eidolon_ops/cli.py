@@ -22,8 +22,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         controller = EidolonPiController(config, SubprocessRunner())
         if arguments.operation == "status":
             result = controller.status()
+        elif arguments.operation == "app-ready":
+            result = controller.app_ready()
         elif arguments.operation == "doctor":
             result = controller.doctor(release_id=arguments.release_id)
+        elif arguments.operation == "provision":
+            result = controller.provision(apply=arguments.apply)
         elif arguments.operation == "install":
             result = controller.install(
                 release_id=arguments.release_id,
@@ -62,7 +66,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         _print_json({"status": "failed", "error": str(exc)}, stream=sys.stderr)
         return 1
     _print_json(result)
-    return 1 if arguments.operation == "doctor" and result.get("status") != "healthy" else 0
+    if arguments.operation == "doctor" and result.get("status") != "healthy":
+        return 1
+    if arguments.operation == "provision" and result.get("status") not in {
+        "healthy",
+        "installed",
+    }:
+        return 1
+    if arguments.operation == "app-ready" and result.get("status") != "app_ready":
+        return 1
+    return 0
 
 
 def run() -> None:
@@ -84,8 +97,16 @@ def _parser() -> argparse.ArgumentParser:
     )
     operations = parser.add_subparsers(dest="operation", required=True)
     operations.add_parser("status", help="read unit, current-link and receipt status")
+    operations.add_parser(
+        "app-ready", help="verify host-side BLE/Wi-Fi/mDNS/pinned-HTTPS App commissioning"
+    )
     doctor = operations.add_parser("doctor", help="run local and target read-only preflight")
     doctor.add_argument("--release-id")
+
+    provision = operations.add_parser(
+        "provision", help="detect or install the pinned Raspberry Pi host foundation"
+    )
+    provision.add_argument("--apply", action="store_true")
 
     install = operations.add_parser("install", help="first Eidolon installation on a clean host")
     install.add_argument("--release-id", required=True)

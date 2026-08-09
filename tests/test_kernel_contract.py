@@ -25,16 +25,24 @@ def test_operator_topology_is_kernel_release_topology_plus_manager() -> None:
 
 
 def test_first_install_prerequisites_match_kernel_descriptor() -> None:
-    assert {destination for destination, _user, _group in SECRET_INPUTS.values()} == set(
-        V2_REQUIRED_SECRETS
-    )
+    private = {
+        destination for destination, _user, _group, mode in SECRET_INPUTS.values() if mode == 0o600
+    }
+    assert private == set(V2_REQUIRED_SECRETS)
+    assert {
+        destination for destination, _user, _group, mode in SECRET_INPUTS.values() if mode == 0o640
+    } == {
+        Path("/etc/eidolon/agent.yaml"),
+        Path("/etc/eidolon/channel.yaml"),
+        Path("/etc/eidolon/memory.yaml"),
+    }
 
 
 def test_current_release_contract_counts_are_not_stale_document_counts() -> None:
-    assert len(V2_SYSTEM_ASSETS) == 15
-    assert len(V2_REQUIRED_SECRETS) == 7
-    assert len(V2_AFFECTED_UNITS) == 7
-    assert len(V2_READINESS) == 7
+    assert len(V2_SYSTEM_ASSETS) == 22
+    assert len(V2_REQUIRED_SECRETS) == 11
+    assert len(V2_AFFECTED_UNITS) == 13
+    assert len(V2_READINESS) == 12
 
 
 def test_data_v2_paths_are_fixed_in_systemd_assets() -> None:

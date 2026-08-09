@@ -28,6 +28,13 @@ def config_path(tmp_path: Path) -> Path:
         "local_api_env": "local-api.env",
         "bootstrap_env": "bootstrap.env",
         "host_identity": "host_identity.ed25519",
+        "agent_env": "agent.env",
+        "channel_env": "channel.env",
+        "memory_env": "memory.env",
+        "livekit_env": "livekit.env",
+        "agent_settings": "agent.yaml",
+        "channel_settings": "channel.yaml",
+        "memory_settings": "memory.yaml",
     }
     for name in install_names.values():
         path = install_dir / name
@@ -43,6 +50,9 @@ def config_path(tmp_path: Path) -> Path:
     path.write_text(
         f"""\
 schema_version = 1
+
+[foundation]
+profile = "raspberry-pi-os-debian-arm64-v1"
 
 [host]
 user = "pi"
@@ -68,6 +78,12 @@ units = [
   "eidolon-kernel.service",
   "eidolon-local-api.service",
   "eidolon-admin.service",
+  "eidolon-nats.service",
+  "eidolon-livekit.service",
+  "eidolon-memory-supervisor.service",
+  "eidolon-memory-discovery.service",
+  "eidolon-agent.service",
+  "eidolon-channel.service",
 ]
 
 [data]
@@ -84,6 +100,13 @@ admin_env = "{install_dir / "admin.env"}"
 local_api_env = "{install_dir / "local-api.env"}"
 bootstrap_env = "{install_dir / "bootstrap.env"}"
 host_identity = "{install_dir / "host_identity.ed25519"}"
+agent_env = "{install_dir / "agent.env"}"
+channel_env = "{install_dir / "channel.env"}"
+memory_env = "{install_dir / "memory.env"}"
+livekit_env = "{install_dir / "livekit.env"}"
+agent_settings = "{install_dir / "agent.yaml"}"
+channel_settings = "{install_dir / "channel.yaml"}"
+memory_settings = "{install_dir / "memory.yaml"}"
 """,
         encoding="utf-8",
     )

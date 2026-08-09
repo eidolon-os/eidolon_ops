@@ -1,60 +1,93 @@
 # Eidolon Pi operations runbook
 
-## Release/update state machine
+All examples use the one Mac entrypoint:
 
-```text
-validate config + exact commits
-  -> git-archive bundle
-  -> upload to unique /var/tmp path
-  -> Pi-native prepare + seal
-  -> activation dry-run
-  -> review gate (default stop)
-  -> snapshot -> quiesce -> install assets -> switch links -> start -> readiness
-       -> activated + doctor
-       -> failure -> restore snapshot -> rolled_back receipt
-       -> restore failure -> rollback_failed; preserve evidence and stop automation
+```bash
+uv run eidolon-pi --config /absolute/path/eidolon-pi.toml <operation>
 ```
 
-`--resume` skips bundle/upload/prepare and re-runs sealed preflight. `--activate` is always explicit. A release is
-identified by a safe release ID plus five complete Git object IDs; working-tree changes cannot enter the archive.
+## New Pi: one command from SSH-ready OS to App-ready backend
 
-## First-install state machine
+Preconditions: supported Raspberry Pi OS, known SSH host key, non-root account with non-interactive sudo, outbound
+package/download access, and the 14 local private inputs declared in config.
 
-```text
-local + SSH host preflight
-  -> bundle/upload/native prepare/seal
-  -> stage seven private files (values never logged)
-  -> target install lock + durable phase journal
-  -> prove clean/owned target namespace
-  -> create eidolon identities and directories
-  -> install exact prerequisite bytes without overwrite
-  -> create fresh Data V2 Alembic baseline as eidolon
-  -> install descriptor-allowlisted system assets and current links
-  -> daemon-reload; enable only Bootstrap/eidolond/Local API/Admin
-  -> ordered start; eidolond starts Data/Data Workspace/Hub/Kernel
-  -> release doctor -> completed receipt
+```bash
+uv run eidolon-pi --config /absolute/path/eidolon-pi.toml \
+  install --release-id 20260807-product-1
+
+uv run eidolon-pi --config /absolute/path/eidolon-pi.toml \
+  install --release-id 20260807-product-1 --apply
 ```
 
-Re-running the same completed release is a doctor-only idempotent success. A partial journal may resume only the
-same release and same staged input digests. Existing databases, identities, secrets, links or units without a
-matching journal fail closed; the installer never imports an old Data database. Failures preserve the phase
-journal and service diagnostics but remove the temporary secret staging bytes.
+The first command is a no-mutation plan. The second is the single authorized operation. Its state machine is:
 
-## Daily commands
+```text
+validate Mac commands, SSH files, 8 repos/commits, 14 private inputs
+  -> probe Python without mutation
+  -> foundation platform/capacity/package/artifact/service doctor
+  -> if needed: Python bootstrap -> apt -> hash-pinned NATS/LiveKit/uv/Node -> BlueZ/NM/Avahi
+  -> exact 8-commit bundle -> SSH upload -> Pi-native prepare/seal
+  -> private staging -> exclusive first-install lock -> clean namespace proof
+  -> identities/directories -> exact 14 input bytes -> fresh Data V2 baseline
+  -> 22 assets + 7 links -> enable 4 top-level units -> ordered start
+  -> 12 release readiness -> Host-side App commissioning gate -> completed journal
+```
 
-1. Update the five reviewed revisions in TOML (or use `--revision source=40hex`).
-2. Run `eidolon-pi deploy --release-id <id>` and review the JSON dry-run.
-3. Run the identical command with `--resume --activate`.
-4. Require `status=activated` followed by `status=healthy`.
-5. Use `status`, `logs` and `diagnose`; never inspect authority SQLite through this tool.
+An existing unowned Eidolon database/link/secret/unit namespace fails closed. A partial install can resume only with
+the same release ID and identical input digests. Temporary secret staging is removed after success or failure.
 
-`start`, `stop` and `restart` use the current descriptor and Kernel host adapter. Stop order removes product
-ingress before eidolond and child units; start order is Bootstrap, eidolond, Local API, Admin. Data/Hub/Kernel are
-not independently enabled or given a competing desired-state source.
+## App-ready meaning
 
-## Rollback semantics
+```bash
+uv run eidolon-pi --config /absolute/path/eidolon-pi.toml app-ready
+```
 
-Rollback restores only the fixed system assets and four component links recorded in a selected activation
-snapshot. Secret content, Host identity and all databases are untouched. A descriptor with database migrations is
-rejected. Bootstrap code/current DB schema equality is a pre-activation gate. `rollback_failed` means host state is
-unknown and requires manual diagnosis; do not loop retries.
+Exit 0 requires Bootstrap preflight, Bootstrap/Local API/BlueZ/NetworkManager/Avahi active, exact identity/TLS file
+ownership/mode, Bootstrap control socket, Local API HTTPS health + descriptor and Avahi service definition. It proves
+the Pi side only. A real phone must still validate BLE discovery, Host proof, TLS SPKI, Controller claim, Wi-Fi
+checkpoint and Workspace setup.
+
+## Daily update
+
+1. Change only reviewed 40-hex revisions (or pass `--revision source=40hex`).
+2. Prepare and inspect without service switch:
+
+   ```bash
+   uv run eidolon-pi --config ... update --release-id 20260808-product-2
+   ```
+
+3. Activate the already prepared release:
+
+   ```bash
+   uv run eidolon-pi --config ... update --release-id 20260808-product-2 \
+     --resume --activate
+   ```
+
+4. Require `status=activated`, `doctor status=healthy`, then `app-ready status=app_ready`.
+
+Activation is: sealed preflight → snapshot → quiesce → assets/links → start → 12 readiness → receipt. Failure runs
+exact snapshot restore. `--resume` never means “ignore a failed gate”; it skips only already-created bundle/upload/
+prepare and re-proves the sealed release.
+
+## Lifecycle, logs and diagnosis
+
+- `start|stop|restart --dry-run` shows the fixed 14-unit scope; without dry-run it uses the current descriptor.
+- `status` is read-only unit/link/receipt observation.
+- `logs` is bounded to fixed unit names, line count and optional time filter.
+- `diagnose` writes a new redacted archive and refuses overwrite. It omits env/key/DB/process-environment content;
+  journal business data may still be sensitive.
+
+## Rollback and data
+
+```bash
+uv run eidolon-pi --config ... rollback --release-id <id> \
+  --snapshot /var/lib/eidolon/deployments/<id>-<tx>
+
+uv run eidolon-pi --config ... rollback --release-id <id> \
+  --snapshot /var/lib/eidolon/deployments/<id>-<tx> --apply
+```
+
+Rollback restores only 22 allowlist system assets and 7 component links from that exact snapshot. It never restores
+secret, Host identity or database. Schema changes and data backup are independent authority-owned procedures;
+descriptor requires `database_migrations=[]`. If automatic restore reports `rollback_failed`, stop automation and
+collect status/logs/diagnose instead of retrying blindly.

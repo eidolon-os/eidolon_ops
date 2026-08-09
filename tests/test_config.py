@@ -11,6 +11,7 @@ from eidolon_ops.config import (
     validate_private_local_file,
     validate_release_id,
 )
+from eidolon_ops.foundation import FOUNDATION_PROFILE
 
 pytestmark = pytest.mark.unit
 
@@ -19,6 +20,7 @@ def test_loads_strict_config(config_path: Path) -> None:
     config = load_config(config_path)
 
     assert config.host.target == "pi@pi.example"
+    assert config.foundation_profile == FOUNDATION_PROFILE
     assert config.host.port == 2222
     assert config.units == PRODUCT_UNITS
     assert set(config.sources) == {
@@ -26,9 +28,12 @@ def test_loads_strict_config(config_path: Path) -> None:
         "eidolon_data",
         "eidolon_hub",
         "eidolon_admin",
+        "eidolon_agent",
+        "eidolon_channel",
+        "eidolon_memory",
         "eidolon_sdk",
     }
-    assert len(config.install_files) == 7
+    assert len(config.install_files) == 14
 
 
 @pytest.mark.parametrize("release_id", ["r1", "20260807-a.b_c-1", "A" * 64])
@@ -53,6 +58,17 @@ def test_rejects_wrong_schema(config_path: Path) -> None:
     _replace(config_path, "schema_version = 1", "schema_version = 2")
 
     with pytest.raises(ConfigurationError, match="schema_version"):
+        load_config(config_path)
+
+
+def test_rejects_unreviewed_foundation_profile(config_path: Path) -> None:
+    _replace(
+        config_path,
+        'profile = "raspberry-pi-os-debian-arm64-v1"',
+        'profile = "operator-controlled"',
+    )
+
+    with pytest.raises(ConfigurationError, match="reviewed profile"):
         load_config(config_path)
 
 

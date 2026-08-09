@@ -1,49 +1,76 @@
 # eidolon-ops
 
-`eidolon-pi` 是 Mac 上管理已审阅 Eidolon OS Raspberry Pi 节点的唯一运维入口。它不复制
-Kernel 的发布事务：精确提交归档、target-native 环境、sealed descriptor、切换、健康门禁和回滚
-继续由 `eidolon_kernel/eidolon_deploy` 执行；本项目只拥有工作站编排、首次 Eidolon 装机、远程
-生命周期、日志和脱敏诊断。
+`eidolon-pi` 是 Mac 上管理 Eidolon OS Raspberry Pi 的唯一入口。对一台刚刷好系统、已开放 SSH 的
+新 Pi，准备一次严格配置后，下面一条命令会完成基础环境检测/安装、精确提交发布、Data V2 初始化、
+14 个产品服务启动，并要求 Host 达到手机 App commissioning 门禁：
 
-当前固定产品拓扑是 Data、Data Workspace、Hub、Kernel、eidolond、Admin、Bootstrap 和 Local API。
-Agent、Channel、Memory、NATS、LiveKit 和 Web client 尚无已审阅的产品 systemd/release contract，
-因此本 CLI 不把 macOS supervisord 开发拓扑伪装成 Pi 产品拓扑。
+```bash
+uv run eidolon-pi --config config/eidolon-pi.toml \
+  install --release-id 20260807-product-1 --apply
+```
 
-## 安装与入口
+“新 Pi”从 Raspberry Pi OS 已刷盘、SSH host key 已可信且操作账号具备 non-interactive sudo 开始；本工具
+不写 SD 卡镜像，也不自动制造云端 provider credential。Host identity、service token 和产品 settings
+来自 Mac 上 14 个 mode-0600 输入文件，值不会进入 TOML、argv、bundle、receipt 或诊断元数据。
+
+## 完整产品范围
+
+正式后端是 14 个 systemd unit：Bootstrap、eidolond、Data、Data Workspace、Hub、Kernel、Local API、
+Admin、NATS、LiveKit、Memory Supervisor、Memory Discovery、Agent、Channel。发布输入固定为 8 个完整
+Git commit；7 个运行 component 一起切换，SDK 只作构建输入。
+
+这套后端支持手机 App 对 Host 的 BLE/Wi-Fi/Host proof/pinned HTTPS/claim/Workspace onboarding 管理路径。
+`app-ready` 是 Host 侧门禁，不是假装跑过真实手机。`client-web`、Audit worker、Vision 和手机安装包本身
+不是 Pi 产品 unit；它们不属于“手机 App 可管理 Host”所需的后端范围。
+
+## 基础环境 profile
+
+`raspberry-pi-os-debian-arm64-v1` 会先只读检测，再在 `--apply` 时安装：
+
+- Debian/Raspberry Pi OS 12/13、aarch64、真实 Raspberry Pi model、systemd PID 1；
+- 8 GiB-class RAM 与至少 12 GiB 可用磁盘；
+- BlueZ、NetworkManager、Avahi、FFmpeg、Git LFS、SQLite、编译与音频/运行库；
+- SHA-256 固定的 NATS Server 2.14.0、LiveKit Server 1.11.0、Node 22.23.2；
+- hash-pinned uv 0.11.15（避开 0.11.14 已公开的 entry-point path traversal 漏洞）；
+- `bluetooth.service`、`NetworkManager.service`、`avahi-daemon.service` enabled + active。
+
+Python 缺失时，CLI 通过受限 shell bootstrap 先验证同一硬件/OS/容量门禁，再安装 Python。下载使用固定
+URL/digest、原子缓存和版本目录；不会用 rsync 覆盖任何工作树。Foundation 每个阶段与失败原因写入
+`/var/lib/eidolon-ops/foundation-v1.json`，可诊断、可幂等重试。
+
+## 安装与配置
 
 ```bash
 cd /Users/manson/ai/eidolon/eidolon_ops
 uv sync --all-extras
-uv run eidolon-pi --config config/eidolon-pi.toml doctor
+cp config/eidolon-pi.example.toml config/eidolon-pi.toml
+chmod 600 config/eidolon-pi.toml
 ```
 
-配置从严格 TOML 读取。SSH host key、目标、repo path、完整 40-hex commit、服务集合、远端数据目录和
-secret 文件来源都必须显式声明；secret 值不进入配置、argv、bundle、receipt 或日志。示例见
-[`config/eidolon-pi.example.toml`](config/eidolon-pi.example.toml)。
+Mac 还必须安装 `git-lfs`；bundle 只从 exact commit pointer 导出 Channel 模型并验证 LFS object digest，
+不会读取 Channel working tree 中的 hydrated 文件。
 
-## 命令
+配置显式固定 foundation profile、目标/SSH、8 个 repo/commit、14 个 unit、authority 数据路径和 14 个
+私密输入文件。SSH 强制 BatchMode、独立 key、`StrictHostKeyChecking=yes` 和显式 known_hosts。
+示例见 [`config/eidolon-pi.example.toml`](config/eidolon-pi.example.toml)。
+
+## 唯一入口与操作
 
 ```text
 eidolon-pi status
 eidolon-pi doctor [--release-id ID]
+eidolon-pi provision [--apply]
 eidolon-pi install --release-id ID [--resume] [--apply]
-eidolon-pi deploy  --release-id ID [--resume] [--activate]
-eidolon-pi update  --release-id ID [--resume] [--activate]
+eidolon-pi deploy|update --release-id ID [--resume] [--activate]
 eidolon-pi start|stop|restart [--dry-run]
+eidolon-pi app-ready
 eidolon-pi rollback --release-id ID --snapshot /var/lib/eidolon/deployments/... [--apply]
 eidolon-pi logs [--unit UNIT] [--lines N] [--since TEXT]
 eidolon-pi diagnose --output /absolute/path/to/report.tar.gz
 ```
 
-- `install` 默认只输出计划；`--apply` 才会安装到一台没有 Eidolon authority 的主机。它要求 Raspberry
-  Pi OS 已有 SSH、systemd、Python 3 和固定路径的 `uv`，但会创建 Eidolon 用户/目录、注入前置文件、
-  建立全新 Data V2 baseline、安装系统资产并启动正式拓扑。
-- `deploy/update` 默认完成 bundle、传输、Pi 原生 prepare/seal 和 activation dry-run；只有
-  `--activate` 才切换服务。`--resume --activate` 复用已准备 release。
-- `rollback` 只恢复 Kernel descriptor 允许的系统资产和 component links，不恢复 secret 或数据库。
-- `diagnose` 只采集主机、unit、link、receipt 和 journal 元数据；不读取 env 内容、Host private key 或
-  authority 数据库内容。journal 仍可能含业务日志或用户标识，生成的压缩包必须按运维敏感资料保存。
-
-首次装机和日常更新详见 [`docs/runbook.md`](docs/runbook.md)。当前验证结论及真实 Pi 限制见
-[`docs/architecture-audit.md`](docs/architecture-audit.md) 与
+所有有破坏性的入口默认计划/dry-run；`install --apply` 是明确的一键首次安装授权，`deploy/update` 必须
+追加 `--activate` 才切换，`rollback` 必须追加 `--apply` 才恢复。详细状态机见
+[`docs/runbook.md`](docs/runbook.md)，代码证据与方案选择见
+[`docs/architecture-audit.md`](docs/architecture-audit.md)，真实验证结果见
 [`docs/verification.md`](docs/verification.md)。

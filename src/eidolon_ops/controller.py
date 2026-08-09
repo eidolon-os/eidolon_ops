@@ -18,6 +18,12 @@ from eidolon_ops.config import (
     validate_private_local_file,
     validate_release_id,
 )
+from eidolon_ops.foundation import (
+    FOUNDATION_PROFILE,
+    foundation_payload,
+    python_bootstrap_script,
+    python_probe_script,
+)
 from eidolon_ops.process import ProcessRunner, checked
 from eidolon_ops.transport import SSHTransport
 
@@ -29,6 +35,13 @@ _STAGED_INSTALL_NAMES = {
     "local_api_env": "local-api.env",
     "bootstrap_env": "bootstrap.env",
     "host_identity": "host_identity.ed25519",
+    "agent_env": "agent.env",
+    "channel_env": "channel.env",
+    "memory_env": "memory.env",
+    "livekit_env": "livekit.env",
+    "agent_settings": "agent.yaml",
+    "channel_settings": "channel.yaml",
+    "memory_settings": "memory.yaml",
 }
 
 
@@ -54,23 +67,115 @@ class EidolonPiController:
         self._validate_ssh_material()
         return self.transport.run_agent("status", self._target_payload())
 
+    def app_ready(self) -> dict[str, object]:
+        self._validate_ssh_material()
+        return self.transport.run_agent("app-ready", self._target_payload(), timeout=300)
+
     def doctor(self, *, release_id: str | None = None) -> dict[str, object]:
         local = self.local_preflight(require_install_files=False)
+        foundation = self.provision(apply=False)
+        if foundation["status"] == "planned_bootstrap":
+            return {
+                "status": "degraded",
+                "local": local,
+                "foundation": foundation,
+                "remote": {"status": "unavailable", "reason": "python3 is missing"},
+            }
         payload = self._target_payload()
         payload["remote_uv"] = str(self.config.host.remote_uv)
         if release_id is not None:
             payload["release_id"] = validate_release_id(release_id)
         remote = self.transport.run_agent("doctor-host", payload, timeout=240)
-        healthy = remote.get("status") == "healthy"
+        healthy = remote.get("status") == "healthy" and foundation.get("status") == "healthy"
         return {
             "status": "healthy" if healthy else "degraded",
             "local": local,
+            "foundation": foundation,
             "remote": remote,
         }
 
+    def provision(self, *, apply: bool) -> dict[str, object]:
+        """Detect or install the pinned non-Eidolon Raspberry Pi foundation."""
+
+        self._validate_ssh_material()
+        missing_commands = [command for command in ("ssh", "scp") if shutil.which(command) is None]
+        if missing_commands:
+            raise OperationsError(
+                "required workstation command is missing: " + ", ".join(missing_commands)
+            )
+        python_available = self._remote_python_available()
+        phases: list[dict[str, object]] = [{"phase": "python_probe", "available": python_available}]
+        if not python_available:
+            if not apply:
+                return {
+                    "status": "planned_bootstrap",
+                    "profile": FOUNDATION_PROFILE,
+                    "phases": phases,
+                    "next": "rerun provision --apply to bootstrap Python and the pinned foundation",
+                }
+            bootstrap = self.transport.run(
+                ("/bin/sh", "-s"),
+                input_bytes=python_bootstrap_script(),
+                sudo=True,
+                timeout=1800,
+                operation="remote foundation Python bootstrap",
+            )
+            try:
+                bootstrap_result = json.loads(bootstrap.stdout)
+            except json.JSONDecodeError as exc:
+                raise OperationsError("foundation bootstrap did not return JSON") from exc
+            phases.append({"phase": "python_bootstrap", "result": bootstrap_result})
+        payload = {"foundation": foundation_payload()}
+        observed = self.transport.run_agent(
+            "foundation-doctor",
+            payload,
+            timeout=300,
+        )
+        phases.append({"phase": "doctor", "result": observed})
+        if observed.get("status") == "healthy":
+            return {
+                "status": "healthy",
+                "profile": FOUNDATION_PROFILE,
+                "changed": False,
+                "phases": phases,
+            }
+        if not apply:
+            return {
+                "status": "degraded",
+                "profile": FOUNDATION_PROFILE,
+                "changed": False,
+                "phases": phases,
+                "next": "rerun provision --apply after reviewing missing packages and capacity gates",
+            }
+        installed = self.transport.run_agent(
+            "foundation-install",
+            payload,
+            timeout=3600,
+        )
+        phases.append({"phase": "install", "result": installed})
+        return {
+            "status": "installed",
+            "profile": FOUNDATION_PROFILE,
+            "changed": True,
+            "phases": phases,
+        }
+
+    def _remote_python_available(self) -> bool:
+        result = self.transport.run(
+            ("/bin/sh", "-s"),
+            input_bytes=python_probe_script(),
+            timeout=30,
+            operation="remote Python probe",
+        )
+        try:
+            document = json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            raise OperationsError("remote Python probe did not return JSON") from exc
+        return document == {"python3": True}
+
     def local_preflight(self, *, require_install_files: bool) -> dict[str, object]:
         self._validate_ssh_material()
-        required_commands = (self.git, "ssh", "scp")
+        required_commands = (self.git, "git-lfs", "ssh", "scp")
         missing_commands = [
             command for command in required_commands if shutil.which(command) is None
         ]
@@ -182,18 +287,17 @@ class EidolonPiController:
         release_id = validate_release_id(release_id)
         if not apply:
             local = self.local_preflight(require_install_files=False)
-            payload = self._target_payload()
-            payload["remote_uv"] = str(self.config.host.remote_uv)
-            remote = self.transport.run_agent("doctor-host", payload)
+            foundation = self.provision(apply=False)
             return {
                 "status": "planned",
                 "release_id": release_id,
                 "local": local,
-                "remote_preflight": remote,
+                "foundation": foundation,
                 "mutations": [
+                    "install the pinned non-Eidolon Raspberry Pi foundation",
                     "prepare exact commit-pinned native release",
                     "create/reuse dedicated service identities and directories",
-                    "install seven operator-supplied prerequisite files without overwrite",
+                    "install the fixed secret, identity and product-settings inputs without overwrite",
                     "create a fresh Data V2 baseline",
                     "install descriptor-allowlisted assets and component links",
                     "enable Bootstrap/eidolond/Local API/Admin and require release doctor",
@@ -201,6 +305,7 @@ class EidolonPiController:
                 "next": "rerun with --apply after confirming this is a new Eidolon namespace",
             }
         local = self.local_preflight(require_install_files=True)
+        foundation = self.provision(apply=True)
         phases: list[dict[str, object]] = []
         if not resume:
             phases.extend(self._bundle_upload_prepare(release_id))
@@ -238,6 +343,7 @@ class EidolonPiController:
         return {
             "status": "installed",
             "release_id": release_id,
+            "foundation": foundation,
             "local": local,
             "phases": phases,
         }

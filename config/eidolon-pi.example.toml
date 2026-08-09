@@ -1,8 +1,11 @@
 schema_version = 1
 
+[foundation]
+profile = "raspberry-pi-os-debian-arm64-v1"
+
 [host]
-user = "pi"
-hostname = "192.168.1.26"
+user = "eidolon-pi5"
+hostname = "192.168.100.15"
 port = 22
 identity_file = "/absolute/path/to/id_ed25519_eidolon_pi"
 known_hosts_file = "/absolute/path/to/eidolon_pi_known_hosts"
@@ -15,11 +18,11 @@ release_cli = "../../eidolon_kernel/.venv/bin/eidolon-release"
 
 [sources.eidolon_kernel]
 path = "../../eidolon_kernel"
-revision = "27dd8c9ed47ca8eeb0776abdadb3ff3dd0631e9e"
+revision = "cf668a338c0f6305164cccd49df16eaa7e92aa04"
 
 [sources.eidolon_data]
 path = "../../eidolon_data"
-revision = "e3afb78ccd0b42b01614fe3d6e9d89733798ebc9"
+revision = "d81086e2807f44ca0c0e43e31103cd85e6165a46"
 
 [sources.eidolon_hub]
 path = "../../eidolon_hub"
@@ -27,11 +30,23 @@ revision = "96438a2507fb76ad025824873a99b213a99016ad"
 
 [sources.eidolon_admin]
 path = "../../eidolon_admin"
-revision = "41b15d14b8597b87849664cb35a63d985e02d727"
+revision = "7ed63835f04a45b15496609681601bc65bfe2960"
+
+[sources.eidolon_agent]
+path = "../../eidolon_agent"
+revision = "2ae449982efe8cf8fede6a32d950111e1290ad15"
+
+[sources.eidolon_channel]
+path = "../../eidolon_channel"
+revision = "fdf7dd42f5d38e14ae05be6fbcf7febf10908397"
+
+[sources.eidolon_memory]
+path = "../../eidolon_memory"
+revision = "303b6004c58abbf86eb311de1f4002748fa9457d"
 
 [sources.eidolon_sdk]
 path = "../../eidolon_sdk"
-revision = "d76fe046bc6eb21d584c20c6613d0918acbf76e6"
+revision = "8108970514d9fefd3d93e7466e91706a1681c331"
 
 [services]
 units = [
@@ -43,6 +58,12 @@ units = [
   "eidolon-kernel.service",
   "eidolon-local-api.service",
   "eidolon-admin.service",
+  "eidolon-nats.service",
+  "eidolon-livekit.service",
+  "eidolon-memory-supervisor.service",
+  "eidolon-memory-discovery.service",
+  "eidolon-agent.service",
+  "eidolon-channel.service",
 ]
 
 [data]
@@ -61,3 +82,10 @@ admin_env = "/absolute/private/path/admin.env"
 local_api_env = "/absolute/private/path/local-api.env"
 bootstrap_env = "/absolute/private/path/bootstrap.env"
 host_identity = "/absolute/private/path/host_identity.ed25519"
+agent_env = "/absolute/private/path/agent.env"
+channel_env = "/absolute/private/path/channel.env"
+memory_env = "/absolute/private/path/memory.env"
+livekit_env = "/absolute/private/path/livekit.env"
+agent_settings = "/absolute/private/path/agent.yaml"
+channel_settings = "/absolute/private/path/channel.yaml"
+memory_settings = "/absolute/private/path/memory.yaml"

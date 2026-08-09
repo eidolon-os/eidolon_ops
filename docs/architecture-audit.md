@@ -1,72 +1,85 @@
 # Eidolon OS Raspberry Pi deployment / operations audit
 
-Audit date: 2026-08-07 (Asia/Shanghai). All process and repository checks were read-only; no Raspberry Pi command
-was executed and no Mac service was changed.
+Audit updated: 2026-08-09 (Asia/Shanghai). No command changed the Raspberry Pi or the running Mac stack.
 
-## Evidence baseline
+## Current code evidence
 
-| Repository | Audited commit | Workspace state relevant to this work |
+The multi-repository root is not Git. The selected release commits remain explicit even when sibling HEADs advance:
+
+| Source | Selected exact release input | Role |
 | --- | --- | --- |
-| `eidolon_kernel` | `27dd8c9ed47ca8eeb0776abdadb3ff3dd0631e9e` | clean; 4 commits ahead of `origin/main` |
-| `eidolon_data` | `e3afb78ccd0b42b01614fe3d6e9d89733798ebc9` | parallel runtime-snapshot changes; read-only |
-| `eidolon_hub` | `96438a2507fb76ad025824873a99b213a99016ad` | clean; 9 commits ahead |
-| `eidolon_admin` | `41b15d14b8597b87849664cb35a63d985e02d727` | `.coverage` untracked; read-only |
-| `eidolon_sdk` | `d76fe046bc6eb21d584c20c6613d0918acbf76e6` | parallel System Data changes; read-only |
+| Kernel | `cf668a338c0f6305164cccd49df16eaa7e92aa04` | release authority/system assets |
+| Data | `d81086e2807f44ca0c0e43e31103cd85e6165a46` | Data V2 + Workspace/runtime authority |
+| Hub | `96438a2507fb76ad025824873a99b213a99016ad` | Device/Hub authority |
+| Admin | `7ed63835f04a45b15496609681601bc65bfe2960` | Bootstrap, Local API, owner runtime projection |
+| Agent | `2ae449982efe8cf8fede6a32d950111e1290ad15` | session-authorized Companion brain |
+| Channel | `fdf7dd42f5d38e14ae05be6fbcf7febf10908397` | Data/Kernel runtime resolver + LiveKit session binding |
+| Memory | `303b6004c58abbf86eb311de1f4002748fa9457d` | supervisor/discovery, no direct Data integration |
+| SDK | `8108970514d9fefd3d93e7466e91706a1681c331` | runtime-authority/session support source |
 
-The current Mac supervisord observation was `admin-api=STOPPED`, `agent=STOPPED`, `hub-api=FATAL`; Audit,
-Channel, Client Web, Memory, NATS and LiveKit were already running. This task did not start, stop or restart them.
+These exact commits form one compatible runtime-session set: Data publishes runtime snapshots, SDK consumes them,
+Channel resolves Data/Kernel state, and Agent/SDK bind access to immutable LiveKit sessions. Dirty Agent/Channel test
+changes and Admin `.coverage` are not staged, overwritten or copied. Bundle construction uses
+`git archive <exact commit>`, never the working tree. The earlier Mac observation (`admin-api` and Agent stopped,
+Hub fatal, other development processes running) was not modified and is not used as the Pi product topology.
 
-## Current product topology and authority direction
+## Authority and dependency topology
 
 ```text
-Mac operator: eidolon-pi
-  -> BatchMode SSH/SCP with an explicit known_hosts file
-  -> target-native eidolon-release / target installer
+Mac eidolon-pi -> strict SSH/SCP -> target installer -> Kernel eidolon-release
 
-systemd
-  -> eidolon-bootstrapd       # Admin-owned Host identity / commissioning authority
-  -> eidolon-local-api        # authenticated product ingress
-  -> eidolon-admin            # loopback operator orchestration; no sibling DB access
-  -> eidolond                 # sole Data/Hub/Kernel desired-state authority
-       -> eidolon-data
-       -> eidolon-data-workspace
-       -> eidolon-hub
-       -> eidolon-kernel
+Bootstrap -> Local API / Admin                  (Admin-owned commissioning/control)
+eidolond -> NATS -> Memory -> Agent -> Channel (machine desired state)
+         -> LiveKit -> Hub / Channel
+         -> Data -> Workspace / Agent / Channel
+         -> Hub
+         -> Kernel -> Channel
 
-Admin -> eidolond directory -> Data / Hub / Kernel public application contracts
+Admin -> public eidolond/Data/Hub/Kernel application contracts
+Deployer -> no sibling SQLite and no cross-database transaction
 ```
 
-The deployer never opens or copies Data, Hub, Kernel, Bootstrap or eidolond SQLite. Data V2 is created only from
-the clean `0001_system_data_v2` Alembic baseline. Legacy `eidolon.sqlite3` and old migrations are rejected.
+Data/Hub/Kernel/Admin/Agent/Channel/Memory keep their existing public contracts and authority. The deployer only
+manages code, fixed system assets, lifecycle and health. It never copies an authority table or claims distributed
+atomicity. Data V2 begins only at its tracked baseline; old migrations and old `eidolon.sqlite3` are outside scope.
 
-## Existing capability and gap
+## Existing capability, previous gap, implemented closure
 
-Kernel already owns the hard transaction: exact `git archive` for five commits, safe tar validation, Pi-native
-`uv sync --frozen`, source/lock/environment sealing, immutable descriptor, complete preflight, non-blocking host
-lock, snapshots, ordered quiesce, atomic asset/link switch, readiness gates, receipts, automatic restore and
-explicit rollback. The current code contract is 4 service components + SDK, 15 assets, 7 prerequisite files,
-7 affected child/operator units and 7 readiness checks. Earlier 14/6 documentation is stale.
+Kernel already owned exact commit bundle, target-native frozen environments, sealing, snapshot, ordered quiesce,
+atomic asset/link switch, readiness, receipts, automatic restore and explicit rollback. The historical
+`eidolon_pi_deploy` instead patched detached clones, restored the legacy database and ran one supervisord unit; it
+conflicts with current Data V2/systemd authority and was rejected.
 
-Missing before this project: one strict Mac configuration and CLI, first Eidolon installation, whole-host
-lifecycle, read-only status, journal access, redacted diagnostics and resumable orchestration. Artifact signing,
-power-loss atomicity, target package bootstrap and product unit contracts for Agent/Channel/Memory/NATS/LiveKit
-remain outside the verified boundary.
-
-The sibling `eidolon_pi_deploy` directory is a v0.1.0 historical path. It applies patches onto detached clones,
-creates an old `eidolon.sqlite3`, runs the whole stack under one supervisord unit and manages Caddy/dnsmasq/UFW.
-Those choices conflict with Data V2 and the current eidolond/systemd authority model, so it is not reused.
+The previous Kernel contract covered only the core control path. This change extends the formal contract to 8 source
+archives, 7 components, 22 system assets, 11 private prerequisites, 13 affected units and 12 readiness checks, with
+Channel model hydration fail-closed. The independent Ops layer adds strict workstation config, Raspberry Pi
+foundation provision, first install, 14-unit lifecycle/status/logs/diagnostics and a Host-side App gate.
 
 ## Option matrix
 
-| Option | Reuse / safety | Boundary fit | Decision |
+| Option | Reuse and safety | Boundary fit | Decision |
 | --- | --- | --- | --- |
-| Extend historical `eidolon_pi_deploy` | low; old schema and patched trees | conflicts with current authority | reject |
-| Grow Kernel's shell driver into all remote operations | high release reuse | mixes target root transaction with workstation UX and first install | reject |
-| Put remote deployment in Admin | would expose convenient UI | Admin must not become root deployer or DB aggregator | reject |
-| Independent Mac operator CLI calling Kernel release contracts | maximal transaction reuse; isolated config/tests | preserves Kernel/Admin/Data/Hub ownership | selected |
+| Revive historical `eidolon_pi_deploy` | old schema, patched trees, supervisord monolith | violates current authority | reject |
+| Grow the Kernel shell driver into all operations | reuses release code but mixes root transaction and workstation UX | first-install/foundation are not Kernel domain | reject |
+| Put root deployment into Admin | convenient UI | makes Admin privileged deployer/aggregator | reject |
+| Independent `eidolon-pi` composing Kernel contracts | maximal release reuse; isolated tests/config | preserves all authority boundaries | selected |
+
+## Scenario support matrix
+
+| Scenario | Supported behavior | Remaining condition |
+| --- | --- | --- |
+| Newly flashed Pi | one `install --apply` provisions foundation, installs and starts full backend | SSH/known_hosts/sudo and 14 private inputs exist |
+| Environment audit only | `provision` and `doctor` are read-only and return nonzero when degraded | Pi reachable |
+| First install interruption | durable foundation/install phases; same commit/input digests resume | retain release ID and inputs |
+| Daily commit update | bundle/prepare/dry-run, then explicit resume+activate | schema gate must remain compatible |
+| Activation failure | exact system asset/link snapshot auto-restored; evidence retained | `rollback_failed` requires manual stop |
+| Explicit rollback | restores selected code/assets snapshot only | never restores DB/secrets |
+| Offline cached retry | pinned artifact cache and existing release may be reused | a truly new Pi still needs apt/PyPI/Git dependency network |
+| Multiple Pis | one strict config per Pi, same CLI/release contract | no fleet fan-out/concurrent scheduler yet |
+| App commissioning | `app-ready` proves Host-side Bootstrap/BLE/network/mDNS/TLS descriptor gate | real phone E2E still required |
 
 ## Safety conclusion
 
-This CLI can be used against mock SSH and an isolated filesystem without touching a formal environment. It must
-not be described as production-ready for a real Pi until the exact pinned revisions complete install/update,
-fault rollback, explicit rollback, concurrency, full reboot and long-running diagnostics on isolated hardware.
+The implementation is complete enough for review and isolated execution. It is not yet approved for a formal Pi:
+full native build, systemd verify, network transition, reboot, rollback injection, thermal/resource soak and real-phone
+commissioning must pass on isolated hardware after explicit authorization.

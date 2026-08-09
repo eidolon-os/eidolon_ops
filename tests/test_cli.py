@@ -20,13 +20,24 @@ class FakeController:
 
     def _result(self, name: str, values: dict[str, object]):
         self.calls.append((name, values))
-        return {"status": "healthy" if name == "doctor" else name}
+        statuses = {
+            "doctor": "healthy",
+            "provision": "installed",
+            "app-ready": "app_ready",
+        }
+        return {"status": statuses.get(name, name)}
 
     def status(self):
         return self._result("status", {})
 
+    def app_ready(self):
+        return self._result("app-ready", {})
+
     def doctor(self, **kwargs):
         return self._result("doctor", kwargs)
+
+    def provision(self, **kwargs):
+        return self._result("provision", kwargs)
 
     def install(self, **kwargs):
         return self._result("install", kwargs)
@@ -56,7 +67,9 @@ def fake_controller(monkeypatch) -> None:
     ("arguments", "expected"),
     [
         (["status"], "status"),
+        (["app-ready"], "app-ready"),
         (["doctor", "--release-id", "r1"], "doctor"),
+        (["provision", "--apply"], "provision"),
         (["install", "--release-id", "r1", "--resume", "--apply"], "install"),
         (["deploy", "--release-id", "r1", "--activate"], "deploy"),
         (["update", "--release-id", "r1", "--resume"], "deploy"),
@@ -89,7 +102,8 @@ def test_cli_routes_every_operation(
     assert cli.main(argv) == 0
 
     output = json.loads(capsys.readouterr().out)
-    assert output["status"] == ("healthy" if expected == "doctor" else expected)
+    statuses = {"doctor": "healthy", "provision": "installed", "app-ready": "app_ready"}
+    assert output["status"] == statuses.get(expected, expected)
     assert FakeController.instance.calls[-1][0] == expected
 
 
@@ -119,6 +133,27 @@ def test_cli_returns_nonzero_for_degraded_doctor(config_path: Path, monkeypatch,
     )
 
     assert cli.main(["--config", str(config_path), "doctor"]) == 1
+    assert json.loads(capsys.readouterr().out)["status"] == "degraded"
+
+
+@pytest.mark.parametrize(
+    ("operation", "method"),
+    [("provision", "provision"), ("app-ready", "app_ready")],
+)
+def test_cli_returns_nonzero_for_unready_gates(
+    config_path: Path,
+    monkeypatch,
+    capsys,
+    operation: str,
+    method: str,
+) -> None:
+    monkeypatch.setattr(
+        FakeController,
+        method,
+        lambda self, **kwargs: {"status": "degraded"},
+    )
+
+    assert cli.main(["--config", str(config_path), operation]) == 1
     assert json.loads(capsys.readouterr().out)["status"] == "degraded"
 
 

@@ -1,92 +1,92 @@
 # Verification report
 
-Date: 2026-08-07 (Asia/Shanghai)
+Updated: 2026-08-09 (Asia/Shanghai). No real Pi, formal database, Mac service lifecycle or sibling working tree was
+modified. A strict read-only SSH attempt reached `192.168.100.15` but authentication failed before any remote
+command ran.
 
-No command in this verification connected to a Raspberry Pi, changed a formal database, or started/stopped/restarted
-the existing Mac stack.
-
-## Workstation project
-
-Commands:
-
-```bash
-UV_CACHE_DIR=/private/tmp/eidolon-ops-uv-cache uv lock --check
-UV_CACHE_DIR=/private/tmp/eidolon-ops-uv-cache uv run ruff check .
-UV_CACHE_DIR=/private/tmp/eidolon-ops-uv-cache uv run ruff format --check .
-PYTHONPYCACHEPREFIX=/private/tmp/eidolon-ops-pyc \
-  UV_CACHE_DIR=/private/tmp/eidolon-ops-uv-cache \
-  uv run python -m compileall -q src tests
-UV_CACHE_DIR=/private/tmp/eidolon-ops-uv-cache \
-  uv run pytest -q --cov=eidolon_ops --cov-branch --cov-report=term-missing
-UV_CACHE_DIR=/private/tmp/eidolon-ops-uv-cache uv build
-```
-
-Results:
-
-- Ruff lint and format: passed.
-- Compileall: passed.
-- Tests: **136 passed, 0 failed, 0 skipped** in **0.96 s**;
-  branch-aware total coverage **90.66%** (90% gate).
-- Build: sdist `eidolon_ops-0.1.0.tar.gz` and universal wheel
-  `eidolon_ops-0.1.0-py3-none-any.whl` built successfully in **3.53 s**.
-- Installed entrypoint help exposed all 11 operations and the wheel contained only the seven runtime modules plus
-  distribution metadata.
-
-The first sandboxed build could not resolve the isolated `hatchling` backend because DNS was denied. The explicitly
-approved network retry succeeded. No application dependency is downloaded at target-operation time by this project;
-Pi-native dependency resolution remains in the existing fixed `uv sync --frozen` preparer.
-
-Test classes include unit, component, contract and real-local-subprocess integration coverage. Failure injection
-exercises prepare abort, install phase failure, secret cleanup failure, mismatched resume input, mode drift, existing
-authority refusal, non-blocking install lock, service-start recovery and idempotent completed re-entry.
-
-## Existing Kernel release boundary
-
-Baseline deployment-only result before implementation:
+## Workstation operations project
 
 ```text
-tests/deploy: 85 passed in 4.33 s
+uv run ruff check .
+All checks passed
+
+uv run pytest --cov=eidolon_ops --cov-report=term-missing --cov-fail-under=90 -q
+167 passed, 0 failed, 0 skipped
+branch-aware coverage: 91.91%
+final pytest runtime reported: 1.97 seconds
+marker breakdown: 60 unit, 102 component, 4 Kernel-contract, 1 subprocess integration
+
+uv build --out-dir /private/tmp/eidolon-ops-build-final2
+sdist: 84,591 bytes; wheel: 32,942 bytes
+
+python3 -m venv /private/tmp/eidolon-ops-wheel-smoke
+.../pip install --no-deps .../eidolon_ops-0.1.0-py3-none-any.whl
+.../eidolon-pi --help
+wheel install and all 13 CLI operation parsers: passed
 ```
 
-Final full Kernel/System/Deploy regression (isolated loopback/Unix sockets explicitly permitted):
+Tests cover strict config, shell-free SSH/SCP construction, Python-missing bootstrap, foundation platform/package/
+artifact/service gates, digest mismatch, safe tar handling, idempotent managed links, foundation failure evidence,
+first-install/resume/lock/secret cleanup, Data V2 baseline, App gate failure/recovery, lifecycle, rollback plan, bounded
+logs, redacted diagnosis and compatibility with the live Kernel release constants.
+
+## Kernel release boundary
 
 ```text
-239 passed, 0 failed, 0 skipped in 23.56 s
-branch-aware coverage: 91.55% (90% gate)
+uv run ruff check .
+All checks passed
+
+uv run pytest --cov=eidolon_deploy --cov-report=term --cov-fail-under=90 -q
+247 passed, 0 failed, 0 skipped
+eidolon_deploy branch-aware coverage: 90.32%
 ```
 
-The first sandboxed full run had exactly two `PermissionError` failures while binding isolated loopback ports;
-235 tests passed and 2 were skipped. The permitted rerun passed all 239. No existing service port or database was used.
+The contract result is 8 source archives, 7 components, 22 assets, 11 required secrets, 13 affected units and 12
+readiness checks. Tests include exact Git object verification, exclusion of working-tree changes, Channel unhydrated
+LFS pointer rejection, target preparation cleanup, snapshot/automatic/explicit rollback, concurrency, TCP/systemd/
+generic-2xx probes and systemd verification command failure injection.
 
-## Real repository bundle smoke
+## Exact repository bundle smoke
 
-The existing `eidolon-release bundle` archived these exact committed objects, not working-tree content:
+The final smoke used the committed Kernel revision plus these selected commits:
 
 ```text
-Kernel  27dd8c9ed47ca8eeb0776abdadb3ff3dd0631e9e
-Data    e3afb78ccd0b42b01614fe3d6e9d89733798ebc9
-Hub     96438a2507fb76ad025824873a99b213a99016ad
-Admin   41b15d14b8597b87849664cb35a63d985e02d727
-SDK     d76fe046bc6eb21d584c20c6613d0918acbf76e6
+Kernel   cf668a338c0f6305164cccd49df16eaa7e92aa04
+Data     d81086e2807f44ca0c0e43e31103cd85e6165a46
+Hub      96438a2507fb76ad025824873a99b213a99016ad
+Admin    7ed63835f04a45b15496609681601bc65bfe2960
+Agent    2ae449982efe8cf8fede6a32d950111e1290ad15
+Channel  fdf7dd42f5d38e14ae05be6fbcf7febf10908397
+Memory   303b6004c58abbf86eb311de1f4002748fa9457d
+SDK      8108970514d9fefd3d93e7466e91706a1681c331
 ```
 
-Result: five verified source archives plus the standalone preparer, **5.7 MiB**, **0.58 s** wall time. The smoke
-stopped before any SSH transfer or target preparation.
+The command completed in 1.37 seconds and produced 8 exact-commit source archives plus the preparer, totalling
+480 MiB under `/private/tmp/eidolon-full-product-bundle-cf668a3`. Channel accounts for 467 MiB after hydrating its 8
+Git LFS model objects from the exact commit pointers. Each object was checked against the pointer SHA-256 and size;
+the final archive was scanned again and contained no LFS pointer payload. This smoke stopped after local bundle
+validation; it performed no SSH, upload or Pi-native preparation.
 
-## Read-only environment observation
+## Foundation artifact evidence
 
-The Mac supervisord observation remained: Admin and Agent STOPPED; Hub FATAL; Audit, Channel, Client Web, Memory,
-NATS and LiveKit RUNNING. Sibling Data/Agent/Channel/SDK changes were preserved. Parallel work added further Admin
-documentation and Channel lock/config changes during this task; they were not staged or edited here.
+The four pinned arm64 inputs were cross-checked against their upstream release metadata. NATS 2.14.0 and Node
+22.23.2 were downloaded and matched the code-owned SHA-256 values. PyPI metadata maps the pinned uv 0.11.15 digest
+to the 23,066,178-byte aarch64 wheel and reports no known vulnerability for that release; 0.11.14 was rejected because
+PyPI reports its entry-point path traversal advisory. The complete 15,478,055-byte LiveKit v1.11.0 arm64 archive was
+also downloaded, matched the profile's `6741466b...e5a87ff` digest and contained the expected `livekit-server`.
+A deliberately interrupted transfer failed both archive and digest validation, confirming that the installer must
+reject incomplete cache content.
 
-## Not executed / acceptance still required
+## Not executed; hardware acceptance remains
 
-- SSH/SCP against the real Pi, target-native dependency download timing and prepare/seal.
-- First install on a clean Raspberry Pi image, real user/group/Polkit/Avahi/BlueZ/NetworkManager integration.
-- Real dry-run, activation, readiness, injected failure auto-restore, explicit rollback and concurrent operator race.
-- Power interruption, whole-host reboot recovery, filesystem-full behavior and long soak/resource/thermal diagnostics.
-- Product systemd contracts for Agent, Channel, Memory, NATS, LiveKit and Web client.
-- Artifact signing/trust root, A/B partitions and database migration/backup semantics.
+- Real SSH/SCP/sudo and Raspberry Pi foundation mutation.
+- `apt` and fixed artifact downloads on Raspberry Pi OS 12/13; package availability on both versions.
+- Pi-native `uv sync` for all 7 environments, model load time, disk/RAM/thermal profile.
+- Real `systemd-analyze verify`, 14-unit start order, BlueZ/NetworkManager/Avahi and NetworkManager SSH continuity.
+- First install, full reboot recovery, concurrent operator race, disk-full/power-loss/failure auto-restore and explicit
+  rollback on isolated hardware.
+- Real phone BLE/Host proof/TLS SPKI/claim/Wi-Fi/Workspace flow and long-running voice/Memory/Agent/Channel path.
+- Artifact signatures/trust root, A/B image rollback and authority-owned schema/data backup workflows.
 
-Therefore the implementation is suitable for review and isolated validation, but is **not yet approved for a formal
-Raspberry Pi**.
+Therefore the code is suitable for review and local isolation, but is not yet safe-approved for a formal Raspberry
+Pi until those tests pass with explicit authorization.

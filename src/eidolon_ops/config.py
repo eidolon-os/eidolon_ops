@@ -10,11 +10,16 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from types import MappingProxyType
 
+from eidolon_ops.foundation import FOUNDATION_PROFILE
+
 SOURCE_IDS = (
     "eidolon_kernel",
     "eidolon_data",
     "eidolon_hub",
     "eidolon_admin",
+    "eidolon_agent",
+    "eidolon_channel",
+    "eidolon_memory",
     "eidolon_sdk",
 )
 PRODUCT_UNITS = (
@@ -26,6 +31,12 @@ PRODUCT_UNITS = (
     "eidolon-kernel.service",
     "eidolon-local-api.service",
     "eidolon-admin.service",
+    "eidolon-nats.service",
+    "eidolon-livekit.service",
+    "eidolon-memory-supervisor.service",
+    "eidolon-memory-discovery.service",
+    "eidolon-agent.service",
+    "eidolon-channel.service",
 )
 INSTALL_FILE_NAMES = (
     "data_env",
@@ -35,6 +46,13 @@ INSTALL_FILE_NAMES = (
     "local_api_env",
     "bootstrap_env",
     "host_identity",
+    "agent_env",
+    "channel_env",
+    "memory_env",
+    "livekit_env",
+    "agent_settings",
+    "channel_settings",
+    "memory_settings",
 )
 FIXED_DATA_PATHS = {
     "system_database": Path("/var/lib/eidolon/eidolon-system.sqlite3"),
@@ -91,6 +109,7 @@ class DataConfig:
 @dataclass(frozen=True, slots=True)
 class OperationsConfig:
     path: Path
+    foundation_profile: str
     host: HostConfig
     workspace: WorkspaceConfig
     sources: Mapping[str, SourceConfig]
@@ -127,13 +146,28 @@ def load_config(path: Path) -> OperationsConfig:
         raise ConfigurationError(f"configuration is unreadable: {resolved}") from exc
     _require_keys(
         document,
-        required={"schema_version", "host", "workspace", "sources", "services", "data"},
+        required={
+            "schema_version",
+            "foundation",
+            "host",
+            "workspace",
+            "sources",
+            "services",
+            "data",
+        },
         optional={"install"},
         label="root",
     )
     if document["schema_version"] != 1:
         raise ConfigurationError("configuration schema_version must be 1")
     base = resolved.parent
+    foundation_wire = _mapping(document["foundation"], "foundation")
+    _require_keys(foundation_wire, required={"profile"}, label="foundation")
+    foundation_profile = _string(foundation_wire["profile"], "foundation.profile")
+    if foundation_profile != FOUNDATION_PROFILE:
+        raise ConfigurationError(
+            f"foundation.profile must be the reviewed profile: {FOUNDATION_PROFILE}"
+        )
     host_wire = _mapping(document["host"], "host")
     _require_keys(
         host_wire,
@@ -174,7 +208,9 @@ def load_config(path: Path) -> OperationsConfig:
 
     sources_wire = _mapping(document["sources"], "sources")
     if set(sources_wire) != set(SOURCE_IDS):
-        raise ConfigurationError("sources must be exactly Kernel/Data/Hub/Admin/SDK")
+        raise ConfigurationError(
+            "sources must be exactly Kernel/Data/Hub/Admin/Agent/Channel/Memory/SDK"
+        )
     sources: dict[str, SourceConfig] = {}
     for source_id in SOURCE_IDS:
         source_wire = _mapping(sources_wire[source_id], f"sources.{source_id}")
@@ -211,7 +247,7 @@ def load_config(path: Path) -> OperationsConfig:
         _require_keys(install_wire, required={"files"}, label="install")
         files_wire = _mapping(install_wire["files"], "install.files")
         if set(files_wire) != set(INSTALL_FILE_NAMES):
-            raise ConfigurationError("install.files must contain the seven fixed prerequisites")
+            raise ConfigurationError("install.files must contain the fixed full-product inputs")
         for name in INSTALL_FILE_NAMES:
             install_files[name] = _local_path(files_wire[name], base, f"install.files.{name}")
         if len(set(install_files.values())) != len(install_files):
@@ -219,6 +255,7 @@ def load_config(path: Path) -> OperationsConfig:
 
     return OperationsConfig(
         path=resolved,
+        foundation_profile=foundation_profile,
         host=HostConfig(
             user=user,
             hostname=hostname,

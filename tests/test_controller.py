@@ -53,6 +53,9 @@ class FakeTransport:
             raise self.fail_actions[action]
         values = {
             "status": {"status": "observed"},
+            "foundation-doctor": {"status": "healthy"},
+            "foundation-install": {"status": "installed"},
+            "app-ready": {"status": "app_ready"},
             "doctor-host": {"status": "healthy", "checks": {}},
             "guard-upload": {"status": "ready_for_upload"},
             "cleanup-stage": {"status": "cleaned"},
@@ -75,7 +78,12 @@ class FakeTransport:
         self.remote_calls.append((remote, sudo))
         if self.fail_remote_match is not None and self.fail_remote_match in " ".join(remote):
             raise RuntimeError(f"failed: {self.fail_remote_match}")
-        if "prepare_target.py" in " ".join(remote):
+        if remote == ("/bin/sh", "-s") and input_bytes is not None:
+            if b'python3":true' in input_bytes:
+                payload = {"python3": True}
+            else:
+                payload = {"status": "bootstrapped", "python3": True}
+        elif "prepare_target.py" in " ".join(remote):
             payload = {"status": "prepared"}
         elif "--dry-run" in remote:
             payload = {"status": "dry_run", "previous_targets": {}}
@@ -138,6 +146,13 @@ def test_status_is_read_only(setup_controller) -> None:
     assert transport.remote_calls == []
 
 
+def test_app_ready_is_read_only_and_bounded(setup_controller) -> None:
+    controller, _runner, transport = setup_controller
+
+    assert controller.app_ready()["status"] == "app_ready"
+    assert [call[0] for call in transport.agent_calls] == ["app-ready"]
+
+
 def test_doctor_combines_local_and_remote(setup_controller) -> None:
     controller, _runner, transport = setup_controller
 
@@ -145,6 +160,103 @@ def test_doctor_combines_local_and_remote(setup_controller) -> None:
 
     assert result["status"] == "healthy"
     assert transport.agent_calls[-1][1]["release_id"] == "r1"
+    assert [call[0] for call in transport.agent_calls[:2]] == [
+        "foundation-doctor",
+        "doctor-host",
+    ]
+
+
+def test_provision_is_read_only_by_default(setup_controller) -> None:
+    controller, _runner, transport = setup_controller
+
+    result = controller.provision(apply=False)
+
+    assert result["status"] == "healthy"
+    assert [call[0] for call in transport.agent_calls] == ["foundation-doctor"]
+
+
+def test_provision_installs_degraded_foundation(config) -> None:
+    transport = FakeTransport()
+    original = transport.run_agent
+
+    def degraded(action, payload, **kwargs):
+        if action == "foundation-doctor":
+            transport.agent_calls.append(
+                (action, dict(payload), kwargs.get("python", "/usr/bin/python3"), True)
+            )
+            return {"status": "degraded"}
+        return original(action, payload, **kwargs)
+
+    transport.run_agent = degraded
+    controller = EidolonPiController(config, ControllerRunner(config), transport=transport)
+
+    result = controller.provision(apply=True)
+
+    assert result["status"] == "installed"
+    assert [call[0] for call in transport.agent_calls] == [
+        "foundation-doctor",
+        "foundation-install",
+    ]
+
+
+def test_provision_plans_and_bootstraps_missing_python(config) -> None:
+    class MissingPythonTransport(FakeTransport):
+        def __init__(self) -> None:
+            super().__init__()
+            self.shell_calls = 0
+
+        def run(self, remote, **kwargs):
+            if tuple(remote) == ("/bin/sh", "-s"):
+                self.shell_calls += 1
+                payload = (
+                    {"python3": False}
+                    if self.shell_calls == 1
+                    else {"status": "bootstrapped", "python3": True}
+                )
+                self.remote_calls.append((tuple(remote), bool(kwargs.get("sudo", False))))
+                return ProcessResult(0, json.dumps(payload), "")
+            return super().run(remote, **kwargs)
+
+    planned_transport = MissingPythonTransport()
+    planned = EidolonPiController(
+        config,
+        ControllerRunner(config),
+        transport=planned_transport,
+    ).provision(apply=False)
+    assert planned["status"] == "planned_bootstrap"
+    assert planned_transport.agent_calls == []
+
+    applied_transport = MissingPythonTransport()
+    applied = EidolonPiController(
+        config,
+        ControllerRunner(config),
+        transport=applied_transport,
+    ).provision(apply=True)
+    assert applied["status"] == "healthy"
+    assert applied_transport.remote_calls[-1][1] is True
+    assert [phase["phase"] for phase in applied["phases"]] == [
+        "python_probe",
+        "python_bootstrap",
+        "doctor",
+    ]
+
+
+def test_provision_reports_degraded_without_apply(config) -> None:
+    transport = FakeTransport()
+
+    def degraded(action, payload, **kwargs):
+        transport.agent_calls.append(
+            (action, dict(payload), kwargs.get("python", "/usr/bin/python3"), True)
+        )
+        return {"status": "degraded"}
+
+    transport.run_agent = degraded
+    controller = EidolonPiController(config, ControllerRunner(config), transport=transport)
+
+    result = controller.provision(apply=False)
+
+    assert result["status"] == "degraded"
+    assert "provision --apply" in result["next"]
 
 
 def test_doctor_reports_degraded(config) -> None:
@@ -219,7 +331,7 @@ def test_install_without_apply_is_read_only(setup_controller) -> None:
 
     assert result["status"] == "planned"
     assert transport.uploads == []
-    assert [call[0] for call in transport.agent_calls] == ["doctor-host"]
+    assert [call[0] for call in transport.agent_calls] == ["foundation-doctor"]
 
 
 def test_install_apply_stages_exact_files_and_cleans(setup_controller) -> None:
@@ -237,9 +349,17 @@ def test_install_apply_stages_exact_files_and_cleans(setup_controller) -> None:
         "/var/tmp/eidolon-secrets-r1/local-api.env",
         "/var/tmp/eidolon-secrets-r1/bootstrap.env",
         "/var/tmp/eidolon-secrets-r1/host_identity.ed25519",
+        "/var/tmp/eidolon-secrets-r1/agent.env",
+        "/var/tmp/eidolon-secrets-r1/channel.env",
+        "/var/tmp/eidolon-secrets-r1/memory.env",
+        "/var/tmp/eidolon-secrets-r1/livekit.env",
+        "/var/tmp/eidolon-secrets-r1/agent.yaml",
+        "/var/tmp/eidolon-secrets-r1/channel.yaml",
+        "/var/tmp/eidolon-secrets-r1/memory.yaml",
     ]
     actions = [call[0] for call in transport.agent_calls]
     assert actions[-2:] == ["install", "cleanup-stage"]
+    assert actions[0] == "foundation-doctor"
 
 
 def test_install_failure_still_cleans_secret_stage(setup_controller) -> None:
