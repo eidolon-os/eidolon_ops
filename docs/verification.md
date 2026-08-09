@@ -1,6 +1,9 @@
 # Verification report
 
-Updated: 2026-08-09 (Asia/Shanghai). A dedicated Ed25519 SSH key passes BatchMode with strict checking against the
+Updated: 2026-08-09 (Asia/Shanghai). Superseding evidence: release upload now uses digest-guarded resumable rsync
+staging. A 494-MiB obsolete candidate reached Pi-native preparation without activation: Kernel prepared, then Data
+dependency installation failed closed after five PyPI retries for `packaging==26.3` timed out. No product unit,
+current link, secret or database was activated by that attempt. A dedicated Ed25519 SSH key passes BatchMode with strict checking against the
 recorded key for `eidolon-pi5@192.168.100.15`; no password was persisted. No Mac service lifecycle or dirty sibling
 working tree was changed. The Pi was changed only inside the reviewed cleanup/Foundation boundaries described below;
 no new Eidolon release was uploaded, prepared or activated, and no database contents were read or written.
@@ -44,9 +47,9 @@ uv run ruff format --check .
 35 files already formatted
 
 pytest --cov=eidolon_ops --cov-branch --cov-report=term-missing --cov-fail-under=90 -q
-292 passed, 0 failed, 0 skipped
-branch-aware coverage: 90.09%
-pytest runtime reported: 3.44 seconds
+304 passed, 0 failed, 0 skipped
+branch-aware coverage: 90.01%
+pytest runtime reported: 3.10 seconds
 
 uv build --out-dir /private/tmp/eidolon-ops-build-20260809-final-1
 sdist: 158,426 bytes; wheel: 62,154 bytes
@@ -78,41 +81,31 @@ eidolon_deploy branch-aware coverage: 90.12%
 pytest runtime reported: 14.15 seconds
 ```
 
-The contract result is 8 source archives, 7 components, 22 assets, 11 required secrets, 13 affected units and 12
+The selected contract is 8 source archives, 7 components, 23 assets, 11 required secrets, 14 affected units and 13
 readiness checks. Tests include exact Git object verification, exclusion of working-tree changes, Channel unhydrated
 LFS pointer rejection, target preparation cleanup, snapshot/automatic/explicit rollback, concurrency, TCP/systemd/
 generic-2xx probes and systemd verification command failure injection.
 
 ## Exact repository bundle and systemd matrix smoke
 
-The final smoke used the committed Kernel revision plus these selected commits:
+The next exact bundle smoke is configured with these selected commits:
 
 ```text
-Kernel   7de97bd8d87b7e3a84109053d1dd98e5f19b0058
+Kernel   267d5dad38e2c2a83d56f0f8e2bf6fb42897fb61
 Data     d81086e2807f44ca0c0e43e31103cd85e6165a46
-Hub      96438a2507fb76ad025824873a99b213a99016ad
-Admin    1ac5c733811c785e70992f527e516fd715b86f5b
+Hub      4bab6a0c5201c6adda7ba0f68241297034326cae
+Admin    987c69282a5a91361b0e9d20144bb7163b8241b3
 Agent    309ba573f249f9376275e14a5cc2f5ea1049b022
-Channel  3bc7e3303fa2c06bcfe0a82dacacd390f7deb372
+Channel  8843de6c1268bf01bf8e303ce26fb209df3e033b
 Memory   303b6004c58abbf86eb311de1f4002748fa9457d
 SDK      8108970514d9fefd3d93e7466e91706a1681c331
 ```
 
-The candidate bundle produced 8 exact-commit source archives plus the preparer and manifest under
-`/private/tmp/eidolon-release-bundles/20260809-full-r2`, totalling 503,483,477 bytes (480 MiB on disk). Channel accounts
-for 490,188,800 bytes after hydrating its 8 Git LFS model objects from the exact commit pointers. The bundler verified
-each source revision and archive digest and rejected all working-tree content. The Admin archive contains the three
-corrected unit blobs with SHA-256 values `bf6955a7...43e9eb1`, `755a0474...555405` and
-`127245ef...83ea65`, exactly matching the independent 14-unit matrix gate. This smoke stopped after local bundle and
-private-input validation; it performed no upload or Pi-native preparation.
-
-The final matrix was followed by 14/14 passing Kernel focused `tests/deploy/test_bundle.py` tests.
-
-The prior `02f96b7` archive was not a release candidate because its three Admin units failed the FHS gate. That defect
-is resolved only by the pinned `1ac5c73` commit above. The latest real Pi clean-install dry-run reports
-`release_matrix.status=compatible` for all 14 units and Foundation `status=healthy`. It detects exactly
-`/var/lib/eidolon`, `/var/lib/eidolon-admin` and `/var/lib/eidolon-bootstrap` for an explicitly authorized permanent
-wipe before a fresh Data V2 baseline.
+Local preflight proves that the release CLI itself is a clean worktree at the exact pinned Kernel commit, all 15 unit
+blobs pass the FHS matrix, and the regenerated 14-file input set passes the new Hub/Admin/Provider token relations.
+The obsolete 494-MiB candidate proved guarded resumable upload and Pi-native execution but failed on the network
+timeout recorded above. The selected matrix's new exact bundle and complete native preparation remain the immediate
+next gate; it must not reuse the obsolete bundle identity.
 
 ## Foundation artifact evidence
 
@@ -127,37 +120,25 @@ resolution to the exact official aarch64 wheel, verified in cache and installed 
 
 ## Product hard gates found by exact-commit audit
 
-The eight pinned Git objects were searched independently for the Hub Channel Provider routes. Hub contains only the
-outbound client for `POST /v1/device-channels/provision` and `revoke`; the other seven release inputs contain no
-production handler. `channel_provider.contract_url=http://127.0.0.1:8090/v1` therefore has no deployable owner in
-this matrix. Exact Kernel config assigns 8090 to `eidolond`'s unrelated `/api/system/v1` service-directory API, so
-the configured call targets the wrong contract. Hub process/readiness alone cannot prove device conversation, and no
-compatibility Provider was added.
+The former 8090 Provider and missing Admin consumer-contract gates are closed in the selected commits. Channel owns
+an authenticated Provider on 8767; Kernel owns its unit, readiness and lifecycle; Hub consumes it. Admin owns the
+Controller-authenticated onboarding target/admission workflow and derives Owner/controller authority server-side.
+These are product implementations, not Ops compatibility handlers.
 
-The current empty target confirms no listener on 8090. Until a real Provider commit, process owner and health
-contract are added to the reviewed release matrix, onboarding cannot return a usable Channel Assignment. This is a
-hard gate for “all services + App ready”, independent of the clean-install mechanics.
-
-Pinned Admin `1ac5c73` was also searched for Mobile's Controller-authenticated Local API consumption routes. It has
-neither `GET /api/local/v1/device-onboarding/target` nor
-`PUT /api/local/v1/device-admissions/{setup_id}`. The latter appears only in an uncommitted document in the current
-dirty Hub working tree, which is outside the fixed `96438a2` release input and is not executable Admin code; the
-former has no workspace match. Ownership belongs to the Admin Local API/control orchestration boundary, not Ops.
-Until committed, pinned and exercised, Mobile must not establish Hub TLS trust from mDNS or reuse the Host SPKI.
-
-Pinned transport assets have a separate trust blocker: Hub listens on plaintext loopback `127.0.0.1:8082`, but its
-public base URL and `_eidolon-hub._tcp` advertiser claim HTTPS port 443. The 14-unit matrix contains no TLS terminator,
-Hub certificate/secret input or readiness probe for 443. A future activation could therefore publish mDNS while no
-usable Hub HTTPS endpoint exists; Mobile is correct to require a Local API-supplied, verified Hub SPKI instead of
-trusting that advertisement.
+Pinned transport assets retain a trust blocker: Hub listens on plaintext loopback `127.0.0.1:8082`, but its public
+base URL requires HTTPS. The 15-unit matrix contains no TLS terminator, Hub certificate/key input or LAN HTTPS
+readiness probe. LiveKit likewise has no device-verifiable WSS origin. Mobile can consume only an installation-verified
+Hub leaf SPKI, while the ESP firmware requires a trusted public CA or an authenticated provisioning channel. Neither
+client may learn trust from mDNS or disable certificate verification.
 
 ## Not executed; hardware acceptance remains
 
-- Permanent deletion of the three old authority roots; no backup was created and explicit authorization remains
-  required. Their metadata-only inventory includes old Data/Hub/Kernel/eidolond SQLite files, release receipts,
+- Permanent deletion of the three old authority roots; the user authorized clean replacement, but the final matrix
+  gate has not yet reached the destructive install phase. Their metadata-only inventory includes old Data/Hub/Kernel/eidolond SQLite files, release receipts,
   Admin job roots and Bootstrap identity/TLS/database files.
-- Pi-native preparation for the seven component environments, model load time and disk/RAM/thermal profile.
-- Real `systemd-analyze verify`, 14-unit start order and health after clean install; Local API/Hub/provider ports and
+- Complete Pi-native preparation for all seven component environments. The first real attempt proved resumable upload
+  and Kernel preparation, then failed closed on a PyPI timeout during Data.
+- Real `systemd-analyze verify`, 15-unit start order and health after clean install; Local API/Hub/provider ports and
   mDNS must be re-measured after activation.
 - Full reboot recovery, concurrent operator race, disk-full/power-loss/failure auto-restore and explicit rollback on
   the Pi.
@@ -165,5 +146,6 @@ trusting that advertisement.
 - Artifact signatures/trust root, A/B image rollback and authority-owned schema/data backup workflows.
 
 Therefore the Pi Foundation and Ops clean-install mechanics are ready for the next authorized destructive test, but
-the whole product is not yet safe-approved or App-conversation-ready. It remains blocked by the authority-data wipe
-decision and the missing production Channel Provider, followed by target-native activation and hardware acceptance.
+the whole product is not yet safe-approved or device-conversation-ready. Clean replacement is authorized; the open
+product blockers are complete target-native preparation plus device-verifiable Hub HTTPS/LiveKit WSS, followed by
+activation and hardware acceptance.

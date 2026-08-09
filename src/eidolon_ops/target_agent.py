@@ -44,6 +44,7 @@ PRODUCT_UNITS = (
     "eidolon-memory-supervisor.service",
     "eidolon-memory-discovery.service",
     "eidolon-agent.service",
+    "eidolon-channel-provider.service",
     "eidolon-channel.service",
 )
 # Stop control/reconciliation entry points before their managed workers.  In
@@ -54,6 +55,7 @@ RESET_STOP_UNITS = (
     "eidolon-local-api.service",
     "eidolond.service",
     "eidolon-bootstrapd.service",
+    "eidolon-channel-provider.service",
     "eidolon-channel.service",
     "eidolon-agent.service",
     "eidolon-memory-discovery.service",
@@ -159,6 +161,7 @@ RESET_AUTHORITY_ROOTS = (
 )
 _RELEASE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _STAGING_NAME = re.compile(r"^eidolon-(?:release|secrets)-[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _VAR_TMP = Path("/var/tmp")
 _RELEASES = Path("/opt/eidolon/releases")
 _LEGACY_RELEASES = Path("/srv/eidolon/releases")
@@ -1631,10 +1634,49 @@ class TopologyExpansionInstaller:
 
 def guard_upload(payload: Mapping[str, object]) -> dict[str, object]:
     release_id = _release_id(payload)
+    transfer_id = payload.get("transfer_id")
+    if not isinstance(transfer_id, str) or _SHA256.fullmatch(transfer_id) is None:
+        raise TargetError("upload transfer identity is invalid")
+    prepared = _RELEASES / release_id
+    if (prepared / "release.json").is_file() and (prepared / "release.json.sha256").is_file():
+        return {
+            "status": "already_prepared",
+            "path": str(prepared),
+            "transfer_id": transfer_id,
+        }
     path = _VAR_TMP / f"eidolon-release-{release_id}"
-    if path.exists() or path.is_symlink():
-        raise TargetError(f"remote bundle path already exists: {path}")
-    return {"status": "ready_for_upload", "path": str(path)}
+    marker = path / ".eidolon-upload.json"
+    expected = {
+        "schema_version": 1,
+        "release_id": release_id,
+        "transfer_id": transfer_id,
+    }
+    if not path.exists() and not path.is_symlink():
+        path.mkdir(mode=0o700)
+        _atomic_json(marker, expected)
+        return {
+            "status": "ready_for_upload",
+            "path": str(path),
+            "transfer_id": transfer_id,
+        }
+    try:
+        metadata = path.stat(follow_symlinks=False)
+        document = json.loads(marker.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise TargetError(f"remote bundle path is not resumable: {path}") from exc
+    if (
+        path.is_symlink()
+        or not stat.S_ISDIR(metadata.st_mode)
+        or stat.S_IMODE(metadata.st_mode) != 0o700
+        or metadata.st_uid != os.geteuid()
+        or document != expected
+    ):
+        raise TargetError(f"remote bundle path identity or ownership drifted: {path}")
+    return {
+        "status": "resume_upload",
+        "path": str(path),
+        "transfer_id": transfer_id,
+    }
 
 
 def cleanup_stage(payload: Mapping[str, object]) -> dict[str, object]:

@@ -124,6 +124,38 @@ def test_upload_rejects_missing_source(config, tmp_path: Path) -> None:
         transport.upload(tmp_path / "missing", "/var/tmp/target")
 
 
+def test_resumable_directory_upload_uses_strict_rsync(config, tmp_path: Path) -> None:
+    source = tmp_path / "bundle"
+    source.mkdir()
+    runner = RecordingRunner([ProcessResult(0, "", "")])
+    transport = SSHTransport(config.host, runner)
+
+    transport.upload_directory_resumable(source, "/var/tmp/eidolon-release-r1")
+
+    command = runner.calls[0]["command"]
+    assert command[0] == "rsync"
+    assert "--partial-dir=.eidolon-partial" in command
+    assert "--delay-updates" in command
+    remote_shell = command[command.index("-e") + 1]
+    assert "BatchMode=yes" in remote_shell
+    assert "StrictHostKeyChecking=yes" in remote_shell
+    assert command[-2:] == (
+        f"{source}/",
+        f"{config.host.target}:/var/tmp/eidolon-release-r1/",
+    )
+
+
+def test_resumable_upload_rejects_symlink_source(config, tmp_path: Path) -> None:
+    source = tmp_path / "bundle"
+    source.mkdir()
+    link = tmp_path / "bundle-link"
+    link.symlink_to(source)
+    transport = SSHTransport(config.host, RecordingRunner())
+
+    with pytest.raises(TransportError, match="unsafe"):
+        transport.upload_directory_resumable(link, "/var/tmp/eidolon-release-r1")
+
+
 def test_agent_payload_does_not_log_json_plaintext(config) -> None:
     runner = RecordingRunner([ProcessResult(0, "{}", "")])
     transport = SSHTransport(config.host, runner)

@@ -18,7 +18,7 @@ release_cli = "../../eidolon_kernel/.venv/bin/eidolon-release"
 
 [sources.eidolon_kernel]
 path = "../../eidolon_kernel"
-revision = "7de97bd8d87b7e3a84109053d1dd98e5f19b0058"
+revision = "267d5dad38e2c2a83d56f0f8e2bf6fb42897fb61"
 
 [sources.eidolon_data]
 path = "../../eidolon_data"
@@ -26,11 +26,11 @@ revision = "d81086e2807f44ca0c0e43e31103cd85e6165a46"
 
 [sources.eidolon_hub]
 path = "../../eidolon_hub"
-revision = "96438a2507fb76ad025824873a99b213a99016ad"
+revision = "4bab6a0c5201c6adda7ba0f68241297034326cae"
 
 [sources.eidolon_admin]
 path = "../../eidolon_admin"
-revision = "1ac5c733811c785e70992f527e516fd715b86f5b"
+revision = "987c69282a5a91361b0e9d20144bb7163b8241b3"
 
 [sources.eidolon_agent]
 path = "../../eidolon_agent"
@@ -38,7 +38,7 @@ revision = "309ba573f249f9376275e14a5cc2f5ea1049b022"
 
 [sources.eidolon_channel]
 path = "../../eidolon_channel"
-revision = "3bc7e3303fa2c06bcfe0a82dacacd390f7deb372"
+revision = "8843de6c1268bf01bf8e303ce26fb209df3e033b"
 
 [sources.eidolon_memory]
 path = "../../eidolon_memory"
@@ -63,6 +63,7 @@ units = [
   "eidolon-memory-supervisor.service",
   "eidolon-memory-discovery.service",
   "eidolon-agent.service",
+  "eidolon-channel-provider.service",
   "eidolon-channel.service",
 ]
 

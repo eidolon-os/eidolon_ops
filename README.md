@@ -5,7 +5,7 @@
 systemd）。`eidolon-pi` 暂时保留为 Pi 发布底层兼容入口，不再作为顶层操作界面。
 
 对一台刚刷好系统、已开放 SSH 的新 Pi，下面一条命令会完成基础环境检测/安装、精确提交发布、
-Data V2 初始化、14 个产品服务启动，并要求 Host 达到手机 App commissioning 门禁：
+Data V2 初始化、15 个产品服务启动，并要求 Host 达到手机 App commissioning 门禁：
 
 ```bash
 uv run eidolon-ops --config config/hosts/pi5.toml \
@@ -30,19 +30,19 @@ Admin/Local API、Agent/Channel、Memory 与 LiveKit 的共享 token 在一次�
 
 ## 完整产品范围
 
-正式后端是 14 个 systemd unit：Bootstrap、eidolond、Data、Data Workspace、Hub、Kernel、Local API、
-Admin、NATS、LiveKit、Memory Supervisor、Memory Discovery、Agent、Channel。发布输入固定为 8 个完整
+正式后端是 15 个 systemd unit：Bootstrap、eidolond、Data、Data Workspace、Hub、Kernel、Local API、
+Admin、NATS、LiveKit、Memory Supervisor、Memory Discovery、Agent、Channel Provider、Channel。发布输入固定为 8 个完整
 Git commit；7 个运行 component 一起切换，SDK 只作构建输入。
 
 这套后端支持手机 App 对 Host 的 BLE/Wi-Fi/Host proof/pinned HTTPS/claim/Workspace onboarding 管理路径。
 `app-ready` 是 Host 侧门禁，不是假装跑过真实手机。`client-web`、Audit worker、Vision 和手机安装包本身
 不是 Pi 产品 unit；它们不属于“手机 App 可管理 Host”所需的后端范围。
 
-当前固定发布矩阵仍有产品级硬门禁：没有进程实现 Hub 配置所需的 8090 Channel Provider
-`device-channels/provision|revoke`，固定 Admin 也没有 Mobile 消费的 Local API onboarding target/admission
-端点；8090 实际由不同契约的 `eidolond` 占用。Hub 还只有 loopback 8082 明文监听，却会宣告 HTTPS
-443，而 release 没有 TLS 终止器/证书。因此 14 个 unit 即使全部健康，也只能报告为后端运行，不能
-报告为“App 开箱即管/可对话”。Ops 不会用 mDNS listener 或临时兼容服务掩盖这些缺口。
+当前矩阵已纳入正式 `eidolon-channel-provider`（8767）以及 Admin 的 Mobile onboarding target/admission
+契约。剩余产品级硬门禁是 LAN transport：Hub 还只有 loopback 8082 明文监听，却会宣告 HTTPS
+endpoint；LiveKit 的设备地址也必须是设备可验证的 WSS。release 尚未拥有 TLS 终止器和对应证书，
+因此 15 个 unit 即使全部健康，也只能报告为后端运行，不能报告为“所有设备可对话”。Ops 不会关闭
+证书校验、从 mDNS 建立信任或用临时兼容服务掩盖缺口。
 
 ## 基础环境 profile
 
@@ -56,7 +56,8 @@ Git commit；7 个运行 component 一起切换，SDK 只作构建输入。
 - `bluetooth.service`、`NetworkManager.service`、`avahi-daemon.service` enabled + active。
 
 Python 缺失时，CLI 通过受限 shell bootstrap 先验证同一硬件/OS/容量门禁，再安装 Python。下载使用固定
-URL/digest、原子缓存和版本目录；不会用 rsync 覆盖任何工作树。Foundation 每个阶段与失败原因写入
+URL/digest、原子缓存和版本目录。`rsync` 只用于带 release digest marker 的 `/var/tmp` 不可变发布暂存，
+支持断线续传且不会覆盖任何工作树。Foundation 每个阶段与失败原因写入
 `/var/lib/eidolon-ops/foundation-v2.json`，与产品 authority namespace 隔离，可诊断、可幂等重试。
 
 ## 安装与配置
@@ -73,7 +74,7 @@ chmod 600 config/eidolon-pi.toml
 Mac 还必须安装 `git-lfs`；bundle 只从 exact commit pointer 导出 Channel 模型并验证 LFS object digest，
 不会读取 Channel working tree 中的 hydrated 文件。
 
-配置显式固定 foundation profile、目标/SSH、8 个 repo/commit、14 个 unit、authority 数据路径和 14 个
+配置显式固定 foundation profile、目标/SSH、8 个 repo/commit、15 个 unit、authority 数据路径和 14 个
 私密输入文件。SSH 强制 BatchMode、独立 key、`StrictHostKeyChecking=yes` 和显式 known_hosts。
 示例见 [`config/eidolon-pi.example.toml`](config/eidolon-pi.example.toml)。
 

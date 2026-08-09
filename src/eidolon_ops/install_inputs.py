@@ -114,6 +114,7 @@ def initialize_install_inputs(
         "admin.env": {
             "EIDOLON_ADMIN_DATA_AUTHORITY_TOKEN": data_token,
             "EIDOLON_ADMIN_DATA_WORKSPACE_AUTHORITY_TOKEN": workspace_token,
+            "EIDOLON_ADMIN_HUB_MANAGEMENT_JWT_SECRET": hub_jwt_secret,
             "EIDOLON_ADMIN_LOCAL_API_SERVICE_TOKEN": local_api_token,
             "EIDOLON_ADMIN_SYSTEM_DIRECTORY_UDS": "/run/eidolon/system.sock",
         },
@@ -132,6 +133,8 @@ def initialize_install_inputs(
             **channel_external,
             "LIVEKIT_API_KEY": livekit_key,
             "LIVEKIT_API_SECRET": livekit_secret,
+            "EIDOLON_CHANNEL_PROVIDER_TOKEN": hub_provider_token,
+            "EIDOLON_LIVEKIT_CLIENT_URL": "ws://127.0.0.1:7880",
             "PAIRING_JWT_SECRET": pairing_token,
             "EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN": data_token,
         },
@@ -208,6 +211,7 @@ def validate_install_input_contract(
         "admin.env": {
             "EIDOLON_ADMIN_DATA_AUTHORITY_TOKEN",
             "EIDOLON_ADMIN_DATA_WORKSPACE_AUTHORITY_TOKEN",
+            "EIDOLON_ADMIN_HUB_MANAGEMENT_JWT_SECRET",
             "EIDOLON_ADMIN_LOCAL_API_SERVICE_TOKEN",
             "EIDOLON_ADMIN_SYSTEM_DIRECTORY_UDS",
         },
@@ -234,6 +238,8 @@ def validate_install_input_contract(
         "BAILIAN_TTS_API_KEY",
         "LIVEKIT_API_KEY",
         "LIVEKIT_API_SECRET",
+        "EIDOLON_CHANNEL_PROVIDER_TOKEN",
+        "EIDOLON_LIVEKIT_CLIENT_URL",
         "PAIRING_JWT_SECRET",
         "EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN",
     }
@@ -321,6 +327,16 @@ def validate_install_input_contract(
             "Hub/Kernel management token",
         ),
         (
+            hub["EIDOLON_HUB_MANAGEMENT_JWT_SECRET"],
+            admin["EIDOLON_ADMIN_HUB_MANAGEMENT_JWT_SECRET"],
+            "Hub/Admin management JWT secret",
+        ),
+        (
+            hub["EIDOLON_HUB_CHANNEL_PROVIDER_TOKEN"],
+            channel["EIDOLON_CHANNEL_PROVIDER_TOKEN"],
+            "Hub/Channel Provider token",
+        ),
+        (
             admin["EIDOLON_ADMIN_LOCAL_API_SERVICE_TOKEN"],
             local_api["EIDOLON_LOCAL_API_ADMIN_SERVICE_TOKEN"],
             "Admin/Local API service token",
@@ -352,6 +368,8 @@ def validate_install_input_contract(
         raise InstallInputError("Data authority paths drifted from the product contract")
     if admin["EIDOLON_ADMIN_SYSTEM_DIRECTORY_UDS"] != "/run/eidolon/system.sock":
         raise InstallInputError("Admin system directory path drifted from the product contract")
+    if channel["EIDOLON_LIVEKIT_CLIENT_URL"] != "ws://127.0.0.1:7880":
+        raise InstallInputError("LiveKit client origin drifted from the backend-only contract")
 
     for name, key in (
         ("agent.env", "EIDOLON_AGENT_LLM_API_KEY"),

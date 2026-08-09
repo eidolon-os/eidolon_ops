@@ -97,6 +97,12 @@ SYSTEMD_ASSET_CONTRACTS = (
     ),
     SystemdAssetContract(
         "eidolon_kernel",
+        "deploy/systemd/eidolon-channel-provider.service",
+        "eidolon-channel-provider.service",
+        "eidolon_channel",
+    ),
+    SystemdAssetContract(
+        "eidolon_kernel",
         "deploy/systemd/eidolon-channel.service",
         "eidolon-channel.service",
         "eidolon_channel",

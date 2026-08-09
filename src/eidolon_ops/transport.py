@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import re
+import shlex
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
@@ -26,11 +27,13 @@ class SSHTransport:
         *,
         ssh: str = "ssh",
         scp: str = "scp",
+        rsync: str = "rsync",
     ) -> None:
         self.host = host
         self.runner = runner
         self.ssh = ssh
         self.scp = scp
+        self.rsync = rsync
 
     def run(
         self,
@@ -108,6 +111,34 @@ class SSHTransport:
             timeout=1800,
         )
         checked("SCP upload", result)
+
+    def upload_directory_resumable(self, source: Path, destination: str) -> None:
+        """Resume an immutable release bundle into an already guarded directory."""
+
+        if (
+            not source.is_dir()
+            or source.is_symlink()
+            or _REMOTE_TOKEN.fullmatch(destination) is None
+        ):
+            raise TransportError("resumable upload source or destination is unsafe")
+        remote_shell = shlex.join(self._ssh_prefix())
+        result = self.runner.run(
+            (
+                self.rsync,
+                "-rlpt",
+                "--partial",
+                "--partial-dir=.eidolon-partial",
+                "--delay-updates",
+                "--timeout=120",
+                "--rsync-path=/usr/bin/rsync",
+                "-e",
+                remote_shell,
+                f"{source}/",
+                f"{self.host.target}:{destination}/",
+            ),
+            timeout=3600,
+        )
+        checked("resumable release upload", result)
 
     def _ssh_prefix(self) -> tuple[str, ...]:
         return (

@@ -911,13 +911,14 @@ def test_payload_round_trip_and_rejects_non_object() -> None:
         target_agent._payload(encoded_list)
 
 
-def test_guard_upload_accepts_absent_path() -> None:
+def test_guard_upload_accepts_absent_path(monkeypatch, tmp_path: Path) -> None:
     release_id = "test-guard-upload-ops"
-    path = Path("/var/tmp") / f"eidolon-release-{release_id}"
-    if path.exists():
-        pytest.skip("test staging path unexpectedly exists")
+    monkeypatch.setattr(target_agent, "_VAR_TMP", tmp_path)
+    path = tmp_path / f"eidolon-release-{release_id}"
 
-    assert target_agent.guard_upload({"release_id": release_id})["status"] == "ready_for_upload"
+    result = target_agent.guard_upload({"release_id": release_id, "transfer_id": "a" * 64})
+    assert result["status"] == "ready_for_upload"
+    assert path.stat().st_mode & 0o777 == 0o700
 
 
 def test_guard_upload_rejects_existing_path(monkeypatch, tmp_path: Path) -> None:
@@ -925,8 +926,56 @@ def test_guard_upload_rejects_existing_path(monkeypatch, tmp_path: Path) -> None
     path = tmp_path / "eidolon-release-existing"
     path.mkdir()
 
-    with pytest.raises(TargetError, match="already exists"):
-        target_agent.guard_upload({"release_id": "existing"})
+    with pytest.raises(TargetError, match="not resumable"):
+        target_agent.guard_upload({"release_id": "existing", "transfer_id": "a" * 64})
+
+
+def test_guard_upload_resumes_only_matching_owned_transfer(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(target_agent, "_VAR_TMP", tmp_path)
+    payload = {"release_id": "resume", "transfer_id": "b" * 64}
+
+    first = target_agent.guard_upload(payload)
+    second = target_agent.guard_upload(payload)
+
+    assert first["status"] == "ready_for_upload"
+    assert second["status"] == "resume_upload"
+    with pytest.raises(TargetError, match="drifted"):
+        target_agent.guard_upload({"release_id": "resume", "transfer_id": "c" * 64})
+
+
+def test_guard_upload_rejects_invalid_transfer_identity(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(target_agent, "_VAR_TMP", tmp_path)
+
+    with pytest.raises(TargetError, match="transfer identity"):
+        target_agent.guard_upload({"release_id": "resume", "transfer_id": "short"})
+
+
+def test_guard_upload_reports_exact_prepared_release(monkeypatch, tmp_path: Path) -> None:
+    releases = tmp_path / "releases"
+    prepared = releases / "prepared"
+    prepared.mkdir(parents=True)
+    (prepared / "release.json").write_text("{}", encoding="utf-8")
+    (prepared / "release.json.sha256").write_text("digest", encoding="utf-8")
+    monkeypatch.setattr(target_agent, "_RELEASES", releases)
+    monkeypatch.setattr(target_agent, "_VAR_TMP", tmp_path / "staging")
+
+    result = target_agent.guard_upload({"release_id": "prepared", "transfer_id": "d" * 64})
+
+    assert result == {
+        "status": "already_prepared",
+        "path": str(prepared),
+        "transfer_id": "d" * 64,
+    }
+
+
+def test_guard_upload_rejects_mode_drift(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(target_agent, "_VAR_TMP", tmp_path)
+    payload = {"release_id": "resume", "transfer_id": "e" * 64}
+    target_agent.guard_upload(payload)
+    (tmp_path / "eidolon-release-resume").chmod(0o755)
+
+    with pytest.raises(TargetError, match="ownership drifted"):
+        target_agent.guard_upload(payload)
 
 
 def test_cleanup_stage_removes_only_exact_secret_path(monkeypatch, tmp_path: Path) -> None:

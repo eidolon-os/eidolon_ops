@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -213,7 +214,7 @@ class EidolonPiController:
 
     def local_preflight(self, *, require_install_files: bool) -> dict[str, object]:
         self._validate_ssh_material()
-        required_commands = (self.git, "git-lfs", "ssh", "scp")
+        required_commands = (self.git, "git-lfs", "ssh", "scp", "rsync")
         missing_commands = [
             command for command in required_commands if shutil.which(command) is None
         ]
@@ -226,6 +227,30 @@ class EidolonPiController:
             raise OperationsError(
                 f"eidolon-release CLI is missing or not executable: {release_cli}"
             )
+        release_cli_root = release_cli.parent.parent.parent
+        if not (release_cli_root / ".git").exists():
+            raise OperationsError("eidolon-release CLI is not inside a Git worktree")
+        cli_revision = checked(
+            "exact eidolon-release authority verification",
+            self.runner.run((self.git, "-C", str(release_cli_root), "rev-parse", "HEAD")),
+        ).stdout.strip()
+        if cli_revision != self.config.sources["eidolon_kernel"].revision:
+            raise OperationsError("eidolon-release CLI does not match the pinned Kernel commit")
+        cli_status = checked(
+            "clean eidolon-release authority verification",
+            self.runner.run(
+                (
+                    self.git,
+                    "-C",
+                    str(release_cli_root),
+                    "status",
+                    "--porcelain",
+                    "--untracked-files=no",
+                )
+            ),
+        ).stdout
+        if cli_status.strip():
+            raise OperationsError("eidolon-release CLI worktree has tracked changes")
         source_evidence: dict[str, str] = {}
         for source_id in SOURCE_IDS:
             source = self.config.sources[source_id]
@@ -261,6 +286,7 @@ class EidolonPiController:
             install_input_contract = self._validate_install_inputs(INSTALL_FILE_NAMES)
         return {
             "release_cli": str(release_cli),
+            "release_cli_revision": cli_revision,
             "sources": source_evidence,
             "release_matrix": release_matrix,
             "ssh": {
@@ -312,12 +338,13 @@ class EidolonPiController:
         release_id: str,
         resume: bool,
         activate: bool,
+        _skip_prepare: bool = False,
     ) -> dict[str, object]:
         release_id = validate_release_id(release_id)
         local = self.local_preflight(require_install_files=False)
         phases: list[dict[str, object]] = []
-        if not resume:
-            phases.extend(self._bundle_upload_prepare(release_id))
+        if not _skip_prepare:
+            phases.extend(self._bundle_upload_prepare(release_id, reuse=resume))
         descriptor = self._remote_descriptor(release_id)
         cli = self._remote_release_cli(release_id)
         dry_run = self._remote_json(
@@ -441,8 +468,7 @@ class EidolonPiController:
             reset = self.reset(wipe_authority_data=True, apply=True)
             phases.append({"phase": "reset_existing", "result": reset})
         foundation = self.provision(apply=True)
-        if not resume:
-            phases.extend(self._bundle_upload_prepare(release_id))
+        phases.extend(self._bundle_upload_prepare(release_id, reuse=resume))
         stage = f"/var/tmp/eidolon-secrets-{release_id}"
         self._stage_install_files(release_id, stage)
         payload = self._target_payload()
@@ -593,8 +619,7 @@ class EidolonPiController:
         self._validate_install_inputs(EXPANSION_FILE_NAMES)
         foundation = self.provision(apply=True)
         phases: list[dict[str, object]] = []
-        if not resume:
-            phases.extend(self._bundle_upload_prepare(release_id))
+        phases.extend(self._bundle_upload_prepare(release_id, reuse=resume))
         stage = f"/var/tmp/eidolon-secrets-{release_id}"
         self._stage_install_files(
             release_id,
@@ -660,7 +685,12 @@ class EidolonPiController:
             }
         replacement = topology.get("source_topology") == "legacy_srv_core"
         try:
-            activated = self.deploy(release_id=release_id, resume=True, activate=True)
+            activated = self.deploy(
+                release_id=release_id,
+                resume=True,
+                activate=True,
+                _skip_prepare=True,
+            )
         except Exception as activation_exc:
             if not replacement:
                 raise
@@ -824,36 +854,60 @@ class EidolonPiController:
         if stat.S_IMODE(known_hosts.stat().st_mode) & 0o022:
             raise ConfigurationError("host.known_hosts_file must not be group/world writable")
 
-    def _bundle_upload_prepare(self, release_id: str) -> list[dict[str, object]]:
+    def _bundle_upload_prepare(
+        self, release_id: str, *, reuse: bool = False
+    ) -> list[dict[str, object]]:
         output = self.config.workspace.bundle_root / release_id
         output.parent.mkdir(parents=True, exist_ok=True)
+        if reuse and not output.exists():
+            # Backward-compatible activation of a release prepared by another
+            # workstation. The subsequent sealed descriptor dry-run is still
+            # authoritative and fails closed when the target is not prepared.
+            return []
         if output.exists():
-            raise OperationsError(
-                f"bundle output already exists; use --resume or a new ID: {output}"
+            if not reuse:
+                raise OperationsError(
+                    f"bundle output already exists; use --resume or a new ID: {output}"
+                )
+            transfer_id = self._validate_existing_bundle(output, release_id)
+            bundle_result = {
+                "status": "reused_validated_bundle",
+                "manifest": str(output / "bundle.json"),
+                "sha256": transfer_id,
+            }
+        else:
+            command = [
+                str(self.config.workspace.release_cli),
+                "bundle",
+                release_id,
+                str(output),
+            ]
+            for source_id in SOURCE_IDS:
+                flag = source_id.removeprefix("eidolon_").replace("eidolon-", "")
+                command.extend((f"--{flag}-repo", str(self.config.sources[source_id].path)))
+            for source_id in SOURCE_IDS:
+                flag = source_id.removeprefix("eidolon_").replace("eidolon-", "")
+                command.extend((f"--{flag}-revision", self.config.sources[source_id].revision))
+            bundle = checked(
+                "commit-pinned source bundle",
+                self.runner.run(command, timeout=300),
             )
-        command = [
-            str(self.config.workspace.release_cli),
-            "bundle",
-            release_id,
-            str(output),
-        ]
-        for source_id in SOURCE_IDS:
-            flag = source_id.removeprefix("eidolon_").replace("eidolon-", "")
-            command.extend((f"--{flag}-repo", str(self.config.sources[source_id].path)))
-        for source_id in SOURCE_IDS:
-            flag = source_id.removeprefix("eidolon_").replace("eidolon-", "")
-            command.extend((f"--{flag}-revision", self.config.sources[source_id].revision))
-        bundle = checked(
-            "commit-pinned source bundle",
-            self.runner.run(command, timeout=300),
-        )
-        bundle_result = self._parse_json(bundle.stdout, "bundle")
+            bundle_result = self._parse_json(bundle.stdout, "bundle")
+            transfer_id = self._validate_existing_bundle(output, release_id)
         guard = self.transport.run_agent(
             "guard-upload",
-            {"release_id": release_id},
+            {"release_id": release_id, "transfer_id": transfer_id},
+            sudo=False,
         )
         remote_bundle = f"/var/tmp/eidolon-release-{release_id}"
-        self.transport.upload(output, remote_bundle, recursive=True)
+        if guard.get("status") == "already_prepared":
+            return [
+                {"phase": "bundle", "result": bundle_result},
+                {"phase": "upload_guard", "result": guard},
+            ]
+        if guard.get("status") not in {"ready_for_upload", "resume_upload"}:
+            raise OperationsError("remote upload guard returned invalid evidence")
+        self.transport.upload_directory_resumable(output, remote_bundle)
         prepare = self._remote_json(
             "target-native release preparation",
             (
@@ -870,6 +924,54 @@ class EidolonPiController:
             {"phase": "upload_guard", "result": guard},
             {"phase": "prepare", "result": prepare},
         ]
+
+    def _validate_existing_bundle(self, output: Path, release_id: str) -> str:
+        manifest = output / "bundle.json"
+        try:
+            document = json.loads(manifest.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise OperationsError("existing bundle manifest is unreadable") from exc
+        sources = document.get("sources") if isinstance(document, dict) else None
+        if (
+            not isinstance(document, dict)
+            or document.get("release_id") != release_id
+            or not isinstance(sources, list)
+            or len(sources) != len(SOURCE_IDS)
+        ):
+            raise OperationsError("existing bundle identity or source set is invalid")
+        for source_id, item in zip(SOURCE_IDS, sources, strict=True):
+            expected_revision = self.config.sources[source_id].revision
+            if (
+                not isinstance(item, dict)
+                or item.get("source_id") != source_id
+                or item.get("revision") != expected_revision
+                or item.get("archive") != f"sources/{source_id}.tar"
+                or not isinstance(item.get("sha256"), str)
+            ):
+                raise OperationsError(f"existing bundle source record drifted: {source_id}")
+            archive = output / str(item["archive"])
+            if self._file_sha256(archive) != item["sha256"]:
+                raise OperationsError(f"existing bundle source digest drifted: {source_id}")
+        preparer = document.get("preparer")
+        if (
+            not isinstance(preparer, dict)
+            or preparer.get("path") != "prepare_target.py"
+            or not isinstance(preparer.get("sha256"), str)
+            or self._file_sha256(output / "prepare_target.py") != preparer["sha256"]
+        ):
+            raise OperationsError("existing bundle preparer digest drifted")
+        return self._file_sha256(manifest)
+
+    @staticmethod
+    def _file_sha256(path: Path) -> str:
+        digest = hashlib.sha256()
+        try:
+            with path.open("rb") as stream:
+                for block in iter(lambda: stream.read(1024 * 1024), b""):
+                    digest.update(block)
+        except OSError as exc:
+            raise OperationsError(f"bundle file is unreadable: {path}") from exc
+        return digest.hexdigest()
 
     def _stage_install_files(
         self,

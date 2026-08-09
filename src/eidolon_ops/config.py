@@ -36,6 +36,7 @@ PRODUCT_UNITS = (
     "eidolon-memory-supervisor.service",
     "eidolon-memory-discovery.service",
     "eidolon-agent.service",
+    "eidolon-channel-provider.service",
     "eidolon-channel.service",
 )
 INSTALL_FILE_NAMES = (

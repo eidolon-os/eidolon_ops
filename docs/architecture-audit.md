@@ -2,7 +2,8 @@
 
 Audit updated: 2026-08-09 (Asia/Shanghai). The running Mac stack and sibling working trees were not changed. On the
 Pi, the fixed legacy code/unit/config/staging namespace was removed without a data wipe, then the non-product
-Foundation v2 was installed and verified. No new product release was uploaded or activated.
+Foundation v2 was installed and verified. One obsolete candidate was uploaded and entered native preparation; it
+failed closed on a PyPI timeout before sealing/activation, so no product service or authority data changed.
 
 ## Current code evidence
 
@@ -10,17 +11,17 @@ The multi-repository root is not Git. The selected release commits remain explic
 
 | Source | Selected exact release input | Role |
 | --- | --- | --- |
-| Kernel | `7de97bd8d87b7e3a84109053d1dd98e5f19b0058` | FHS release authority |
+| Kernel | `267d5dad38e2c2a83d56f0f8e2bf6fb42897fb61` | FHS release authority + Channel Provider topology |
 | Data | `d81086e2807f44ca0c0e43e31103cd85e6165a46` | Data V2 + Workspace/runtime authority |
-| Hub | `96438a2507fb76ad025824873a99b213a99016ad` | Device/Hub authority |
-| Admin | `1ac5c733811c785e70992f527e516fd715b86f5b` | control-plane baseline plus isolated FHS Pi systemd fix |
+| Hub | `4bab6a0c5201c6adda7ba0f68241297034326cae` | proof-bound onboarding + dedicated Provider port |
+| Admin | `987c69282a5a91361b0e9d20144bb7163b8241b3` | Mobile admission orchestration + isolated FHS systemd fix |
 | Agent | `309ba573f249f9376275e14a5cc2f5ea1049b022` | session-authorized Companion brain + authority E2E |
-| Channel | `3bc7e3303fa2c06bcfe0a82dacacd390f7deb372` | Data/Kernel resolver + LiveKit v5 token E2E |
+| Channel | `8843de6c1268bf01bf8e303ce26fb209df3e033b` | voice runtime + formal Hub Channel Provider |
 | Memory | `303b6004c58abbf86eb311de1f4002748fa9457d` | supervisor/discovery, no direct Data integration |
 | SDK | `8108970514d9fefd3d93e7466e91706a1681c331` | runtime-authority/session support source |
 
-The selected matrix is now a deployable **candidate**: Admin commit `1ac5c73` was created from `02f96b7` in an
-isolated worktree and changes only its three Pi systemd units. The upload preflight read all 14 units directly from
+The selected matrix is now a deployable **candidate**: Admin commit `987c692` combines the formal Mobile admission
+workflow with the isolated FHS systemd fix. The upload preflight reads all 15 units directly from
 their Git objects and accepted the `/etc/eidolon/host.env`, `/opt/eidolon/current/eidolon_admin/` and FHS state-path
 contracts. The exact 8-source bundle and the 14-file private-input contract also passed locally. Current sibling
 branches and dirty working trees remain outside the release input: Ops does not stage, overwrite or copy them. The
@@ -47,14 +48,10 @@ Data/Hub/Kernel/Admin/Agent/Channel/Memory keep their existing public contracts 
 manages code, fixed system assets, lifecycle and health. It never copies an authority table or claims distributed
 atomicity. Data V2 begins only at its tracked baseline; old migrations and old `eidolon.sqlite3` are outside scope.
 
-Two consumer paths are currently outside the selected release contract. First, Hub is only a client of the
-`/v1/device-channels/provision|revoke` Provider contract; none of the eight pinned repositories implements those
-routes. Port 8090 is actually assigned to `eidolond`'s system-directory HTTP API, which is a different contract, so
-Hub would call the wrong process rather than a Channel Provider. Second, pinned Admin does not implement
-Controller-authenticated Local API `GET /api/local/v1/device-onboarding/target` or
-`PUT /api/local/v1/device-admissions/{setup_id}`. A newer dirty Hub working tree contains a design document for the
-latter, but it is neither a committed release input nor an Admin implementation. Ops must report both as product
-blockers rather than inventing cross-authority compatibility logic.
+The selected contract now owns both former consumer gaps. Channel provides authenticated, idempotent
+`/v1/device-channels/provision|revoke` on 8767 with LiveKit health, and Admin provides Controller-authenticated Local
+API onboarding target/admission with forward-only Hub claim → Kernel mount → optional Companion attach. The remaining
+device-conversation blocker is the deployment-owned LAN TLS/WSS ingress and certificate trust described below.
 
 The public Hub transport is also incomplete in the release assets. `eidolon-hub.service` binds plaintext HTTP only to
 `127.0.0.1:8082`, while the pinned Hub config and mDNS advertiser claim `https://eidolon-hub.local` on port 443. No
@@ -70,9 +67,9 @@ atomic asset/link switch, readiness, receipts, automatic restore and explicit ro
 conflicts with current Data V2/systemd authority and was rejected.
 
 The previous Kernel contract covered only the core control path. This change extends the formal contract to 8 source
-archives, 7 components, 22 system assets, 11 private prerequisites, 13 affected units and 12 readiness checks, with
+archives, 7 components, 23 system assets, 11 private prerequisites, 14 affected units and 13 readiness checks, with
 Channel model hydration fail-closed. The independent Ops layer adds strict workstation config, Raspberry Pi
-foundation provision, first install, 14-unit lifecycle/status/logs/diagnostics and a Host-side App gate.
+foundation provision, first install, 15-unit lifecycle/status/logs/diagnostics and a Host-side App gate.
 
 ## Option matrix
 
@@ -87,7 +84,7 @@ foundation provision, first install, 14-unit lifecycle/status/logs/diagnostics a
 
 | Scenario | Supported behavior | Remaining condition |
 | --- | --- | --- |
-| Newly flashed Pi | one `install --apply` provisions foundation, installs and starts the selected 14-unit backend | SSH/known_hosts/sudo and 14 private inputs exist; App conversation still requires the missing contracts |
+| Newly flashed Pi | one `install --apply` provisions foundation, installs and starts the selected 15-unit backend | SSH/known_hosts/sudo and 14 private inputs exist; device conversation still requires trusted LAN TLS/WSS |
 | Environment audit only | `provision` and `doctor` are read-only and return nonzero when degraded | Pi reachable |
 | First install interruption | durable foundation/install phases; same commit/input digests resume | retain release ID and inputs |
 | Existing Pi replacement | reset plan, then explicit data-wiping clean install; no `/srv` migration/adoption | exact matrix must pass before install deletes anything |
@@ -97,13 +94,13 @@ foundation provision, first install, 14-unit lifecycle/status/logs/diagnostics a
 | Offline cached retry | pinned artifact cache and existing release may be reused | a truly new Pi still needs apt/PyPI/Git dependency network |
 | Multiple Pis | one strict config per Pi, same CLI/release contract | no fleet fan-out/concurrent scheduler yet |
 | App commissioning | `app-ready` proves Host-side Bootstrap/BLE/network/mDNS/TLS descriptor gate | target-selection/admission Local API contracts and real phone E2E remain |
-| Device conversation | Hub approval must obtain a real Channel Assignment from the Provider | no production Provider owner exists in the pinned matrix; hard blocked |
+| Device conversation | Hub approval obtains a real Channel Assignment from the Provider | LAN Hub HTTPS and LiveKit WSS trust remain hard blocked |
 
 ## Safety conclusion
 
 The selected release matrix, exact bundle, private inputs and real Pi Foundation pass their respective gates. A
-clean-install dry-run now detects only the three preserved old authority roots. Product activation still requires
-explicit authorization to permanently delete those roots. Even after activation, it must not be called “all services
-+ App ready” until a reviewed Channel Provider owner and the two Local API consumer contracts enter the pinned
-release matrix. Target-native build, systemd verification, activation health, network transition, reboot, rollback
+clean-install dry-run now detects only the three preserved old authority roots. The user authorized clean replacement,
+but deletion remains gated behind final exact-bundle validation. Even after activation, it must not be called “all
+devices ready” until Hub HTTPS and LiveKit WSS have a device-verifiable trust path. Target-native build, systemd
+verification, activation health, network transition, reboot, rollback
 injection, thermal/resource soak and real-phone commissioning remain hardware acceptance work.

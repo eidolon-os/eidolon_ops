@@ -15,9 +15,6 @@ def config_path(tmp_path: Path) -> Path:
     known_hosts = tmp_path / "known_hosts"
     known_hosts.write_text("host ssh-ed25519 AAAATEST\n", encoding="utf-8")
     known_hosts.chmod(0o644)
-    release_cli = tmp_path / "eidolon-release"
-    release_cli.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    release_cli.chmod(0o755)
     install_dir = tmp_path / "private"
     install_dir.mkdir()
     install_dir.chmod(0o700)
@@ -47,6 +44,10 @@ def config_path(tmp_path: Path) -> Path:
         repository.mkdir()
         (repository / ".git").mkdir()
         revisions[source_id] = f"{index:040x}"
+    release_cli = tmp_path / "eidolon_kernel/.venv/bin/eidolon-release"
+    release_cli.parent.mkdir(parents=True)
+    release_cli.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    release_cli.chmod(0o755)
     path = tmp_path / "eidolon-pi.toml"
     path.write_text(
         f"""\
@@ -84,6 +85,7 @@ units = [
   "eidolon-memory-supervisor.service",
   "eidolon-memory-discovery.service",
   "eidolon-agent.service",
+  "eidolon-channel-provider.service",
   "eidolon-channel.service",
 ]
 

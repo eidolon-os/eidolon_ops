@@ -39,11 +39,11 @@ validate Mac commands, SSH files, 8 repos/commits, 14 private inputs
   -> foundation platform/capacity/package/artifact/service doctor
   -> if needed: Python bootstrap -> apt -> hash-pinned NATS/LiveKit/uv/Node -> BlueZ/NM/Avahi
   -> exact Foundation evidence outside the product authority namespace
-  -> exact 8-commit bundle -> SSH upload -> Pi-native prepare/seal
+  -> exact 8-commit bundle -> digest-guarded resumable SSH/rsync staging -> Pi-native prepare/seal
   -> private staging -> exclusive first-install lock -> clean namespace proof
   -> identities/directories -> exact 14 input bytes -> fresh Data V2 baseline
-  -> 22 assets + 7 links -> enable 4 top-level units -> ordered start
-  -> 12 release readiness -> Host-side App commissioning gate -> completed journal
+  -> 23 assets + 7 links -> enable 4 top-level units -> ordered start
+  -> 13 release readiness -> Host-side App commissioning gate -> completed journal
 ```
 
 An existing unowned Eidolon database/link/secret/unit namespace fails closed. A partial install can resume only with
@@ -71,7 +71,7 @@ uv run eidolon-ops --config /absolute/path/hosts/pi5.toml \
 but preserves `/var/lib/eidolon` and `/var/lib/eidolon-bootstrap`; it is an uninstall boundary, not a schema migration.
 `--wipe-authority-data` additionally removes those authority roots and the old `/var/lib/eidolon-admin` root. It is
 irreversible. Foundation packages/artifacts and service identities are preserved. Reset stops and disables only the
-fixed 14 units, refuses an active unit that cannot stop, refuses mounted deletion roots, reloads systemd and is
+fixed 15 units, refuses an active unit that cannot stop, refuses mounted deletion roots, reloads systemd and is
 idempotent when units or paths are already absent.
 
 ## App-ready meaning
@@ -85,12 +85,11 @@ ownership/mode, Bootstrap control socket, Local API HTTPS health + descriptor an
 the Pi side only. A real phone must still validate BLE discovery, Host proof, TLS SPKI, Controller claim, Wi-Fi
 checkpoint and Workspace setup.
 
-`app-ready` does not prove Hub trust selection or device conversation. The current pinned matrix has no production
-handler for Hub's `POST /v1/device-channels/provision|revoke` dependency: port 8090 belongs to the unrelated
-`eidolond` system-directory contract. Hub itself binds plaintext loopback 8082 while mDNS claims HTTPS 443, with no
-TLS terminator/certificate asset in the release. Pinned Admin also has neither `GET /api/local/v1/device-onboarding/target` nor
-`PUT /api/local/v1/device-admissions/{setup_id}`. Treat those as hard product gates. Do not let a client derive Hub
-TLS trust from mDNS alone, substitute the Host SPKI, or interpret a healthy Hub listener as a usable Channel Provider.
+`app-ready` does not yet prove device conversation. The pinned matrix now owns Hub's
+`POST /v1/device-channels/provision|revoke` dependency through `eidolon-channel-provider` on 8767, and Admin owns the
+Mobile onboarding target/admission workflow. Hub still binds plaintext loopback 8082 with no LAN TLS terminator;
+LiveKit also lacks a device-verifiable WSS origin. Treat those transports as hard product gates. Do not derive Hub
+TLS trust from mDNS, substitute the Host SPKI, or disable ESP certificate verification.
 
 ## Daily update
 
@@ -110,7 +109,7 @@ TLS trust from mDNS alone, substitute the Host SPKI, or interpret a healthy Hub 
 
 4. Require `status=activated`, `doctor status=healthy`, then `app-ready status=app_ready`.
 
-Activation is: sealed preflight → snapshot → quiesce → assets/links → start → 12 readiness → receipt. Failure runs
+Activation is: sealed preflight → snapshot → quiesce → assets/links → start → 13 readiness → receipt. Failure runs
 exact snapshot restore. `--resume` never means “ignore a failed gate”; it skips only already-created bundle/upload/
 prepare and re-proves the sealed release. A degraded post-activation doctor or App-ready result also restores the
 exact activation snapshot; invalid or failed rollback evidence is surfaced as a hard failure and never reported as
@@ -118,7 +117,7 @@ recovered.
 
 ## Lifecycle, logs and diagnosis
 
-- `start|stop|restart --dry-run` shows the fixed 14-unit scope; without dry-run it uses the current descriptor.
+- `start|stop|restart --dry-run` shows the fixed 15-unit scope; without dry-run it uses the current descriptor.
 - `status` is read-only unit/link/receipt observation.
 - `logs` is bounded to fixed unit names, line count and optional time filter.
 - `diagnose` writes a new redacted archive and refuses overwrite. It omits env/key/DB/process-environment content;
@@ -134,7 +133,7 @@ uv run eidolon-ops --config ... rollback --release-id <id> \
   --snapshot /var/lib/eidolon/deployments/<id>-<tx> --apply
 ```
 
-Rollback restores only 22 allowlist system assets and component links that existed in that exact snapshot. It never
+Rollback restores only 23 allowlist system assets and component links that existed in that exact snapshot. It never
 restores secret, Host identity or database. Schema changes and data backup are independent authority-owned procedures;
 descriptor requires `database_migrations=[]`. If automatic restore reports `rollback_failed`, stop automation and
 collect status/logs/diagnose instead of retrying blindly.

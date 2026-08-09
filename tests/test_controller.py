@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import tarfile
 from pathlib import Path
@@ -21,18 +22,28 @@ class ControllerRunner:
         *,
         wrong_revision: bool = False,
         invalid_release_matrix: bool = False,
+        cli_revision_mismatch: bool = False,
+        dirty_cli: bool = False,
     ) -> None:
         self.config = config
         self.wrong_revision = wrong_revision
         self.invalid_release_matrix = invalid_release_matrix
+        self.cli_revision_mismatch = cli_revision_mismatch
+        self.dirty_cli = dirty_cli
         self.calls: list[tuple[str, ...]] = []
 
     def run(self, command, **kwargs):
         command = tuple(command)
         self.calls.append(command)
         if "rev-parse" in command:
-            revision = command[-1].removesuffix("^{commit}")
-            if self.wrong_revision:
+            revision = (
+                self.config.sources["eidolon_kernel"].revision
+                if command[-1] == "HEAD"
+                else command[-1].removesuffix("^{commit}")
+            )
+            if self.cli_revision_mismatch and command[-1] == "HEAD":
+                revision = "e" * 40
+            if self.wrong_revision and command[-1] != "HEAD":
                 revision = "f" * 40
             return ProcessResult(0, revision + "\n", "")
         if "show" in command:
@@ -57,10 +68,42 @@ class ControllerRunner:
                 f"ExecStart={executable}\n",
                 "",
             )
+        if "status" in command and "--porcelain" in command:
+            return ProcessResult(0, " M eidolon_deploy/cli.py\n" if self.dirty_cli else "", "")
         if len(command) > 1 and command[1] == "bundle":
             output = Path(command[3])
             output.mkdir(parents=True)
-            (output / "bundle.json").write_text("{}", encoding="utf-8")
+            sources = output / "sources"
+            sources.mkdir()
+            records = []
+            for source_id in SOURCE_IDS:
+                archive = sources / f"{source_id}.tar"
+                archive.write_bytes(f"archive:{source_id}".encode())
+                records.append(
+                    {
+                        "source_id": source_id,
+                        "revision": self.config.sources[source_id].revision,
+                        "archive": f"sources/{source_id}.tar",
+                        "sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
+                    }
+                )
+            preparer = output / "prepare_target.py"
+            preparer.write_bytes(b"preparer")
+            (output / "bundle.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "release_id": command[2],
+                        "target": {"system": "linux", "machine": "aarch64"},
+                        "sources": records,
+                        "preparer": {
+                            "path": "prepare_target.py",
+                            "sha256": hashlib.sha256(preparer.read_bytes()).hexdigest(),
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
             return ProcessResult(
                 0,
                 json.dumps({"status": "bundled", "manifest": str(output / "bundle.json")}),
@@ -74,6 +117,7 @@ class FakeTransport:
         self.agent_calls: list[tuple[str, dict[str, object], str, bool]] = []
         self.remote_calls: list[tuple[tuple[str, ...], bool]] = []
         self.uploads: list[tuple[Path, str, bool]] = []
+        self.resumable_uploads: list[tuple[Path, str]] = []
         self.fail_actions: dict[str, Exception] = {}
         self.fail_remote_match: str | None = None
 
@@ -147,6 +191,9 @@ class FakeTransport:
     def upload(self, source, destination, *, recursive=False):
         self.uploads.append((Path(source), destination, recursive))
 
+    def upload_directory_resumable(self, source, destination):
+        self.resumable_uploads.append((Path(source), destination))
+
 
 def _stub_input_contract(controller: EidolonPiController) -> None:
     controller._validate_install_inputs = lambda _names: {  # type: ignore[method-assign]
@@ -173,6 +220,7 @@ def test_local_preflight_proves_exact_commits(config) -> None:
         source_id: config.sources[source_id].revision for source_id in SOURCE_IDS
     }
     assert result["install_prerequisites_checked"] is True
+    assert result["release_cli_revision"] == config.sources["eidolon_kernel"].revision
     assert result["install_input_contract"] == {"status": "compatible"}
 
 
@@ -184,6 +232,28 @@ def test_local_preflight_rejects_revision_alias(config) -> None:
     )
 
     with pytest.raises(OperationsError, match="exact commit"):
+        controller.local_preflight(require_install_files=False)
+
+
+def test_local_preflight_rejects_mismatched_release_authority(config) -> None:
+    controller = EidolonPiController(
+        config,
+        ControllerRunner(config, cli_revision_mismatch=True),
+        transport=FakeTransport(),
+    )
+
+    with pytest.raises(OperationsError, match="pinned Kernel"):
+        controller.local_preflight(require_install_files=False)
+
+
+def test_local_preflight_rejects_dirty_release_authority(config) -> None:
+    controller = EidolonPiController(
+        config,
+        ControllerRunner(config, dirty_cli=True),
+        transport=FakeTransport(),
+    )
+
+    with pytest.raises(OperationsError, match="tracked changes"):
         controller.local_preflight(require_install_files=False)
 
 
@@ -343,8 +413,8 @@ def test_deploy_defaults_to_prepare_and_dry_run(setup_controller) -> None:
         "prepare",
         "dry_run",
     ]
-    assert transport.uploads[0][1] == "/var/tmp/eidolon-release-r1"
-    assert transport.uploads[0][2] is True
+    assert transport.resumable_uploads[0][1] == "/var/tmp/eidolon-release-r1"
+    assert transport.resumable_uploads[0][0].name == "r1"
 
 
 def test_deploy_resume_activate_skips_transfer(setup_controller) -> None:
@@ -361,6 +431,53 @@ def test_deploy_resume_activate_skips_transfer(setup_controller) -> None:
     ]
     assert transport.uploads == []
     assert not any(len(call) > 1 and call[1] == "bundle" for call in runner.calls)
+
+
+def test_deploy_resume_revalidates_and_resumes_existing_bundle(setup_controller) -> None:
+    controller, runner, transport = setup_controller
+    controller.deploy(release_id="r1", resume=False, activate=False)
+    runner.calls.clear()
+    transport.resumable_uploads.clear()
+
+    result = controller.deploy(release_id="r1", resume=True, activate=False)
+
+    assert result["phases"][0]["result"]["status"] == "reused_validated_bundle"
+    assert transport.resumable_uploads == [
+        (controller.config.workspace.bundle_root / "r1", "/var/tmp/eidolon-release-r1")
+    ]
+    assert not any(len(call) > 1 and call[1] == "bundle" for call in runner.calls)
+
+
+def test_deploy_resume_rejects_existing_bundle_digest_drift(setup_controller) -> None:
+    controller, _runner, _transport = setup_controller
+    controller.deploy(release_id="r1", resume=False, activate=False)
+    archive = controller.config.workspace.bundle_root / "r1/sources/eidolon_channel.tar"
+    archive.write_bytes(b"drift")
+
+    with pytest.raises(OperationsError, match="source digest drifted"):
+        controller.deploy(release_id="r1", resume=True, activate=False)
+
+
+def test_deploy_resume_rejects_unreadable_existing_manifest(setup_controller) -> None:
+    controller, _runner, _transport = setup_controller
+    controller.deploy(release_id="r1", resume=False, activate=False)
+    manifest = controller.config.workspace.bundle_root / "r1/bundle.json"
+    manifest.write_text("not-json", encoding="utf-8")
+
+    with pytest.raises(OperationsError, match="manifest is unreadable"):
+        controller.deploy(release_id="r1", resume=True, activate=False)
+
+
+def test_deploy_resume_rejects_existing_bundle_identity_drift(setup_controller) -> None:
+    controller, _runner, _transport = setup_controller
+    controller.deploy(release_id="r1", resume=False, activate=False)
+    manifest = controller.config.workspace.bundle_root / "r1/bundle.json"
+    document = json.loads(manifest.read_text(encoding="utf-8"))
+    document["release_id"] = "different"
+    manifest.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(OperationsError, match="identity or source set"):
+        controller.deploy(release_id="r1", resume=True, activate=False)
 
 
 def test_deploy_app_gate_failure_restores_exact_activation_snapshot(config) -> None:
