@@ -355,7 +355,7 @@ class EidolonPiController:
         self._stage_install_files(release_id, stage)
         payload = self._target_payload()
         payload["release_id"] = release_id
-        python = f"/srv/eidolon/releases/{release_id}/eidolon_kernel/.venv/bin/python"
+        python = f"/opt/eidolon/releases/{release_id}/eidolon_kernel/.venv/bin/python"
         primary_error: Exception | None = None
         try:
             result = self.transport.run_agent(
@@ -408,6 +408,48 @@ class EidolonPiController:
             plan_payload,
             timeout=180,
         )
+        if topology.get("status") == "replacement_cleanup_pending":
+            if not apply:
+                return {
+                    "status": "planned",
+                    "release_id": release_id,
+                    "local": local,
+                    "topology": topology,
+                    "mutations": [
+                        "re-prove the exact active /opt release with doctor and App-ready",
+                        "delete only the journal-owned /srv/eidolon code tree",
+                    ],
+                    "next": "rerun with --apply to finish the interrupted legacy cleanup",
+                }
+            doctor = self._remote_json(
+                "replacement cleanup doctor",
+                (
+                    self._remote_release_cli(release_id),
+                    "doctor",
+                    self._remote_descriptor(release_id),
+                ),
+                timeout=300,
+            )
+            app = self.app_ready()
+            if doctor.get("status") != "healthy" or app.get("status") != "app_ready":
+                raise OperationsError("legacy cleanup requires healthy doctor and App-ready gates")
+            retired = self.transport.run_agent(
+                "retire-legacy-root",
+                plan_payload,
+                timeout=300,
+            )
+            if retired.get("status") not in {"retired", "already_retired"}:
+                raise OperationsError("legacy root retirement returned invalid evidence")
+            return {
+                "status": "expanded",
+                "release_id": release_id,
+                "local": local,
+                "phases": [
+                    {"phase": "doctor", "result": doctor},
+                    {"phase": "app_ready", "result": app},
+                    {"phase": "legacy_root_retirement", "result": retired},
+                ],
+            }
         if not apply:
             foundation = self.provision(apply=False)
             if topology.get("status") == "conflict":
@@ -419,10 +461,12 @@ class EidolonPiController:
                 "foundation": foundation,
                 "topology": topology,
                 "mutations": [
+                    "materialize the reviewed Host path profile and /etc/eidolon/host.env",
                     "install only the seven new Agent/Channel/Memory/LiveKit inputs",
                     "prepare and activate the exact full-product release",
-                    "snapshot existing assets and four core component links",
-                    "remove newly introduced links/assets if activation or App gate fails",
+                    "snapshot existing system assets and managed /opt component links",
+                    "restore old assets and remove introduced /opt links if a gate fails",
+                    "delete /srv/eidolon only after /opt doctor and App-ready gates pass",
                 ],
                 "next": "rerun with --apply after reviewing the owned core release evidence",
             }
@@ -443,7 +487,7 @@ class EidolonPiController:
         )
         payload = self._target_payload()
         payload["release_id"] = release_id
-        python = f"/srv/eidolon/releases/{release_id}/eidolon_kernel/.venv/bin/python"
+        python = f"/opt/eidolon/releases/{release_id}/eidolon_kernel/.venv/bin/python"
         primary_error: Exception | None = None
         staged: dict[str, object] | None = None
         try:
@@ -498,8 +542,41 @@ class EidolonPiController:
                 "local": local,
                 "phases": phases,
             }
-        activated = self.deploy(release_id=release_id, resume=True, activate=True)
+        replacement = topology.get("source_topology") == "legacy_srv_core"
+        try:
+            activated = self.deploy(release_id=release_id, resume=True, activate=True)
+        except Exception as activation_exc:
+            if not replacement:
+                raise
+            try:
+                aborted = self.transport.run_agent(
+                    "abort-replacement",
+                    payload,
+                    timeout=180,
+                )
+            except Exception as abort_exc:
+                raise OperationsError(
+                    f"legacy replacement activation failed ({activation_exc}); "
+                    f"bridge cleanup also failed: {abort_exc}"
+                ) from abort_exc
+            if aborted.get("status") not in {"aborted", "already_aborted"}:
+                raise OperationsError(
+                    "legacy replacement abort returned invalid evidence"
+                ) from activation_exc
+            raise OperationsError(
+                f"legacy replacement activation failed ({activation_exc}); "
+                "unused /opt bridge links were removed"
+            ) from activation_exc
         phases.extend(activated["phases"])
+        if replacement:
+            retired = self.transport.run_agent(
+                "retire-legacy-root",
+                payload,
+                timeout=300,
+            )
+            if retired.get("status") not in {"retired", "already_retired"}:
+                raise OperationsError("legacy root retirement returned invalid evidence")
+            phases.append({"phase": "legacy_root_retirement", "result": retired})
         return {
             "status": "expanded",
             "release_id": release_id,
@@ -519,7 +596,7 @@ class EidolonPiController:
                 "units": self.config.units,
                 "authority": "eidolond remains the Data/Hub/Kernel desired-state owner",
             }
-        python = "/srv/eidolon/current/eidolon_kernel/.venv/bin/python"
+        python = "/opt/eidolon/current/eidolon_kernel/.venv/bin/python"
         return self.transport.run_agent(
             action,
             self._target_payload(),
@@ -738,8 +815,8 @@ class EidolonPiController:
 
     @staticmethod
     def _remote_release_cli(release_id: str) -> str:
-        return f"/srv/eidolon/releases/{release_id}/eidolon_kernel/.venv/bin/eidolon-release"
+        return f"/opt/eidolon/releases/{release_id}/eidolon_kernel/.venv/bin/eidolon-release"
 
     @staticmethod
     def _remote_descriptor(release_id: str) -> str:
-        return f"/srv/eidolon/releases/{release_id}/release.json"
+        return f"/opt/eidolon/releases/{release_id}/release.json"

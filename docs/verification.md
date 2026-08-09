@@ -10,8 +10,10 @@ Bootstrap preflight and Local API HTTPS descriptor, and correct Host identity/TL
 not a blank Host: the active release manages Kernel/Data/Hub/Admin under the legacy `/srv/eidolon` namespace. The six
 new NATS/LiveKit/Memory/Agent/Channel units are not installed, and seven foundation packages plus the pinned
 uv/Node/NATS/LiveKit artifacts remain absent. Consequently first install is correctly inapplicable; a reviewed
-core-to-full expansion is required. The pinned release deliberately retains the active `/srv/eidolon` contract;
-concurrent `/opt/eidolon` migration work was excluded and must be handled as a separate migration decision.
+core-to-full expansion is required. This observed `/srv/eidolon` tree is legacy state, not the new path contract.
+The reviewed target layout is `/opt/eidolon/{releases,current}` plus FHS config/state/runtime/log/cache roots. The
+online Host requires an explicit cutover: activate and gate the new `/opt` release, then delete `/srv/eidolon`
+without copying it. That destructive operation was not performed by this read-only probe.
 
 ## Workstation operations project
 
@@ -19,28 +21,34 @@ concurrent `/opt/eidolon` migration work was excluded and must be handled as a s
 uv run ruff check .
 All checks passed
 
-ruff format --check src/eidolon_ops tests
-17 files already formatted
+uv run ruff format --check .
+31 files already formatted
 
 pytest --cov=eidolon_ops --cov-branch --cov-report=term-missing --cov-fail-under=90 -q
-187 passed, 0 failed, 0 skipped
-branch-aware coverage: 90.78%
-final staged-only pytest runtime reported: 4.59 seconds
+245 passed, 0 failed, 0 skipped
+branch-aware coverage: 90.30%
+pytest runtime reported: 2.47 seconds
 
-uv build --out-dir /private/tmp/eidolon-ops-build-expansion3
-sdist: 90,495 bytes; wheel: 35,650 bytes
+committed isolated clone (no sibling repositories):
+244 passed, 2 skipped; branch-aware coverage 90.30%; 3.99 seconds
+the two skips are the optional Kernel and Data/Hub cross-repository contract modules
 
-python3 -m venv /private/tmp/eidolon-ops-wheel-expansion3
+uv build --out-dir /private/tmp/eidolon-ops-build-final
+sdist: 137,021 bytes; wheel: 49,297 bytes
+
+python3 -m venv /private/tmp/eidolon-ops-wheel-final
 .../pip install --no-deps .../eidolon_ops-0.1.0-py3-none-any.whl
+.../eidolon-ops --help
 .../eidolon-pi --help
-wheel install and all 14 CLI operation parsers: passed
+wheel install plus unified 17-operation and compatibility 14-operation parser smoke: passed
 ```
 
 Tests cover strict config, shell-free SSH/SCP construction, Python-missing bootstrap, foundation platform/package/
 artifact/service gates, digest mismatch, safe tar handling, idempotent managed links, foundation failure evidence,
 first-install/resume/lock/secret cleanup, Data V2 baseline, core-to-full expansion/idempotency/input drift, post-
-activation doctor/App failure recovery, lifecycle, rollback plan, bounded logs, redacted diagnosis and compatibility
-with the pinned Kernel release constants.
+activation doctor/App failure recovery, `/srv` replacement/abort/interrupted cleanup/nested-mount refusal, generated
+mode-0600 LiveKit credentials and redacted mismatch logs, unified Mac/Pi adapters, lifecycle, rollback plan, bounded
+logs, redacted diagnosis and compatibility with the pinned Kernel release constants.
 
 ## Kernel release boundary
 
@@ -64,7 +72,7 @@ generic-2xx probes and systemd verification command failure injection.
 The final smoke used the committed Kernel revision plus these selected commits:
 
 ```text
-Kernel   b8a40e4cc807346936b12bd1cea6e1865884264e
+Kernel   7de97bd8d87b7e3a84109053d1dd98e5f19b0058
 Data     d81086e2807f44ca0c0e43e31103cd85e6165a46
 Hub      96438a2507fb76ad025824873a99b213a99016ad
 Admin    02f96b7ca4fc0b662dcfdfdb0c8d2293d3cfd8d0
@@ -74,17 +82,18 @@ Memory   303b6004c58abbf86eb311de1f4002748fa9457d
 SDK      8108970514d9fefd3d93e7466e91706a1681c331
 ```
 
-The final expansion-matrix command completed in 2.090 seconds and produced 8 exact-commit source archives plus the
-preparer, totalling 480 MiB under `/private/tmp/eidolon-full-product-bundle-expansion4`. Channel accounts for 467 MiB after
+The final matrix produced 8 exact-commit source archives plus the preparer, totalling 480 MiB under
+`/private/tmp/eidolon-full-product-bundle-20260809-final`. Channel accounts for 467 MiB after
 hydrating its 8 Git LFS model objects from the exact commit pointers. Each object was checked against the pointer
 SHA-256 and size;
 the final archive was scanned again and contained no LFS pointer payload. Four changed Admin production files were
 independently compared with their `02f96b7` Git blobs and matched byte-for-byte in the preceding identical-Admin
-archive smoke; the final Admin archive SHA remained `70a46467...382feb96`. The final Kernel `linux.py` and Admin
-`control_plane.py` archive bytes were also matched directly to their selected Git blobs. This smoke stopped after
+archive smoke; the final Admin archive SHA remained `70a46467...382feb96`. The final Kernel archive SHA is
+`907d22f7...a625727`. The final Kernel `linux.py` and Admin `control_plane.py` archive bytes were also matched directly
+to their selected Git blobs. This smoke stopped after
 local bundle validation; it performed no upload or Pi-native preparation.
 
-The final matrix was followed by `14 passed in 8.96s` for Kernel's focused `tests/deploy/test_bundle.py` suite.
+The final matrix was followed by 14/14 passing Kernel focused `tests/deploy/test_bundle.py` tests.
 
 ## Foundation artifact evidence
 

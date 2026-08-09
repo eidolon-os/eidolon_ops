@@ -10,3 +10,6 @@ __pycache__/
 *.pyc
 .eidolon-ops/
 diagnostics/
+config/eidolon-pi.toml
+config/hosts/*.toml
+!config/hosts/*.example.toml

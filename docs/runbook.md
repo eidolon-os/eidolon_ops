@@ -1,9 +1,10 @@
 # Eidolon Pi operations runbook
 
-All examples use the one Mac entrypoint:
+All examples use the unified host entrypoint. The Pi Host profile references
+the lower-level commit/SSH release configuration:
 
 ```bash
-uv run eidolon-pi --config /absolute/path/eidolon-pi.toml <operation>
+uv run eidolon-ops --config /absolute/path/hosts/pi5.toml <operation>
 ```
 
 ## New Pi: one command from SSH-ready OS to App-ready backend
@@ -12,10 +13,10 @@ Preconditions: supported Raspberry Pi OS, known SSH host key, non-root account w
 package/download access, and the 14 local private inputs declared in config.
 
 ```bash
-uv run eidolon-pi --config /absolute/path/eidolon-pi.toml \
+uv run eidolon-ops --config /absolute/path/hosts/pi5.toml \
   install --release-id 20260807-product-1
 
-uv run eidolon-pi --config /absolute/path/eidolon-pi.toml \
+uv run eidolon-ops --config /absolute/path/hosts/pi5.toml \
   install --release-id 20260807-product-1 --apply
 ```
 
@@ -42,25 +43,26 @@ An older Host whose Kernel/Data/Hub/Admin links all point into one managed relea
 then expand it explicitly:
 
 ```bash
-uv run eidolon-pi --config /absolute/path/eidolon-pi.toml \
+uv run eidolon-ops --config /absolute/path/hosts/pi5.toml \
   expand --release-id 20260809-product-full
 
-uv run eidolon-pi --config /absolute/path/eidolon-pi.toml \
+uv run eidolon-ops --config /absolute/path/hosts/pi5.toml \
   expand --release-id 20260809-product-full --apply
 ```
 
-The read-only plan rejects a missing/mixed core link, any partial Agent/Channel/Memory link set, or an existing
-unowned new input. Apply provisions missing foundation dependencies, prepares the exact release, installs only the
-seven new Agent/Channel/Memory/LiveKit env/settings inputs, then activates through the normal sealed transaction.
-Its snapshot contains the four old core links and the system assets that really existed. If readiness or the
-App-ready gate fails, rollback restores those links/assets and removes links/assets introduced by the failed
-expansion. New private inputs remain as an auditable, digest-bound retry prerequisite; rollback never deletes secrets
-or authority data.
+The read-only plan accepts either one managed `/opt` core release or one owned legacy `/srv` core release. It rejects
+missing/mixed core links, any partial Agent/Channel/Memory link set, or an existing unowned new input. Apply provisions
+missing foundation dependencies, materializes `/etc/eidolon/host.env`, prepares the exact `/opt` release, installs
+only the seven new Agent/Channel/Memory/LiveKit env/settings inputs, then activates through the normal sealed
+transaction. No release file or symlink is migrated out of `/srv`: it is used only as ownership evidence. If a gate
+fails, rollback restores the old system assets and removes the introduced `/opt` links. Only after `/opt` doctor and
+App-ready both pass does Ops delete the exact `/srv/eidolon` tree. `/var/lib`, `/etc/eidolon` and Bootstrap state are
+not part of that deletion.
 
 ## App-ready meaning
 
 ```bash
-uv run eidolon-pi --config /absolute/path/eidolon-pi.toml app-ready
+uv run eidolon-ops --config /absolute/path/hosts/pi5.toml app-ready
 ```
 
 Exit 0 requires Bootstrap preflight, Bootstrap/Local API/BlueZ/NetworkManager/Avahi active, exact identity/TLS file
@@ -74,13 +76,13 @@ checkpoint and Workspace setup.
 2. Prepare and inspect without service switch:
 
    ```bash
-   uv run eidolon-pi --config ... update --release-id 20260808-product-2
+   uv run eidolon-ops --config ... update --release-id 20260808-product-2
    ```
 
 3. Activate the already prepared release:
 
    ```bash
-   uv run eidolon-pi --config ... update --release-id 20260808-product-2 \
+   uv run eidolon-ops --config ... update --release-id 20260808-product-2 \
      --resume --activate
    ```
 
@@ -103,10 +105,10 @@ recovered.
 ## Rollback and data
 
 ```bash
-uv run eidolon-pi --config ... rollback --release-id <id> \
+uv run eidolon-ops --config ... rollback --release-id <id> \
   --snapshot /var/lib/eidolon/deployments/<id>-<tx>
 
-uv run eidolon-pi --config ... rollback --release-id <id> \
+uv run eidolon-ops --config ... rollback --release-id <id> \
   --snapshot /var/lib/eidolon/deployments/<id>-<tx> --apply
 ```
 

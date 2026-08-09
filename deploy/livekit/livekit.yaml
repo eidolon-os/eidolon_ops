@@ -1,0 +1,30 @@
+# LiveKit server — local / LAN dev (shared infra for hub + channel).
+#
+# Owned by eidolon_ops; started by the selected host lifecycle adapter.
+# Credentials are generated into the Host state root on first start and
+# injected into LiveKit, Hub and Channel through the supervisord parent
+# environment. No credential belongs in this source template.
+# Hub uses this server as token issuer + room controller; Channel uses it as an
+# agent worker + voice room participant. Do not treat either project as the sole
+# LiveKit owner.
+
+port: 7880
+bind_addresses:
+  - 0.0.0.0
+
+# No cert_file/key_file → TURN TLS off; UDP/TCP only.
+turn:
+  enabled: true
+  udp_port: 3478
+
+rtc:
+  # node_ip is dynamic in local/LAN dev. The supervisor wrapper renders
+  # var/livekit/livekit.generated.yaml at LiveKit process start and injects the
+  # current LAN IP there, so this source config stays portable.
+  use_external_ip: false
+  port_range_start: 50000
+  port_range_end: 60000
+
+logging:
+  level: debug
+  json: false

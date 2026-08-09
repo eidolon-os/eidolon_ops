@@ -214,6 +214,7 @@ def test_pinned_uv_install_uses_hash_requirement(monkeypatch, tmp_path: Path) ->
     local_bin = tmp_path / "bin"
     local_bin.mkdir()
     monkeypatch.setattr(target_agent, "_LOCAL_BIN", local_bin)
+    monkeypatch.setattr(target_agent, "_VAR_TMP", tmp_path)
     monkeypatch.setattr(target_agent, "_binary_version", lambda _name: {"healthy": False})
     calls: list[tuple[str, ...]] = []
 
@@ -549,6 +550,9 @@ def test_target_main_routes_all_actions_and_errors(monkeypatch, capsys) -> None:
         "doctor-host": "doctor_host",
         "guard-upload": "guard_upload",
         "cleanup-stage": "cleanup_stage",
+        "retire-legacy-root": "retire_legacy_root",
+        "cleanup-legacy": "cleanup_legacy",
+        "abort-replacement": "abort_replacement",
         "install": "install",
         "expand": "expand",
         "rollback-plan": "rollback_plan",

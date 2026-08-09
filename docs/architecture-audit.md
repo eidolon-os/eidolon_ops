@@ -8,7 +8,7 @@ The multi-repository root is not Git. The selected release commits remain explic
 
 | Source | Selected exact release input | Role |
 | --- | --- | --- |
-| Kernel | `b8a40e4cc807346936b12bd1cea6e1865884264e` | release authority/system assets + rollback-safe core expansion |
+| Kernel | `7de97bd8d87b7e3a84109053d1dd98e5f19b0058` | FHS release authority + rollback-safe `/srv` replacement |
 | Data | `d81086e2807f44ca0c0e43e31103cd85e6165a46` | Data V2 + Workspace/runtime authority |
 | Hub | `96438a2507fb76ad025824873a99b213a99016ad` | Device/Hub authority |
 | Admin | `02f96b7ca4fc0b662dcfdfdb0c8d2293d3cfd8d0` | merged control-plane semantics + owner runtime projection |
@@ -19,8 +19,8 @@ The multi-repository root is not Git. The selected release commits remain explic
 
 These exact commits form one compatible runtime-session set: Data publishes runtime snapshots, SDK consumes them,
 Admin includes the merged production control-plane/workspace-policy fixes, Channel resolves Data/Kernel state, and
-Agent/SDK bind access to immutable LiveKit sessions. The Admin checkout's unrelated `.coverage` is not staged,
-overwritten or copied. Bundle construction uses
+Agent/SDK bind access to immutable LiveKit sessions. Current sibling branches and dirty working trees are deliberately
+outside the release input: Ops does not stage, overwrite or copy them. Bundle construction uses
 `git archive <exact commit>`, never the working tree. The earlier Mac observation (`admin-api` and Agent stopped,
 Hub fatal, other development processes running) was not modified and is not used as the Pi product topology.
 
@@ -72,7 +72,7 @@ foundation provision, first install, 14-unit lifecycle/status/logs/diagnostics a
 | Newly flashed Pi | one `install --apply` provisions foundation, installs and starts full backend | SSH/known_hosts/sudo and 14 private inputs exist |
 | Environment audit only | `provision` and `doctor` are read-only and return nonzero when degraded | Pi reachable |
 | First install interruption | durable foundation/install phases; same commit/input digests resume | retain release ID and inputs |
-| Managed 4-component Pi | explicit `expand` proves one owned core release, adds only new inputs, then uses normal activation | path namespace must match the sealed release contract |
+| Managed 4-component Pi | `expand` proves the old release, activates/gates exact `/opt`, then deletes legacy `/srv` code | old tree must match the exact owned cleanup shape |
 | Daily commit update | bundle/prepare/dry-run, then explicit resume+activate | schema gate must remain compatible |
 | Activation/health gate failure | exact system asset/link snapshot auto-restored; evidence retained | `rollback_failed` requires manual stop |
 | Explicit rollback | restores selected code/assets snapshot only | never restores DB/secrets |

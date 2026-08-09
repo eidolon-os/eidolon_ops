@@ -53,13 +53,16 @@ DIRECT_ENABLE_UNITS = (
     "eidolon-admin.service",
 )
 CURRENT_LINKS = {
-    "eidolon_kernel": Path("/srv/eidolon/current/eidolon_kernel"),
-    "eidolon_data": Path("/srv/eidolon/current/eidolon_data"),
-    "eidolon_hub": Path("/srv/eidolon/current/eidolon_hub"),
-    "eidolon_admin": Path("/srv/eidolon/current/eidolon_admin"),
-    "eidolon_agent": Path("/srv/eidolon/current/eidolon_agent"),
-    "eidolon_channel": Path("/srv/eidolon/current/eidolon_channel"),
-    "eidolon_memory": Path("/srv/eidolon/current/eidolon_memory"),
+    "eidolon_kernel": Path("/opt/eidolon/current/eidolon_kernel"),
+    "eidolon_data": Path("/opt/eidolon/current/eidolon_data"),
+    "eidolon_hub": Path("/opt/eidolon/current/eidolon_hub"),
+    "eidolon_admin": Path("/opt/eidolon/current/eidolon_admin"),
+    "eidolon_agent": Path("/opt/eidolon/current/eidolon_agent"),
+    "eidolon_channel": Path("/opt/eidolon/current/eidolon_channel"),
+    "eidolon_memory": Path("/opt/eidolon/current/eidolon_memory"),
+}
+LEGACY_CURRENT_LINKS = {
+    component_id: Path("/srv/eidolon/current") / component_id for component_id in CURRENT_LINKS
 }
 SECRET_INPUTS = {
     "data.env": (Path("/etc/eidolon/data.env"), "root", "root", 0o600),
@@ -114,8 +117,46 @@ FIXED_DATA = {
 _RELEASE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _STAGING_NAME = re.compile(r"^eidolon-(?:release|secrets)-[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _VAR_TMP = Path("/var/tmp")
-_RELEASES = Path("/srv/eidolon/releases")
-_CURRENT_KERNEL = Path("/srv/eidolon/current/eidolon_kernel")
+_RELEASES = Path("/opt/eidolon/releases")
+_LEGACY_RELEASES = Path("/srv/eidolon/releases")
+_LEGACY_ROOT = Path("/srv/eidolon")
+_CURRENT_KERNEL = Path("/opt/eidolon/current/eidolon_kernel")
+HOST_ENV_PATH = Path("/etc/eidolon/host.env")
+HOST_ENV_VALUE = (
+    "EIDOLON_INSTALL_ROOT=/opt/eidolon\n"
+    "EIDOLON_WORKSPACE_ROOT=/opt/eidolon/current\n"
+    "EIDOLON_ROOT=/opt/eidolon/current\n"
+    "EIDOLON_CONFIG_ROOT=/etc/eidolon\n"
+    "EIDOLON_STATE_ROOT=/var/lib/eidolon\n"
+    "EIDOLON_RUNTIME_ROOT=/run/eidolon\n"
+    "EIDOLON_LOG_ROOT=/var/log/eidolon\n"
+    "EIDOLON_CACHE_ROOT=/var/cache/eidolon\n"
+    "EIDOLON_BOOTSTRAP_STATE_ROOT=/var/lib/eidolon-bootstrap\n"
+    "EIDOLON_BOOTSTRAP_RUNTIME_ROOT=/run/eidolon-bootstrap\n"
+    "EIDOLON_BOOTSTRAP_STATE_DIR=/var/lib/eidolon-bootstrap\n"
+    "EIDOLON_BOOTSTRAP_RUNTIME_DIR=/run/eidolon-bootstrap\n"
+)
+HOST_DIRECTORIES = (
+    (Path("/opt/eidolon"), 0o755, "root", "root"),
+    (Path("/opt/eidolon/releases"), 0o755, "root", "root"),
+    (Path("/opt/eidolon/current"), 0o755, "root", "root"),
+    (Path("/var/lib/eidolon"), 0o750, "eidolon", "eidolon"),
+    (Path("/var/lib/eidolon/agent"), 0o750, "eidolon", "eidolon"),
+    (Path("/var/lib/eidolon/memory"), 0o750, "eidolon", "eidolon"),
+    (Path("/var/lib/eidolon/nats/jetstream"), 0o750, "eidolon", "eidolon"),
+    (Path("/var/lib/eidolon/voiceprints"), 0o750, "eidolon", "eidolon"),
+    (Path("/var/lib/eidolon/objects"), 0o750, "eidolon", "eidolon"),
+    (Path("/var/lib/eidolon/admin"), 0o750, "eidolon", "eidolon"),
+    (
+        Path("/var/lib/eidolon-bootstrap"),
+        0o710,
+        "eidolon-bootstrap",
+        "eidolon-bootstrap",
+    ),
+    (Path("/var/cache/eidolon"), 0o750, "eidolon", "eidolon"),
+    (Path("/var/log/eidolon"), 0o750, "eidolon", "eidolon"),
+    (Path("/etc/eidolon"), 0o750, "root", "eidolon"),
+)
 _PHASES = (
     "validated",
     "identities",
@@ -215,13 +256,13 @@ _FOUNDATION_VERSION_PREFIXES = {
     "uv": ("uv 0.11.15",),
     "node": ("v22.23.2",),
 }
-_FOUNDATION_EVIDENCE = Path("/var/lib/eidolon-ops/foundation-v1.json")
-_FOUNDATION_CACHE = Path("/var/cache/eidolon-ops/artifacts")
+_FOUNDATION_EVIDENCE = Path("/var/lib/eidolon/ops/foundation-v1.json")
+_FOUNDATION_CACHE = Path("/var/cache/eidolon/ops/artifacts")
 _FOUNDATION_LIBRARY = Path("/usr/local/lib/eidolon-foundation")
 _FOUNDATION_LOCK = Path("/run/lock/eidolon-foundation.lock")
 _LOCAL_BIN = Path("/usr/local/bin")
 _LOCAL_LIB = Path("/usr/local/lib")
-_APP_PREFLIGHT = Path("/srv/eidolon/current/eidolon_admin/.venv/bin/eidolon-bootstrap-preflight")
+_APP_PREFLIGHT = Path("/opt/eidolon/current/eidolon_admin/.venv/bin/eidolon-bootstrap-preflight")
 _HOST_IDENTITY = Path("/var/lib/eidolon-bootstrap/host_identity.ed25519")
 _COMMISSIONING_TLS = Path("/var/lib/eidolon-bootstrap/commissioning_tls.pem")
 _BOOTSTRAP_SOCKET = Path("/run/eidolon-bootstrap/control.sock")
@@ -295,6 +336,57 @@ def _atomic_json(path: Path, document: object, *, mode: int = 0o600) -> None:
         os.replace(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def _atomic_text(path: Path, value: str, *, mode: int = 0o644) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    payload = value.encode("utf-8")
+    try:
+        with temporary.open("xb") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chmod(temporary, mode)
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _atomic_symlink(target: Path, link: Path) -> None:
+    link.parent.mkdir(parents=True, exist_ok=True)
+    temporary = link.with_name(f".{link.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        temporary.symlink_to(target)
+        os.replace(temporary, link)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _ensure_host_path_contract(
+    root: Path,
+    chown: Callable[[Path, str, str], None],
+) -> None:
+    """Materialize the host-profile roots without adopting mutable contents."""
+
+    for value, mode, user, group in HOST_DIRECTORIES:
+        path = _host_path(root, value)
+        if path.exists() and (path.is_symlink() or not path.is_dir()):
+            raise TargetError(f"host path is not a safe directory: {value}")
+        path.mkdir(parents=True, exist_ok=True)
+        os.chmod(path, mode)
+        chown(path, user, group)
+    host_env = _host_path(root, HOST_ENV_PATH)
+    if host_env.exists() or host_env.is_symlink():
+        if (
+            host_env.is_symlink()
+            or not host_env.is_file()
+            or host_env.read_text(encoding="utf-8") != HOST_ENV_VALUE
+        ):
+            raise TargetError("existing /etc/eidolon/host.env violates the path contract")
+        return
+    _atomic_text(host_env, HOST_ENV_VALUE, mode=0o644)
+    chown(host_env, "root", "root")
 
 
 @contextmanager
@@ -444,6 +536,7 @@ def doctor_host(payload: Mapping[str, object]) -> dict[str, object]:
     remote_uv = payload.get("remote_uv")
     if not isinstance(remote_uv, str) or not Path(remote_uv).is_absolute():
         raise TargetError("remote uv path is invalid")
+    host_env = HOST_ENV_PATH
     checks = {
         "system": platform.system().lower() == "linux",
         "machine": platform.machine().lower() == "aarch64",
@@ -452,6 +545,8 @@ def doctor_host(payload: Mapping[str, object]) -> dict[str, object]:
         "systemd_analyze": Path("/usr/bin/systemd-analyze").is_file(),
         "python3": Path("/usr/bin/python3").is_file(),
         "uv": Path(remote_uv).is_file() and os.access(remote_uv, os.X_OK),
+        "host_path_contract": host_env.is_file()
+        and host_env.read_text(encoding="utf-8") == HOST_ENV_VALUE,
     }
     release_id = _release_id(payload, required=False)
     release_doctor: object = None
@@ -724,7 +819,7 @@ def _install_uv(artifact: Mapping[str, str]) -> None:
     path = _LOCAL_BIN / "uv"
     if path.exists() or path.is_symlink():
         raise TargetError(f"refusing to replace unmanaged executable: {path}")
-    requirement = Path("/var/tmp") / f"eidolon-uv-{uuid.uuid4().hex}.txt"
+    requirement = _VAR_TMP / f"eidolon-uv-{uuid.uuid4().hex}.txt"
     try:
         requirement.write_text(
             f"uv=={artifact['version']} --hash=sha256:{artifact['sha256']}\n",
@@ -995,21 +1090,28 @@ def app_ready(payload: Mapping[str, object]) -> dict[str, object]:
     }
 
 
-def _component_link_state(component_id: str, *, root: Path = Path("/")) -> dict[str, object]:
-    link = _host_path(root, CURRENT_LINKS[component_id])
+def _component_link_state(
+    component_id: str,
+    *,
+    root: Path = Path("/"),
+    links: Mapping[str, Path] = CURRENT_LINKS,
+    releases_root: Path = _RELEASES,
+) -> dict[str, object]:
+    link_value = links[component_id]
+    link = _host_path(root, link_value)
     if not link.is_symlink():
         return {
             "state": "unsafe" if link.exists() else "absent",
-            "link": str(CURRENT_LINKS[component_id]),
+            "link": str(link_value),
         }
     target = Path(os.readlink(link))
     resolved = (target if target.is_absolute() else link.parent / target).resolve(strict=False)
-    releases = _host_path(root, _RELEASES).resolve()
+    releases = _host_path(root, releases_root).resolve()
     if resolved.name != component_id or resolved.parent.parent != releases or not resolved.is_dir():
-        return {"state": "unsafe", "link": str(CURRENT_LINKS[component_id])}
+        return {"state": "unsafe", "link": str(link_value)}
     return {
         "state": "managed",
-        "link": str(CURRENT_LINKS[component_id]),
+        "link": str(link_value),
         "release_id": resolved.parent.name,
         "target": str(resolved),
     }
@@ -1029,13 +1131,20 @@ def topology_expansion_plan(
         component_id: _component_link_state(component_id, root=root)
         for component_id in CURRENT_LINKS
     }
+    legacy_links = {
+        component_id: _component_link_state(
+            component_id,
+            root=root,
+            links=LEGACY_CURRENT_LINKS,
+            releases_root=_LEGACY_RELEASES,
+        )
+        for component_id in CURRENT_LINKS
+    }
     core = [links[component_id] for component_id in CORE_COMPONENTS]
     core_releases = {str(item["release_id"]) for item in core if item.get("state") == "managed"}
-    if not all(item.get("state") == "managed" for item in core) or len(core_releases) != 1:
-        state = "conflict"
-        reason = "core component links are missing, unsafe or do not share one release"
-        source_release = None
-    else:
+    topology = "unknown"
+    if all(item.get("state") == "managed" for item in core) and len(core_releases) == 1:
+        topology = "opt"
         source_release = next(iter(core_releases))
         expansion = [links[component_id] for component_id in EXPANSION_COMPONENTS]
         expansion_states = {str(item["state"]) for item in expansion}
@@ -1045,11 +1154,52 @@ def topology_expansion_plan(
         elif expansion_states == {"managed"} and all(
             item.get("release_id") == source_release for item in expansion
         ):
-            state = "already_full"
-            reason = "all seven component links already share one managed release"
+            legacy_core = [legacy_links[component_id] for component_id in CORE_COMPONENTS]
+            legacy_expansion = [legacy_links[component_id] for component_id in EXPANSION_COMPONENTS]
+            if (
+                source_release == release_id
+                and all(item.get("state") == "managed" for item in legacy_core)
+                and len(
+                    {
+                        str(item["release_id"])
+                        for item in legacy_core
+                        if item.get("state") == "managed"
+                    }
+                )
+                == 1
+                and all(item.get("state") == "absent" for item in legacy_expansion)
+            ):
+                state = "replacement_cleanup_pending"
+                reason = "the /opt release is active and the disposable legacy code tree remains"
+            else:
+                state = "already_full"
+                reason = "all seven component links already share one managed release"
         else:
             state = "conflict"
             reason = "new component links are partial, unsafe or target another release"
+    elif all(item.get("state") == "absent" for item in links.values()):
+        legacy_core = [legacy_links[component_id] for component_id in CORE_COMPONENTS]
+        legacy_releases = {
+            str(item["release_id"]) for item in legacy_core if item.get("state") == "managed"
+        }
+        legacy_expansion = [legacy_links[component_id] for component_id in EXPANSION_COMPONENTS]
+        if (
+            all(item.get("state") == "managed" for item in legacy_core)
+            and len(legacy_releases) == 1
+            and all(item.get("state") == "absent" for item in legacy_expansion)
+        ):
+            topology = "legacy_srv_core"
+            source_release = next(iter(legacy_releases))
+            state = "eligible"
+            reason = "owned legacy core can be replaced by the prepared /opt full topology"
+        else:
+            state = "conflict"
+            reason = "neither /opt nor legacy core links form one owned release"
+            source_release = None
+    else:
+        state = "conflict"
+        reason = "core component links are partial or unsafe in the /opt namespace"
+        source_release = None
     input_paths = {
         name: {
             "path": str(destination),
@@ -1062,8 +1212,10 @@ def topology_expansion_plan(
         "status": state,
         "release_id": release_id,
         "source_release": source_release,
+        "source_topology": topology,
         "reason": reason,
         "links": links,
+        "legacy_links": legacy_links,
         "expansion_inputs": input_paths,
     }
 
@@ -1100,6 +1252,9 @@ class TopologyExpansionInstaller:
             raise TargetError("topology expansion requires the fixed seven-component release")
         inputs = self._input_digests()
         with _exclusive(self.lock_path):
+            existing = self._existing_journal(inputs)
+            if existing is not None and existing.get("source_topology") == "legacy_srv_core":
+                return self._prepare_legacy_replacement(existing, inputs)
             plan = topology_expansion_plan(
                 {
                     "release_id": self.release_id,
@@ -1109,6 +1264,8 @@ class TopologyExpansionInstaller:
                 root=self.root,
             )
             journal = self._load_or_begin(plan, inputs)
+            if journal.get("source_topology") == "legacy_srv_core":
+                return self._prepare_legacy_replacement(journal, inputs)
             if plan["status"] == "already_full":
                 expected_release = _host_path(self.root, _RELEASES / self.release_id).resolve()
                 actual_targets = {
@@ -1123,6 +1280,7 @@ class TopologyExpansionInstaller:
                         "source_release": journal["source_release"],
                     }
                 raise TargetError("Host is already full on another or unowned release")
+            _ensure_host_path_contract(self.root, self._chown)
             self._install_inputs(inputs)
             journal.update(
                 {
@@ -1137,7 +1295,67 @@ class TopologyExpansionInstaller:
                 "status": "inputs_installed",
                 "release_id": self.release_id,
                 "source_release": journal["source_release"],
+                "source_topology": journal["source_topology"],
             }
+
+    def _prepare_legacy_replacement(
+        self,
+        journal: dict[str, object],
+        inputs: Mapping[str, str],
+    ) -> dict[str, object]:
+        legacy = {
+            component_id: _component_link_state(
+                component_id,
+                root=self.root,
+                links=LEGACY_CURRENT_LINKS,
+                releases_root=_LEGACY_RELEASES,
+            )
+            for component_id in CURRENT_LINKS
+        }
+        legacy_core = [legacy[component_id] for component_id in CORE_COMPONENTS]
+        source_releases = {
+            str(item["release_id"]) for item in legacy_core if item.get("state") == "managed"
+        }
+        if (
+            not all(item.get("state") == "managed" for item in legacy_core)
+            or source_releases != {str(journal["source_release"])}
+            or not all(
+                legacy[component_id].get("state") == "absent"
+                for component_id in EXPANSION_COMPONENTS
+            )
+        ):
+            raise TargetError("legacy replacement source topology changed")
+
+        _ensure_host_path_contract(self.root, self._chown)
+        self._install_inputs(inputs)
+        for component_id in EXPANSION_COMPONENTS:
+            state = _component_link_state(component_id, root=self.root)
+            if state.get("state") != "absent":
+                raise TargetError("legacy replacement found an unexpected new component link")
+        for component_id in CORE_COMPONENTS:
+            component = self.release.components_by_id[component_id]
+            link = _host_path(self.root, CURRENT_LINKS[component_id])
+            state = _component_link_state(component_id, root=self.root)
+            if state.get("state") == "absent":
+                _atomic_symlink(_host_path(self.root, component.release_path), link)
+                state = _component_link_state(component_id, root=self.root)
+            if state.get("state") != "managed" or state.get("release_id") != self.release_id:
+                raise TargetError("legacy replacement bridge link is unsafe or drifted")
+        journal.update(
+            {
+                "status": "completed",
+                "phase": "bridge",
+                "error": None,
+                "updated_at": int(time.time()),
+            }
+        )
+        _atomic_json(self.journal_path, journal)
+        return {
+            "status": "replacement_prepared",
+            "release_id": self.release_id,
+            "source_release": journal["source_release"],
+            "source_topology": journal["source_topology"],
+        }
 
     def _input_digests(self) -> dict[str, str]:
         if not self.secret_stage.is_dir() or self.secret_stage.is_symlink():
@@ -1158,20 +1376,11 @@ class TopologyExpansionInstaller:
         plan: Mapping[str, object],
         inputs: Mapping[str, str],
     ) -> dict[str, object]:
-        if self.journal_path.exists():
-            try:
-                document = json.loads(self.journal_path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError) as exc:
-                raise TargetError("topology expansion journal is unreadable") from exc
-            if (
-                not isinstance(document, dict)
-                or document.get("schema_version") != 1
-                or document.get("release_id") != self.release_id
-                or document.get("input_sha256") != dict(inputs)
-                or (
-                    plan.get("status") == "eligible"
-                    and document.get("source_release") != plan.get("source_release")
-                )
+        document = self._existing_journal(inputs)
+        if document is not None:
+            if plan.get("status") == "eligible" and (
+                document.get("source_release") != plan.get("source_release")
+                or document.get("source_topology") != plan.get("source_topology")
             ):
                 raise TargetError("topology expansion journal identity or inputs do not match")
             if plan.get("status") not in {"eligible", "already_full"}:
@@ -1196,12 +1405,32 @@ class TopologyExpansionInstaller:
             "schema_version": 1,
             "release_id": self.release_id,
             "source_release": plan["source_release"],
+            "source_topology": plan["source_topology"],
             "status": "running",
             "phase": "validated",
             "input_sha256": dict(inputs),
             "updated_at": int(time.time()),
         }
         _atomic_json(self.journal_path, document)
+        return document
+
+    def _existing_journal(
+        self,
+        inputs: Mapping[str, str],
+    ) -> dict[str, object] | None:
+        if not self.journal_path.exists():
+            return None
+        try:
+            document = json.loads(self.journal_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise TargetError("topology expansion journal is unreadable") from exc
+        if (
+            not isinstance(document, dict)
+            or document.get("schema_version") != 1
+            or document.get("release_id") != self.release_id
+            or document.get("input_sha256") != dict(inputs)
+        ):
+            raise TargetError("topology expansion journal identity or inputs do not match")
         return document
 
     def _install_inputs(self, inputs: Mapping[str, str]) -> None:
@@ -1258,6 +1487,20 @@ def cleanup_stage(payload: Mapping[str, object]) -> dict[str, object]:
             raise TargetError("secret staging path is not a directory")
         shutil.rmtree(path)
     return {"status": "cleaned", "path": str(path)}
+
+
+def retire_legacy_root(
+    payload: Mapping[str, object], *, root: Path = Path("/")
+) -> dict[str, object]:
+    """Delete the old code tree through the durable replacement journal."""
+
+    result = cleanup_legacy(payload, root=root)
+    status = result.get("status")
+    if status == "cleaned":
+        return {**result, "status": "retired"}
+    if status == "already_cleaned":
+        return {**result, "status": "already_retired"}
+    raise TargetError("legacy retirement returned invalid cleanup evidence")
 
 
 class _DeploymentRunner:
@@ -1440,7 +1683,7 @@ class TargetInstaller:
         for namespace in (
             Path("/var/lib/eidolon"),
             Path("/var/lib/eidolon-bootstrap"),
-            Path("/var/lib/eidolon-admin"),
+            Path("/var/lib/eidolon/admin"),
             Path("/etc/eidolon"),
         ):
             path = _host_path(self.root, namespace)
@@ -1479,19 +1722,7 @@ class TargetInstaller:
         if self.root == Path("/"):
             self._ensure_service_identity("eidolon")
             self._ensure_service_identity("eidolon-bootstrap")
-        directories = (
-            (Path("/srv/eidolon/current"), 0o755, "root", "root"),
-            (Path("/var/lib/eidolon"), 0o750, "eidolon", "eidolon"),
-            (self.data["object_store"], 0o750, "eidolon", "eidolon"),
-            (Path("/var/lib/eidolon-admin"), 0o750, "eidolon", "eidolon"),
-            (Path("/var/lib/eidolon-bootstrap"), 0o710, "eidolon-bootstrap", "eidolon-bootstrap"),
-            (Path("/etc/eidolon"), 0o750, "root", "eidolon"),
-        )
-        for value, mode, user, group in directories:
-            path = _host_path(self.root, value)
-            path.mkdir(parents=True, exist_ok=True)
-            os.chmod(path, mode)
-            self._chown(path, user, group)
+        _ensure_host_path_contract(self.root, self._chown)
 
     def _ensure_service_identity(self, name: str) -> None:
         group = self.command(("/usr/bin/getent", "group", name), timeout=30)
@@ -1645,6 +1876,162 @@ def expand(payload: Mapping[str, object]) -> dict[str, object]:
     ).install_inputs()
 
 
+def _replacement_journal(
+    payload: Mapping[str, object],
+    *,
+    root: Path,
+) -> tuple[Path, dict[str, object]]:
+    release_id = _release_id(payload)
+    data = _fixed_data(payload)
+    path = _host_path(
+        root,
+        data["deployment_evidence"] / f"expand-{release_id}" / "expand.json",
+    )
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise TargetError("legacy replacement journal is unreadable") from exc
+    if (
+        not isinstance(document, dict)
+        or document.get("schema_version") != 1
+        or document.get("release_id") != release_id
+        or document.get("source_topology") != "legacy_srv_core"
+        or document.get("phase") != "bridge"
+        or document.get("status") not in {"completed", "cleanup_started", "cleaned", "aborted"}
+    ):
+        raise TargetError("legacy replacement journal is invalid")
+    return path, document
+
+
+def _require_active_replacement(
+    release_id: str,
+    *,
+    root: Path,
+) -> None:
+    for component_id in CURRENT_LINKS:
+        state = _component_link_state(component_id, root=root)
+        if state.get("state") != "managed" or state.get("release_id") != release_id:
+            raise TargetError("legacy cleanup requires the exact active /opt release")
+
+
+def _refuse_nested_mounts(path: Path) -> None:
+    """Never let recursive legacy cleanup cross a mounted filesystem boundary."""
+
+    for directory, names, _files in os.walk(path, followlinks=False):
+        parent = Path(directory)
+        for name in names:
+            candidate = parent / name
+            if not candidate.is_symlink() and os.path.ismount(candidate):
+                raise TargetError(f"legacy code root contains a mount: {candidate}")
+
+
+def cleanup_legacy(
+    payload: Mapping[str, object],
+    *,
+    root: Path = Path("/"),
+) -> dict[str, object]:
+    """Delete only the disposable legacy code tree after the new release is active."""
+
+    _fixed_units(payload)
+    release_id = _release_id(payload)
+    root = root.resolve()
+    journal_path, journal = _replacement_journal(payload, root=root)
+    _require_active_replacement(release_id, root=root)
+    legacy_root = _host_path(root, _LEGACY_ROOT)
+    if journal.get("status") == "cleaned":
+        if legacy_root.exists() or legacy_root.is_symlink():
+            raise TargetError("legacy code tree reappeared after recorded cleanup")
+        return {"status": "already_cleaned", "path": str(_LEGACY_ROOT)}
+    if not (legacy_root.exists() or legacy_root.is_symlink()):
+        journal.update({"status": "cleaned", "updated_at": int(time.time())})
+        _atomic_json(journal_path, journal)
+        return {"status": "cleaned", "path": str(_LEGACY_ROOT)}
+    if legacy_root.is_symlink() or not legacy_root.is_dir() or os.path.ismount(legacy_root):
+        raise TargetError("legacy code root is not a removable owned directory")
+    _refuse_nested_mounts(legacy_root)
+    if journal.get("status") != "cleanup_started":
+        entries = {path.name for path in legacy_root.iterdir()}
+        if entries != {"current", "releases"}:
+            raise TargetError("legacy code root contains paths outside current/releases")
+        source_release = str(journal["source_release"])
+        for component_id in CORE_COMPONENTS:
+            state = _component_link_state(
+                component_id,
+                root=root,
+                links=LEGACY_CURRENT_LINKS,
+                releases_root=_LEGACY_RELEASES,
+            )
+            if state.get("state") != "managed" or state.get("release_id") != source_release:
+                raise TargetError("legacy code links no longer match replacement evidence")
+        for component_id in EXPANSION_COMPONENTS:
+            state = _component_link_state(
+                component_id,
+                root=root,
+                links=LEGACY_CURRENT_LINKS,
+                releases_root=_LEGACY_RELEASES,
+            )
+            if state.get("state") != "absent":
+                raise TargetError("legacy code root contains an unexpected component link")
+        journal.update({"status": "cleanup_started", "updated_at": int(time.time())})
+        _atomic_json(journal_path, journal)
+    shutil.rmtree(legacy_root)
+    journal.update({"status": "cleaned", "updated_at": int(time.time())})
+    _atomic_json(journal_path, journal)
+    return {"status": "cleaned", "path": str(_LEGACY_ROOT)}
+
+
+def abort_replacement(
+    payload: Mapping[str, object],
+    *,
+    root: Path = Path("/"),
+) -> dict[str, object]:
+    """Remove unused /opt bridge links after activation rolled back to legacy assets."""
+
+    _fixed_units(payload)
+    release_id = _release_id(payload)
+    root = root.resolve()
+    journal_path, journal = _replacement_journal(payload, root=root)
+    if journal.get("status") == "aborted":
+        for component_id in CURRENT_LINKS:
+            if _component_link_state(component_id, root=root).get("state") != "absent":
+                raise TargetError("aborted replacement regained an /opt component link")
+        return {"status": "already_aborted", "removed_links": []}
+    if journal.get("status") in {"cleanup_started", "cleaned"}:
+        raise TargetError("legacy replacement can no longer be aborted")
+    source_release = str(journal["source_release"])
+    for component_id in CORE_COMPONENTS:
+        state = _component_link_state(
+            component_id,
+            root=root,
+            links=LEGACY_CURRENT_LINKS,
+            releases_root=_LEGACY_RELEASES,
+        )
+        if state.get("state") != "managed" or state.get("release_id") != source_release:
+            raise TargetError("legacy rollback source is missing or drifted")
+    for component_id in EXPANSION_COMPONENTS:
+        if _component_link_state(component_id, root=root).get("state") != "absent":
+            raise TargetError("replacement abort refuses an active or partial full topology")
+    removed: list[str] = []
+    for component_id in CORE_COMPONENTS:
+        state = _component_link_state(component_id, root=root)
+        link = _host_path(root, CURRENT_LINKS[component_id])
+        if state.get("state") == "absent":
+            continue
+        if state.get("state") != "managed" or state.get("release_id") != release_id:
+            raise TargetError("replacement bridge link is unsafe or targets another release")
+        link.unlink()
+        removed.append(component_id)
+    journal.update(
+        {
+            "status": "aborted",
+            "error": "activation did not complete; bridge links removed",
+            "updated_at": int(time.time()),
+        }
+    )
+    _atomic_json(journal_path, journal)
+    return {"status": "aborted", "removed_links": removed}
+
+
 def lifecycle(action: str, payload: Mapping[str, object]) -> dict[str, object]:
     _fixed_units(payload)
     try:
@@ -1790,10 +2177,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = guard_upload(payload)
         elif action == "cleanup-stage":
             result = cleanup_stage(payload)
+        elif action == "retire-legacy-root":
+            result = retire_legacy_root(payload)
         elif action == "install":
             result = install(payload)
         elif action == "expand":
             result = expand(payload)
+        elif action == "cleanup-legacy":
+            result = cleanup_legacy(payload)
+        elif action == "abort-replacement":
+            result = abort_replacement(payload)
         elif action in {"start", "stop", "restart"}:
             result = lifecycle(action, payload)
         elif action == "rollback-plan":

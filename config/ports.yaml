@@ -1,0 +1,70 @@
+# Eidolon dev stack — Ops-owned port registry consumed by Admin and supervisord.
+#
+# Sub-project config/settings.yaml files are the source of truth for bind ports.
+# run_all.sh start runs ``python -m eidolon_admin_server.app.ports collect`` to
+# refresh this file (aggregation only — child settings are never modified).
+#
+# Edit admin / client_web / nats.http_port here when needed. Data, Kernel and
+# eidolond currently have deployment-contract ports because their application
+# settings intentionally do not own ASGI binding.
+
+admin:
+  api:
+    host: 127.0.0.1
+    port: 9000
+  web:
+    port: 9001
+hub:
+  api:
+    host: 0.0.0.0
+    port: 8082
+data:
+  api:
+    host: 127.0.0.1
+    port: 8084
+  workspace_api:
+    host: 127.0.0.1
+    port: 8085
+kernel:
+  api:
+    host: 127.0.0.1
+    port: 8083
+eidolond:
+  api:
+    host: 127.0.0.1
+    port: 8090
+agent:
+  http:
+    port: 8180
+  admin:
+    port: 8081
+  grpc:
+    port: 45051
+memory:
+  discovery:
+    host: 127.0.0.1
+    port: 8020
+  mcp:
+    port: 10030
+  supervisor_http:
+    host: 127.0.0.1
+    port: 8019
+channel:
+  worker:
+    port: 8766
+client_web:
+  port: 3001
+nats:
+  port: 4222
+  http_port: 8222
+livekit:
+  port: 7880
+  turn_udp_port: 3478
+  rtc_port_start: 50000
+  rtc_port_end: 60000
+mementos:
+  sidecar:
+    host: 127.0.0.1
+    port: 18765
+  # This optional non-Eidolon project is host-specific. Export
+  # EIDOLON_MEMENTOS_DIR before enabling its Ops executor config.

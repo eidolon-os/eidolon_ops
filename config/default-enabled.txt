@@ -1,0 +1,28 @@
+# Default macOS host programs to enable on a fresh Ops setup.
+#
+# This file is the SOURCE for the initial state of
+# ``$EIDOLON_RUNTIME_ROOT/supervisor/enabled``. On first ``eidolon-ops start``
+# (detected by the absence of ``enabled/.seeded``), each name
+# listed here gets a symlink created at
+# ``enabled/<name>.conf`` pointing to its absolute Ops source config. After that
+# first seed, this file is NEVER consulted again — the Admin UI's
+# Enable/Disable buttons own the runtime state.
+#
+# Format: one config name per line (no ``.conf`` suffix). Lines
+# starting with ``#`` and blank lines are ignored.
+#
+# To add a NEW default-on service for fresh clones: add its name here
+# AND ship the matching Ops ``deploy/supervisor/available/<name>.conf``.
+# Existing checkouts will NOT pick up the change unless you also
+# delete their ``enabled/.seeded`` sentinel — which is intentional,
+# since rerunning the seed would overwrite their UI-managed state.
+
+admin
+audit
+agent
+channel
+client-web
+hub
+livekit
+memory
+nats

@@ -4,8 +4,9 @@ import base64
 import contextlib
 import json
 import subprocess
+import sys
 from pathlib import Path
-from types import MappingProxyType, SimpleNamespace
+from types import MappingProxyType, ModuleType, SimpleNamespace
 
 import pytest
 
@@ -365,6 +366,7 @@ def test_owned_core_topology_plan_is_read_only_and_eligible(expansion_fixture) -
     result = target_agent.topology_expansion_plan(payload, root=installer.root)
 
     assert result["status"] == "eligible"
+    assert result["source_topology"] == "opt"
     assert result["source_release"] == "core-release"
     assert all(
         result["links"][component_id]["state"] == "managed"
@@ -375,6 +377,201 @@ def test_owned_core_topology_plan_is_read_only_and_eligible(expansion_fixture) -
         for component_id in target_agent.EXPANSION_COMPONENTS
     )
     assert not installer.journal_path.exists()
+
+
+def _make_legacy_core(installer: TopologyExpansionInstaller) -> None:
+    root = installer.root
+    for component_id in target_agent.CORE_COMPONENTS:
+        (root / target_agent.CURRENT_LINKS[component_id].relative_to("/")).unlink()
+        legacy_release = (
+            root / target_agent._LEGACY_RELEASES.relative_to("/") / "legacy-core" / component_id
+        )
+        legacy_release.mkdir(parents=True)
+        legacy_link = root / target_agent.LEGACY_CURRENT_LINKS[component_id].relative_to("/")
+        legacy_link.parent.mkdir(parents=True, exist_ok=True)
+        legacy_link.symlink_to(legacy_release)
+
+
+def _install_kernel_stubs(
+    monkeypatch,
+    release: object,
+    *,
+    host_type: type | None = None,
+) -> None:
+    package = ModuleType("eidolon_deploy")
+    package.__path__ = []  # type: ignore[attr-defined]
+    linux = ModuleType("eidolon_deploy.linux")
+    manifest = ModuleType("eidolon_deploy.manifest")
+    linux.CommandResult = (  # type: ignore[attr-defined]
+        lambda returncode, stdout, stderr: SimpleNamespace(
+            returncode=returncode,
+            stdout=stdout,
+            stderr=stderr,
+        )
+    )
+    if host_type is not None:
+        linux.LinuxDeploymentHost = host_type  # type: ignore[attr-defined]
+    manifest.load_release_descriptor = lambda _path: release  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "eidolon_deploy", package)
+    monkeypatch.setitem(sys.modules, "eidolon_deploy.linux", linux)
+    monkeypatch.setitem(sys.modules, "eidolon_deploy.manifest", manifest)
+
+
+def test_legacy_core_topology_is_eligible_without_moving_old_release(
+    expansion_fixture,
+) -> None:
+    installer, _stage, _release, payload = expansion_fixture
+    root = installer.root
+    _make_legacy_core(installer)
+
+    plan = target_agent.topology_expansion_plan(payload, root=root)
+    result = installer.install_inputs()
+
+    assert plan["status"] == "eligible"
+    assert plan["source_topology"] == "legacy_srv_core"
+    assert plan["source_release"] == "legacy-core"
+    assert result["status"] == "replacement_prepared"
+    assert (
+        root / target_agent.LEGACY_CURRENT_LINKS["eidolon_kernel"].relative_to("/")
+    ).is_symlink()
+    assert (root / target_agent.HOST_ENV_PATH.relative_to("/")).read_text(
+        encoding="utf-8"
+    ) == target_agent.HOST_ENV_VALUE
+
+
+def test_legacy_root_retirement_requires_exact_full_opt_release(
+    expansion_fixture,
+) -> None:
+    installer, _stage, release, payload = expansion_fixture
+    root = installer.root
+    _make_legacy_core(installer)
+    assert installer.install_inputs()["status"] == "replacement_prepared"
+    legacy = root / target_agent._LEGACY_ROOT.relative_to("/")
+    state = root / "var/lib/eidolon/eidolon-system.sqlite3"
+    state.parent.mkdir(parents=True, exist_ok=True)
+    state.write_text("state", encoding="utf-8")
+    for component_id in target_agent.EXPANSION_COMPONENTS:
+        component = release.components_by_id[component_id]
+        link = root / component.current_link.relative_to("/")
+        link.symlink_to(root / component.release_path.relative_to("/"))
+
+    retirement_payload = {**payload, "release_id": release.release_id}
+    result = target_agent.retire_legacy_root(retirement_payload, root=root)
+
+    assert result == {"status": "retired", "path": "/srv/eidolon"}
+    assert not legacy.exists()
+    assert state.read_text(encoding="utf-8") == "state"
+    assert target_agent.retire_legacy_root(retirement_payload, root=root)["status"] == (
+        "already_retired"
+    )
+
+
+def test_legacy_root_retirement_refuses_before_full_activation(
+    expansion_fixture,
+) -> None:
+    installer, _stage, _release, payload = expansion_fixture
+    _make_legacy_core(installer)
+    assert installer.install_inputs()["status"] == "replacement_prepared"
+
+    with pytest.raises(TargetError, match="exact active /opt release"):
+        target_agent.retire_legacy_root(payload, root=installer.root)
+
+
+def test_legacy_replacement_abort_removes_only_bridge_links(expansion_fixture) -> None:
+    installer, _stage, _release, payload = expansion_fixture
+    _make_legacy_core(installer)
+    assert installer.install_inputs()["status"] == "replacement_prepared"
+
+    result = target_agent.abort_replacement(payload, root=installer.root)
+    repeated = target_agent.abort_replacement(payload, root=installer.root)
+
+    assert result["status"] == "aborted"
+    assert set(result["removed_links"]) == set(target_agent.CORE_COMPONENTS)
+    assert repeated == {"status": "already_aborted", "removed_links": []}
+    assert all(
+        target_agent._component_link_state(component_id, root=installer.root)["state"] == "absent"
+        for component_id in target_agent.CURRENT_LINKS
+    )
+    assert (
+        installer.root / target_agent.LEGACY_CURRENT_LINKS["eidolon_kernel"].relative_to("/")
+    ).is_symlink()
+
+
+def test_legacy_cleanup_rejects_unowned_path(expansion_fixture) -> None:
+    installer, _stage, release, payload = expansion_fixture
+    _make_legacy_core(installer)
+    installer.install_inputs()
+    for component_id in target_agent.EXPANSION_COMPONENTS:
+        component = release.components_by_id[component_id]
+        link = installer.root / component.current_link.relative_to("/")
+        link.symlink_to(installer.root / component.release_path.relative_to("/"))
+    legacy = installer.root / target_agent._LEGACY_ROOT.relative_to("/")
+    (legacy / "unowned").write_text("keep", encoding="utf-8")
+
+    with pytest.raises(TargetError, match="outside current/releases"):
+        target_agent.retire_legacy_root(payload, root=installer.root)
+
+    assert legacy.is_dir()
+
+
+def test_legacy_cleanup_refuses_nested_mount(expansion_fixture, monkeypatch) -> None:
+    installer, _stage, release, payload = expansion_fixture
+    _make_legacy_core(installer)
+    installer.install_inputs()
+    for component_id in target_agent.EXPANSION_COMPONENTS:
+        component = release.components_by_id[component_id]
+        link = installer.root / component.current_link.relative_to("/")
+        link.symlink_to(installer.root / component.release_path.relative_to("/"))
+    legacy = installer.root / target_agent._LEGACY_ROOT.relative_to("/")
+    nested_mount = legacy / "releases"
+    original = target_agent.os.path.ismount
+    monkeypatch.setattr(
+        target_agent.os.path,
+        "ismount",
+        lambda path: Path(path) == nested_mount or original(path),
+    )
+
+    with pytest.raises(TargetError, match="contains a mount"):
+        target_agent.retire_legacy_root(payload, root=installer.root)
+
+    assert legacy.is_dir()
+
+
+def test_legacy_cleanup_resumes_after_interruption(expansion_fixture) -> None:
+    installer, _stage, release, payload = expansion_fixture
+    _make_legacy_core(installer)
+    installer.install_inputs()
+    for component_id in target_agent.EXPANSION_COMPONENTS:
+        component = release.components_by_id[component_id]
+        link = installer.root / component.current_link.relative_to("/")
+        link.symlink_to(installer.root / component.release_path.relative_to("/"))
+    journal = json.loads(installer.journal_path.read_text(encoding="utf-8"))
+    journal["status"] = "cleanup_started"
+    installer.journal_path.write_text(json.dumps(journal), encoding="utf-8")
+    legacy_current = installer.root / target_agent._LEGACY_ROOT.relative_to("/") / "current"
+    for link in legacy_current.iterdir():
+        link.unlink()
+    legacy_current.rmdir()
+
+    result = target_agent.retire_legacy_root(payload, root=installer.root)
+
+    assert result["status"] == "retired"
+    assert not (installer.root / target_agent._LEGACY_ROOT.relative_to("/")).exists()
+
+
+def test_full_replacement_reports_cleanup_pending(expansion_fixture) -> None:
+    installer, _stage, release, payload = expansion_fixture
+    _make_legacy_core(installer)
+    installer.install_inputs()
+    for component_id in target_agent.EXPANSION_COMPONENTS:
+        component = release.components_by_id[component_id]
+        link = installer.root / component.current_link.relative_to("/")
+        link.symlink_to(installer.root / component.release_path.relative_to("/"))
+
+    result = target_agent.topology_expansion_plan(payload, root=installer.root)
+
+    assert result["status"] == "replacement_cleanup_pending"
+    assert "disposable legacy code tree" in result["reason"]
 
 
 def test_topology_expansion_installs_only_new_inputs_idempotently(expansion_fixture) -> None:
@@ -874,11 +1071,7 @@ def test_lifecycle_uses_kernel_host_adapter(monkeypatch, tmp_path: Path) -> None
         def wait_ready(self, value):
             self.calls.append("ready")
 
-    import eidolon_deploy.linux
-    import eidolon_deploy.manifest
-
-    monkeypatch.setattr(eidolon_deploy.linux, "LinuxDeploymentHost", Host)
-    monkeypatch.setattr(eidolon_deploy.manifest, "load_release_descriptor", lambda path: release)
+    _install_kernel_stubs(monkeypatch, release, host_type=Host)
     active = tmp_path / "release/eidolon_kernel"
     active.mkdir(parents=True)
     monkeypatch.setattr(target_agent, "_CURRENT_KERNEL", active)
@@ -921,11 +1114,7 @@ def test_install_wrapper_reuses_kernel_descriptor(monkeypatch, tmp_path: Path) -
         def install(self):
             return {"status": "installed"}
 
-    import eidolon_deploy.linux
-    import eidolon_deploy.manifest
-
-    monkeypatch.setattr(eidolon_deploy.linux, "LinuxDeploymentHost", Host)
-    monkeypatch.setattr(eidolon_deploy.manifest, "load_release_descriptor", lambda path: release)
+    _install_kernel_stubs(monkeypatch, release, host_type=Host)
     monkeypatch.setattr(target_agent, "TargetInstaller", Installer)
     monkeypatch.setattr(target_agent, "_RELEASES", tmp_path / "releases")
     monkeypatch.setattr(target_agent, "_VAR_TMP", tmp_path)
@@ -950,9 +1139,7 @@ def test_expand_wrapper_reuses_kernel_descriptor(monkeypatch, tmp_path: Path) ->
         def install_inputs(self):
             return {"status": "inputs_installed"}
 
-    import eidolon_deploy.manifest
-
-    monkeypatch.setattr(eidolon_deploy.manifest, "load_release_descriptor", lambda path: release)
+    _install_kernel_stubs(monkeypatch, release)
     monkeypatch.setattr(target_agent, "TopologyExpansionInstaller", Installer)
     monkeypatch.setattr(target_agent, "_RELEASES", tmp_path / "releases")
     monkeypatch.setattr(target_agent, "_VAR_TMP", tmp_path)

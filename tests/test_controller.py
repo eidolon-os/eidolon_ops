@@ -63,6 +63,8 @@ class FakeTransport:
             "doctor-host": {"status": "healthy", "checks": {}},
             "guard-upload": {"status": "ready_for_upload"},
             "cleanup-stage": {"status": "cleaned"},
+            "retire-legacy-root": {"status": "retired"},
+            "abort-replacement": {"status": "aborted"},
             "install": {"status": "installed"},
             "expand": {"status": "inputs_installed", "source_release": "core-release"},
             "start": {"status": "started"},
@@ -544,6 +546,90 @@ def test_expand_apply_stages_only_new_inputs_then_activates(setup_controller) ->
     ]
 
 
+def test_expand_retires_legacy_root_only_after_all_health_gates(config) -> None:
+    transport = FakeTransport()
+    original = transport.run_agent
+
+    def legacy(action, payload, **kwargs):
+        if action == "expansion-plan":
+            transport.agent_calls.append(
+                (action, dict(payload), kwargs.get("python", "/usr/bin/python3"), True)
+            )
+            return {
+                "status": "eligible",
+                "source_release": "legacy-core",
+                "source_topology": "legacy_srv_core",
+            }
+        return original(action, payload, **kwargs)
+
+    transport.run_agent = legacy
+    controller = EidolonPiController(config, ControllerRunner(config), transport=transport)
+
+    result = controller.expand(release_id="r1", resume=True, apply=True)
+
+    assert result["phases"][-1]["phase"] == "legacy_root_retirement"
+    actions = [call[0] for call in transport.agent_calls]
+    assert actions.index("retire-legacy-root") > actions.index("app-ready")
+
+
+def test_legacy_replacement_failure_aborts_unused_bridge(config) -> None:
+    transport = FakeTransport()
+    original = transport.run_agent
+
+    def legacy(action, payload, **kwargs):
+        if action == "expansion-plan":
+            transport.agent_calls.append(
+                (action, dict(payload), kwargs.get("python", "/usr/bin/python3"), True)
+            )
+            return {
+                "status": "eligible",
+                "source_release": "legacy-core",
+                "source_topology": "legacy_srv_core",
+            }
+        return original(action, payload, **kwargs)
+
+    transport.run_agent = legacy
+    transport.fail_remote_match = " deploy "
+    controller = EidolonPiController(config, ControllerRunner(config), transport=transport)
+
+    with pytest.raises(OperationsError, match="bridge links were removed"):
+        controller.expand(release_id="r1", resume=True, apply=True)
+
+    actions = [call[0] for call in transport.agent_calls]
+    assert "abort-replacement" in actions
+    assert "retire-legacy-root" not in actions
+
+
+def test_interrupted_legacy_cleanup_rechecks_gates_and_retires(config) -> None:
+    transport = FakeTransport()
+    original = transport.run_agent
+
+    def cleanup_pending(action, payload, **kwargs):
+        if action == "expansion-plan":
+            transport.agent_calls.append(
+                (action, dict(payload), kwargs.get("python", "/usr/bin/python3"), True)
+            )
+            return {
+                "status": "replacement_cleanup_pending",
+                "source_release": "r1",
+                "source_topology": "opt",
+            }
+        return original(action, payload, **kwargs)
+
+    transport.run_agent = cleanup_pending
+    controller = EidolonPiController(config, ControllerRunner(config), transport=transport)
+
+    result = controller.expand(release_id="r1", resume=True, apply=True)
+
+    assert result["status"] == "expanded"
+    assert [phase["phase"] for phase in result["phases"]] == [
+        "doctor",
+        "app_ready",
+        "legacy_root_retirement",
+    ]
+    assert transport.uploads == []
+
+
 def test_expand_refuses_topology_conflict_before_foundation_mutation(config) -> None:
     transport = FakeTransport()
     original = transport.run_agent
@@ -626,7 +712,7 @@ def test_lifecycle_uses_active_kernel_runtime(setup_controller, action: str) -> 
     result = controller.lifecycle(action, dry_run=False)
 
     assert result["status"] == (action + "ed" if action != "stop" else "stopped")
-    assert transport.agent_calls[-1][2] == ("/srv/eidolon/current/eidolon_kernel/.venv/bin/python")
+    assert transport.agent_calls[-1][2] == ("/opt/eidolon/current/eidolon_kernel/.venv/bin/python")
 
 
 def test_rollback_defaults_to_plan(setup_controller) -> None:

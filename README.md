@@ -1,11 +1,14 @@
 # eidolon-ops
 
-`eidolon-pi` 是 Mac 上管理 Eidolon OS Raspberry Pi 的唯一入口。对一台刚刷好系统、已开放 SSH 的
-新 Pi，准备一次严格配置后，下面一条命令会完成基础环境检测/安装、精确提交发布、Data V2 初始化、
-14 个产品服务启动，并要求 Host 达到手机 App commissioning 门禁：
+`eidolon-ops` 是 Mac 开发 Host 与 Raspberry Pi 产品 Host 的统一管理入口。两端使用相同的路径角色、
+生命周期命令和诊断模型；区别只在 Host profile 与执行适配器（Mac 是本地 supervisord，Pi 是远程
+systemd）。`eidolon-pi` 暂时保留为 Pi 发布底层兼容入口，不再作为顶层操作界面。
+
+对一台刚刷好系统、已开放 SSH 的新 Pi，下面一条命令会完成基础环境检测/安装、精确提交发布、
+Data V2 初始化、14 个产品服务启动，并要求 Host 达到手机 App commissioning 门禁：
 
 ```bash
-uv run eidolon-pi --config config/eidolon-pi.toml \
+uv run eidolon-ops --config config/hosts/pi5.toml \
   install --release-id 20260807-product-1 --apply
 ```
 
@@ -41,9 +44,11 @@ URL/digest、原子缓存和版本目录；不会用 rsync 覆盖任何工作树
 ## 安装与配置
 
 ```bash
-cd /Users/manson/ai/eidolon/eidolon_ops
+cd /path/to/eidolon/eidolon_ops
 uv sync --all-extras
 cp config/eidolon-pi.example.toml config/eidolon-pi.toml
+cp config/hosts/pi5.example.toml config/hosts/pi5.toml
+cp config/hosts/mac.example.toml config/hosts/mac.toml
 chmod 600 config/eidolon-pi.toml
 ```
 
@@ -54,20 +59,43 @@ Mac 还必须安装 `git-lfs`；bundle 只从 exact commit pointer 导出 Channe
 私密输入文件。SSH 强制 BatchMode、独立 key、`StrictHostKeyChecking=yes` 和显式 known_hosts。
 示例见 [`config/eidolon-pi.example.toml`](config/eidolon-pi.example.toml)。
 
+## 统一路径契约
+
+| 生命周期 | Mac profile | Pi profile |
+|---|---|---|
+| 代码/发布 | `~/ai/eidolon` 工作树 | `/opt/eidolon/{releases,current}` |
+| Host 配置 | `eidolon_ops/config` | `/etc/eidolon` |
+| 持久状态 | `~/eidolon/data` | `/var/lib/eidolon` |
+| 临时运行态 | `~/eidolon/run` | `/run/eidolon` |
+| 日志 | `~/eidolon/logs` | `/var/log/eidolon`（并保留 journal） |
+| 缓存/诊断原始件 | `~/eidolon/cache` | `/var/cache/eidolon` |
+| Bootstrap 状态 | `~/eidolon/bootstrap` | `/var/lib/eidolon-bootstrap` |
+| Bootstrap 临时运行态 | `~/eidolon/run/bootstrap` | `/run/eidolon-bootstrap` |
+
+`/opt` 只放不可变产品代码与 active symlink；业务状态不进入 `/opt`。`/srv` 不再使用，因为这里没有
+由机器对外提供、需要独立管理的 service data tree。组件不得再从 `HOME` 拼接产品路径；Ops 将 profile
+解析为同一组 `EIDOLON_*_ROOT` 环境变量。Bootstrap 单独保留状态域，以维持首次初始化、reset、换网和
+Owner 变更的权限边界；它的 state/runtime 目录均不与产品主进程共享 ownership。
+
 ## 唯一入口与操作
 
 ```text
-eidolon-pi status
-eidolon-pi doctor [--release-id ID]
-eidolon-pi provision [--apply]
-eidolon-pi install --release-id ID [--resume] [--apply]
-eidolon-pi expand --release-id ID [--resume] [--apply]
-eidolon-pi deploy|update --release-id ID [--resume] [--activate]
-eidolon-pi start|stop|restart [--dry-run]
-eidolon-pi app-ready
-eidolon-pi rollback --release-id ID --snapshot /var/lib/eidolon/deployments/... [--apply]
-eidolon-pi logs [--unit UNIT] [--lines N] [--since TEXT]
-eidolon-pi diagnose --output /absolute/path/to/report.tar.gz
+eidolon-ops --config HOST.toml status|doctor
+eidolon-ops --config HOST.toml migrate-paths [--apply]  # Mac one-time state cutover
+eidolon-ops --config HOST.toml start|stop|restart [--dry-run]
+eidolon-ops --config HOST.toml logs [--service SERVICE] [--lines N] [--since TEXT]
+
+# Mac-only isolated profiles
+eidolon-ops --config HOST.toml core-contract start|stop|restart|status
+eidolon-ops --config HOST.toml os-control-plane prepare|validate|start|stop|restart|status
+
+# Pi release/install capabilities
+eidolon-ops --config HOST.toml provision [--apply]
+eidolon-ops --config HOST.toml install|expand --release-id ID [--resume] [--apply]
+eidolon-ops --config HOST.toml deploy|update --release-id ID [--resume] [--activate]
+eidolon-ops --config HOST.toml app-ready
+eidolon-ops --config HOST.toml rollback --release-id ID --snapshot /var/lib/eidolon/deployments/... [--apply]
+eidolon-ops --config HOST.toml diagnose --output /absolute/path/to/report.tar.gz
 ```
 
 所有有破坏性的入口默认计划/dry-run；`install --apply` 只接受全新 Eidolon namespace。已由旧 4-component
