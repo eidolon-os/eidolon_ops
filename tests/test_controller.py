@@ -116,6 +116,7 @@ class FakeTransport:
     def __init__(self) -> None:
         self.agent_calls: list[tuple[str, dict[str, object], str, bool]] = []
         self.remote_calls: list[tuple[tuple[str, ...], bool]] = []
+        self.remote_timeouts: list[float] = []
         self.uploads: list[tuple[Path, str, bool]] = []
         self.resumable_uploads: list[tuple[Path, str]] = []
         self.fail_actions: dict[str, Exception] = {}
@@ -167,6 +168,7 @@ class FakeTransport:
     def run(self, remote, *, input_bytes=None, sudo=False, timeout=120, operation="remote"):
         remote = tuple(remote)
         self.remote_calls.append((remote, sudo))
+        self.remote_timeouts.append(timeout)
         if self.fail_remote_match is not None and self.fail_remote_match in " ".join(remote):
             raise RuntimeError(f"failed: {self.fail_remote_match}")
         if remote == ("/bin/sh", "-s") and input_bytes is not None:
@@ -433,6 +435,12 @@ def test_deploy_defaults_to_prepare_and_dry_run(setup_controller) -> None:
         "UV_HTTP_RETRIES=8",
         "/usr/bin/python3",
     )
+    prepare_index = next(
+        index
+        for index, (remote, _sudo) in enumerate(transport.remote_calls)
+        if any(token.endswith("/prepare_target.py") for token in remote)
+    )
+    assert transport.remote_timeouts[prepare_index] == 3600
 
 
 def test_deploy_resume_activate_skips_transfer(setup_controller) -> None:

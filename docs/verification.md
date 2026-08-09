@@ -49,7 +49,7 @@ uv run ruff format --check .
 pytest --cov=eidolon_ops --cov-branch --cov-report=term-missing --cov-fail-under=90 -q
 312 passed, 0 failed, 0 skipped
 branch-aware coverage: 90.06%
-pytest runtime reported: 4.18 seconds
+pytest runtime reported: 3.76 seconds
 
 uv build --out-dir /private/tmp/eidolon-ops-build-20260809-final-1
 sdist: 158,426 bytes; wheel: 62,154 bytes
@@ -103,12 +103,14 @@ SDK      8108970514d9fefd3d93e7466e91706a1681c331
 
 Local preflight proves that the release CLI itself is a clean worktree at the exact pinned Kernel commit, all 15 unit
 blobs pass the FHS matrix, and the regenerated 14-file input set passes the new Hub/Admin/Provider token relations.
-The selected matrix's 480-MiB exact bundle passed local digest validation and guarded resumable upload. Its first
-target-native attempt completed Data and entered Hub, but the official PyPI path stopped making progress while
-downloading `cryptography`; the unsealed release root was removed by the preparer's failure path, the immutable
-staging remained, and zero product units were installed. Ops now requires an explicit credential-free HTTPS Python
-index plus bounded uv timeout/retry values and records them in preflight evidence. Every component still installs with
-`uv sync --frozen`; the next run must reuse this same bundle identity and prove complete native preparation.
+The selected matrix's 480-MiB exact bundle passed local digest validation and guarded resumable upload. A resumed
+target-native attempt completed Kernel, Data, Hub and Admin, then spent more than the original 30-minute controller
+window populating the Agent environment. The controller timed out while the Pi process continued under PID 1; that
+process later exited without sealing and the preparer's failure path removed the unsealed release root. Immutable
+staging and 437 MiB of verified uv cache remained, while zero product units were installed. Ops now requires an
+explicit credential-free HTTPS default index plus bounded uv timeout/retry values, records them in preflight evidence,
+and allows 60 minutes for the complete native phase. Frozen locks can retain direct PyPI artifact URLs, so this is not
+an offline wheel bundle and must not be reported as one.
 
 ## Foundation artifact evidence
 
@@ -139,9 +141,9 @@ client may learn trust from mDNS or disable certificate verification.
 - Permanent deletion of the three old authority roots; the user authorized clean replacement, but the final matrix
   gate has not yet reached the destructive install phase. Their metadata-only inventory includes old Data/Hub/Kernel/eidolond SQLite files, release receipts,
   Admin job roots and Bootstrap identity/TLS/database files.
-- Complete Pi-native preparation for all seven component environments. The exact selected matrix completed Data and
-  reached Hub, then failed closed on an unavailable official PyPI download path. The resumable retry now uses the
-  explicitly configured HTTPS mirror with frozen locks, bounded timeout and bounded retries.
+- Complete Pi-native preparation for all seven component environments. The selected matrix completed four and reached
+  Agent before the old 30-minute controller window expired. A retry can reuse the exact staging and 437-MiB uv cache;
+  direct artifact URLs in frozen locks still require their recorded CDN to be reachable.
 - Real `systemd-analyze verify`, 15-unit start order and health after clean install; Local API/Hub/provider ports and
   mDNS must be re-measured after activation.
 - Full reboot recovery, concurrent operator race, disk-full/power-loss/failure auto-restore and explicit rollback on

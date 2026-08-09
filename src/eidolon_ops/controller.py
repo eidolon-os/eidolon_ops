@@ -927,7 +927,7 @@ class EidolonPiController:
                 "--uv",
                 str(self.config.host.remote_uv),
             ),
-            timeout=1800,
+            timeout=3600,
         )
         return [
             {"phase": "bundle", "result": bundle_result},

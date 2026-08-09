@@ -76,9 +76,7 @@ _REVISION = re.compile(r"^[0-9a-f]{40}$")
 _HOST = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$")
 _USER = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
 _RELEASE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
-_PYTHON_INDEX_URL = re.compile(
-    r"^https://[A-Za-z0-9.-]+(?::[0-9]{1,5})?/[A-Za-z0-9_./:=+@,-]*$"
-)
+_PYTHON_INDEX_URL = re.compile(r"^https://[A-Za-z0-9.-]+(?::[0-9]{1,5})?/[A-Za-z0-9_./:=+@,-]*$")
 
 
 class ConfigurationError(ValueError):
