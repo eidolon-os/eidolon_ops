@@ -85,5 +85,29 @@ def test_local_path_migration_refuses_conflicts_and_live_stack(tmp_path: Path) -
     pid = profile.paths.runtime_root / "ops/supervisord.pid"
     pid.parent.mkdir(parents=True, exist_ok=True)
     pid.write_text(str(os.getpid()), encoding="utf-8")
+    plan = migrator.plan()
+    assert plan["apply_ready"] is False
+    assert plan["live_processes"] == [
+        {"pid": os.getpid(), "pid_file": str(pid)},
+    ]
     with pytest.raises(OperationsError, match="stop the local Eidolon stack"):
         migrator.apply()
+
+
+def test_local_path_migration_treats_signal_permission_error_as_live(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    profile = _profile(tmp_path)
+    pid = profile.paths.current_root / "eidolon_admin/var/supervisord.pid"
+    pid.parent.mkdir(parents=True)
+    pid.write_text("4242", encoding="utf-8")
+
+    def deny_signal(_pid: int, _signal: int) -> None:
+        raise PermissionError
+
+    monkeypatch.setattr(os, "kill", deny_signal)
+
+    plan = LocalPathMigrator(profile).plan()
+
+    assert plan["apply_ready"] is False
+    assert plan["live_processes"] == [{"pid": 4242, "pid_file": str(pid)}]

@@ -72,6 +72,25 @@ Mac 还必须安装 `git-lfs`；bundle 只从 exact commit pointer 导出 Channe
 | Bootstrap 状态 | `~/eidolon/bootstrap` | `/var/lib/eidolon-bootstrap` |
 | Bootstrap 临时运行态 | `~/eidolon/run/bootstrap` | `/run/eidolon-bootstrap` |
 
+根目录下面按 authority/组件继续隔离，不能自行再发明路径：
+
+| 相对 `$EIDOLON_STATE_ROOT` | Owner / 内容 |
+|---|---|
+| `eidolon-system.sqlite3`、`objects/` | Data 的系统权威库与对象存储 |
+| `hub/` | Hub 独占 SQLite |
+| `agent/` | Agent 独占状态与 SQLite |
+| `memory/` | Memory palace、ledger 与组件状态 |
+| `nats/` | NATS JetStream |
+| `voiceprints/` | Channel/语音身份资产 |
+| `admin/`、`audit/` | Admin 控制面状态与可重建审计索引 |
+| `registry/` | SDK registry |
+| `ops/`、`deployments/` | Ops/foundation 与 Kernel release 事务证据 |
+
+`$EIDOLON_RUNTIME_ROOT`、`$EIDOLON_LOG_ROOT` 和 `$EIDOLON_CACHE_ROOT` 同样使用组件子目录。Mac
+开发所需的组件 settings/secret 仍由各组件工作树持有，Ops 只拥有 Host profile、端口和启用集合；Pi
+发布则把经过声明的私密输入物化为 `/etc/eidolon/*.env|*.yaml`。两者由同一 CLI 和路径角色驱动，不把
+开发工作树布局伪装成产品 FHS 布局。
+
 `/opt` 只放不可变产品代码与 active symlink；业务状态不进入 `/opt`。`/srv` 不再使用，因为这里没有
 由机器对外提供、需要独立管理的 service data tree。组件不得再从 `HOME` 拼接产品路径；Ops 将 profile
 解析为同一组 `EIDOLON_*_ROOT` 环境变量。Bootstrap 单独保留状态域，以维持首次初始化、reset、换网和

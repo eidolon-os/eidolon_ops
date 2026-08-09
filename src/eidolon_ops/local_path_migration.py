@@ -35,12 +35,15 @@ class LocalPathMigrator:
         entries = [self._entry(move) for move in self.moves]
         conflicts = [entry["move_id"] for entry in entries if entry["state"] == "conflict"]
         pending = [entry["move_id"] for entry in entries if entry["state"] == "pending"]
+        live_processes = self._live_processes()
         return {
             "status": "conflict" if conflicts else "migration_required" if pending else "clean",
             "host_id": self.profile.host_id,
             "moves": entries,
             "conflicts": conflicts,
             "pending": pending,
+            "live_processes": live_processes,
+            "apply_ready": not conflicts and not live_processes,
         }
 
     def apply(self) -> dict[str, object]:
@@ -101,23 +104,37 @@ class LocalPathMigrator:
         }
 
     def _require_stopped(self) -> None:
+        live = self._live_processes()
+        if live:
+            details = ", ".join(
+                f"{item['pid_file']}:{item['pid']}" for item in live
+            )
+            raise OperationsError(
+                "stop the local Eidolon stack before migrating state paths: "
+                + details
+            )
+
+    def _live_processes(self) -> list[dict[str, object]]:
         candidates = list((self.profile.paths.runtime_root / "ops").glob("*.pid"))
         candidates.extend(self.profile.paths.runtime_root.glob("eidolon-admin*.pid"))
         # One-time guard for the executor location being retired from Admin.
         candidates.extend((self.profile.paths.current_root / "eidolon_admin/var").glob("*.pid"))
-        live: list[str] = []
+        live: list[dict[str, object]] = []
         for path in candidates:
             try:
                 pid = int(path.read_text(encoding="utf-8").strip())
-                os.kill(pid, 0)
             except (OSError, ValueError):
                 continue
-            live.append(f"{path.name}:{pid}")
-        if live:
-            raise OperationsError(
-                "stop the local Eidolon stack before migrating state paths: "
-                + ", ".join(sorted(live))
-            )
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                continue
+            except PermissionError:
+                # EPERM proves that the PID exists but this observer cannot
+                # signal it.  A state cutover must fail closed in that case.
+                pass
+            live.append({"pid": pid, "pid_file": str(path)})
+        return sorted(live, key=lambda item: str(item["pid_file"]))
 
 
 def _moves(profile: HostProfile) -> tuple[PathMove, ...]:
