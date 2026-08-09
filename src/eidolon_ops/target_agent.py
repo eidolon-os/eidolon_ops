@@ -82,6 +82,29 @@ SECRET_INPUTS = {
     "channel.yaml": (Path("/etc/eidolon/channel.yaml"), "root", "eidolon", 0o640),
     "memory.yaml": (Path("/etc/eidolon/memory.yaml"), "root", "eidolon", 0o640),
 }
+EXPANSION_INPUTS = {
+    name: SECRET_INPUTS[name]
+    for name in (
+        "agent.env",
+        "channel.env",
+        "memory.env",
+        "livekit.env",
+        "agent.yaml",
+        "channel.yaml",
+        "memory.yaml",
+    )
+}
+CORE_COMPONENTS = (
+    "eidolon_kernel",
+    "eidolon_data",
+    "eidolon_hub",
+    "eidolon_admin",
+)
+EXPANSION_COMPONENTS = (
+    "eidolon_agent",
+    "eidolon_channel",
+    "eidolon_memory",
+)
 FIXED_DATA = {
     "system_database": Path("/var/lib/eidolon/eidolon-system.sqlite3"),
     "object_store": Path("/var/lib/eidolon/objects"),
@@ -352,6 +375,7 @@ def status(payload: Mapping[str, object]) -> dict[str, object]:
     evidence = FIXED_DATA["deployment_evidence"]
     receipts: list[dict[str, object]] = []
     installations: list[dict[str, object]] = []
+    expansions: list[dict[str, object]] = []
     if evidence.is_dir():
         for receipt in sorted(
             evidence.glob("*/receipt.json"), key=lambda item: item.stat().st_mtime
@@ -385,6 +409,22 @@ def status(payload: Mapping[str, object]) -> dict[str, object]:
                         "phase": document.get("phase"),
                     }
                 )
+        for journal in sorted(
+            evidence.glob("expand-*/expand.json"), key=lambda item: item.stat().st_mtime
+        )[-10:]:
+            try:
+                document = json.loads(journal.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if isinstance(document, dict):
+                expansions.append(
+                    {
+                        "path": str(journal),
+                        "release_id": document.get("release_id"),
+                        "status": document.get("status"),
+                        "source_release": document.get("source_release"),
+                    }
+                )
     return {
         "status": "observed",
         "host": platform.node(),
@@ -394,6 +434,7 @@ def status(payload: Mapping[str, object]) -> dict[str, object]:
         "current_links": links,
         "recent_receipts": receipts,
         "installations": installations,
+        "expansions": expansions,
     }
 
 
@@ -954,6 +995,251 @@ def app_ready(payload: Mapping[str, object]) -> dict[str, object]:
     }
 
 
+def _component_link_state(component_id: str, *, root: Path = Path("/")) -> dict[str, object]:
+    link = _host_path(root, CURRENT_LINKS[component_id])
+    if not link.is_symlink():
+        return {
+            "state": "unsafe" if link.exists() else "absent",
+            "link": str(CURRENT_LINKS[component_id]),
+        }
+    target = Path(os.readlink(link))
+    resolved = (target if target.is_absolute() else link.parent / target).resolve(strict=False)
+    releases = _host_path(root, _RELEASES).resolve()
+    if resolved.name != component_id or resolved.parent.parent != releases or not resolved.is_dir():
+        return {"state": "unsafe", "link": str(CURRENT_LINKS[component_id])}
+    return {
+        "state": "managed",
+        "link": str(CURRENT_LINKS[component_id]),
+        "release_id": resolved.parent.name,
+        "target": str(resolved),
+    }
+
+
+def topology_expansion_plan(
+    payload: Mapping[str, object],
+    *,
+    root: Path = Path("/"),
+) -> dict[str, object]:
+    """Inspect whether an owned four-component release can expand safely."""
+
+    _fixed_units(payload)
+    _fixed_data(payload)
+    release_id = _release_id(payload)
+    links = {
+        component_id: _component_link_state(component_id, root=root)
+        for component_id in CURRENT_LINKS
+    }
+    core = [links[component_id] for component_id in CORE_COMPONENTS]
+    core_releases = {str(item["release_id"]) for item in core if item.get("state") == "managed"}
+    if not all(item.get("state") == "managed" for item in core) or len(core_releases) != 1:
+        state = "conflict"
+        reason = "core component links are missing, unsafe or do not share one release"
+        source_release = None
+    else:
+        source_release = next(iter(core_releases))
+        expansion = [links[component_id] for component_id in EXPANSION_COMPONENTS]
+        expansion_states = {str(item["state"]) for item in expansion}
+        if expansion_states == {"absent"}:
+            state = "eligible"
+            reason = "owned core release can expand without adopting component links"
+        elif expansion_states == {"managed"} and all(
+            item.get("release_id") == source_release for item in expansion
+        ):
+            state = "already_full"
+            reason = "all seven component links already share one managed release"
+        else:
+            state = "conflict"
+            reason = "new component links are partial, unsafe or target another release"
+    input_paths = {
+        name: {
+            "path": str(destination),
+            "exists": _host_path(root, destination).exists()
+            or _host_path(root, destination).is_symlink(),
+        }
+        for name, (destination, _user, _group, _mode) in EXPANSION_INPUTS.items()
+    }
+    return {
+        "status": state,
+        "release_id": release_id,
+        "source_release": source_release,
+        "reason": reason,
+        "links": links,
+        "expansion_inputs": input_paths,
+    }
+
+
+class TopologyExpansionInstaller:
+    """Stage only new full-product inputs on an already managed core Host."""
+
+    def __init__(
+        self,
+        *,
+        release: object,
+        secret_stage: Path,
+        data: Mapping[str, Path],
+        root: Path = Path("/"),
+        manage_ownership: bool = True,
+    ) -> None:
+        self.release = release
+        self.secret_stage = secret_stage
+        self.data = data
+        self.root = root.resolve()
+        self.manage_ownership = manage_ownership
+        self.release_id = str(release.release_id)
+        self.evidence_dir = _host_path(
+            self.root,
+            data["deployment_evidence"] / f"expand-{self.release_id}",
+        )
+        self.journal_path = self.evidence_dir / "expand.json"
+        self.lock_path = _host_path(self.root, Path("/run/lock/eidolon-install.lock"))
+
+    def install_inputs(self) -> dict[str, object]:
+        if os.geteuid() != 0 and self.root == Path("/"):
+            raise TargetError("topology expansion requires root")
+        if set(self.release.components_by_id) != set(CURRENT_LINKS):
+            raise TargetError("topology expansion requires the fixed seven-component release")
+        inputs = self._input_digests()
+        with _exclusive(self.lock_path):
+            plan = topology_expansion_plan(
+                {
+                    "release_id": self.release_id,
+                    "units": list(PRODUCT_UNITS),
+                    "data": {name: str(path) for name, path in FIXED_DATA.items()},
+                },
+                root=self.root,
+            )
+            journal = self._load_or_begin(plan, inputs)
+            if plan["status"] == "already_full":
+                expected_release = _host_path(self.root, _RELEASES / self.release_id).resolve()
+                actual_targets = {
+                    Path(str(item["target"])).parent
+                    for item in plan["links"].values()
+                    if item.get("state") == "managed"
+                }
+                if journal.get("status") == "completed" and actual_targets == {expected_release}:
+                    return {
+                        "status": "already_expanded",
+                        "release_id": self.release_id,
+                        "source_release": journal["source_release"],
+                    }
+                raise TargetError("Host is already full on another or unowned release")
+            self._install_inputs(inputs)
+            journal.update(
+                {
+                    "status": "completed",
+                    "phase": "inputs",
+                    "error": None,
+                    "updated_at": int(time.time()),
+                }
+            )
+            _atomic_json(self.journal_path, journal)
+            return {
+                "status": "inputs_installed",
+                "release_id": self.release_id,
+                "source_release": journal["source_release"],
+            }
+
+    def _input_digests(self) -> dict[str, str]:
+        if not self.secret_stage.is_dir() or self.secret_stage.is_symlink():
+            raise TargetError("topology expansion staging directory is missing or unsafe")
+        actual = {path.name for path in self.secret_stage.iterdir()}
+        if actual != set(EXPANSION_INPUTS):
+            raise TargetError("topology expansion staging file set is invalid")
+        values: dict[str, str] = {}
+        for name in EXPANSION_INPUTS:
+            path = self.secret_stage / name
+            if not path.is_file() or path.is_symlink():
+                raise TargetError(f"topology expansion input is unsafe: {name}")
+            values[name] = _file_sha256(path)
+        return values
+
+    def _load_or_begin(
+        self,
+        plan: Mapping[str, object],
+        inputs: Mapping[str, str],
+    ) -> dict[str, object]:
+        if self.journal_path.exists():
+            try:
+                document = json.loads(self.journal_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise TargetError("topology expansion journal is unreadable") from exc
+            if (
+                not isinstance(document, dict)
+                or document.get("schema_version") != 1
+                or document.get("release_id") != self.release_id
+                or document.get("input_sha256") != dict(inputs)
+                or (
+                    plan.get("status") == "eligible"
+                    and document.get("source_release") != plan.get("source_release")
+                )
+            ):
+                raise TargetError("topology expansion journal identity or inputs do not match")
+            if plan.get("status") not in {"eligible", "already_full"}:
+                raise TargetError(str(plan.get("reason")))
+            return document
+        if plan.get("status") != "eligible":
+            raise TargetError(str(plan.get("reason")))
+        conflicts = [
+            str(destination)
+            for destination, _user, _group, _mode in EXPANSION_INPUTS.values()
+            if _host_path(self.root, destination).exists()
+            or _host_path(self.root, destination).is_symlink()
+        ]
+        if conflicts:
+            raise TargetError(
+                "topology expansion refuses existing unowned inputs: "
+                + ", ".join(sorted(conflicts))
+            )
+        self.evidence_dir.mkdir(parents=True, mode=0o700)
+        os.chmod(self.evidence_dir, 0o700)
+        document: dict[str, object] = {
+            "schema_version": 1,
+            "release_id": self.release_id,
+            "source_release": plan["source_release"],
+            "status": "running",
+            "phase": "validated",
+            "input_sha256": dict(inputs),
+            "updated_at": int(time.time()),
+        }
+        _atomic_json(self.journal_path, document)
+        return document
+
+    def _install_inputs(self, inputs: Mapping[str, str]) -> None:
+        for name, (destination_value, user, group, mode) in EXPANSION_INPUTS.items():
+            source = self.secret_stage / name
+            destination = _host_path(self.root, destination_value)
+            if destination.exists() or destination.is_symlink():
+                if (
+                    destination.is_symlink()
+                    or not destination.is_file()
+                    or _file_sha256(destination) != inputs[name]
+                    or stat.S_IMODE(destination.stat().st_mode) != mode
+                ):
+                    raise TargetError(
+                        f"existing topology expansion input differs: {destination_value}"
+                    )
+                continue
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            temporary = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.tmp")
+            try:
+                shutil.copyfile(source, temporary)
+                os.chmod(temporary, mode)
+                self._chown(temporary, user, group)
+                os.replace(temporary, destination)
+            finally:
+                temporary.unlink(missing_ok=True)
+
+    def _chown(self, path: Path, user: str, group: str) -> None:
+        if not self.manage_ownership or self.root != Path("/"):
+            return
+        try:
+            uid = pwd.getpwnam(user).pw_uid
+            gid = grp.getgrnam(group).gr_gid
+        except KeyError as exc:
+            raise TargetError(f"required service identity is missing: {user}:{group}") from exc
+        os.chown(path, uid, gid)
+
+
 def guard_upload(payload: Mapping[str, object]) -> dict[str, object]:
     release_id = _release_id(payload)
     path = _VAR_TMP / f"eidolon-release-{release_id}"
@@ -1337,6 +1623,28 @@ def install(payload: Mapping[str, object]) -> dict[str, object]:
     ).install()
 
 
+def expand(payload: Mapping[str, object]) -> dict[str, object]:
+    release_id = _release_id(payload)
+    data = _fixed_data(payload)
+    _fixed_units(payload)
+    descriptor = _RELEASES / release_id / "release.json"
+    secret_stage = _VAR_TMP / f"eidolon-secrets-{release_id}"
+    if secret_stage.parent != _VAR_TMP or _STAGING_NAME.fullmatch(secret_stage.name) is None:
+        raise TargetError("topology expansion staging path is unsafe")
+    try:
+        from eidolon_deploy.manifest import load_release_descriptor
+    except ImportError as exc:
+        raise TargetError("prepared release deployment package is unavailable") from exc
+    release = load_release_descriptor(descriptor)
+    if release.release_id != release_id:
+        raise TargetError("prepared release identity mismatch")
+    return TopologyExpansionInstaller(
+        release=release,
+        secret_stage=secret_stage,
+        data=data,
+    ).install_inputs()
+
+
 def lifecycle(action: str, payload: Mapping[str, object]) -> dict[str, object]:
     _fixed_units(payload)
     try:
@@ -1474,6 +1782,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = foundation_install(payload)
         elif action == "app-ready":
             result = app_ready(payload)
+        elif action == "expansion-plan":
+            result = topology_expansion_plan(payload)
         elif action == "doctor-host":
             result = doctor_host(payload)
         elif action == "guard-upload":
@@ -1482,6 +1792,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = cleanup_stage(payload)
         elif action == "install":
             result = install(payload)
+        elif action == "expand":
+            result = expand(payload)
         elif action in {"start", "stop", "restart"}:
             result = lifecycle(action, payload)
         elif action == "rollback-plan":

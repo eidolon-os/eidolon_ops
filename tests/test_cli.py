@@ -42,6 +42,9 @@ class FakeController:
     def install(self, **kwargs):
         return self._result("install", kwargs)
 
+    def expand(self, **kwargs):
+        return self._result("expand", kwargs)
+
     def deploy(self, **kwargs):
         return self._result("deploy", kwargs)
 
@@ -71,6 +74,7 @@ def fake_controller(monkeypatch) -> None:
         (["doctor", "--release-id", "r1"], "doctor"),
         (["provision", "--apply"], "provision"),
         (["install", "--release-id", "r1", "--resume", "--apply"], "install"),
+        (["expand", "--release-id", "r1", "--resume", "--apply"], "expand"),
         (["deploy", "--release-id", "r1", "--activate"], "deploy"),
         (["update", "--release-id", "r1", "--resume"], "deploy"),
         (["start", "--dry-run"], "lifecycle"),
