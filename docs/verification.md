@@ -86,31 +86,28 @@ The final smoke used the committed Kernel revision plus these selected commits:
 Kernel   7de97bd8d87b7e3a84109053d1dd98e5f19b0058
 Data     d81086e2807f44ca0c0e43e31103cd85e6165a46
 Hub      96438a2507fb76ad025824873a99b213a99016ad
-Admin    02f96b7ca4fc0b662dcfdfdb0c8d2293d3cfd8d0
+Admin    1ac5c733811c785e70992f527e516fd715b86f5b
 Agent    309ba573f249f9376275e14a5cc2f5ea1049b022
 Channel  3bc7e3303fa2c06bcfe0a82dacacd390f7deb372
 Memory   303b6004c58abbf86eb311de1f4002748fa9457d
 SDK      8108970514d9fefd3d93e7466e91706a1681c331
 ```
 
-The archive smoke produced 8 exact-commit source archives plus the preparer, totalling 480 MiB under
-`/private/tmp/eidolon-full-product-bundle-20260809-final`. Channel accounts for 467 MiB after
-hydrating its 8 Git LFS model objects from the exact commit pointers. Each object was checked against the pointer
-SHA-256 and size;
-the final archive was scanned again and contained no LFS pointer payload. Four changed Admin production files were
-independently compared with their `02f96b7` Git blobs and matched byte-for-byte in the preceding identical-Admin
-archive smoke; the final Admin archive SHA remained `70a46467...382feb96`. The final Kernel archive SHA is
-`907d22f7...a625727`. The final Kernel `linux.py` and Admin `control_plane.py` archive bytes were also matched directly
-to their selected Git blobs. This smoke stopped after
-local bundle validation; it performed no upload or Pi-native preparation.
+The candidate bundle produced 8 exact-commit source archives plus the preparer and manifest under
+`/private/tmp/eidolon-release-bundles/20260809-full-r2`, totalling 503,483,477 bytes (480 MiB on disk). Channel accounts
+for 490,188,800 bytes after hydrating its 8 Git LFS model objects from the exact commit pointers. The bundler verified
+each source revision and archive digest and rejected all working-tree content. The Admin archive contains the three
+corrected unit blobs with SHA-256 values `bf6955a7...43e9eb1`, `755a0474...555405` and
+`127245ef...83ea65`, exactly matching the independent 14-unit matrix gate. This smoke stopped after local bundle and
+private-input validation; it performed no upload or Pi-native preparation.
 
 The final matrix was followed by 14/14 passing Kernel focused `tests/deploy/test_bundle.py` tests.
 
-The archive is **not a release candidate**. A later fail-closed Ops gate read all 14 systemd assets from the exact Git
-objects and rejected Admin `02f96b7ca4fc...`: `eidolon-bootstrapd.service`, `eidolon-local-api.service` and
-`eidolon-admin.service` each omit `/etc/eidolon/host.env`, contain `/srv/eidolon`, and fail the exact Admin `/opt`
-ExecStart contract. The gate exits before reset, bundle upload or activation. A new Admin commit and new exact bundle
-are required; working-tree edits are not accepted as release evidence.
+The prior `02f96b7` archive was not a release candidate because its three Admin units failed the FHS gate. That defect
+is resolved only by the pinned `1ac5c73` commit above. A real Pi install dry-run now reports
+`release_matrix.status=compatible` for 14 units and `pi-private-inputs-v1` validates all 14 private files. The same
+dry-run reports the Pi foundation as degraded because 9 apt packages and pinned uv/Node/NATS/LiveKit binaries are
+absent; `install --apply` must provision those before native release preparation.
 
 ## Foundation artifact evidence
 

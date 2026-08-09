@@ -11,18 +11,18 @@ The multi-repository root is not Git. The selected release commits remain explic
 | Kernel | `7de97bd8d87b7e3a84109053d1dd98e5f19b0058` | FHS release authority |
 | Data | `d81086e2807f44ca0c0e43e31103cd85e6165a46` | Data V2 + Workspace/runtime authority |
 | Hub | `96438a2507fb76ad025824873a99b213a99016ad` | Device/Hub authority |
-| Admin | `02f96b7ca4fc0b662dcfdfdb0c8d2293d3cfd8d0` | merged control-plane semantics + owner runtime projection |
+| Admin | `1ac5c733811c785e70992f527e516fd715b86f5b` | control-plane baseline plus isolated FHS Pi systemd fix |
 | Agent | `309ba573f249f9376275e14a5cc2f5ea1049b022` | session-authorized Companion brain + authority E2E |
 | Channel | `3bc7e3303fa2c06bcfe0a82dacacd390f7deb372` | Data/Kernel resolver + LiveKit v5 token E2E |
 | Memory | `303b6004c58abbf86eb311de1f4002748fa9457d` | supervisor/discovery, no direct Data integration |
 | SDK | `8108970514d9fefd3d93e7466e91706a1681c331` | runtime-authority/session support source |
 
-The application commits contain the required runtime-session changes, but this exact matrix is **not a deployable
-release**. The upload preflight reads all 14 systemd units directly from their Git objects and rejects the three Admin
-units in `02f96b7`: they omit `/etc/eidolon/host.env`, execute from `/srv/eidolon`, and do not use the exact
-`/opt/eidolon/current/eidolon_admin/` component root. No Pi cleanup/upload/activation may run until Admin has a clean
-commit containing FHS-correct units and the matrix pin is updated. Current sibling branches and dirty working trees are
-deliberately outside the release input: Ops does not stage, overwrite or copy them.
+The selected matrix is now a deployable **candidate**: Admin commit `1ac5c73` was created from `02f96b7` in an
+isolated worktree and changes only its three Pi systemd units. The upload preflight read all 14 units directly from
+their Git objects and accepted the `/etc/eidolon/host.env`, `/opt/eidolon/current/eidolon_admin/` and FHS state-path
+contracts. The exact 8-source bundle and the 14-file private-input contract also passed locally. Current sibling
+branches and dirty working trees remain outside the release input: Ops does not stage, overwrite or copy them. The
+candidate is not production-qualified until target-native preparation, activation and hardware acceptance pass.
 
 ## Authority and dependency topology
 
@@ -82,7 +82,7 @@ foundation provision, first install, 14-unit lifecycle/status/logs/diagnostics a
 
 ## Safety conclusion
 
-The implementation is ready for further isolated review, but the selected release matrix is currently blocked by the
-three Admin systemd assets above. It is not safe to run the destructive install against the Pi until a corrected Admin
-commit is pinned and a new exact bundle passes. Native build, systemd verify, network transition, reboot, rollback
-injection, thermal/resource soak and real-phone commissioning also remain hardware acceptance work.
+The selected release matrix, exact bundle and private inputs pass the Mac-side gates, so the candidate is ready for
+an explicitly authorized clean-install test on the Pi. It is not yet safe to call production-ready: target-native
+build, systemd verification, activation health, network transition, reboot, rollback injection, thermal/resource soak
+and real-phone commissioning remain hardware acceptance work.
