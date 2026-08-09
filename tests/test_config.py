@@ -64,7 +64,7 @@ def test_rejects_wrong_schema(config_path: Path) -> None:
 def test_rejects_unreviewed_foundation_profile(config_path: Path) -> None:
     _replace(
         config_path,
-        'profile = "raspberry-pi-os-debian-arm64-v1"',
+        'profile = "raspberry-pi-os-debian-arm64-v2"',
         'profile = "operator-controlled"',
     )
 

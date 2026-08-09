@@ -38,11 +38,16 @@ Git commit；7 个运行 component 一起切换，SDK 只作构建输入。
 `app-ready` 是 Host 侧门禁，不是假装跑过真实手机。`client-web`、Audit worker、Vision 和手机安装包本身
 不是 Pi 产品 unit；它们不属于“手机 App 可管理 Host”所需的后端范围。
 
+当前固定发布矩阵仍有产品级硬门禁：没有进程实现 Hub 配置所需的 8090 Channel Provider
+`device-channels/provision|revoke`，固定 Admin 也没有 Mobile 消费的 Local API onboarding target/admission
+端点。因此 14 个 unit 即使全部健康，也只能报告为后端运行，不能报告为“App 开箱即管/可对话”。Ops
+不会用 mDNS listener 或临时兼容服务掩盖这些缺口。
+
 ## 基础环境 profile
 
-`raspberry-pi-os-debian-arm64-v1` 会先只读检测，再在 `--apply` 时安装：
+`raspberry-pi-os-debian-arm64-v2` 会先只读检测，再在 `--apply` 时通过受限的 Debian 官方登记 HTTPS 镜像安装：
 
-- Debian/Raspberry Pi OS 12/13、aarch64、真实 Raspberry Pi model、systemd PID 1；
+- Debian/Raspberry Pi OS 13、aarch64、真实 Raspberry Pi model、systemd PID 1；
 - 8 GiB-class RAM 与至少 12 GiB 可用磁盘；
 - BlueZ、NetworkManager、Avahi、FFmpeg、Git LFS、SQLite、编译与音频/运行库；
 - SHA-256 固定的 NATS Server 2.14.0、LiveKit Server 1.11.0、Node 22.23.2；
@@ -51,7 +56,7 @@ Git commit；7 个运行 component 一起切换，SDK 只作构建输入。
 
 Python 缺失时，CLI 通过受限 shell bootstrap 先验证同一硬件/OS/容量门禁，再安装 Python。下载使用固定
 URL/digest、原子缓存和版本目录；不会用 rsync 覆盖任何工作树。Foundation 每个阶段与失败原因写入
-`/var/lib/eidolon/ops/foundation-v1.json`，可诊断、可幂等重试。
+`/var/lib/eidolon-ops/foundation-v2.json`，与产品 authority namespace 隔离，可诊断、可幂等重试。
 
 ## 安装与配置
 

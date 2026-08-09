@@ -46,6 +46,25 @@ PRODUCT_UNITS = (
     "eidolon-agent.service",
     "eidolon-channel.service",
 )
+# Stop control/reconciliation entry points before their managed workers.  In
+# particular, an active legacy eidolond can race a later Kernel stop with a
+# start transaction and make systemd cancel the reset job.
+RESET_STOP_UNITS = (
+    "eidolon-admin.service",
+    "eidolon-local-api.service",
+    "eidolond.service",
+    "eidolon-bootstrapd.service",
+    "eidolon-channel.service",
+    "eidolon-agent.service",
+    "eidolon-memory-discovery.service",
+    "eidolon-memory-supervisor.service",
+    "eidolon-livekit.service",
+    "eidolon-nats.service",
+    "eidolon-kernel.service",
+    "eidolon-hub.service",
+    "eidolon-data-workspace.service",
+    "eidolon-data.service",
+)
 DIRECT_ENABLE_UNITS = (
     "eidolon-bootstrapd.service",
     "eidolond.service",
@@ -190,9 +209,20 @@ _PHASES = (
     "started",
     "completed",
 )
-_FOUNDATION_PROFILE = "raspberry-pi-os-debian-arm64-v1"
+_FOUNDATION_PROFILE = "raspberry-pi-os-debian-arm64-v2"
 _FOUNDATION_OS_IDS = ("debian", "raspbian")
-_FOUNDATION_OS_VERSIONS = ("12", "13")
+_FOUNDATION_OS_VERSIONS = ("13",)
+_FOUNDATION_APT_MIRRORS = {
+    "debian": "https://mirror.nju.edu.cn/debian/",
+    "raspberrypi": "https://archive.raspberrypi.com/debian/",
+    "security": "https://mirror.nju.edu.cn/debian-security/",
+}
+_APT_COMMAND_OPTIONS = (
+    "-o",
+    "Acquire::ForceIPv4=true",
+    "-o",
+    "Acquire::Retries=3",
+)
 _FOUNDATION_PACKAGES = (
     "alsa-utils",
     "avahi-daemon",
@@ -210,7 +240,7 @@ _FOUNDATION_PACKAGES = (
     "libatomic1",
     "libffi-dev",
     "libgl1",
-    "libglib2.0-0",
+    "libglib2.0-0t64",
     "libgomp1",
     "libnss-mdns",
     "libsndfile1",
@@ -220,7 +250,8 @@ _FOUNDATION_PACKAGES = (
     "network-manager",
     "ninja-build",
     "pkg-config",
-    "policykit-1",
+    "pkexec",
+    "polkitd",
     "python3",
     "python3-pip",
     "python3-venv",
@@ -238,10 +269,7 @@ _FOUNDATION_ARTIFACTS = (
     {
         "artifact_id": "nats-server",
         "version": "2.14.0",
-        "url": (
-            "https://github.com/nats-io/nats-server/releases/download/"
-            "v2.14.0/nats-server-v2.14.0-linux-arm64.tar.gz"
-        ),
+        "url": "https://api.github.com/repos/nats-io/nats-server/releases/assets/409045586",
         "sha256": "ce7dc5f7d97b70dabc38b13157fed28d7d06227860676143c15c62c5c297996c",
         "kind": "tar-binary",
         "executable": "nats-server",
@@ -249,10 +277,7 @@ _FOUNDATION_ARTIFACTS = (
     {
         "artifact_id": "livekit-server",
         "version": "1.11.0",
-        "url": (
-            "https://github.com/livekit/livekit/releases/download/"
-            "v1.11.0/livekit_1.11.0_linux_arm64.tar.gz"
-        ),
+        "url": "https://api.github.com/repos/livekit/livekit/releases/assets/398737306",
         "sha256": "6741466bc12e75544338292ab2c1c02c02f3c626568230b5548fffc53e5a87ff",
         "kind": "tar-binary",
         "executable": "livekit-server",
@@ -260,7 +285,12 @@ _FOUNDATION_ARTIFACTS = (
     {
         "artifact_id": "uv",
         "version": "0.11.15",
-        "url": "https://pypi.org/project/uv/0.11.15/",
+        "url": (
+            "https://files.pythonhosted.org/packages/af/50/"
+            "4bc8a148274feabee2d9c9f1fa15009e10c0228dfe57981ee3ea2ef1d481/"
+            "uv-0.11.15-py3-none-manylinux_2_17_aarch64."
+            "manylinux2014_aarch64.musllinux_1_1_aarch64.whl"
+        ),
         "sha256": "c0cf52cd6d50bb9e05e2d968f45f80761107e4cbc8d4a26d9758f9d8274aaec1",
         "kind": "pip-wheel",
         "executable": "uv",
@@ -280,7 +310,7 @@ _FOUNDATION_VERSION_PREFIXES = {
     "uv": ("uv 0.11.15",),
     "node": ("v22.23.2",),
 }
-_FOUNDATION_EVIDENCE = Path("/var/lib/eidolon/ops/foundation-v1.json")
+_FOUNDATION_EVIDENCE = Path("/var/lib/eidolon-ops/foundation-v2.json")
 _FOUNDATION_CACHE = Path("/var/cache/eidolon/ops/artifacts")
 _FOUNDATION_LIBRARY = Path("/usr/local/lib/eidolon-foundation")
 _FOUNDATION_LOCK = Path("/run/lock/eidolon-foundation.lock")
@@ -604,6 +634,7 @@ def _expected_foundation() -> dict[str, object]:
         "architecture": "aarch64",
         "os_ids": list(_FOUNDATION_OS_IDS),
         "os_versions": list(_FOUNDATION_OS_VERSIONS),
+        "apt_mirrors": dict(_FOUNDATION_APT_MIRRORS),
         "apt_packages": list(_FOUNDATION_PACKAGES),
         "services": list(_FOUNDATION_SERVICES),
         "artifacts": [dict(artifact) for artifact in _FOUNDATION_ARTIFACTS],
@@ -699,18 +730,35 @@ def foundation_doctor(payload: Mapping[str, object]) -> dict[str, object]:
         for artifact in contract["artifacts"]
     }
     services = {unit: _service_status(unit) for unit in contract["services"]}
-    healthy = (
-        all(platform_checks.values())
-        and all(packages.values())
-        and all(bool(item["healthy"]) for item in artifacts.values())
-        and all(bool(item["healthy"]) for item in services.values())
-    )
     evidence: object = None
     if _FOUNDATION_EVIDENCE.is_file():
         try:
             evidence = json.loads(_FOUNDATION_EVIDENCE.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             evidence = {"status": "unreadable"}
+    expected_artifacts = {
+        artifact["artifact_id"]: {
+            "version": artifact["version"],
+            "sha256": artifact["sha256"],
+        }
+        for artifact in contract["artifacts"]
+    }
+    evidence_healthy = (
+        isinstance(evidence, dict)
+        and evidence.get("schema_version") == 1
+        and evidence.get("profile") == _FOUNDATION_PROFILE
+        and evidence.get("status") == "installed"
+        and evidence.get("phase") == "completed"
+        and evidence.get("error") is None
+        and evidence.get("artifacts") == expected_artifacts
+    )
+    healthy = (
+        all(platform_checks.values())
+        and all(packages.values())
+        and all(bool(item["healthy"]) for item in artifacts.values())
+        and all(bool(item["healthy"]) for item in services.values())
+        and evidence_healthy
+    )
     return {
         "status": "healthy" if healthy else "degraded",
         "profile": _FOUNDATION_PROFILE,
@@ -719,38 +767,67 @@ def foundation_doctor(payload: Mapping[str, object]) -> dict[str, object]:
         "artifacts": artifacts,
         "services": services,
         "evidence": evidence,
+        "evidence_healthy": evidence_healthy,
     }
 
 
 def _download_verified(artifact: Mapping[str, str]) -> Path:
     _FOUNDATION_CACHE.mkdir(parents=True, exist_ok=True, mode=0o755)
-    suffix = ".tar.xz" if artifact["kind"] == "node-tar" else ".tar.gz"
-    destination = _FOUNDATION_CACHE / f"{artifact['artifact_id']}-{artifact['version']}{suffix}"
+    suffixes = {
+        "node-tar": ".tar.xz",
+        "pip-wheel": ".whl",
+        "tar-binary": ".tar.gz",
+    }
+    try:
+        suffix = suffixes[artifact["kind"]]
+    except KeyError as exc:
+        raise TargetError(f"unsupported foundation artifact kind: {artifact['kind']}") from exc
+    filename = f"{artifact['artifact_id']}-{artifact['version']}{suffix}"
+    if artifact["kind"] == "pip-wheel":
+        filename = PurePosixPath(artifact["url"].split("?", 1)[0]).name
+        if not filename.endswith(".whl") or "/" in filename or filename in {"", ".", ".."}:
+            raise TargetError("pip wheel URL does not contain a valid filename")
+    destination = _FOUNDATION_CACHE / filename
     if destination.is_file() and _file_sha256(destination) == artifact["sha256"]:
         return destination
-    temporary = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.tmp")
-    try:
-        _checked(
-            f"download {artifact['artifact_id']}",
-            (
-                "/usr/bin/curl",
-                "--fail",
-                "--location",
-                "--retry",
-                "3",
-                "--retry-all-errors",
-                "--output",
-                str(temporary),
-                artifact["url"],
-            ),
-            timeout=900,
+    temporary = destination.with_name(f".{destination.name}.partial")
+    headers = ()
+    if artifact["url"].startswith("https://api.github.com/"):
+        headers = (
+            "--header",
+            "Accept: application/octet-stream",
+            "--header",
+            "X-GitHub-Api-Version: 2022-11-28",
         )
-        if _file_sha256(temporary) != artifact["sha256"]:
-            raise TargetError(f"downloaded artifact hash mismatch: {artifact['artifact_id']}")
-        os.chmod(temporary, 0o644)
-        os.replace(temporary, destination)
-    finally:
+    _checked(
+        f"download {artifact['artifact_id']}",
+        (
+            "/usr/bin/curl",
+            "--fail",
+            "--location",
+            "--retry",
+            "3",
+            "--retry-all-errors",
+            "--connect-timeout",
+            "20",
+            "--speed-limit",
+            "1024",
+            "--speed-time",
+            "60",
+            "--continue-at",
+            "-",
+            *headers,
+            "--output",
+            str(temporary),
+            artifact["url"],
+        ),
+        timeout=900,
+    )
+    if _file_sha256(temporary) != artifact["sha256"]:
         temporary.unlink(missing_ok=True)
+        raise TargetError(f"downloaded artifact hash mismatch: {artifact['artifact_id']}")
+    os.chmod(temporary, 0o644)
+    os.replace(temporary, destination)
     return destination
 
 
@@ -843,10 +920,11 @@ def _install_uv(artifact: Mapping[str, str]) -> None:
     path = _LOCAL_BIN / "uv"
     if path.exists() or path.is_symlink():
         raise TargetError(f"refusing to replace unmanaged executable: {path}")
+    wheel = _download_verified(artifact)
     requirement = _VAR_TMP / f"eidolon-uv-{uuid.uuid4().hex}.txt"
     try:
         requirement.write_text(
-            f"uv=={artifact['version']} --hash=sha256:{artifact['sha256']}\n",
+            f"uv @ {wheel.as_uri()} --hash=sha256:{artifact['sha256']}\n",
             encoding="utf-8",
         )
         os.chmod(requirement, 0o600)
@@ -860,6 +938,7 @@ def _install_uv(artifact: Mapping[str, str]) -> None:
                 "--break-system-packages",
                 "--disable-pip-version-check",
                 "--no-deps",
+                "--no-index",
                 "--only-binary=:all:",
                 "--require-hashes",
                 "--requirement",
@@ -869,6 +948,59 @@ def _install_uv(artifact: Mapping[str, str]) -> None:
         )
     finally:
         requirement.unlink(missing_ok=True)
+
+
+@contextmanager
+def _foundation_apt_options(contract: Mapping[str, object]) -> Iterator[tuple[str, ...]]:
+    version = _os_release().get("VERSION_ID", "").split(".", 1)[0]
+    suites = {"13": "trixie"}
+    if version not in suites:
+        raise TargetError("foundation apt mirror requires reviewed Debian version")
+    mirrors = contract["apt_mirrors"]
+    if not isinstance(mirrors, dict):
+        raise TargetError("foundation apt mirror contract is invalid")
+    suite = suites[version]
+    with tempfile.TemporaryDirectory(prefix="eidolon-apt-") as temporary:
+        root = Path(temporary)
+        source_parts = root / "parts"
+        lists = root / "lists"
+        source_parts.mkdir()
+        (lists / "partial").mkdir(parents=True)
+        sources = root / "eidolon.sources"
+        sources.write_text(
+            "\n".join(
+                (
+                    "Types: deb",
+                    f"URIs: {mirrors['debian']}",
+                    f"Suites: {suite} {suite}-updates",
+                    "Components: main contrib non-free non-free-firmware",
+                    "Signed-By: /usr/share/keyrings/debian-archive-keyring.pgp",
+                    "",
+                    "Types: deb",
+                    f"URIs: {mirrors['raspberrypi']}",
+                    f"Suites: {suite}",
+                    "Components: main",
+                    "Signed-By: /usr/share/keyrings/raspberrypi-archive-keyring.pgp",
+                    "",
+                    "Types: deb",
+                    f"URIs: {mirrors['security']}",
+                    f"Suites: {suite}-security",
+                    "Components: main contrib non-free non-free-firmware",
+                    "Signed-By: /usr/share/keyrings/debian-archive-keyring.pgp",
+                    "",
+                )
+            ),
+            encoding="utf-8",
+        )
+        yield (
+            *_APT_COMMAND_OPTIONS,
+            "-o",
+            f"Dir::Etc::sourcelist={sources}",
+            "-o",
+            f"Dir::Etc::sourceparts={source_parts}",
+            "-o",
+            f"Dir::State::lists={lists}",
+        )
 
 
 def foundation_install(payload: Mapping[str, object]) -> dict[str, object]:
@@ -912,24 +1044,26 @@ def foundation_install(payload: Mapping[str, object]) -> dict[str, object]:
         try:
             environment = dict(os.environ)
             environment["DEBIAN_FRONTEND"] = "noninteractive"
-            _checked(
-                "refresh apt metadata",
-                ("/usr/bin/apt-get", "update"),
-                timeout=900,
-                env=environment,
-            )
-            _checked(
-                "install foundation packages",
-                (
-                    "/usr/bin/apt-get",
-                    "install",
-                    "-y",
-                    "--no-install-recommends",
-                    *contract["apt_packages"],
-                ),
-                timeout=1800,
-                env=environment,
-            )
+            with _foundation_apt_options(contract) as apt_options:
+                _checked(
+                    "refresh apt metadata",
+                    ("/usr/bin/apt-get", *apt_options, "update"),
+                    timeout=900,
+                    env=environment,
+                )
+                _checked(
+                    "install foundation packages",
+                    (
+                        "/usr/bin/apt-get",
+                        *apt_options,
+                        "install",
+                        "-y",
+                        "--no-install-recommends",
+                        *contract["apt_packages"],
+                    ),
+                    timeout=1800,
+                    env=environment,
+                )
             phase = "packages"
             record("installing", phase)
             for artifact in contract["artifacts"]:
@@ -950,15 +1084,13 @@ def foundation_install(payload: Mapping[str, object]) -> dict[str, object]:
                     ("/usr/bin/systemctl", "enable", "--now", unit),
                     timeout=120,
                 )
-            phase = "services"
-            record("verifying", phase)
+            phase = "completed"
+            record("installed", phase)
             result = foundation_doctor(payload)
             if result["status"] != "healthy":
                 raise TargetError(
                     "foundation installation completed but the health gate is degraded"
                 )
-            phase = "completed"
-            record("installed", phase)
             result["evidence"] = dict(evidence)
             return {
                 "status": "installed",
@@ -1020,17 +1152,21 @@ def app_ready(payload: Mapping[str, object]) -> dict[str, object]:
     """Prove the host-side prerequisites for mobile App commissioning."""
 
     _fixed_units(payload)
-    preflight_result = _run((str(_APP_PREFLIGHT),), timeout=60)
-    if preflight_result.returncode not in {0, 1}:
-        preflight: object = {
-            "ok": False,
-            "error": preflight_result.stderr.strip() or "Bootstrap preflight could not run",
-        }
+    try:
+        preflight_result = _run((str(_APP_PREFLIGHT),), timeout=60)
+    except TargetError as exc:
+        preflight: object = {"ok": False, "error": str(exc)}
     else:
-        try:
-            preflight = json.loads(preflight_result.stdout)
-        except json.JSONDecodeError:
-            preflight = {"ok": False, "error": "Bootstrap preflight output is invalid"}
+        if preflight_result.returncode not in {0, 1}:
+            preflight = {
+                "ok": False,
+                "error": preflight_result.stderr.strip() or "Bootstrap preflight could not run",
+            }
+        else:
+            try:
+                preflight = json.loads(preflight_result.stdout)
+            except json.JSONDecodeError:
+                preflight = {"ok": False, "error": "Bootstrap preflight output is invalid"}
     services = {
         unit: _unit_status(unit)
         for unit in (
@@ -2143,7 +2279,7 @@ def reset_host(
     lock_path = _host_path(root, Path("/run/lock/eidolon-install.lock"))
     with _exclusive(lock_path):
         if manage_services:
-            for unit in reversed(PRODUCT_UNITS):
+            for unit in RESET_STOP_UNITS:
                 observed = command(
                     (
                         "/usr/bin/systemctl",

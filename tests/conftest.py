@@ -53,7 +53,7 @@ def config_path(tmp_path: Path) -> Path:
 schema_version = 1
 
 [foundation]
-profile = "raspberry-pi-os-debian-arm64-v1"
+profile = "raspberry-pi-os-debian-arm64-v2"
 
 [host]
 user = "pi"

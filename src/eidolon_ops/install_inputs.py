@@ -246,6 +246,40 @@ def validate_install_input_contract(
     ):
         raise InstallInputError("install input env key set drifted: channel.env")
 
+    provider_destinations = {
+        "eidolon_agent": "agent.env",
+        "eidolon_channel": "channel.env",
+        "eidolon_memory": "memory.env",
+    }
+    current_providers = {
+        source_id: _parse_provider_env(config.sources[source_id].path / "config/.env")
+        for source_id in _EXTERNAL_KEYS
+    }
+    for source_id, keys in _EXTERNAL_KEYS.items():
+        destination = envs[provider_destinations[source_id]]
+        for key in keys:
+            current = current_providers[source_id].get(key)
+            if not _usable_secret(current, key=key):
+                raise InstallInputError(
+                    f"current Mac provider credential is missing or a placeholder: {source_id}:{key}"
+                )
+            if destination.get(key) != current:
+                raise InstallInputError(
+                    f"install input provider credential drifted from Mac: {source_id}:{key}"
+                )
+    for key in _OPTIONAL_CHANNEL_KEYS:
+        current = current_providers["eidolon_channel"].get(key)
+        installed = envs["channel.env"].get(key)
+        if _usable_secret(current, key=key):
+            if installed != current:
+                raise InstallInputError(
+                    f"install input provider credential drifted from Mac: eidolon_channel:{key}"
+                )
+        elif installed is not None:
+            raise InstallInputError(
+                f"install input provider credential drifted from Mac: eidolon_channel:{key}"
+            )
+
     data = envs["data.env"]
     hub = envs["hub.env"]
     kernel = envs["kernel.env"]

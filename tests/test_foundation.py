@@ -18,6 +18,9 @@ import pytest
 
 from eidolon_ops import target_agent
 from eidolon_ops.foundation import (
+    APT_COMMAND_OPTIONS,
+    APT_MIRRORS,
+    APT_PACKAGES,
     FOUNDATION_ARTIFACTS,
     foundation_payload,
     python_bootstrap_script,
@@ -34,7 +37,18 @@ def _foundation_request() -> dict[str, object]:
 
 def test_foundation_scripts_and_target_contract_are_exact() -> None:
     assert b'"python3":true' in python_probe_script()
-    assert b"apt-get install" in python_bootstrap_script()
+    assert b"install -y --no-install-recommends" in python_bootstrap_script()
+    assert b"Acquire::ForceIPv4=true" in python_bootstrap_script()
+    assert b"https://mirror.nju.edu.cn/debian/" in python_bootstrap_script()
+    assert b"https://archive.raspberrypi.com/debian/" in python_bootstrap_script()
+    assert target_agent._APT_COMMAND_OPTIONS == APT_COMMAND_OPTIONS
+    assert target_agent._FOUNDATION_APT_MIRRORS == APT_MIRRORS
+    assert Path("/var/lib/eidolon-ops/foundation-v2.json") == (target_agent._FOUNDATION_EVIDENCE)
+    assert not any(
+        root == target_agent._FOUNDATION_EVIDENCE
+        or root in target_agent._FOUNDATION_EVIDENCE.parents
+        for root in target_agent.RESET_AUTHORITY_ROOTS
+    )
     assert target_agent._foundation_contract(_foundation_request()) == foundation_payload()
 
     changed = _foundation_request()
@@ -43,11 +57,18 @@ def test_foundation_scripts_and_target_contract_are_exact() -> None:
         target_agent._foundation_contract(changed)
 
 
+def test_foundation_uses_direct_debian_13_package_names() -> None:
+    assert "policykit-1" not in APT_PACKAGES
+    assert {"polkitd", "pkexec"} <= set(APT_PACKAGES)
+    assert "libglib2.0-0" not in APT_PACKAGES
+    assert "libglib2.0-0t64" in APT_PACKAGES
+
+
 def test_platform_checks_cover_os_init_memory_and_disk(monkeypatch) -> None:
     monkeypatch.setattr(
         target_agent,
         "_os_release",
-        lambda: {"ID": "raspbian", "ID_LIKE": "debian", "VERSION_ID": "12"},
+        lambda: {"ID": "raspbian", "ID_LIKE": "debian", "VERSION_ID": "13"},
     )
     monkeypatch.setattr(target_agent.platform, "system", lambda: "Linux")
     monkeypatch.setattr(target_agent.platform, "machine", lambda: "aarch64")
@@ -75,7 +96,22 @@ def test_platform_checks_cover_os_init_memory_and_disk(monkeypatch) -> None:
 
 def test_foundation_doctor_composes_every_gate(monkeypatch, tmp_path: Path) -> None:
     evidence = tmp_path / "foundation.json"
-    evidence.write_text('{"status":"installed"}\n', encoding="utf-8")
+    contract = foundation_payload()
+    evidence_document = {
+        "schema_version": 1,
+        "profile": contract["profile"],
+        "status": "installed",
+        "phase": "completed",
+        "error": None,
+        "artifacts": {
+            artifact["artifact_id"]: {
+                "version": artifact["version"],
+                "sha256": artifact["sha256"],
+            }
+            for artifact in contract["artifacts"]
+        },
+    }
+    evidence.write_text(json.dumps(evidence_document), encoding="utf-8")
     monkeypatch.setattr(target_agent, "_FOUNDATION_EVIDENCE", evidence)
     monkeypatch.setattr(
         target_agent,
@@ -97,9 +133,16 @@ def test_foundation_doctor_composes_every_gate(monkeypatch, tmp_path: Path) -> N
     result = target_agent.foundation_doctor(_foundation_request())
 
     assert result["status"] == "healthy"
-    assert result["evidence"] == {"status": "installed"}
+    assert result["evidence"] == evidence_document
+    assert result["evidence_healthy"] is True
     assert set(result["artifacts"]) == {item.artifact_id for item in FOUNDATION_ARTIFACTS}
 
+    evidence.unlink()
+    missing_evidence = target_agent.foundation_doctor(_foundation_request())
+    assert missing_evidence["status"] == "degraded"
+    assert missing_evidence["evidence_healthy"] is False
+
+    evidence.write_text(json.dumps(evidence_document), encoding="utf-8")
     monkeypatch.setattr(target_agent, "_package_installed", lambda _package: False)
     assert target_agent.foundation_doctor(_foundation_request())["status"] == "degraded"
 
@@ -109,16 +152,18 @@ def test_download_is_hash_verified_cached_and_atomic(monkeypatch, tmp_path: Path
     artifact = {
         "artifact_id": "test",
         "version": "1",
-        "url": "https://example.invalid/test.tar.gz",
+        "url": "https://api.github.com/repos/example/releases/assets/1",
         "sha256": hashlib.sha256(payload).hexdigest(),
         "kind": "tar-binary",
         "executable": "test",
     }
     monkeypatch.setattr(target_agent, "_FOUNDATION_CACHE", tmp_path / "cache")
     calls: list[str] = []
+    commands: list[tuple[str, ...]] = []
 
     def fake_checked(operation, command, **_kwargs):
         calls.append(operation)
+        commands.append(tuple(command))
         destination = Path(command[command.index("--output") + 1])
         destination.write_bytes(payload)
         return subprocess.CompletedProcess(command, 0, "", "")
@@ -131,6 +176,58 @@ def test_download_is_hash_verified_cached_and_atomic(monkeypatch, tmp_path: Path
     assert first == second
     assert first.read_bytes() == payload
     assert calls == ["download test"]
+    assert "Accept: application/octet-stream" in commands[0]
+    assert "--continue-at" in commands[0]
+
+
+def test_download_keeps_stable_partial_for_next_provision(monkeypatch, tmp_path: Path) -> None:
+    artifact = {
+        "artifact_id": "test",
+        "version": "1",
+        "url": "https://example.invalid/test.tar.gz",
+        "sha256": "0" * 64,
+        "kind": "tar-binary",
+        "executable": "test",
+    }
+    cache = tmp_path / "cache"
+    monkeypatch.setattr(target_agent, "_FOUNDATION_CACHE", cache)
+
+    def interrupted(_operation, command, **_kwargs):
+        Path(command[command.index("--output") + 1]).write_bytes(b"partial")
+        raise TargetError("network interrupted")
+
+    monkeypatch.setattr(target_agent, "_checked", interrupted)
+
+    with pytest.raises(TargetError, match="network interrupted"):
+        target_agent._download_verified(artifact)
+
+    assert (cache / ".test-1.tar.gz.partial").read_bytes() == b"partial"
+
+
+def test_download_uses_wheel_suffix_and_rejects_unknown_kind(monkeypatch, tmp_path: Path) -> None:
+    payload = b"wheel"
+    cache = tmp_path / "cache"
+    monkeypatch.setattr(target_agent, "_FOUNDATION_CACHE", cache)
+
+    def downloaded(_operation, command, **_kwargs):
+        Path(command[command.index("--output") + 1]).write_bytes(payload)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(target_agent, "_checked", downloaded)
+    artifact = {
+        "artifact_id": "uv",
+        "version": "1",
+        "url": "https://example.invalid/uv.whl",
+        "sha256": hashlib.sha256(payload).hexdigest(),
+        "kind": "pip-wheel",
+        "executable": "uv",
+    }
+
+    assert target_agent._download_verified(artifact).name == "uv.whl"
+    with pytest.raises(TargetError, match="unsupported foundation artifact kind"):
+        target_agent._download_verified({**artifact, "kind": "unknown"})
+    with pytest.raises(TargetError, match="valid filename"):
+        target_agent._download_verified({**artifact, "url": "https://example.invalid/not-a-wheel"})
 
 
 def _binary_archive(path: Path, name: str, payload: bytes) -> None:
@@ -216,6 +313,9 @@ def test_pinned_uv_install_uses_hash_requirement(monkeypatch, tmp_path: Path) ->
     monkeypatch.setattr(target_agent, "_LOCAL_BIN", local_bin)
     monkeypatch.setattr(target_agent, "_VAR_TMP", tmp_path)
     monkeypatch.setattr(target_agent, "_binary_version", lambda _name: {"healthy": False})
+    wheel = tmp_path / "uv.whl"
+    wheel.write_bytes(b"wheel")
+    monkeypatch.setattr(target_agent, "_download_verified", lambda _artifact: wheel)
     calls: list[tuple[str, ...]] = []
 
     def fake_checked(_operation, command, **_kwargs):
@@ -231,10 +331,14 @@ def test_pinned_uv_install_uses_hash_requirement(monkeypatch, tmp_path: Path) ->
     target_agent._install_uv(artifact)
 
     assert "--require-hashes" in calls[0]
+    assert "--no-index" in calls[0]
+    requirement = next(part for part in calls[0] if part.endswith(".txt"))
+    assert not Path(requirement).exists()
 
 
 def test_foundation_install_runs_locked_idempotent_phases(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(target_agent.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(target_agent, "_os_release", lambda: {"VERSION_ID": "13"})
     monkeypatch.setattr(target_agent, "_FOUNDATION_LOCK", tmp_path / "foundation.lock")
     monkeypatch.setattr(target_agent, "_FOUNDATION_EVIDENCE", tmp_path / "evidence.json")
     monkeypatch.setattr(
@@ -277,6 +381,7 @@ def test_foundation_install_runs_locked_idempotent_phases(monkeypatch, tmp_path:
     assert result["status"] == "installed"
     assert installed == ["nats-server", "livekit-server", "uv", "node"]
     assert any("apt-get" in call[0] for call in commands)
+    assert any(any(part.startswith("Dir::Etc::sourcelist=") for part in call) for call in commands)
     assert json.loads((tmp_path / "evidence.json").read_text())["profile"] == result["profile"]
 
 
@@ -400,6 +505,7 @@ def test_foundation_low_level_checks_and_failure_evidence(monkeypatch, tmp_path:
     assert target_agent._service_status("bluetooth.service")["healthy"]
 
     monkeypatch.setattr(target_agent.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(target_agent, "_os_release", lambda: {"VERSION_ID": "13"})
     monkeypatch.setattr(target_agent, "_FOUNDATION_LOCK", tmp_path / "foundation.lock")
     evidence = tmp_path / "foundation.json"
     monkeypatch.setattr(target_agent, "_FOUNDATION_EVIDENCE", evidence)
@@ -539,6 +645,15 @@ def test_app_ready_returns_degraded_evidence(monkeypatch, tmp_path: Path) -> Non
     assert result["status"] == "degraded"
     assert result["preflight"]["error"] == "missing"
     assert result["local_api"]["error"] == "offline"
+
+    monkeypatch.setattr(
+        target_agent,
+        "_run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(TargetError("not installed")),
+    )
+    absent = target_agent.app_ready({"units": list(target_agent.PRODUCT_UNITS)})
+    assert absent["status"] == "degraded"
+    assert absent["preflight"]["error"] == "not installed"
 
 
 def test_target_main_routes_all_actions_and_errors(monkeypatch, capsys) -> None:

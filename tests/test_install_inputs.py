@@ -165,6 +165,31 @@ def test_initializer_fails_before_writing_when_provider_key_is_missing(
     assert not next(iter(configured.install_files.values())).parent.exists()
 
 
+def test_validator_rejects_required_provider_drift_from_mac(config, tmp_path: Path) -> None:
+    configured = _config_for_init(config, tmp_path)
+    initialize_install_inputs(configured, _settings_reader)
+    source = configured.sources["eidolon_agent"].path / "config/.env"
+    source.write_text("EIDOLON_AGENT_LLM_API_KEY=replaced-on-mac\n", encoding="utf-8")
+
+    with pytest.raises(InstallInputError, match="credential drifted from Mac"):
+        validate_install_input_contract(configured, _settings_reader)
+
+
+def test_validator_rejects_optional_provider_drift_from_mac(config, tmp_path: Path) -> None:
+    configured = _config_for_init(config, tmp_path)
+    initialize_install_inputs(configured, _settings_reader)
+    source = configured.sources["eidolon_channel"].path / "config/.env"
+    source.write_text(
+        "OPENAI_LLM_API_KEY=channel-llm-key\n"
+        "BAILIAN_STT_API_KEY=channel-stt-key\n"
+        "BAILIAN_TTS_API_KEY=channel-tts-key\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(InstallInputError, match="SENSETIME_STT_API_KEY"):
+        validate_install_input_contract(configured, _settings_reader)
+
+
 def test_initializer_fails_closed_on_exact_settings_drift(config, tmp_path: Path) -> None:
     configured = _config_for_init(config, tmp_path)
 

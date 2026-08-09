@@ -1,30 +1,38 @@
 # Verification report
 
-Updated: 2026-08-09 (Asia/Shanghai). No Pi state, formal database, Mac service lifecycle or sibling working tree was
-modified. A dedicated existing Ed25519 SSH key now passes BatchMode with strict checking against the recorded key for
-`192.168.100.15`; no password was persisted. No upload, package install, systemd mutation, database access or
-activation was performed.
+Updated: 2026-08-09 (Asia/Shanghai). A dedicated Ed25519 SSH key passes BatchMode with strict checking against the
+recorded key for `eidolon-pi5@192.168.100.15`; no password was persisted. No Mac service lifecycle or dirty sibling
+working tree was changed. The Pi was changed only inside the reviewed cleanup/Foundation boundaries described below;
+no new Eidolon release was uploaded, prepared or activated, and no database contents were read or written.
 
-The probe verified a Raspberry Pi 5 Model B, Debian 13 arm64, systemd PID 1, 8-GB-class RAM, NVMe root with more than
-200 GiB free, non-interactive sudo, active NetworkManager/BlueZ/Avahi, an unblocked Bluetooth controller, healthy
-Bootstrap preflight and Local API HTTPS descriptor, and correct Host identity/TLS modes. It also found that this is
-not a blank Host: the active release manages Kernel/Data/Hub/Admin under the legacy `/srv/eidolon` namespace. The six
-new NATS/LiveKit/Memory/Agent/Channel units are not installed, and seven foundation packages plus the pinned
-uv/Node/NATS/LiveKit artifacts remain absent. Consequently a normal first install is correctly inapplicable. The
-selected operational policy is now a clean reset/reinstall, not core expansion or `/srv` migration. The refreshed
-`status` observed eight loaded/active legacy units, no `/opt` current links, and no NATS/LiveKit/Memory/Agent/Channel
-units. The foundation plan observed healthy BlueZ/NetworkManager/Avahi but missing pinned uv/Node/NATS/LiveKit and
-several apt prerequisites. `app-ready` fails because the `/opt` Admin preflight executable does not exist. A reset plan
-listed the fixed `/srv`, unit/config/runtime, authority-data and stale staging paths; it did not apply the deletion.
+The target is a Raspberry Pi 5 Model B running Debian 13 arm64 with systemd PID 1, 8-GB-class RAM and more than 200
+GiB free on the NVMe root. The no-data-wipe reset was applied after its dry-run: it stopped the reconciler before
+workers, disabled the fixed product units, removed `/srv/eidolon`, `/etc/eidolon`, the old unit/polkit/Avahi assets,
+runtime paths and three stale release staging directories. A repeated reset plan returned `detected=[]` and
+`staging=[]`. The authority roots were deliberately preserved.
+
+Foundation v2 was then installed and re-proved idempotently. All 34 exact Debian/Raspberry Pi packages are present;
+BlueZ, NetworkManager and Avahi are enabled and active; NATS 2.14.0, LiveKit 1.11.0, Node 22.23.2 and uv 0.11.15 all
+match the pinned versions. The final read-only doctor returned `status=healthy`, including exact artifact evidence in
+`/var/lib/eidolon-ops/foundation-v2.json`. Temporary apt sources did not modify `/etc/apt`. Direct upstream downloads
+were unreliable from this network, so exact artifacts were cache-seeded only after SHA-256 verification; the target
+installer still uses code-owned upstream URLs and re-verifies the cache.
+
+The post-reset product state is intentionally empty: every one of the 14 Eidolon units is `not-found/inactive`, all
+seven `/opt/eidolon/current` component links are absent, and TCP listeners are only SSH 22 and rpcbind 111. Local API
+9002 refuses connections; both `_eidolon-local-api._tcp` and `_eidolon-hub._tcp` Avahi queries are empty. `app-ready`
+returns structured `degraded` evidence rather than crashing. Wi-Fi remains a hardware-acceptance risk: observed SSH
+timeouts and multi-second ICMP delivery require retry/resume testing before production use.
 
 The local-only `init-inputs` command then created the real 14-file Pi input set under the ignored operator-private
 directory. It imported only allowlisted external provider variables, generated internally consistent cross-service
 tokens and a 32-byte raw Ed25519 identity, transformed the three exact settings Git objects for product FHS paths,
 wrote all files mode 0600 under a mode-0700 directory, and returned `already_initialized` on a second run without
 reading secret values. No input content was printed or committed.
-The independent pre-install validator then returned `compatible pi-private-inputs-v1 14` for the real set after
-re-reading all env key sets, fixed paths, cross-service token relationships, Host identity length and all three
-pinned settings Git objects.
+The independent pre-install validator returned `compatible pi-private-inputs-v1 14` for the real set after re-reading
+all env key sets, fixed paths, cross-service token relationships, Host identity length and all three pinned settings
+Git objects. Required Agent/Channel/Memory provider credentials, plus optional Channel provider credentials when
+present, were re-compared byte-for-byte with the current Mac source `.env` files without printing any value.
 
 ## Workstation operations project
 
@@ -36,17 +44,14 @@ uv run ruff format --check .
 35 files already formatted
 
 pytest --cov=eidolon_ops --cov-branch --cov-report=term-missing --cov-fail-under=90 -q
-286 passed, 0 failed, 0 skipped
-branch-aware coverage: 90.10%
-pytest runtime reported: 2.34 seconds
+292 passed, 0 failed, 0 skipped
+branch-aware coverage: 90.09%
+pytest runtime reported: 3.44 seconds
 
-committed isolated clone (no sibling repositories): 284 passed, 2 skipped; branch-aware coverage 90.10%; 4.03
-seconds. The two skips are the optional Kernel and Data/Hub cross-repository contract modules.
+uv build --out-dir /private/tmp/eidolon-ops-build-20260809-final-1
+sdist: 158,426 bytes; wheel: 62,154 bytes
 
-uv build --out-dir /private/tmp/eidolon-ops-build-2746d4e
-sdist: 153,195 bytes; wheel: 59,764 bytes
-
-python3 -m venv /private/tmp/eidolon-ops-wheel-2746d4e
+python3 -m venv /private/tmp/eidolon-ops-wheel-20260809-final-1
 .../pip install --no-deps .../eidolon_ops-0.1.0-py3-none-any.whl
 .../eidolon-ops --help
 .../eidolon-pi --help
@@ -104,10 +109,10 @@ private-input validation; it performed no upload or Pi-native preparation.
 The final matrix was followed by 14/14 passing Kernel focused `tests/deploy/test_bundle.py` tests.
 
 The prior `02f96b7` archive was not a release candidate because its three Admin units failed the FHS gate. That defect
-is resolved only by the pinned `1ac5c73` commit above. A real Pi install dry-run now reports
-`release_matrix.status=compatible` for 14 units and `pi-private-inputs-v1` validates all 14 private files. The same
-dry-run reports the Pi foundation as degraded because 9 apt packages and pinned uv/Node/NATS/LiveKit binaries are
-absent; `install --apply` must provision those before native release preparation.
+is resolved only by the pinned `1ac5c73` commit above. The latest real Pi clean-install dry-run reports
+`release_matrix.status=compatible` for all 14 units and Foundation `status=healthy`. It detects exactly
+`/var/lib/eidolon`, `/var/lib/eidolon-admin` and `/var/lib/eidolon-bootstrap` for an explicitly authorized permanent
+wipe before a fresh Data V2 baseline.
 
 ## Foundation artifact evidence
 
@@ -116,19 +121,41 @@ The four pinned arm64 inputs were cross-checked against their upstream release m
 to the 23,066,178-byte aarch64 wheel and reports no known vulnerability for that release; 0.11.14 was rejected because
 PyPI reports its entry-point path traversal advisory. The complete 15,478,055-byte LiveKit v1.11.0 arm64 archive was
 also downloaded, matched the profile's `6741466b...e5a87ff` digest and contained the expected `livekit-server`.
-A deliberately interrupted transfer failed both archive and digest validation, confirming that the installer must
-reject incomplete cache content.
+A deliberately interrupted transfer retains only a stable `.partial` for resumable download; incomplete or
+digest-mismatched content is never promoted. The uv install was additionally changed from ambient pip-index
+resolution to the exact official aarch64 wheel, verified in cache and installed with `--no-index --require-hashes`.
+
+## Product hard gates found by exact-commit audit
+
+The eight pinned Git objects were searched independently for the Hub Channel Provider routes. Hub contains only the
+outbound client for `POST /v1/device-channels/provision` and `revoke`; the other seven release inputs contain no
+production handler. `channel_provider.contract_url=http://127.0.0.1:8090/v1` therefore has no deployable owner in
+this matrix. Hub process/readiness alone cannot prove device conversation, and no compatibility Provider was added.
+
+The current empty target confirms no listener on 8090. Until a real Provider commit, process owner and health
+contract are added to the reviewed release matrix, onboarding cannot return a usable Channel Assignment. This is a
+hard gate for “all services + App ready”, independent of the clean-install mechanics.
+
+Pinned Admin `1ac5c73` was also searched for Mobile's Controller-authenticated Local API consumption routes. It has
+neither `GET /api/local/v1/device-onboarding/target` nor
+`PUT /api/local/v1/device-admissions/{setup_id}`. The latter appears only in an uncommitted document in the current
+dirty Hub working tree, which is outside the fixed `96438a2` release input and is not executable Admin code; the
+former has no workspace match. Ownership belongs to the Admin Local API/control orchestration boundary, not Ops.
+Until committed, pinned and exercised, Mobile must not establish Hub TLS trust from mDNS or reuse the Host SPKI.
 
 ## Not executed; hardware acceptance remains
 
-- Real SCP/upload and Raspberry Pi foundation mutation; SSH/sudo were exercised only by bounded read-only probes.
-- `apt` and fixed artifact downloads on Raspberry Pi OS 12/13; package availability on both versions.
-- Pi-native `uv sync` for all 7 environments, model load time, disk/RAM/thermal profile.
-- Real `systemd-analyze verify`, 14-unit start order, BlueZ/NetworkManager/Avahi and NetworkManager SSH continuity.
-- First install, full reboot recovery, concurrent operator race, disk-full/power-loss/failure auto-restore and explicit
-  rollback on isolated hardware.
+- Permanent deletion of the three old authority roots; no backup was created and explicit authorization remains
+  required. Their metadata-only inventory includes old Data/Hub/Kernel/eidolond SQLite files, release receipts,
+  Admin job roots and Bootstrap identity/TLS/database files.
+- Pi-native preparation for the seven component environments, model load time and disk/RAM/thermal profile.
+- Real `systemd-analyze verify`, 14-unit start order and health after clean install; Local API/Hub/provider ports and
+  mDNS must be re-measured after activation.
+- Full reboot recovery, concurrent operator race, disk-full/power-loss/failure auto-restore and explicit rollback on
+  the Pi.
 - Real phone BLE/Host proof/TLS SPKI/claim/Wi-Fi/Workspace flow and long-running voice/Memory/Agent/Channel path.
 - Artifact signatures/trust root, A/B image rollback and authority-owned schema/data backup workflows.
 
-Therefore the code is suitable for review and local isolation, but is not yet safe-approved for a formal Raspberry
-Pi until those tests pass with explicit authorization.
+Therefore the Pi Foundation and Ops clean-install mechanics are ready for the next authorized destructive test, but
+the whole product is not yet safe-approved or App-conversation-ready. It remains blocked by the authority-data wipe
+decision and the missing production Channel Provider, followed by target-native activation and hardware acceptance.

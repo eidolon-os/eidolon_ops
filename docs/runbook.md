@@ -9,7 +9,7 @@ uv run eidolon-ops --config /absolute/path/hosts/pi5.toml <operation>
 
 ## New Pi: one command from SSH-ready OS to App-ready backend
 
-Preconditions: supported Raspberry Pi OS, known SSH host key, non-root account with non-interactive sudo, outbound
+Preconditions: reviewed Debian/Raspberry Pi OS 13, known SSH host key, non-root account with non-interactive sudo, outbound
 package/download access, and the 14 local private inputs declared in config.
 
 Create those inputs once before the first plan. This is local-only and never contacts the Pi:
@@ -38,6 +38,7 @@ validate Mac commands, SSH files, 8 repos/commits, 14 private inputs
   -> probe Python without mutation
   -> foundation platform/capacity/package/artifact/service doctor
   -> if needed: Python bootstrap -> apt -> hash-pinned NATS/LiveKit/uv/Node -> BlueZ/NM/Avahi
+  -> exact Foundation evidence outside the product authority namespace
   -> exact 8-commit bundle -> SSH upload -> Pi-native prepare/seal
   -> private staging -> exclusive first-install lock -> clean namespace proof
   -> identities/directories -> exact 14 input bytes -> fresh Data V2 baseline
@@ -83,6 +84,12 @@ Exit 0 requires Bootstrap preflight, Bootstrap/Local API/BlueZ/NetworkManager/Av
 ownership/mode, Bootstrap control socket, Local API HTTPS health + descriptor and Avahi service definition. It proves
 the Pi side only. A real phone must still validate BLE discovery, Host proof, TLS SPKI, Controller claim, Wi-Fi
 checkpoint and Workspace setup.
+
+`app-ready` does not prove Hub trust selection or device conversation. The current pinned matrix has no production
+owner for Hub's `POST /v1/device-channels/provision|revoke` dependency on port 8090, and pinned Admin has neither
+`GET /api/local/v1/device-onboarding/target` nor
+`PUT /api/local/v1/device-admissions/{setup_id}`. Treat those as hard product gates. Do not let a client derive Hub
+TLS trust from mDNS alone, substitute the Host SPKI, or interpret a healthy Hub listener as a usable Channel Provider.
 
 ## Daily update
 

@@ -1,6 +1,8 @@
 # Eidolon OS Raspberry Pi deployment / operations audit
 
-Audit updated: 2026-08-09 (Asia/Shanghai). No command changed the Raspberry Pi or the running Mac stack.
+Audit updated: 2026-08-09 (Asia/Shanghai). The running Mac stack and sibling working trees were not changed. On the
+Pi, the fixed legacy code/unit/config/staging namespace was removed without a data wipe, then the non-product
+Foundation v2 was installed and verified. No new product release was uploaded or activated.
 
 ## Current code evidence
 
@@ -22,7 +24,8 @@ isolated worktree and changes only its three Pi systemd units. The upload prefli
 their Git objects and accepted the `/etc/eidolon/host.env`, `/opt/eidolon/current/eidolon_admin/` and FHS state-path
 contracts. The exact 8-source bundle and the 14-file private-input contract also passed locally. Current sibling
 branches and dirty working trees remain outside the release input: Ops does not stage, overwrite or copy them. The
-candidate is not production-qualified until target-native preparation, activation and hardware acceptance pass.
+candidate is not production-qualified until the product contract blockers below are resolved and target-native
+preparation, activation and hardware acceptance pass.
 
 ## Authority and dependency topology
 
@@ -43,6 +46,13 @@ Deployer -> no sibling SQLite and no cross-database transaction
 Data/Hub/Kernel/Admin/Agent/Channel/Memory keep their existing public contracts and authority. The deployer only
 manages code, fixed system assets, lifecycle and health. It never copies an authority table or claims distributed
 atomicity. Data V2 begins only at its tracked baseline; old migrations and old `eidolon.sqlite3` are outside scope.
+
+Two consumer paths are currently outside the selected release contract. First, Hub is only a client of the
+`/v1/device-channels/provision|revoke` Provider contract; none of the eight pinned repositories implements those
+routes, and no product unit owns port 8090. Second, pinned Admin does not implement Controller-authenticated Local API
+`GET /api/local/v1/device-onboarding/target` or `PUT /api/local/v1/device-admissions/{setup_id}`. A newer dirty Hub
+working tree contains a design document for the latter, but it is neither a committed release input nor an Admin
+implementation. Ops must report both as product blockers rather than inventing cross-authority compatibility logic.
 
 ## Existing capability, previous gap, implemented closure
 
@@ -69,7 +79,7 @@ foundation provision, first install, 14-unit lifecycle/status/logs/diagnostics a
 
 | Scenario | Supported behavior | Remaining condition |
 | --- | --- | --- |
-| Newly flashed Pi | one `install --apply` provisions foundation, installs and starts full backend | SSH/known_hosts/sudo and 14 private inputs exist |
+| Newly flashed Pi | one `install --apply` provisions foundation, installs and starts the selected 14-unit backend | SSH/known_hosts/sudo and 14 private inputs exist; App conversation still requires the missing contracts |
 | Environment audit only | `provision` and `doctor` are read-only and return nonzero when degraded | Pi reachable |
 | First install interruption | durable foundation/install phases; same commit/input digests resume | retain release ID and inputs |
 | Existing Pi replacement | reset plan, then explicit data-wiping clean install; no `/srv` migration/adoption | exact matrix must pass before install deletes anything |
@@ -78,11 +88,14 @@ foundation provision, first install, 14-unit lifecycle/status/logs/diagnostics a
 | Explicit rollback | restores selected code/assets snapshot only | never restores DB/secrets |
 | Offline cached retry | pinned artifact cache and existing release may be reused | a truly new Pi still needs apt/PyPI/Git dependency network |
 | Multiple Pis | one strict config per Pi, same CLI/release contract | no fleet fan-out/concurrent scheduler yet |
-| App commissioning | `app-ready` proves Host-side Bootstrap/BLE/network/mDNS/TLS descriptor gate | real phone E2E still required |
+| App commissioning | `app-ready` proves Host-side Bootstrap/BLE/network/mDNS/TLS descriptor gate | target-selection/admission Local API contracts and real phone E2E remain |
+| Device conversation | Hub approval must obtain a real Channel Assignment from the Provider | no production Provider owner exists in the pinned matrix; hard blocked |
 
 ## Safety conclusion
 
-The selected release matrix, exact bundle and private inputs pass the Mac-side gates, so the candidate is ready for
-an explicitly authorized clean-install test on the Pi. It is not yet safe to call production-ready: target-native
-build, systemd verification, activation health, network transition, reboot, rollback injection, thermal/resource soak
-and real-phone commissioning remain hardware acceptance work.
+The selected release matrix, exact bundle, private inputs and real Pi Foundation pass their respective gates. A
+clean-install dry-run now detects only the three preserved old authority roots. Product activation still requires
+explicit authorization to permanently delete those roots. Even after activation, it must not be called “all services
++ App ready” until a reviewed Channel Provider owner and the two Local API consumer contracts enter the pinned
+release matrix. Target-native build, systemd verification, activation health, network transition, reboot, rollback
+injection, thermal/resource soak and real-phone commissioning remain hardware acceptance work.

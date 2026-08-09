@@ -412,9 +412,30 @@ def test_reset_stops_and_disables_fixed_units_before_deletion(tmp_path: Path) ->
 
     stop_units = [call[2] for call in command.calls if call[1] == "stop"]
     disable_units = [call[2] for call in command.calls if call[1] == "disable"]
-    assert stop_units == list(reversed(target_agent.PRODUCT_UNITS))
-    assert disable_units == list(reversed(target_agent.PRODUCT_UNITS))
+    assert set(target_agent.RESET_STOP_UNITS) == set(target_agent.PRODUCT_UNITS)
+    assert stop_units == list(target_agent.RESET_STOP_UNITS)
+    assert disable_units == list(target_agent.RESET_STOP_UNITS)
     assert ("/usr/bin/systemctl", "daemon-reload") in command.calls
+
+
+def test_reset_stops_reconciler_before_kernel(tmp_path: Path) -> None:
+    _materialize_reset_fixture(tmp_path)
+    stopped: set[str] = set()
+
+    def reconciler_sensitive(command, **_kwargs):
+        command = tuple(command)
+        if command[1] == "stop":
+            unit = command[2]
+            if unit == "eidolon-kernel.service" and "eidolond.service" not in stopped:
+                return subprocess.CompletedProcess(command, 1, "", "Job canceled")
+            stopped.add(unit)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    result = target_agent.reset_host(_reset_payload(), root=tmp_path, command=reconciler_sensitive)
+
+    assert result["status"] == "reset"
+    assert "eidolond.service" in stopped
+    assert "eidolon-kernel.service" in stopped
 
 
 def test_reset_treats_missing_units_as_already_clean(tmp_path: Path) -> None:
