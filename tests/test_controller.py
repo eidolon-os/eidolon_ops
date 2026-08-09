@@ -148,15 +148,24 @@ class FakeTransport:
         self.uploads.append((Path(source), destination, recursive))
 
 
+def _stub_input_contract(controller: EidolonPiController) -> None:
+    controller._validate_install_inputs = lambda _names: {  # type: ignore[method-assign]
+        "status": "compatible"
+    }
+
+
 @pytest.fixture
 def setup_controller(config):
     runner = ControllerRunner(config)
     transport = FakeTransport()
-    return EidolonPiController(config, runner, transport=transport), runner, transport
+    controller = EidolonPiController(config, runner, transport=transport)
+    _stub_input_contract(controller)
+    return controller, runner, transport
 
 
 def test_local_preflight_proves_exact_commits(config) -> None:
     controller = EidolonPiController(config, ControllerRunner(config), transport=FakeTransport())
+    _stub_input_contract(controller)
 
     result = controller.local_preflight(require_install_files=True)
 
@@ -164,6 +173,7 @@ def test_local_preflight_proves_exact_commits(config) -> None:
         source_id: config.sources[source_id].revision for source_id in SOURCE_IDS
     }
     assert result["install_prerequisites_checked"] is True
+    assert result["install_input_contract"] == {"status": "compatible"}
 
 
 def test_local_preflight_rejects_revision_alias(config) -> None:
@@ -485,6 +495,17 @@ def test_install_without_apply_is_read_only(setup_controller) -> None:
     assert [call[0] for call in transport.agent_calls] == ["foundation-doctor"]
 
 
+def test_input_initialization_is_local_and_exact_revision_pinned(setup_controller) -> None:
+    controller, runner, transport = setup_controller
+
+    result = controller.initialize_inputs()
+
+    assert result["status"] == "already_initialized"
+    assert transport.agent_calls == []
+    settings_checks = [call for call in runner.calls if "rev-parse" in call]
+    assert len(settings_checks) == 3
+
+
 def test_install_apply_stages_exact_files_and_cleans(setup_controller) -> None:
     controller, _runner, transport = setup_controller
 
@@ -680,6 +701,7 @@ def test_expand_retires_legacy_root_only_after_all_health_gates(config) -> None:
 
     transport.run_agent = legacy
     controller = EidolonPiController(config, ControllerRunner(config), transport=transport)
+    _stub_input_contract(controller)
 
     result = controller.expand(release_id="r1", resume=True, apply=True)
 
@@ -707,6 +729,7 @@ def test_legacy_replacement_failure_aborts_unused_bridge(config) -> None:
     transport.run_agent = legacy
     transport.fail_remote_match = " deploy "
     controller = EidolonPiController(config, ControllerRunner(config), transport=transport)
+    _stub_input_contract(controller)
 
     with pytest.raises(OperationsError, match="bridge links were removed"):
         controller.expand(release_id="r1", resume=True, apply=True)
@@ -799,6 +822,7 @@ def test_expand_completed_transaction_rechecks_doctor_and_app(config) -> None:
 
     transport.run_agent = completed
     controller = EidolonPiController(config, ControllerRunner(config), transport=transport)
+    _stub_input_contract(controller)
 
     result = controller.expand(release_id="r1", resume=True, apply=True)
 

@@ -169,6 +169,9 @@ def test_pi_adapter_delegates_every_remote_capability(monkeypatch, tmp_path: Pat
         def provision(self, **kwargs):
             return self._result("provision", kwargs)
 
+        def initialize_inputs(self):
+            return self._result("init-inputs")
+
         def install(self, **kwargs):
             return self._result("install", kwargs)
 
@@ -202,6 +205,7 @@ def test_pi_adapter_delegates_every_remote_capability(monkeypatch, tmp_path: Pat
     assert controller.status()["status"] == "ok"
     controller.app_ready()
     controller.provision(apply=False)
+    controller.initialize_inputs()
     controller.install(release_id="r1", resume=True, apply=True)
     controller.reset(wipe_authority_data=False, apply=False)
     controller.deploy(release_id="r1", resume=True, activate=True)

@@ -1,8 +1,9 @@
 # Verification report
 
 Updated: 2026-08-09 (Asia/Shanghai). No Pi state, formal database, Mac service lifecycle or sibling working tree was
-modified. Password authentication to `192.168.100.15` was used only for an interactive, read-only probe; no password
-was persisted. No upload, package install, systemd mutation, database access or activation was performed.
+modified. A dedicated existing Ed25519 SSH key now passes BatchMode with strict checking against the recorded key for
+`192.168.100.15`; no password was persisted. No upload, package install, systemd mutation, database access or
+activation was performed.
 
 The probe verified a Raspberry Pi 5 Model B, Debian 13 arm64, systemd PID 1, 8-GB-class RAM, NVMe root with more than
 200 GiB free, non-interactive sudo, active NetworkManager/BlueZ/Avahi, an unblocked Bluetooth controller, healthy
@@ -10,8 +11,20 @@ Bootstrap preflight and Local API HTTPS descriptor, and correct Host identity/TL
 not a blank Host: the active release manages Kernel/Data/Hub/Admin under the legacy `/srv/eidolon` namespace. The six
 new NATS/LiveKit/Memory/Agent/Channel units are not installed, and seven foundation packages plus the pinned
 uv/Node/NATS/LiveKit artifacts remain absent. Consequently a normal first install is correctly inapplicable. The
-selected operational policy is now a clean reset/reinstall, not core expansion or `/srv` migration. That destructive
-operation was not performed by this read-only probe.
+selected operational policy is now a clean reset/reinstall, not core expansion or `/srv` migration. The refreshed
+`status` observed eight loaded/active legacy units, no `/opt` current links, and no NATS/LiveKit/Memory/Agent/Channel
+units. The foundation plan observed healthy BlueZ/NetworkManager/Avahi but missing pinned uv/Node/NATS/LiveKit and
+several apt prerequisites. `app-ready` fails because the `/opt` Admin preflight executable does not exist. A reset plan
+listed the fixed `/srv`, unit/config/runtime, authority-data and stale staging paths; it did not apply the deletion.
+
+The local-only `init-inputs` command then created the real 14-file Pi input set under the ignored operator-private
+directory. It imported only allowlisted external provider variables, generated internally consistent cross-service
+tokens and a 32-byte raw Ed25519 identity, transformed the three exact settings Git objects for product FHS paths,
+wrote all files mode 0600 under a mode-0700 directory, and returned `already_initialized` on a second run without
+reading secret values. No input content was printed or committed.
+The independent pre-install validator then returned `compatible pi-private-inputs-v1 14` for the real set after
+re-reading all env key sets, fixed paths, cross-service token relationships, Host identity length and all three
+pinned settings Git objects.
 
 ## Workstation operations project
 
@@ -20,20 +33,20 @@ uv run ruff check .
 All checks passed
 
 uv run ruff format --check .
-33 files already formatted
+35 files already formatted
 
 pytest --cov=eidolon_ops --cov-branch --cov-report=term-missing --cov-fail-under=90 -q
-266 passed, 0 failed, 0 skipped
-branch-aware coverage: 90.17%
-pytest runtime reported: 2.83 seconds
+286 passed, 0 failed, 0 skipped
+branch-aware coverage: 90.10%
+pytest runtime reported: 2.34 seconds
 
-committed isolated clone (no sibling repositories): 264 passed, 2 skipped; branch-aware coverage 90.17%; 3.47
+committed isolated clone (no sibling repositories): 284 passed, 2 skipped; branch-aware coverage 90.10%; 4.03
 seconds. The two skips are the optional Kernel and Data/Hub cross-repository contract modules.
 
-uv build --out-dir /private/tmp/eidolon-ops-build-20260809-reset-b29c
-sdist: 144,714 bytes; wheel: 53,937 bytes
+uv build --out-dir /private/tmp/eidolon-ops-build-2746d4e
+sdist: 153,195 bytes; wheel: 59,764 bytes
 
-python3 -m venv /private/tmp/eidolon-ops-wheel-20260809-reset-b29c
+python3 -m venv /private/tmp/eidolon-ops-wheel-2746d4e
 .../pip install --no-deps .../eidolon_ops-0.1.0-py3-none-any.whl
 .../eidolon-ops --help
 .../eidolon-pi --help
@@ -42,7 +55,8 @@ wheel install plus unified and lower-level Pi parser smoke: passed; neither publ
 
 Tests cover strict config, shell-free SSH/SCP construction, Python-missing bootstrap, foundation platform/package/
 artifact/service gates, digest mismatch, safe tar handling, idempotent managed links, foundation failure evidence,
-first-install/resume/lock/secret cleanup, Data V2 baseline, core-to-full expansion/idempotency/input drift, post-
+first-install/resume/lock/secret cleanup, atomic 14-input initialization/provider allowlists/token relationships/
+exact-settings overlays/idempotency/drift refusal, Data V2 baseline, core-to-full expansion/input drift, post-
 activation doctor/App failure recovery, `/srv` replacement/abort/interrupted cleanup/nested-mount refusal, generated
 mode-0600 LiveKit credentials and redacted mismatch logs, unified Mac/Pi adapters, lifecycle, rollback plan, bounded
 logs, redacted diagnosis and compatibility with the pinned Kernel release constants.

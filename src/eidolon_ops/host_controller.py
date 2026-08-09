@@ -34,6 +34,9 @@ class HostController:
     def provision(self, *, apply: bool) -> dict[str, object]:
         return self._require_pi("provision").provision(apply=apply)
 
+    def initialize_inputs(self) -> dict[str, object]:
+        return self._require_pi("init-inputs").initialize_inputs()
+
     def install(
         self,
         *,

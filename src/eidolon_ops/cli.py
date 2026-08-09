@@ -28,6 +28,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = controller.doctor(release_id=arguments.release_id)
         elif arguments.operation == "provision":
             result = controller.provision(apply=arguments.apply)
+        elif arguments.operation == "init-inputs":
+            result = controller.initialize_inputs()
         elif arguments.operation == "install":
             result = controller.install(
                 release_id=arguments.release_id,
@@ -114,6 +116,7 @@ def _parser() -> argparse.ArgumentParser:
         "provision", help="detect or install the pinned Raspberry Pi host foundation"
     )
     provision.add_argument("--apply", action="store_true")
+    operations.add_parser("init-inputs", help="create the private local first-install input set")
 
     install = operations.add_parser("install", help="first Eidolon installation on a clean host")
     install.add_argument("--release-id", required=True)

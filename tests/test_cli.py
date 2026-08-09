@@ -39,6 +39,9 @@ class FakeController:
     def provision(self, **kwargs):
         return self._result("provision", kwargs)
 
+    def initialize_inputs(self):
+        return self._result("init-inputs", {})
+
     def install(self, **kwargs):
         return self._result("install", kwargs)
 
@@ -76,6 +79,7 @@ def fake_controller(monkeypatch) -> None:
         (["app-ready"], "app-ready"),
         (["doctor", "--release-id", "r1"], "doctor"),
         (["provision", "--apply"], "provision"),
+        (["init-inputs"], "init-inputs"),
         (
             [
                 "install",

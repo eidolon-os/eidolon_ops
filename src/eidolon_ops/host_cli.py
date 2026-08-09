@@ -33,6 +33,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = controller.doctor(release_id=arguments.release_id)
         elif arguments.operation == "provision":
             result = controller.provision(apply=arguments.apply)
+        elif arguments.operation == "init-inputs":
+            result = controller.initialize_inputs()
         elif arguments.operation == "install":
             result = controller.install(
                 release_id=arguments.release_id,
@@ -121,6 +123,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "clean",
         "migrated",
         "reset",
+        "initialized",
+        "already_initialized",
     }
     return 0 if result.get("status") in success else 1
 
@@ -149,6 +153,7 @@ def _parser() -> argparse.ArgumentParser:
     doctor.add_argument("--release-id")
     provision = operations.add_parser("provision")
     provision.add_argument("--apply", action="store_true")
+    operations.add_parser("init-inputs")
     install = operations.add_parser("install")
     install.add_argument("--release-id", required=True)
     install.add_argument("--resume", action="store_true")

@@ -20,6 +20,7 @@ def config_path(tmp_path: Path) -> Path:
     release_cli.chmod(0o755)
     install_dir = tmp_path / "private"
     install_dir.mkdir()
+    install_dir.chmod(0o700)
     install_names = {
         "data_env": "data.env",
         "hub_env": "hub.env",

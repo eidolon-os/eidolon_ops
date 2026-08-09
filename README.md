@@ -16,6 +16,18 @@ uv run eidolon-ops --config config/hosts/pi5.toml \
 不写 SD 卡镜像，也不自动制造云端 provider credential。Host identity、service token 和产品 settings
 来自 Mac 上 14 个 mode-0600 输入文件，值不会进入 TOML、argv、bundle、receipt 或诊断元数据。
 
+首次使用先从三个组件现有的本机 provider `.env` 白名单导入外部 LLM/STT/TTS key，并生成其余内部
+credential、32-byte raw Ed25519 Host identity 和精确提交派生的 Pi settings：
+
+```bash
+uv run eidolon-ops --config config/hosts/pi5.toml init-inputs
+```
+
+该命令只读 Agent/Channel/Memory 的固定 provider key 名，不复制它们已有的内部 token；Data/Kernel、
+Admin/Local API、Agent/Channel、Memory 与 LiveKit 的共享 token 在一次本地事务中重新生成。14 个文件
+原子写入同一 mode-0700 目录，文件为 mode-0600，已有完整目录只验证不读取，partial/extra 文件或模板
+漂移一律拒绝，永不覆盖。
+
 ## 完整产品范围
 
 正式后端是 14 个 systemd unit：Bootstrap、eidolond、Data、Data Workspace、Hub、Kernel、Local API、
@@ -110,6 +122,7 @@ eidolon-ops --config HOST.toml os-control-plane prepare|validate|start|stop|rest
 
 # Pi release/install capabilities
 eidolon-ops --config HOST.toml provision [--apply]
+eidolon-ops --config HOST.toml init-inputs
 eidolon-ops --config HOST.toml install --release-id ID [--resume] [--apply]
 eidolon-ops --config HOST.toml reset [--wipe-authority-data] [--apply]
 eidolon-ops --config HOST.toml install --release-id ID \

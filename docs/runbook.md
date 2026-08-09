@@ -12,6 +12,17 @@ uv run eidolon-ops --config /absolute/path/hosts/pi5.toml <operation>
 Preconditions: supported Raspberry Pi OS, known SSH host key, non-root account with non-interactive sudo, outbound
 package/download access, and the 14 local private inputs declared in config.
 
+Create those inputs once before the first plan. This is local-only and never contacts the Pi:
+
+```bash
+uv run eidolon-ops --config /absolute/path/hosts/pi5.toml init-inputs
+```
+
+The initializer imports only the required provider credential names from the Agent/Channel/Memory source
+directories' local `config/.env` files. It generates every internal cross-service token and the raw 32-byte Host
+identity together, derives product settings from exact Git objects, applies fail-closed FHS overlays, writes a
+mode-0700 directory with 14 mode-0600 files and refuses overwrite or template drift.
+
 ```bash
 uv run eidolon-ops --config /absolute/path/hosts/pi5.toml \
   install --release-id 20260807-product-1

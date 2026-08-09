@@ -26,6 +26,11 @@ from eidolon_ops.foundation import (
     python_bootstrap_script,
     python_probe_script,
 )
+from eidolon_ops.install_inputs import (
+    InstallInputError,
+    initialize_install_inputs,
+    validate_install_input_contract,
+)
 from eidolon_ops.process import ProcessRunner, checked
 from eidolon_ops.release_matrix import (
     ReleaseMatrixError,
@@ -72,6 +77,33 @@ class EidolonPiController:
     def status(self) -> dict[str, object]:
         self._validate_ssh_material()
         return self.transport.run_agent("status", self._target_payload())
+
+    def initialize_inputs(self) -> dict[str, object]:
+        """Create the private local first-install input set without contacting the Pi."""
+
+        for source_id in ("eidolon_agent", "eidolon_channel", "eidolon_memory"):
+            source = self.config.sources[source_id]
+            result = checked(
+                f"exact settings commit verification for {source_id}",
+                self.runner.run(
+                    (
+                        self.git,
+                        "-C",
+                        str(source.path),
+                        "rev-parse",
+                        "--verify",
+                        f"{source.revision}^{{commit}}",
+                    )
+                ),
+            )
+            if result.stdout.strip() != source.revision:
+                raise OperationsError(
+                    f"settings source revision is not the exact commit object: {source_id}"
+                )
+        try:
+            return initialize_install_inputs(self.config, self._read_exact_source_file)
+        except InstallInputError as exc:
+            raise OperationsError(str(exc)) from exc
 
     def app_ready(self) -> dict[str, object]:
         self._validate_ssh_material()
@@ -224,8 +256,9 @@ class EidolonPiController:
             )
         except ReleaseMatrixError as exc:
             raise OperationsError(str(exc)) from exc
+        install_input_contract = None
         if require_install_files:
-            self._validate_install_inputs(INSTALL_FILE_NAMES)
+            install_input_contract = self._validate_install_inputs(INSTALL_FILE_NAMES)
         return {
             "release_cli": str(release_cli),
             "sources": source_evidence,
@@ -237,6 +270,7 @@ class EidolonPiController:
                 "strict_host_key_checking": True,
             },
             "install_prerequisites_checked": require_install_files,
+            "install_input_contract": install_input_contract,
         }
 
     def _read_exact_source_file(self, source_id: str, revision: str, path: str) -> str:
@@ -257,13 +291,20 @@ class EidolonPiController:
         )
         return result.stdout
 
-    def _validate_install_inputs(self, names: tuple[str, ...]) -> None:
+    def _validate_install_inputs(self, names: tuple[str, ...]) -> dict[str, object]:
         if set(self.config.install_files) != set(INSTALL_FILE_NAMES):
             raise ConfigurationError("install.files is required for install or expansion")
         for name in names:
             validate_private_local_file(
                 self.config.install_files[name], label=f"install.files.{name}"
             )
+        try:
+            return validate_install_input_contract(
+                self.config,
+                self._read_exact_source_file,
+            )
+        except InstallInputError as exc:
+            raise OperationsError(str(exc)) from exc
 
     def deploy(
         self,

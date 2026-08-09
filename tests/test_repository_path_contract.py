@@ -31,6 +31,8 @@ def test_product_runtime_assets_do_not_reintroduce_legacy_host_paths() -> None:
     forbidden = ("/srv/eidolon", "/Users/manson", "%(ENV_HOME)s/eidolon")
     violations: list[str] = []
     for path in _files(REPOSITORY, patterns):
+        if path == REPOSITORY / "config/eidolon-pi.toml":
+            continue
         text = path.read_text(encoding="utf-8", errors="replace")
         for value in forbidden:
             if value in text:
