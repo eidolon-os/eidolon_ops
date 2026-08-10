@@ -11,7 +11,7 @@ The multi-repository root is not Git. The selected release commits remain explic
 
 | Source | Selected exact release input | Role |
 | --- | --- | --- |
-| Kernel | `f6b2efad080ab51115de287c25fdb8e420361cc4` | FHS release authority + Mac-prefetched ARM64 dependency bundle |
+| Kernel | `ab171cf9c8d2a1b837161dcddc080a641a3120c4` | FHS release authority + closed-shape ARM64 dependency bundle |
 | Data | `d81086e2807f44ca0c0e43e31103cd85e6165a46` | Data V2 + Workspace/runtime authority |
 | Hub | `4bab6a0c5201c6adda7ba0f68241297034326cae` | proof-bound onboarding + dedicated Provider port |
 | Admin | `987c69282a5a91361b0e9d20144bb7163b8241b3` | Mobile admission orchestration + isolated FHS systemd fix |

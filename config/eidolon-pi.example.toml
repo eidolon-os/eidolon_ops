@@ -24,7 +24,7 @@ python_concurrent_downloads = 4
 
 [sources.eidolon_kernel]
 path = "../../eidolon_kernel"
-revision = "f6b2efad080ab51115de287c25fdb8e420361cc4"
+revision = "ab171cf9c8d2a1b837161dcddc080a641a3120c4"
 
 [sources.eidolon_data]
 path = "../../eidolon_data"

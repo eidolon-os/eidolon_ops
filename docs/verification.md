@@ -91,7 +91,7 @@ generic-2xx probes and systemd verification command failure injection.
 The next exact bundle smoke is configured with these selected commits:
 
 ```text
-Kernel   f6b2efad080ab51115de287c25fdb8e420361cc4
+Kernel   ab171cf9c8d2a1b837161dcddc080a641a3120c4
 Data     d81086e2807f44ca0c0e43e31103cd85e6165a46
 Hub      4bab6a0c5201c6adda7ba0f68241297034326cae
 Admin    987c69282a5a91361b0e9d20144bb7163b8241b3
