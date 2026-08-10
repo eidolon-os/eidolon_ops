@@ -4,6 +4,31 @@
 生命周期命令和诊断模型；区别只在 Host profile 与执行适配器（Mac 是本地 supervisord，Pi 是远程
 systemd）。`eidolon-ops` 是唯一入口；实现级诊断收敛在 `eidolon-ops debug` 之下。
 
+## 运维权威的三层分工
+
+Ops 是唯一入口，不是唯一实现。三层各自拥有不可替代的事实，越界即是重复实现：
+
+| 层 | 谁 | 回答的问题 | 形态 |
+|---|---|---|---|
+| Operator 侧 | `eidolon-ops` | 这台 Host 应该是什么 | 工作站上按需运行，**永不常驻产品机** |
+| Host 侧 | `eidolond`、`eidolon-bootstrapd` | 现在应该跑什么、Host 身份与认领状态 | 产品机常驻 |
+| 组件 | Data / Hub / Kernel / Agent / Memory / Channel | 我自己怎么配置、迁移、备份、清除 | 各自权威 |
+
+具体到发布事务与运行时：
+
+| 动作 | Ops | `eidolon-release` | `eidolond` |
+|---|---|---|---|
+| 选定 release matrix（8 commit） | 唯一 | — | — |
+| 封印 bundle、target prepare、原子激活、代码回滚 | 编排 | 执行原语 | — |
+| 服务 enable/disable/restart、desired state、ready directory | 请求 / 消费 | — | 唯一 |
+| 健康门禁判定（`app-ready`） | 唯一 | — | 提供 observed state |
+| Controller Reset | 编排 | — | Bootstrap 执行 |
+
+`eidolon-release` 与 `eidolond` 留在 `eidolon_kernel` 仓：前者随 release 分发并在目标机上执行
+（回滚旧 release 用的就是那个 release 自带的激活器），后者是 15 个产品 unit 之一。Ops 只依赖
+它们的契约——通过 `eidolon-release contract` 校验格式版本，通过 release 发布的
+`.release/bin/{eidolon-release,python}` 寻址——不依赖任何组件目录名或 Git 工作树。
+
 对一台刚刷好系统、已开放 SSH 的新 Pi，下面一条命令会完成基础环境检测/安装、精确提交发布、
 Data V2 初始化、15 个产品服务启动，并要求 Host 达到手机 App commissioning 门禁：
 
