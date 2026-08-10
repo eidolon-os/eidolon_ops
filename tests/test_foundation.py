@@ -411,6 +411,26 @@ def test_https_json_is_bounded_and_validates_status(monkeypatch) -> None:
     assert target_agent._https_json("/healthz") == {"status": "ok"}
 
 
+def test_https_json_wraps_transport_failure_and_closes(monkeypatch) -> None:
+    closed: list[bool] = []
+
+    class Connection:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def request(self, _method, _path):
+            raise OSError("offline")
+
+        def close(self):
+            closed.append(True)
+
+    monkeypatch.setattr(target_agent.http.client, "HTTPSConnection", Connection)
+
+    with pytest.raises(TargetError, match="self-check failed"):
+        target_agent._https_json_endpoint("192.168.100.15", 8443, "/health", label="Hub")
+    assert closed == [True]
+
+
 def test_private_file_and_app_ready_gate(monkeypatch, tmp_path: Path) -> None:
     user = pwd.getpwuid(os.getuid()).pw_name
     group = grp.getgrgid(os.getgid()).gr_name

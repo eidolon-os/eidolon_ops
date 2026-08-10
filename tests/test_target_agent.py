@@ -413,7 +413,10 @@ def test_reset_stops_and_disables_fixed_units_before_deletion(tmp_path: Path) ->
 
     stop_units = [call[2] for call in command.calls if call[1] == "stop"]
     disable_units = [call[2] for call in command.calls if call[1] == "disable"]
-    assert set(target_agent.RESET_STOP_UNITS) == set(target_agent.PRODUCT_UNITS)
+    assert set(target_agent.RESET_STOP_UNITS) == {
+        *target_agent.PRODUCT_UNITS,
+        "eidolon-hub-ingress.service",
+    }
     assert stop_units == list(target_agent.RESET_STOP_UNITS)
     assert disable_units == list(target_agent.RESET_STOP_UNITS)
     assert ("/usr/bin/systemctl", "daemon-reload") in command.calls

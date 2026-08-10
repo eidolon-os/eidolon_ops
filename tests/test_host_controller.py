@@ -189,8 +189,9 @@ def test_pi_adapter_delegates_every_remote_capability(monkeypatch, tmp_path: Pat
             return self
 
     class Pi:
-        def __init__(self, config, runner) -> None:
+        def __init__(self, config, runner, *, app=None) -> None:
             assert isinstance(config, Config)
+            assert app is None
 
         def _result(self, name, values=None):
             calls.append((name, values or {}))

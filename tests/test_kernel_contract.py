@@ -8,7 +8,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from eidolon_ops.target_agent import MANAGED_SYSTEM_ASSETS, PRODUCT_UNITS, SECRET_INPUTS
+from eidolon_ops.target_agent import (
+    HOST_APPLICATION_INPUTS,
+    MANAGED_SYSTEM_ASSETS,
+    PRODUCT_UNITS,
+    SECRET_INPUTS,
+)
 
 KERNEL_ROOT = Path(__file__).resolve().parents[2] / "eidolon_kernel"
 
@@ -79,7 +84,10 @@ def test_current_release_contract_counts_are_not_stale_document_counts(
 
 
 def test_reset_system_asset_allowlist_matches_kernel_release_contract(kernel_contract) -> None:
-    assert set(MANAGED_SYSTEM_ASSETS) == set(kernel_contract.system_assets)
+    assert set(MANAGED_SYSTEM_ASSETS) == {
+        *kernel_contract.system_assets,
+        *(value[0] for value in HOST_APPLICATION_INPUTS.values()),
+    }
 
 
 def test_data_v2_paths_are_fixed_in_systemd_assets(kernel_contract) -> None:

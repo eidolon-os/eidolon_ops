@@ -18,3 +18,9 @@ bootstrap_runtime_root = "/run/eidolon-bootstrap"
 
 [adapter]
 operations_config = "../eidolon-pi.toml"
+
+[app]
+lan_ipv4 = "192.168.100.15"
+hub_https_port = 8443
+livekit_client_url = "ws://192.168.100.15:7880"
+allow_insecure_livekit = true

@@ -68,11 +68,12 @@ endpoint, then uses the advertised SPKI pin for the existing short-code Controll
 commissioning do not enable this route. The corresponding Mobile debug client is
 `f7d2f51a52bf9d55755d1624130c5d64f4b19d9e`.
 
-The public Hub transport is incomplete in the Pi release assets. `eidolon-hub.service` binds plaintext HTTP only to
-`127.0.0.1:8082`, while the pinned Hub config and mDNS advertiser claim `https://eidolon-hub.local` on port 443. No
-unit, reverse proxy, Hub certificate input or readiness check owns that TLS endpoint. The Local API certificate/SPKI
-cannot be reused by assumption. A started Hub may therefore advertise an unreachable/untrusted endpoint; process and
-mDNS health are not sufficient onboarding evidence.
+The release-owned Hub remains one plaintext authority process on `127.0.0.1:8082`. Ops now supplies the missing Host
+configuration layer without mutating commit-pinned release assets: a Host-key-derived Hub ID/`.local` origin, stable
+pinned P-256 leaf, generated Hub settings selected through a systemd environment overlay, and a hardened
+`eidolon-hub-ingress.service` on 8443. SRV port, TXT descriptor, Hub descriptor, Local API target and certificate SAN
+come from one contract. `app-ready` rejects the generic template identity, cross-Host resolution or an unreachable
+advertised endpoint. Product WSS for LiveKit remains a separate release gate.
 
 ## Existing capability, previous gap, implemented closure
 

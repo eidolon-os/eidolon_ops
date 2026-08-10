@@ -3,12 +3,14 @@ from __future__ import annotations
 import hashlib
 import json
 import tarfile
+from ipaddress import IPv4Address
 from pathlib import Path
 
 import pytest
 
 from eidolon_ops.config import SOURCE_IDS, ConfigurationError
 from eidolon_ops.controller import EidolonPiController, OperationsError
+from eidolon_ops.paths import AppAccess
 from eidolon_ops.process import ProcessResult
 from eidolon_ops.release_matrix import SYSTEMD_ASSET_CONTRACTS
 
@@ -222,6 +224,15 @@ def _stub_input_contract(controller: EidolonPiController) -> None:
     controller._validate_install_inputs = lambda _names: {  # type: ignore[method-assign]
         "status": "compatible"
     }
+
+
+def _app() -> AppAccess:
+    return AppAccess(
+        lan_ipv4=IPv4Address("192.168.100.15"),
+        hub_https_port=8443,
+        livekit_client_url="ws://192.168.100.15:7880",
+        allow_insecure_livekit=True,
+    )
 
 
 @pytest.fixture
@@ -734,6 +745,65 @@ def test_install_apply_stages_exact_files_and_cleans(setup_controller) -> None:
     actions = [call[0] for call in transport.agent_calls]
     assert actions[-2:] == ["install", "cleanup-stage"]
     assert actions[0] == "foundation-doctor"
+
+
+def test_unified_pi_stage_renders_host_bound_application_assets(config) -> None:
+    identity = config.install_files["host_identity"]
+    identity.write_bytes(b"a" * 32)
+    identity.chmod(0o600)
+    config.install_files["local_api_env"].write_text(
+        "EIDOLON_LOCAL_API_ADMIN_BASE_URL=http://127.0.0.1:9000\n"
+        "EIDOLON_LOCAL_API_ADMIN_SERVICE_TOKEN=test-token\n",
+        encoding="utf-8",
+    )
+    config.install_files["channel_env"].write_text(
+        "EIDOLON_LIVEKIT_CLIENT_URL=ws://127.0.0.1:7880\nPAIRING_JWT_SECRET=test-token\n",
+        encoding="utf-8",
+    )
+
+    class Runner(ControllerRunner):
+        def run(self, command, **kwargs):
+            if "show" in command and command[-1].endswith("config/hub.systemd.example.yaml"):
+                return ProcessResult(
+                    0,
+                    "onboarding:\n"
+                    "  hub_id: eidolon-hub-local\n"
+                    "  public_base_url: https://eidolon-hub.local\n"
+                    "discovery:\n  mdns:\n    enabled: true\n"
+                    "channel_provider:\n  contract_url: http://127.0.0.1:8767/v1\n"
+                    "persistence:\n  path: /var/lib/eidolon/eidolon-hub.sqlite3\n",
+                    "",
+                )
+            return super().run(command, **kwargs)
+
+    class CapturingTransport(FakeTransport):
+        def __init__(self) -> None:
+            super().__init__()
+            self.uploaded_bytes: dict[str, bytes] = {}
+
+        def upload(self, source, destination, *, recursive=False):
+            super().upload(source, destination, recursive=recursive)
+            self.uploaded_bytes[destination] = Path(source).read_bytes()
+
+    transport = CapturingTransport()
+    controller = EidolonPiController(config, Runner(config), transport=transport, app=_app())
+    stage = "/var/tmp/eidolon-secrets-host-bound"
+
+    controller._stage_install_files("host-bound", stage)
+    payload = controller._target_payload()
+
+    assert len(transport.uploaded_bytes) == len(config.install_files) + 6
+    app = payload["app"]
+    assert isinstance(app, dict)
+    assert app["hub_id"] != "eidolon-hub-local"
+    assert str(app["hub_hostname"]).endswith(".local")
+    assert str(app["hub_origin"]).endswith(":8443")
+    rendered_local = transport.uploaded_bytes[f"{stage}/local-api.env"].decode()
+    rendered_hub = transport.uploaded_bytes[f"{stage}/hub.generated.yaml"].decode()
+    assert f"EIDOLON_LOCAL_API_HUB_ID={app['hub_id']}" in rendered_local
+    assert f"hub_id: {app['hub_id']}" in rendered_hub
+    assert f"public_base_url: {app['hub_origin']}" in rendered_hub
+    assert b"--listen-port 8443" in transport.uploaded_bytes[f"{stage}/hub-ingress.service"]
 
 
 def test_install_can_reset_and_wipe_existing_host_before_provision(setup_controller) -> None:

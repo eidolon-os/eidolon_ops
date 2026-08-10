@@ -282,7 +282,7 @@ class HostController:
         if config_path is None:
             raise OperationsError("Pi host profile does not reference an operations config")
         config = load_config(config_path).with_revision_overrides(self.revision_overrides)
-        return EidolonPiController(config, self.runner)
+        return EidolonPiController(config, self.runner, app=self.profile.app)
 
     def _require_pi(self, operation: str) -> EidolonPiController:
         if self.profile.driver != "ssh-systemd":

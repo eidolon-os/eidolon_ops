@@ -84,7 +84,6 @@ class AppAccess:
     """Device-reachable application endpoints for one Host."""
 
     lan_ipv4: IPv4Address
-    hub_hostname: str
     hub_https_port: int
     livekit_client_url: str
     allow_insecure_livekit: bool
@@ -281,7 +280,6 @@ def _app_access(value: object | None) -> AppAccess | None:
     document = _table(value, "app")
     expected = {
         "lan_ipv4",
-        "hub_hostname",
         "hub_https_port",
         "livekit_client_url",
         "allow_insecure_livekit",
@@ -294,9 +292,6 @@ def _app_access(value: object | None) -> AppAccess | None:
         raise HostProfileError("app.lan_ipv4 must be a private IPv4 address") from exc
     if not isinstance(address, IPv4Address) or not address.is_private or address.is_loopback:
         raise HostProfileError("app.lan_ipv4 must be a private IPv4 address")
-    hostname = _text(document["hub_hostname"], "app.hub_hostname").lower()
-    if re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.local", hostname) is None:
-        raise HostProfileError("app.hub_hostname must be one single-label .local hostname")
     port = document["hub_https_port"]
     if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:
         raise HostProfileError("app.hub_https_port must be a valid TCP port")
@@ -321,7 +316,6 @@ def _app_access(value: object | None) -> AppAccess | None:
         raise HostProfileError("an insecure LiveKit URL must use app.lan_ipv4")
     return AppAccess(
         lan_ipv4=address,
-        hub_hostname=hostname,
         hub_https_port=port,
         livekit_client_url=livekit_url.rstrip("/"),
         allow_insecure_livekit=allow_insecure,

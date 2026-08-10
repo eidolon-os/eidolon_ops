@@ -1,5 +1,44 @@
 # Verification report
 
+## Current superseding state: Host-bound Hub LAN identity
+
+On 2026-08-10 the Mac Host at `192.168.100.16` retained its existing Bootstrap Ed25519 identity and Ops derived
+`ehost-b3c897513cdce96b1f15`, Hub ID `eidolon-hub-b3c897513cdce96b1f15` and hostname
+`eidolon-hub-b3c897513cdce96b1f15.local`. `product-source prepare` atomically rotated the previous generic Hub leaf;
+the certificate CN/SAN, Hub settings, Local API target and LAN descriptor all contain that exact hostname. A real
+`restart` returned 12/12 backend health and a subsequent `app-ready` returned `app_ready`. Direct LAN HTTPS on
+`192.168.100.16:8443` returned the same Hub ID and descriptor origin.
+
+Pi5 was intentionally kept online and unchanged at `192.168.100.15`. A read-only Avahi browse from Pi5 simultaneously
+resolved the new Mac instance to `192.168.100.16:8443` and retained Pi5's old generic instance
+`eidolon-hub-local/eidolon-hub.local` at `192.168.100.15:443`. This is real two-Host evidence that instance name,
+hostname, port and descriptor TXT no longer collide for the repaired Mac. Pi5 has not yet been reinstalled with the
+new Ops contract, so its generic/unreachable Hub advertisement remains historical deployment state rather than a
+claim of Pi App readiness. The final Pad conversation retry remains the external E2E gate.
+
+The implementation also covers future clean Pi installs: the 15 commit-pinned release units remain unmodified while
+Ops stages Host-bound generated Hub settings, stable P-256 leaf/key, Local API target, LiveKit client origin, a
+hardened 8443 ingress unit and a systemd settings overlay. Target `app-ready` verifies file ownership/modes, certificate
+pair/SAN, LAN health, descriptor identity, Local API coherence and Avahi resolution. Product-grade LiveKit WSS remains
+unverified; current private `ws://` use is an explicit development profile opt-in.
+
+Current reproducible local gates:
+
+```text
+uv run ruff check .
+All checks passed
+
+uv run ruff format --check .
+44 files already formatted
+
+uv run pytest --cov=eidolon_ops --cov-report=term -q
+384 passed in 3.96s
+Total coverage: 90.03% (branch coverage enabled; fail-under 90)
+```
+
+The sections below retain chronological reset/install evidence; statements describing an empty Pi or generic Mac Hub
+are historical and are superseded by this section.
+
 Updated: 2026-08-10 (Asia/Shanghai). Superseding evidence: release upload now uses digest-guarded resumable rsync
 staging. A 494-MiB obsolete candidate reached Pi-native preparation without activation: Kernel prepared, then Data
 dependency installation failed closed after five PyPI retries for `packaging==26.3` timed out. No product unit,

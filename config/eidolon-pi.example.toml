@@ -5,7 +5,7 @@ profile = "raspberry-pi-os-debian-arm64-v2"
 
 [host]
 user = "eidolon-pi5"
-hostname = "192.168.1.26"
+hostname = "192.168.100.15"
 port = 22
 identity_file = "/absolute/path/to/id_ed25519_eidolon_pi"
 known_hosts_file = "/absolute/path/to/eidolon_pi_known_hosts"

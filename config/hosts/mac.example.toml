@@ -30,7 +30,6 @@ external_livekit_config = "../../../eidolon_admin/var/livekit/livekit.generated.
 
 [app]
 lan_ipv4 = "192.168.1.25"
-hub_hostname = "eidolon-hub.local"
 hub_https_port = 8443
 livekit_client_url = "ws://192.168.1.25:7880"
 allow_insecure_livekit = true

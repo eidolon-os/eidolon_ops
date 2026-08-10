@@ -27,11 +27,17 @@ from eidolon_ops.foundation import (
     python_bootstrap_script,
     python_probe_script,
 )
+from eidolon_ops.host_application import (
+    HOST_APPLICATION_STAGE_NAMES,
+    HostApplicationError,
+    HostApplicationMaterializer,
+)
 from eidolon_ops.install_inputs import (
     InstallInputError,
     initialize_install_inputs,
     validate_install_input_contract,
 )
+from eidolon_ops.paths import AppAccess
 from eidolon_ops.process import ProcessRunner, checked
 from eidolon_ops.release_matrix import (
     ReleaseMatrixError,
@@ -69,11 +75,13 @@ class EidolonPiController:
         *,
         transport: SSHTransport | None = None,
         git: str = "git",
+        app: AppAccess | None = None,
     ) -> None:
         self.config = config
         self.runner = runner
         self.transport = transport or SSHTransport(config.host, runner)
         self.git = git
+        self.app = app
 
     def status(self) -> dict[str, object]:
         self._validate_ssh_material()
@@ -102,8 +110,12 @@ class EidolonPiController:
                     f"settings source revision is not the exact commit object: {source_id}"
                 )
         try:
-            return initialize_install_inputs(self.config, self._read_exact_source_file)
-        except InstallInputError as exc:
+            result = initialize_install_inputs(self.config, self._read_exact_source_file)
+            if self.app is None:
+                return result
+            application = self._prepare_host_application()
+            return {**result, "host_application": application.public_contract()}
+        except (InstallInputError, HostApplicationError) as exc:
             raise OperationsError(str(exc)) from exc
 
     def app_ready(self) -> dict[str, object]:
@@ -1052,11 +1064,26 @@ class EidolonPiController:
             sudo=False,
             operation="private secret staging directory creation",
         )
-        for name in names:
-            self.transport.upload(
-                self.config.install_files[name],
-                f"{stage}/{_STAGED_INSTALL_NAMES[name]}",
-            )
+        full_install = names == INSTALL_FILE_NAMES
+        application = self._prepare_host_application() if full_install and self.app else None
+        with tempfile.TemporaryDirectory(prefix="eidolon-host-application-") as temporary_value:
+            temporary = Path(temporary_value)
+            for name in names:
+                source = self.config.install_files[name]
+                if application is not None and name in {"local_api_env", "channel_env"}:
+                    rendered = self._host_application().render_environment(
+                        _STAGED_INSTALL_NAMES[name], source.read_text(encoding="utf-8")
+                    )
+                    source = temporary / _STAGED_INSTALL_NAMES[name]
+                    source.write_text(rendered, encoding="utf-8")
+                    os.chmod(source, 0o600)
+                self.transport.upload(source, f"{stage}/{_STAGED_INSTALL_NAMES[name]}")
+            if application is not None:
+                for name in HOST_APPLICATION_STAGE_NAMES:
+                    source = temporary / name
+                    source.write_bytes(application.files[name])
+                    os.chmod(source, 0o600)
+                    self.transport.upload(source, f"{stage}/{name}")
 
     def _remote_json(
         self,
@@ -1084,7 +1111,7 @@ class EidolonPiController:
         return document
 
     def _target_payload(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "units": list(self.config.units),
             "data": {
                 "system_database": str(self.config.data.system_database),
@@ -1093,6 +1120,38 @@ class EidolonPiController:
                 "deployment_evidence": str(self.config.data.deployment_evidence),
             },
         }
+        identity_path = self.config.install_files.get("host_identity")
+        if self.app is not None and identity_path is not None and identity_path.is_file():
+            try:
+                payload["app"] = self._host_application().public_contract()
+            except HostApplicationError as exc:
+                raise OperationsError(str(exc)) from exc
+        return payload
+
+    def _require_app_access(self) -> AppAccess:
+        if self.app is None:
+            raise OperationsError("Pi Host operations require the unified [app] access contract")
+        return self.app
+
+    def _host_application(self) -> HostApplicationMaterializer:
+        app = self._require_app_access()
+        ingress = Path(__file__).with_name("lan_ingress.py")
+        try:
+            source = ingress.read_bytes()
+        except OSError as exc:
+            raise OperationsError("deployment-owned LAN ingress source is missing") from exc
+        return HostApplicationMaterializer(self.config, app, source)
+
+    def _prepare_host_application(self):
+        materializer = self._host_application()
+        kernel = self.config.sources["eidolon_kernel"]
+        template = self._read_exact_source_file(
+            "eidolon_kernel", kernel.revision, "config/hub.systemd.example.yaml"
+        )
+        try:
+            return materializer.prepare(template)
+        except HostApplicationError as exc:
+            raise OperationsError(str(exc)) from exc
 
     @staticmethod
     def _remote_release_cli(release_id: str) -> str:

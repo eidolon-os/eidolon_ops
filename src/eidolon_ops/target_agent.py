@@ -28,7 +28,9 @@ import time
 import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
+from ipaddress import IPv4Address, ip_address
 from pathlib import Path, PurePosixPath
+from urllib.parse import urlparse
 
 PRODUCT_UNITS = (
     "eidolon-bootstrapd.service",
@@ -63,6 +65,7 @@ RESET_STOP_UNITS = (
     "eidolon-livekit.service",
     "eidolon-nats.service",
     "eidolon-kernel.service",
+    "eidolon-hub-ingress.service",
     "eidolon-hub.service",
     "eidolon-data-workspace.service",
     "eidolon-data.service",
@@ -106,6 +109,35 @@ SECRET_INPUTS = {
     "channel.yaml": (Path("/etc/eidolon/channel.yaml"), "root", "eidolon", 0o640),
     "memory.yaml": (Path("/etc/eidolon/memory.yaml"), "root", "eidolon", 0o640),
 }
+HOST_APPLICATION_INPUTS = {
+    "hub.generated.yaml": (
+        Path("/etc/eidolon/generated/hub.yaml"),
+        "root",
+        "eidolon",
+        0o640,
+    ),
+    "hub.crt": (Path("/etc/eidolon/tls/hub.crt"), "root", "eidolon", 0o640),
+    "hub.key": (Path("/etc/eidolon/tls/hub.key"), "root", "eidolon", 0o640),
+    "hub-ingress.py": (
+        Path("/usr/local/libexec/eidolon-hub-lan-ingress"),
+        "root",
+        "root",
+        0o755,
+    ),
+    "hub-ingress.service": (
+        Path("/etc/systemd/system/eidolon-hub-ingress.service"),
+        "root",
+        "root",
+        0o644,
+    ),
+    "hub-service-override.conf": (
+        Path("/etc/systemd/system/eidolon-hub.service.d/20-eidolon-ops-host.conf"),
+        "root",
+        "root",
+        0o644,
+    ),
+}
+INSTALL_INPUTS = {**SECRET_INPUTS, **HOST_APPLICATION_INPUTS}
 EXPANSION_INPUTS = {
     name: SECRET_INPUTS[name]
     for name in (
@@ -145,6 +177,7 @@ MANAGED_SYSTEM_ASSETS = (
     Path("/etc/polkit-1/rules.d/60-eidolon-bootstrap-network.rules"),
     Path("/etc/avahi/services/eidolon-local-api.service"),
     Path("/usr/local/libexec/eidolon-livekit-launch"),
+    *(destination for destination, _user, _group, _mode in HOST_APPLICATION_INPUTS.values()),
 )
 RESET_DEPLOYMENT_ROOTS = (
     Path("/opt/eidolon"),
@@ -488,6 +521,72 @@ def _fixed_data(payload: Mapping[str, object]) -> dict[str, Path]:
     return result
 
 
+def _fixed_app(payload: Mapping[str, object]) -> dict[str, object]:
+    value = payload.get("app")
+    expected = {
+        "host_id",
+        "hub_id",
+        "hub_hostname",
+        "hub_https_port",
+        "hub_origin",
+        "lan_ipv4",
+        "livekit_client_url",
+        "allow_insecure_livekit",
+    }
+    if not isinstance(value, dict) or set(value) != expected:
+        raise TargetError("Host application contract is missing or malformed")
+    host_id = value.get("host_id")
+    if not isinstance(host_id, str) or re.fullmatch(r"ehost-[0-9a-f]{20}", host_id) is None:
+        raise TargetError("Host application Host ID is invalid")
+    suffix = host_id.removeprefix("ehost-")
+    hub_id = f"eidolon-hub-{suffix}"
+    hub_hostname = f"{hub_id}.local"
+    port = value.get("hub_https_port")
+    if (
+        value.get("hub_id") != hub_id
+        or value.get("hub_hostname") != hub_hostname
+        or type(port) is not int
+        or not 1 <= port <= 65535
+        or value.get("hub_origin") != f"https://{hub_hostname}:{port}"
+    ):
+        raise TargetError("Host application Hub identity is not Host-bound")
+    try:
+        address = ip_address(str(value.get("lan_ipv4")))
+    except ValueError as exc:
+        raise TargetError("Host application LAN address is invalid") from exc
+    if not isinstance(address, IPv4Address) or not address.is_private or address.is_loopback:
+        raise TargetError("Host application LAN address must be private IPv4")
+    livekit = value.get("livekit_client_url")
+    try:
+        parsed = urlparse(livekit) if isinstance(livekit, str) else None
+        if parsed is not None:
+            _parsed_port = parsed.port
+    except ValueError as exc:
+        raise TargetError("Host application LiveKit origin is invalid") from exc
+    allow_insecure = value.get("allow_insecure_livekit")
+    if (
+        parsed is None
+        or parsed.scheme not in {"ws", "wss"}
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path not in {"", "/"}
+        or parsed.query
+        or parsed.fragment
+        or not isinstance(allow_insecure, bool)
+        or (parsed.scheme == "ws" and not allow_insecure)
+        or (parsed.scheme == "ws" and parsed.hostname != str(address))
+    ):
+        raise TargetError("Host application LiveKit origin is invalid")
+    return dict(value)
+
+
+def _optional_app(payload: Mapping[str, object]) -> dict[str, object] | None:
+    if "app" not in payload:
+        return None
+    return _fixed_app(payload)
+
+
 def _release_id(payload: Mapping[str, object], *, required: bool = True) -> str | None:
     value = payload.get("release_id")
     if value is None and not required:
@@ -579,7 +678,14 @@ def status(payload: Mapping[str, object]) -> dict[str, object]:
         "host": platform.node(),
         "system": platform.system().lower(),
         "machine": platform.machine().lower(),
-        "units": {unit: _unit_status(unit) for unit in units},
+        "units": {
+            **{unit: _unit_status(unit) for unit in units},
+            **(
+                {"eidolon-hub-ingress.service": _unit_status("eidolon-hub-ingress.service")}
+                if _optional_app(payload) is not None
+                else {}
+            ),
+        },
         "current_links": links,
         "recent_receipts": receipts,
         "installations": installations,
@@ -1106,27 +1212,166 @@ def foundation_install(payload: Mapping[str, object]) -> dict[str, object]:
 
 
 def _https_json(path: str) -> dict[str, object]:
+    return _https_json_endpoint("127.0.0.1", 9002, path, label="Local API")
+
+
+def _https_json_endpoint(host: str, port: int, path: str, *, label: str) -> dict[str, object]:
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     context.check_hostname = False
     context.verify_mode = ssl.CERT_NONE
-    connection = http.client.HTTPSConnection("127.0.0.1", 9002, timeout=5, context=context)
+    connection = http.client.HTTPSConnection(host, port, timeout=5, context=context)
     try:
         connection.request("GET", path)
         response = connection.getresponse()
         payload = response.read(1024 * 1024)
     except (OSError, http.client.HTTPException) as exc:
-        raise TargetError(f"Local API self-check failed: {exc}") from exc
+        raise TargetError(f"{label} self-check failed: {exc}") from exc
     finally:
         connection.close()
     if response.status != 200:
-        raise TargetError(f"Local API self-check returned HTTP {response.status}")
+        raise TargetError(f"{label} self-check returned HTTP {response.status}")
     try:
         document = json.loads(payload)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise TargetError("Local API self-check returned invalid JSON") from exc
+        raise TargetError(f"{label} self-check returned invalid JSON") from exc
     if not isinstance(document, dict):
-        raise TargetError("Local API self-check returned a non-object")
+        raise TargetError(f"{label} self-check returned a non-object")
     return document
+
+
+def _environment_values(path: Path) -> dict[str, str]:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError) as exc:
+        raise TargetError(f"Host application environment is unreadable: {path}") from exc
+    values: dict[str, str] = {}
+    for raw in lines:
+        if not raw:
+            continue
+        key, separator, value = raw.partition("=")
+        if not separator or not key or not value or key in values:
+            raise TargetError(f"Host application environment is invalid: {path}")
+        values[key] = value
+    return values
+
+
+def _host_application_ready(
+    app: Mapping[str, object], *, root: Path = Path("/")
+) -> dict[str, object]:
+    hostname = str(app["hub_hostname"])
+    hub_id = str(app["hub_id"])
+    address = str(app["lan_ipv4"])
+    port = int(app["hub_https_port"])
+    origin = str(app["hub_origin"])
+    settings_value = Path("/etc/eidolon/generated/hub.yaml")
+    certificate_value = Path("/etc/eidolon/tls/hub.crt")
+    private_key_value = Path("/etc/eidolon/tls/hub.key")
+    settings_path = _host_path(root, settings_value)
+    certificate_path = _host_path(root, certificate_value)
+    private_key_path = _host_path(root, private_key_value)
+    files = {
+        "hub_settings": _private_file_check(settings_path, 0o640, "root", "eidolon"),
+        "hub_certificate": _private_file_check(certificate_path, 0o640, "root", "eidolon"),
+        "hub_private_key": _private_file_check(private_key_path, 0o640, "root", "eidolon"),
+    }
+    settings = ""
+    local_api_values: dict[str, str] = {}
+    channel_values: dict[str, str] = {}
+    try:
+        settings = settings_path.read_text(encoding="utf-8")
+        local_api_values = _environment_values(_host_path(root, Path("/etc/eidolon/local-api.env")))
+        channel_values = _environment_values(_host_path(root, Path("/etc/eidolon/channel.env")))
+    except (OSError, UnicodeDecodeError, TargetError):
+        pass
+    certificate_ok = False
+    try:
+        decoded = ssl._ssl._test_decode_cert(str(certificate_path))
+        sans = decoded.get("subjectAltName", ())
+        starts = ssl.cert_time_to_seconds(decoded["notBefore"])
+        expires = ssl.cert_time_to_seconds(decoded["notAfter"])
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(certificate_path, private_key_path)
+        instant = time.time()
+        certificate_ok = sans == (("DNS", hostname),) and starts <= instant and expires > instant
+    except (KeyError, OSError, ssl.SSLError, ValueError):
+        certificate_ok = False
+    try:
+        health = _https_json_endpoint(address, port, "/health", label="Hub LAN ingress")
+        descriptor = _https_json_endpoint(
+            address,
+            port,
+            "/api/device-onboarding/v1/descriptor",
+            label="Hub LAN descriptor",
+        )
+    except TargetError as exc:
+        health = {"error": str(exc)}
+        descriptor = {}
+    resolution = _run(("/usr/bin/avahi-resolve-host-name", "-4", hostname), timeout=10)
+    resolved_addresses = {
+        line.split("\t", 1)[1].strip() for line in resolution.stdout.splitlines() if "\t" in line
+    }
+    browse = _run(
+        ("/usr/bin/avahi-browse", "-rtp", "_eidolon-hub._tcp"),
+        timeout=15,
+    )
+    mdns_records = []
+    for line in browse.stdout.splitlines():
+        fields = line.split(";")
+        if (
+            len(fields) >= 10
+            and fields[0] == "="
+            and fields[3] == hub_id
+            and fields[4] == "_eidolon-hub._tcp"
+        ):
+            mdns_records.append(fields)
+    expected_descriptor = origin + "/api/device-onboarding/v1/descriptor"
+    expected_mdns = bool(mdns_records) and all(
+        fields[6] == hostname
+        and fields[7] == address
+        and fields[8] == str(port)
+        and expected_descriptor in ";".join(fields[9:])
+        for fields in mdns_records
+    )
+    checks = {
+        "files": all(bool(value["healthy"]) for value in files.values()),
+        "certificate": certificate_ok,
+        "hub_settings": (
+            f"hub_id: {hub_id}" in settings
+            and f"public_base_url: {origin}" in settings
+            and "hub_id: eidolon-hub-local" not in settings
+        ),
+        "local_api_target": (
+            local_api_values.get("EIDOLON_LOCAL_API_HUB_ID") == hub_id
+            and local_api_values.get("EIDOLON_LOCAL_API_HUB_DESCRIPTOR_URI")
+            == origin + "/api/device-onboarding/v1/descriptor"
+            and local_api_values.get("EIDOLON_LOCAL_API_HUB_TLS_CERTIFICATE")
+            == str(certificate_value)
+        ),
+        "livekit_origin": (
+            channel_values.get("EIDOLON_LIVEKIT_CLIENT_URL") == app["livekit_client_url"]
+            and channel_values.get("EIDOLON_CHANNEL_PROVIDER_ALLOW_INSECURE_LAN_CLIENT_URL")
+            == ("1" if app["allow_insecure_livekit"] else "0")
+        ),
+        "hub_lan_health": health.get("status") == "ok",
+        "hub_descriptor": (
+            descriptor.get("hub_id") == hub_id
+            and descriptor.get("descriptor_uri") == origin + "/api/device-onboarding/v1/descriptor"
+        ),
+        "mdns_resolves_to_host": resolution.returncode == 0 and resolved_addresses == {address},
+        "mdns_contract": browse.returncode == 0 and expected_mdns,
+    }
+    return {
+        "healthy": all(checks.values()),
+        "identity": {
+            "host_id": app["host_id"],
+            "hub_id": hub_id,
+            "hub_hostname": hostname,
+        },
+        "checks": checks,
+        "files": files,
+        "resolution": sorted(resolved_addresses),
+        "hub_health": health,
+    }
 
 
 def _private_file_check(path: Path, mode: int, user: str, group: str) -> dict[str, object]:
@@ -1155,6 +1400,7 @@ def app_ready(payload: Mapping[str, object]) -> dict[str, object]:
     """Prove the host-side prerequisites for mobile App commissioning."""
 
     _fixed_units(payload)
+    app = _optional_app(payload)
     try:
         preflight_result = _run((str(_APP_PREFLIGHT),), timeout=60)
     except TargetError as exc:
@@ -1175,6 +1421,7 @@ def app_ready(payload: Mapping[str, object]) -> dict[str, object]:
         for unit in (
             "eidolon-bootstrapd.service",
             "eidolon-local-api.service",
+            *(("eidolon-hub-ingress.service",) if app is not None else ()),
             "bluetooth.service",
             "NetworkManager.service",
             "avahi-daemon.service",
@@ -1229,6 +1476,7 @@ def app_ready(payload: Mapping[str, object]) -> dict[str, object]:
         "service_type": "_eidolon-local-api._tcp",
         "port": 9002,
     }
+    host_application = _host_application_ready(app) if app is not None else None
     preflight_ok = isinstance(preflight, dict) and preflight.get("ok") is True
     healthy = (
         preflight_ok
@@ -1237,6 +1485,7 @@ def app_ready(payload: Mapping[str, object]) -> dict[str, object]:
         and all(sockets.values())
         and bool(local_api["healthy"])
         and bool(mdns["healthy"])
+        and (host_application is None or bool(host_application["healthy"]))
     )
     return {
         "status": "app_ready" if healthy else "degraded",
@@ -1246,6 +1495,7 @@ def app_ready(payload: Mapping[str, object]) -> dict[str, object]:
         "sockets": sockets,
         "local_api": local_api,
         "mdns": mdns,
+        "host_application": host_application,
         "scope": (
             "Host-side commissioning readiness only. A real phone must still verify BLE, "
             "Host proof, TLS SPKI pinning, Controller claim, Wi-Fi checkpoint and Workspace setup."
@@ -1857,10 +2107,12 @@ class TargetInstaller:
                 if self._before(phase, "started"):
                     self.host.start_release(self.release)
                     self.host.wait_ready(self.release)
+                    self._start_host_application()
                     result = self.host.doctor(self.release)
                     app_result = self._require_app_ready()
                     phase = self._record(journal, "started")
                 else:
+                    self._start_host_application()
                     result = self.host.doctor(self.release)
                     app_result = self._require_app_ready()
                 phase = self._record(journal, "completed", status="completed")
@@ -1902,10 +2154,10 @@ class TargetInstaller:
         if not self.secret_stage.is_dir() or self.secret_stage.is_symlink():
             raise TargetError("secret staging directory is missing or unsafe")
         actual = {path.name for path in self.secret_stage.iterdir()}
-        if actual != set(SECRET_INPUTS):
+        if frozenset(actual) not in {frozenset(SECRET_INPUTS), frozenset(INSTALL_INPUTS)}:
             raise TargetError("secret staging file set is invalid")
         values: dict[str, str] = {}
-        for name in SECRET_INPUTS:
+        for name in sorted(actual):
             path = self.secret_stage / name
             if not path.is_file() or path.is_symlink():
                 raise TargetError(f"secret staging input is unsafe: {name}")
@@ -1950,7 +2202,7 @@ class TargetInstaller:
         for path in (self.data["system_database"], self.data["bootstrap_database"]):
             if _host_path(self.root, path).exists():
                 conflicts.append(str(path))
-        for destination, _user, _group, _mode in SECRET_INPUTS.values():
+        for destination, _user, _group, _mode in INSTALL_INPUTS.values():
             if _host_path(self.root, destination).exists():
                 conflicts.append(str(destination))
         for asset in self.release.system_assets:
@@ -2027,7 +2279,8 @@ class TargetInstaller:
             raise TargetError(f"service identity has unexpected primary group: {name}")
 
     def _install_prerequisites(self, inputs: Mapping[str, str]) -> None:
-        for name, (destination_value, user, group, mode) in SECRET_INPUTS.items():
+        selected_inputs = {name: INSTALL_INPUTS[name] for name in inputs}
+        for name, (destination_value, user, group, mode) in selected_inputs.items():
             source = self.secret_stage / name
             destination = _host_path(self.root, destination_value)
             if destination.exists():
@@ -2083,6 +2336,20 @@ class TargetInstaller:
             "product unit enablement",
             ("/usr/bin/systemctl", "enable", *DIRECT_ENABLE_UNITS),
         )
+        ingress = _host_path(self.root, HOST_APPLICATION_INPUTS["hub-ingress.service"][0])
+        if ingress.is_file():
+            self._command_checked(
+                "Host application unit enablement",
+                ("/usr/bin/systemctl", "enable", "eidolon-hub-ingress.service"),
+            )
+
+    def _start_host_application(self) -> None:
+        ingress = _host_path(self.root, HOST_APPLICATION_INPUTS["hub-ingress.service"][0])
+        if ingress.is_file():
+            self._command_checked(
+                "Host application ingress start",
+                ("/usr/bin/systemctl", "start", "eidolon-hub-ingress.service"),
+            )
 
     def _command_checked(self, operation: str, command: Sequence[str]):
         result = self.command(command, timeout=120)
@@ -2454,6 +2721,7 @@ def reset_host(
 
 def lifecycle(action: str, payload: Mapping[str, object]) -> dict[str, object]:
     _fixed_units(payload)
+    app = _optional_app(payload)
     try:
         from eidolon_deploy.linux import LinuxDeploymentHost
         from eidolon_deploy.manifest import load_release_descriptor
@@ -2470,6 +2738,16 @@ def lifecycle(action: str, payload: Mapping[str, object]) -> dict[str, object]:
         if action in {"start", "restart"}:
             host.start_release(release)
             host.wait_ready(release)
+            if app is not None:
+                ingress = _run(
+                    ("/usr/bin/systemctl", "start", "eidolon-hub-ingress.service"),
+                    timeout=120,
+                )
+                if ingress.returncode != 0:
+                    raise TargetError(
+                        "Host application ingress failed to start: "
+                        + (ingress.stderr.strip() or ingress.stdout.strip() or "no output")
+                    )
     return {
         "status": action + "ed" if action != "stop" else "stopped",
         "release_id": release.release_id,
@@ -2499,7 +2777,10 @@ def rollback_plan(payload: Mapping[str, object]) -> dict[str, object]:
 def logs(payload: Mapping[str, object]) -> dict[str, object]:
     units = _fixed_units(payload)
     requested = payload.get("unit")
-    if requested is not None and requested not in units:
+    selectable_units = (
+        (*units, "eidolon-hub-ingress.service") if _optional_app(payload) is not None else units
+    )
+    if requested is not None and requested not in selectable_units:
         raise TargetError("requested log unit is outside the product topology")
     lines = payload.get("lines", 200)
     if type(lines) is not int or not 1 <= lines <= 5000:
@@ -2512,7 +2793,7 @@ def logs(payload: Mapping[str, object]) -> dict[str, object]:
         or any(ord(char) < 32 for char in since)
     ):
         raise TargetError("journal since value is invalid")
-    selected = (requested,) if isinstance(requested, str) else units
+    selected = (requested,) if isinstance(requested, str) else selectable_units
     entries: dict[str, str] = {}
     for unit in selected:
         command = [

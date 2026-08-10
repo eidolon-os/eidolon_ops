@@ -47,12 +47,15 @@ def _product(tmp_path: Path, *, foundation_mode: str) -> LocalProductSource:
         external_livekit_config=tmp_path / "livekit.yaml",
         app=AppAccess(
             lan_ipv4=IPv4Address("192.168.1.25"),
-            hub_hostname="eidolon-hub.local",
             hub_https_port=8443,
             livekit_client_url="ws://192.168.1.25:7880",
             allow_insecure_livekit=True,
         ),
     )
+    profile.paths.bootstrap_state_root.mkdir(parents=True)
+    identity = profile.paths.bootstrap_state_root / "host_identity.ed25519"
+    identity.write_bytes(b"i" * 32)
+    identity.chmod(0o600)
     return LocalProductSource(profile, cast(Any, None), cast(Any, None))
 
 
@@ -203,7 +206,8 @@ def test_prepare_materializes_one_canonical_mac_product_contract(
                 if target.endswith("config/hub.systemd.example.yaml"):
                     return ProcessResult(
                         0,
-                        "onboarding:\n  public_base_url: https://eidolon-hub.local\n"
+                        "onboarding:\n  hub_id: eidolon-hub-local\n"
+                        "  public_base_url: https://eidolon-hub.local\n"
                         "persistence:\n  path: /var/lib/eidolon/eidolon-hub.sqlite3\n",
                         "",
                     )
@@ -266,7 +270,7 @@ def test_hub_tls_identity_is_generated_validated_and_reused(tmp_path: Path) -> N
     assert certificate.stat().st_mode & 0o777 == 0o600
     assert private_key.stat().st_mode & 0o777 == 0o600
     decoded = local_product_module.ssl._ssl._test_decode_cert(str(certificate))
-    assert ("DNS", "eidolon-hub.local") in decoded["subjectAltName"]
+    assert ("DNS", product._host_lan_identity().hub_hostname) in decoded["subjectAltName"]
     original = certificate.read_bytes(), private_key.read_bytes()
 
     product._ensure_hub_tls_identity()
@@ -284,8 +288,9 @@ def test_hub_tls_identity_fails_closed_for_partial_or_invalid_files(tmp_path: Pa
         product._ensure_hub_tls_identity()
 
     private_key.write_text("invalid", encoding="utf-8")
-    with pytest.raises(OperationsError, match="invalid"):
-        product._ensure_hub_tls_identity()
+    product._ensure_hub_tls_identity()
+    decoded = local_product_module.ssl._ssl._test_decode_cert(str(certificate))
+    assert ("DNS", product._host_lan_identity().hub_hostname) in decoded["subjectAltName"]
 
 
 def test_product_health_uses_canonical_endpoints(monkeypatch, tmp_path: Path) -> None:
@@ -329,10 +334,13 @@ def test_app_ready_requires_device_reachable_contract(monkeypatch, tmp_path: Pat
     (root / "settings").mkdir(parents=True)
     product.profile.paths.log_root.joinpath("admin").mkdir(parents=True)
     certificate = root / "tls/hub.crt"
+    identity = product._host_lan_identity()
+    origin = identity.hub_origin(8443)
+    product._ensure_hub_tls_identity()
     (root / "env/local-api.env").write_text(
-        "EIDOLON_LOCAL_API_HUB_ID=eidolon-hub-local\n"
+        f"EIDOLON_LOCAL_API_HUB_ID={identity.hub_id}\n"
         "EIDOLON_LOCAL_API_HUB_DESCRIPTOR_URI="
-        "https://eidolon-hub.local:8443/api/device-onboarding/v1/descriptor\n"
+        f"{origin}/api/device-onboarding/v1/descriptor\n"
         f"EIDOLON_LOCAL_API_HUB_TLS_CERTIFICATE={certificate}\n",
         encoding="utf-8",
     )
@@ -342,7 +350,7 @@ def test_app_ready_requires_device_reachable_contract(monkeypatch, tmp_path: Pat
         encoding="utf-8",
     )
     (root / "settings/hub.yaml").write_text(
-        "onboarding:\n  public_base_url: https://eidolon-hub.local:8443\n",
+        f"onboarding:\n  hub_id: {identity.hub_id}\n  public_base_url: {origin}\n",
         encoding="utf-8",
     )
     external_livekit = cast(Path, product.profile.external_livekit_config)

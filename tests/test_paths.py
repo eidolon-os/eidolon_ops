@@ -46,7 +46,6 @@ foundation_mode = "external"
 external_livekit_config = "{tmp_path / "livekit.yaml"}"
 [app]
 lan_ipv4 = "192.168.1.25"
-hub_hostname = "eidolon-hub.local"
 hub_https_port = 8443
 livekit_client_url = "ws://192.168.1.25:7880"
 allow_insecure_livekit = true
@@ -125,7 +124,7 @@ def test_mac_example_uses_the_ops_owned_source_lifecycle() -> None:
     assert profile.operations_config == (REPOSITORY_ROOT / "config/eidolon-pi.toml").resolve()
     assert profile.foundation_mode == "external"
     assert profile.app is not None
-    assert profile.app.hub_hostname == "eidolon-hub.local"
+    assert profile.app.hub_https_port == 8443
     product_root = Path.home() / "ai/eidolon/.eidolon/mac-product"
     assert profile.paths.config_root == product_root / "config"
     assert profile.paths.state_root == product_root / "state"
@@ -305,7 +304,6 @@ def test_profile_rejects_unknown_structural_fields(
         ('lan_ipv4 = "192.168.1.25"', 'lan_ipv4 = "127.0.0.1"', "private IPv4"),
         ('lan_ipv4 = "192.168.1.25"', 'lan_ipv4 = "not-an-ip"', "private IPv4"),
         ('lan_ipv4 = "192.168.1.25"', 'lan_ipv4 = "fd00::25"', "private IPv4"),
-        ('hub_hostname = "eidolon-hub.local"', 'hub_hostname = "hub.example.com"', ".local"),
         ("hub_https_port = 8443", "hub_https_port = true", "valid TCP port"),
         ("hub_https_port = 8443", "hub_https_port = 0", "valid TCP port"),
         (

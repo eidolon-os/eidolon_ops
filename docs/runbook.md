@@ -82,20 +82,16 @@ uv run eidolon-ops --config /absolute/path/hosts/pi5.toml app-ready
 ```
 
 Exit 0 requires Bootstrap preflight, Bootstrap/Local API/BlueZ/NetworkManager/Avahi active, exact identity/TLS file
-ownership/mode, Bootstrap control socket, Local API HTTPS health + descriptor and Avahi service definition. It proves
-the Pi side only. A real phone must still validate BLE discovery, Host proof, TLS SPKI, Controller claim, Wi-Fi
-checkpoint and Workspace setup.
+ownership/mode, Bootstrap control socket and Local API HTTPS health + descriptor. With a unified Host `[app]`
+contract it additionally requires a Hub identity derived from the Bootstrap Host key, matching certificate SAN/key,
+LAN 8443 health, exact Hub descriptor, Local API target coherence, unique mDNS SRV/TXT resolution and the configured
+LiveKit client origin.
 
-`app-ready` does not yet prove device conversation. The pinned matrix now owns Hub's
-`POST /v1/device-channels/provision|revoke` dependency through `eidolon-channel-provider` on 8767, and Admin owns the
-Mobile onboarding target/admission workflow. On the Mac development profile, the same command additionally proves
-the configured LAN address, Local API HTTPS, deployment-owned Hub 8443 TLS ingress, Hub public descriptor URL,
-Local API mDNS registration, external LiveKit reachability/node IP and the explicit insecure-LAN LiveKit opt-in.
-The generated Hub certificate is installation configuration consumed by Local API; mDNS is discovery only.
-
-The Pi product assets still have no equivalent Hub TLS terminator/certificate input, and LiveKit still lacks a
-device-verifiable WSS origin. Treat those as Pi release hard gates. Do not copy the Mac development opt-in into the
-Pi profile, derive Hub TLS trust from mDNS, substitute the Host SPKI, or disable ESP certificate verification.
+`app-ready` does not replace the final device conversation E2E. The App must still obtain a real Channel Assignment,
+connect to LiveKit, and reach Channel/Agent. Private `ws://` LiveKit is accepted only when the Host profile explicitly
+opts into development LAN transport; product WSS remains a release gate. Never derive Hub trust from mDNS, substitute
+the Host SPKI, or disable Mobile/ESP certificate verification. mDNS carries routing hints while Local API carries the
+verified Hub certificate pin.
 
 ## Daily update
 

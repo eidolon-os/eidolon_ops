@@ -39,12 +39,14 @@ Git commit；7 个运行 component 一起切换，SDK 只作构建输入。
 不是 Pi 产品 unit；它们不属于“手机 App 可管理 Host”所需的后端范围。
 
 当前矩阵已纳入正式 `eidolon-channel-provider`（8767）以及 Admin 的 Mobile onboarding target/admission
-契约。Mac 源码 profile 还拥有一个明确限定为开发用途的 LAN 接入层：稳定生成的 Hub 叶子证书由
-Local API 安装配置固定并计算 SPKI，8443 TLS ingress 转发到 loopback Hub；LiveKit 客户端地址可在显式
-opt-in 后使用私网 `ws://`。这不是关闭 Mobile 的 Hub 证书校验，也不从 mDNS 学习信任。
+契约。Ops 从 Bootstrap 使用的 Ed25519 Host identity 按与 Admin 完全相同的算法派生唯一 `ehost-*`，
+再生成 `eidolon-hub-<Host suffix>` 与对应 `.local` 名称。Mac 与 Pi 使用同一规则，不再共享
+`eidolon-hub-local`/`eidolon-hub.local`，IP 变化也不改变身份。
 
-Pi release 仍没有上述 LAN ingress/certificate 资产，LiveKit 也仍缺少产品级 WSS 信任路径。因此 Mac
-真机联调门禁与 Pi 正式发布门禁必须分开报告，不能用开发 profile 的放宽替代产品结论。
+两端都由 Ops 管理稳定的 P-256 Hub 叶子证书和 8443 TLS ingress，Local API 固定证书并计算 SPKI，
+ingress 转发到 loopback Hub 8082。Pi 的 15 个 release unit 不被改写；Ops 另行安装一个 Host 配置 unit
+`eidolon-hub-ingress.service` 与 Hub systemd 配置 overlay。LiveKit 可在显式开发 opt-in 后使用私网
+`ws://`；产品级 WSS 仍是独立门禁。这不是关闭 Mobile 的 Hub 证书校验，也不从 mDNS 学习信任。
 
 ## 基础环境 profile
 
@@ -76,8 +78,10 @@ chmod 600 config/eidolon-pi.toml
 Mac 还必须安装 `git-lfs`；bundle 只从 exact commit pointer 导出 Channel 模型并验证 LFS object digest，
 不会读取 Channel working tree 中的 hydrated 文件。
 
-配置显式固定 foundation profile、目标/SSH、8 个 repo/commit、15 个 unit、authority 数据路径、14 个
-私密输入文件，以及 Python 索引/超时/重试/并发策略。Python 依赖仍由各仓库的 frozen `uv.lock` 精确
+配置显式固定 foundation profile、目标/SSH、8 个 repo/commit、15 个 release unit、authority 数据路径、
+14 个私密基础输入文件、统一 `[app]` LAN 契约，以及 Python 索引/超时/重试/并发策略。Host-bound Hub
+配置、证书、ingress 与 systemd overlay 由 Ops 从 Host identity 原子生成，不进入 Git 或 release bundle。
+Python 依赖仍由各仓库的 frozen `uv.lock` 精确
 约束，但 Linux/aarch64 artifact 在 Mac 上预取、压缩、哈希后随 bundle 传输；Pi prepare 强制 offline，
 不会因弱网重复拉包。HTTPS index URL 与 uv/build-tool 版本进入 bundle 门禁，不能在目标端漂移。SSH
 强制 BatchMode、独立 key、`StrictHostKeyChecking=yes` 和显式 known_hosts。

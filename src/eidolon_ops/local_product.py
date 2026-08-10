@@ -16,6 +16,13 @@ from urllib.parse import urlparse
 
 from eidolon_ops.config import OperationsConfig
 from eidolon_ops.controller import OperationsError
+from eidolon_ops.host_identity import (
+    HostIdentityError,
+    HostLanIdentity,
+    derive_host_lan_identity,
+    generate_hub_tls_identity,
+    validate_hub_tls_identity,
+)
 from eidolon_ops.install_inputs import InstallInputError, validate_install_input_contract
 from eidolon_ops.paths import HostProfile
 from eidolon_ops.process import ProcessRunner, checked
@@ -84,9 +91,20 @@ class LocalProductSource:
         os.chmod(paths.config_root, 0o700)
         os.chmod(paths.config_root / "env", 0o700)
         os.chmod(paths.config_root / "tls", 0o700)
+        source_inputs = next(iter(self.config.install_files.values())).parent
+        identity_destination = paths.bootstrap_state_root / "host_identity.ed25519"
+        identity_source = source_inputs.joinpath("host_identity.ed25519").read_bytes()
+        if not identity_destination.exists():
+            _atomic_private_file(identity_destination, identity_source)
+        elif (
+            identity_destination.is_symlink()
+            or not identity_destination.is_file()
+            or stat.S_IMODE(identity_destination.stat().st_mode) != 0o600
+            or identity_destination.stat().st_size != 32
+        ):
+            raise OperationsError("existing Mac Host Identity is unsafe or invalid")
         self._ensure_hub_tls_identity()
 
-        source_inputs = next(iter(self.config.install_files.values())).parent
         expected: dict[Path, bytes] = {}
         for name in _ENV_NAMES:
             rendered = self._translate_fhs(source_inputs.joinpath(name).read_text(encoding="utf-8"))
@@ -102,7 +120,7 @@ class LocalProductSource:
                 rendered = _merge_environment_values(
                     rendered,
                     {
-                        "EIDOLON_LOCAL_API_HUB_ID": "eidolon-hub-local",
+                        "EIDOLON_LOCAL_API_HUB_ID": self._host_lan_identity().hub_id,
                         "EIDOLON_LOCAL_API_HUB_DESCRIPTOR_URI": (
                             self._hub_public_base_url() + "/api/device-onboarding/v1/descriptor"
                         ),
@@ -139,6 +157,13 @@ class LocalProductSource:
                 )
             )
             if name == "hub.yaml":
+                identity = self._host_lan_identity()
+                rendered = _replace_exactly_once(
+                    rendered,
+                    "hub_id: eidolon-hub-local",
+                    f"hub_id: {identity.hub_id}",
+                    label="Host-bound Hub identity",
+                )
                 rendered = _replace_exactly_once(
                     rendered,
                     "public_base_url: https://eidolon-hub.local",
@@ -176,20 +201,8 @@ class LocalProductSource:
         expected[paths.config_root / "product-source.env"] = self._profile_environment().encode(
             "utf-8"
         )
-        identity_destination = paths.bootstrap_state_root / "host_identity.ed25519"
-        identity_source = source_inputs.joinpath("host_identity.ed25519").read_bytes()
-
         for destination, content in expected.items():
             _atomic_private_file(destination, content)
-        if not identity_destination.exists():
-            _atomic_private_file(identity_destination, identity_source)
-        elif (
-            identity_destination.is_symlink()
-            or not identity_destination.is_file()
-            or stat.S_IMODE(identity_destination.stat().st_mode) != 0o600
-            or identity_destination.stat().st_size != 32
-        ):
-            raise OperationsError("existing Mac Host Identity is unsafe or invalid")
         self._migrate_data_schema()
         result = self.validate()
         return {
@@ -289,6 +302,16 @@ class LocalProductSource:
         settings = (self.profile.paths.config_root / "settings/hub.yaml").read_text(
             encoding="utf-8"
         )
+        identity = self._host_lan_identity()
+        try:
+            validate_hub_tls_identity(
+                self._hub_certificate_path().read_bytes(),
+                self._hub_private_key_path().read_bytes(),
+                identity,
+            )
+            hub_tls_identity = True
+        except (OSError, HostIdentityError):
+            hub_tls_identity = False
         generated_livekit = self.profile.external_livekit_config
         livekit_node_ip = ""
         if generated_livekit is not None and generated_livekit.is_file():
@@ -304,13 +327,18 @@ class LocalProductSource:
         contract = {
             "lan_address_present": str(app.lan_ipv4) in interface_addresses,
             "local_api_target": (
-                local_api_env.get("EIDOLON_LOCAL_API_HUB_ID") == "eidolon-hub-local"
+                local_api_env.get("EIDOLON_LOCAL_API_HUB_ID") == self._host_lan_identity().hub_id
                 and local_api_env.get("EIDOLON_LOCAL_API_HUB_DESCRIPTOR_URI")
                 == self._hub_public_base_url() + "/api/device-onboarding/v1/descriptor"
                 and local_api_env.get("EIDOLON_LOCAL_API_HUB_TLS_CERTIFICATE")
                 == str(self._hub_certificate_path())
             ),
             "hub_public_url": f"public_base_url: {self._hub_public_base_url()}" in settings,
+            "hub_identity": (
+                f"hub_id: {identity.hub_id}" in settings
+                and "hub_id: eidolon-hub-local" not in settings
+            ),
+            "hub_tls_identity": hub_tls_identity,
             "livekit_client_url": (
                 channel_env.get("EIDOLON_LIVEKIT_CLIENT_URL") == app.livekit_client_url
             ),
@@ -417,7 +445,20 @@ class LocalProductSource:
 
     def _hub_public_base_url(self) -> str:
         app = self._require_app_access()
-        return f"https://{app.hub_hostname}:{app.hub_https_port}"
+        return self._host_lan_identity().hub_origin(app.hub_https_port)
+
+    def _host_lan_identity(self) -> HostLanIdentity:
+        path = self.profile.paths.bootstrap_state_root / "host_identity.ed25519"
+        try:
+            if (
+                path.is_symlink()
+                or not path.is_file()
+                or stat.S_IMODE(path.stat().st_mode) != 0o600
+            ):
+                raise OperationsError("Mac Host Identity is unsafe or missing")
+            return derive_host_lan_identity(path.read_bytes())
+        except (OSError, HostIdentityError) as exc:
+            raise OperationsError("Mac Host Identity cannot define its LAN identity") from exc
 
     def _hub_certificate_path(self) -> Path:
         return self.profile.paths.config_root / "tls/hub.crt"
@@ -426,64 +467,51 @@ class LocalProductSource:
         return self.profile.paths.config_root / "tls/hub.key"
 
     def _ensure_hub_tls_identity(self) -> None:
-        app = self._require_app_access()
+        identity = self._host_lan_identity()
         certificate = self._hub_certificate_path()
         private_key = self._hub_private_key_path()
         existing = (certificate.exists(), private_key.exists())
         if any(existing) and not all(existing):
             raise OperationsError("Mac Hub TLS identity is incomplete")
-        if not all(existing):
-            temporary_certificate = certificate.with_name(f".{certificate.name}.{os.getpid()}")
-            temporary_key = private_key.with_name(f".{private_key.name}.{os.getpid()}")
+        replace_identity = not all(existing)
+        if all(existing):
+            for path in (certificate, private_key):
+                if path.is_symlink() or not path.is_file():
+                    raise OperationsError("Mac Hub TLS identity is unsafe")
             try:
-                checked(
-                    "Mac Hub TLS identity generation",
-                    self.runner.run(
-                        (
-                            "openssl",
-                            "req",
-                            "-x509",
-                            "-newkey",
-                            "ec",
-                            "-pkeyopt",
-                            "ec_paramgen_curve:P-256",
-                            "-sha256",
-                            "-nodes",
-                            "-days",
-                            "3650",
-                            "-subj",
-                            f"/CN={app.hub_hostname}",
-                            "-addext",
-                            f"subjectAltName=DNS:{app.hub_hostname}",
-                            "-keyout",
-                            str(temporary_key),
-                            "-out",
-                            str(temporary_certificate),
-                        ),
-                        timeout=30,
-                    ),
+                validate_hub_tls_identity(
+                    certificate.read_bytes(), private_key.read_bytes(), identity
                 )
-                if not temporary_certificate.is_file() or not temporary_key.is_file():
-                    raise OperationsError("OpenSSL did not create the Mac Hub TLS identity")
-                os.replace(temporary_certificate, certificate)
-                os.replace(temporary_key, private_key)
-            finally:
-                temporary_certificate.unlink(missing_ok=True)
-                temporary_key.unlink(missing_ok=True)
+            except (OSError, HostIdentityError):
+                replace_identity = True
+        if replace_identity:
+            certificate_pem, private_key_pem = generate_hub_tls_identity(identity)
+            previous_certificate = certificate.read_bytes() if certificate.is_file() else None
+            previous_key = private_key.read_bytes() if private_key.is_file() else None
+            try:
+                _atomic_private_file(certificate, certificate_pem)
+                _atomic_private_file(private_key, private_key_pem)
+                validate_hub_tls_identity(
+                    certificate.read_bytes(), private_key.read_bytes(), identity
+                )
+            except (OSError, HostIdentityError) as exc:
+                if previous_certificate is None:
+                    certificate.unlink(missing_ok=True)
+                else:
+                    _atomic_private_file(certificate, previous_certificate)
+                if previous_key is None:
+                    private_key.unlink(missing_ok=True)
+                else:
+                    _atomic_private_file(private_key, previous_key)
+                raise OperationsError("Mac Hub TLS identity rotation failed") from exc
         for path in (certificate, private_key):
             if path.is_symlink() or not path.is_file():
                 raise OperationsError("Mac Hub TLS identity is unsafe")
             os.chmod(path, 0o600)
         try:
-            decoded = ssl._ssl._test_decode_cert(str(certificate))
-            sans = decoded.get("subjectAltName", ())
-            expires = ssl.cert_time_to_seconds(decoded["notAfter"])
-            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-            context.load_cert_chain(certificate, private_key)
-        except (KeyError, OSError, ssl.SSLError, ValueError) as exc:
+            validate_hub_tls_identity(certificate.read_bytes(), private_key.read_bytes(), identity)
+        except (OSError, HostIdentityError) as exc:
             raise OperationsError("Mac Hub TLS identity is invalid") from exc
-        if ("DNS", app.hub_hostname) not in sans or expires <= time.time():
-            raise OperationsError("Mac Hub TLS identity does not match the app contract")
 
     def _eidolond_settings(self) -> str:
         paths = self.profile.paths
