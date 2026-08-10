@@ -46,17 +46,11 @@ class FakeHostController:
     def deploy(self, **kwargs):
         return self._result("deploy", **kwargs)
 
-    def expand(self, **kwargs):
-        return self._result("expand", **kwargs)
-
     def rollback(self, **kwargs):
         return self._result("rollback", **kwargs)
 
     def diagnose(self, **kwargs):
         return self._result("diagnose", **kwargs)
-
-    def migrate_paths(self, **kwargs):
-        return self._result("migrate-paths", **kwargs)
 
     def lifecycle(self, operation, **kwargs):
         return self._result("lifecycle", operation=operation, **kwargs)
@@ -102,7 +96,6 @@ def fake_host(monkeypatch) -> None:
             "rollback",
         ),
         (["diagnose", "--output", "/tmp/report.tar.gz"], "diagnose"),
-        (["migrate-paths", "--apply"], "migrate-paths"),
         (
             ["start", "--force-cleanup", "--strict", "--no-wait-ready"],
             "lifecycle",

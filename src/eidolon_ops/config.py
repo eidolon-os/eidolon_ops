@@ -56,15 +56,6 @@ INSTALL_FILE_NAMES = (
     "channel_settings",
     "memory_settings",
 )
-EXPANSION_FILE_NAMES = (
-    "agent_env",
-    "channel_env",
-    "memory_env",
-    "livekit_env",
-    "agent_settings",
-    "channel_settings",
-    "memory_settings",
-)
 FIXED_DATA_PATHS = {
     "system_database": Path("/var/lib/eidolon/eidolon-system.sqlite3"),
     "object_store": Path("/var/lib/eidolon/objects"),

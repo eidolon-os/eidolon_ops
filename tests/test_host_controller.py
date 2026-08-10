@@ -128,16 +128,6 @@ def test_local_doctor_and_bounded_logs(tmp_path: Path) -> None:
         controller.logs(service=None, lines=0, since=None)
 
 
-def test_local_controller_exposes_explicit_path_cutover(tmp_path: Path) -> None:
-    controller = HostController(_profile(tmp_path), Runner())
-
-    assert controller.migrate_paths(apply=False)["status"] == "clean"
-    applied = controller.migrate_paths(apply=True)
-
-    assert applied["status"] == "migrated"
-    assert Path(str(applied["evidence"])).is_file()
-
-
 def test_local_controller_exposes_product_app_ready(monkeypatch, tmp_path: Path) -> None:
     controller = HostController(_profile(tmp_path), Runner())
     product = SimpleNamespace(app_ready=lambda: {"status": "app_ready"})
@@ -263,8 +253,6 @@ def test_pi_adapter_delegates_every_remote_capability(monkeypatch, tmp_path: Pat
         controller.lifecycle("start", force_cleanup=True)
     with pytest.raises(OperationsError, match="macOS adapter"):
         controller.local_profile("core-contract", "status")
-    with pytest.raises(OperationsError, match="macOS adapter"):
-        controller.migrate_paths(apply=False)
 
 
 def test_controller_rejects_missing_pi_config_and_unsafe_local_logs(tmp_path: Path) -> None:

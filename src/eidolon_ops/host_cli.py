@@ -64,8 +64,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         elif arguments.operation == "diagnose":
             result = controller.diagnose(output=arguments.output)
-        elif arguments.operation == "migrate-paths":
-            result = controller.migrate_paths(apply=arguments.apply)
         elif arguments.operation in {"start", "stop", "restart"}:
             result = controller.lifecycle(
                 arguments.operation,
@@ -180,8 +178,6 @@ def _parser() -> argparse.ArgumentParser:
     rollback.add_argument("--apply", action="store_true")
     diagnose = operations.add_parser("diagnose")
     diagnose.add_argument("--output", type=Path, required=True)
-    migration = operations.add_parser("migrate-paths")
-    migration.add_argument("--apply", action="store_true")
     for name in ("start", "stop", "restart"):
         command = operations.add_parser(name)
         command.add_argument("--dry-run", action="store_true")

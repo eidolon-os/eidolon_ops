@@ -49,21 +49,6 @@ def test_product_runtime_assets_do_not_reintroduce_legacy_host_paths() -> None:
     assert violations == []
 
 
-def test_legacy_srv_namespace_is_cutover_evidence_and_cleanup_target_only() -> None:
-    target = REPOSITORY / "src/eidolon_ops/target_agent.py"
-    lines = [
-        line.strip()
-        for line in target.read_text(encoding="utf-8").splitlines()
-        if "/srv/eidolon" in line
-    ]
-    assert lines == [
-        'component_id: Path("/srv/eidolon/current") / component_id for component_id in CURRENT_LINKS',
-        'Path("/srv/eidolon"),',
-        '_LEGACY_RELEASES = Path("/srv/eidolon/releases")',
-        '_LEGACY_ROOT = Path("/srv/eidolon")',
-    ]
-
-
 def test_data_and_hub_consume_the_shared_state_root_contract() -> None:
     repositories = {
         "data": REPOSITORY.parent / "eidolon_data",

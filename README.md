@@ -129,7 +129,6 @@ Owner 变更的权限边界；它的 state/runtime 目录均不与产品主进�
 ```text
 eidolon-ops --config HOST.toml status|doctor
 eidolon-ops --config HOST.toml commissioning-code [--ttl-seconds 600]  # Mac Debug Host
-eidolon-ops --config HOST.toml migrate-paths [--apply]  # Mac one-time state cutover
 eidolon-ops --config HOST.toml start|stop|restart [--dry-run]
 eidolon-ops --config HOST.toml logs [--service SERVICE] [--lines N] [--since TEXT]
 

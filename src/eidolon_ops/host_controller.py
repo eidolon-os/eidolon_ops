@@ -86,12 +86,6 @@ class HostController:
     def diagnose(self, *, output: Path) -> dict[str, object]:
         return self._require_pi("diagnose").diagnose(output=output)
 
-    def migrate_paths(self, *, apply: bool) -> dict[str, object]:
-        from eidolon_ops.local_path_migration import LocalPathMigrator
-
-        migrator = LocalPathMigrator(self.profile)
-        return migrator.apply() if apply else migrator.plan()
-
     def doctor(self, *, release_id: str | None = None) -> dict[str, object]:
         paths = self.profile.paths
         path_items = (
@@ -106,18 +100,11 @@ class HostController:
             ("bootstrap_runtime", paths.bootstrap_runtime_root),
         )
         if self.profile.driver == "local-supervisord":
-            from eidolon_ops.local_path_migration import LocalPathMigrator
-
             path_report = {
                 name: {"path": str(value), "exists": value.exists()} for name, value in path_items
             }
             script = self._local_script()
-            migration = LocalPathMigrator(self.profile).plan()
-            healthy = (
-                paths.current_root.is_dir()
-                and os.access(script, os.X_OK)
-                and migration["status"] == "clean"
-            )
+            healthy = paths.current_root.is_dir() and os.access(script, os.X_OK)
             return {
                 "status": "healthy" if healthy else "degraded",
                 "host_id": self.profile.host_id,
@@ -125,7 +112,6 @@ class HostController:
                 "driver": self.profile.driver,
                 "paths": path_report,
                 "lifecycle_script": str(script),
-                "path_migration": migration,
             }
         remote = self._pi().doctor(release_id=release_id)
         return {
@@ -149,8 +135,6 @@ class HostController:
         if operation not in {"start", "stop", "restart"}:
             raise OperationsError(f"unsupported lifecycle operation: {operation}")
         if self.profile.driver == "local-supervisord":
-            from eidolon_ops.local_path_migration import LocalPathMigrator
-
             if force_cleanup or strict or not wait_ready:
                 raise OperationsError(
                     "legacy Mac lifecycle flags are not valid for the canonical product-source stack"
@@ -162,8 +146,6 @@ class HostController:
                     "command": [str(self._local_script()), "product-source", operation],
                     "environment": self.profile.environment(),
                 }
-            if operation in {"start", "restart"}:
-                LocalPathMigrator(self.profile).require_clean()
             return self.local_profile("product-source", operation)
         if force_cleanup or strict or not wait_ready:
             raise OperationsError("Mac lifecycle flags are not valid for the systemd adapter")
