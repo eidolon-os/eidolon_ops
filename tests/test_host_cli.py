@@ -40,6 +40,9 @@ class FakeHostController:
     def install(self, **kwargs):
         return self._result("install", **kwargs)
 
+    def controller_reset(self, **kwargs):
+        return self._result("controller-reset", **kwargs)
+
     def reset(self, **kwargs):
         return self._result("reset", **kwargs)
 
@@ -102,6 +105,7 @@ def fake_host(monkeypatch) -> None:
         ),
         (["restart", "--dry-run"], "lifecycle"),
         (["logs", "--service", "agent", "--lines", "10"], "logs"),
+        (["controller-reset", "--apply"], "controller-reset"),
         (["debug", "status"], "local-profile"),
         (["debug", "prepare"], "local-profile"),
     ],

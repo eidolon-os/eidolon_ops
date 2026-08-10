@@ -1112,3 +1112,49 @@ def test_active_release_rejects_a_release_missing_its_operator_entries(
 
     with pytest.raises(TargetError, match="does not publish its"):
         target_agent.active_release({"units": list(target_agent.PRODUCT_UNITS)})
+
+
+def test_controller_reset_reports_the_bootstrap_evidence(tmp_path, monkeypatch) -> None:
+    """Recovery is delegated to Bootstrap; the agent only carries its evidence."""
+
+    ctl = tmp_path / "eidolon-bootstrapctl"
+    ctl.write_text("#!/bin/sh\n", encoding="utf-8")
+    ctl.chmod(0o755)
+    monkeypatch.setattr(target_agent, "_BOOTSTRAP_CTL", ctl)
+    document = {"revoked_controllers": ["ectrl-0123456789abcdef0123"], "preserved": ["owner_binding"]}
+    monkeypatch.setattr(
+        target_agent,
+        "_run",
+        lambda command, **kwargs: subprocess.CompletedProcess(
+            command, 0, json.dumps(document), ""
+        ),
+    )
+
+    result = target_agent.controller_reset({"units": list(target_agent.PRODUCT_UNITS)})
+
+    assert result["status"] == "reset"
+    assert result["controller_reset"] == document
+
+
+def test_controller_reset_requires_the_bootstrap_control_cli(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(target_agent, "_BOOTSTRAP_CTL", tmp_path / "missing")
+
+    with pytest.raises(TargetError, match="bootstrap control CLI"):
+        target_agent.controller_reset({"units": list(target_agent.PRODUCT_UNITS)})
+
+
+def test_controller_reset_rejects_output_that_is_not_bootstrap_evidence(
+    tmp_path, monkeypatch
+) -> None:
+    ctl = tmp_path / "eidolon-bootstrapctl"
+    ctl.write_text("#!/bin/sh\n", encoding="utf-8")
+    ctl.chmod(0o755)
+    monkeypatch.setattr(target_agent, "_BOOTSTRAP_CTL", ctl)
+    monkeypatch.setattr(
+        target_agent,
+        "_run",
+        lambda command, **kwargs: subprocess.CompletedProcess(command, 0, "{}", ""),
+    )
+
+    with pytest.raises(TargetError, match="invalid evidence"):
+        target_agent.controller_reset({"units": list(target_agent.PRODUCT_UNITS)})

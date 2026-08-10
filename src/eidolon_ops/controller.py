@@ -588,6 +588,36 @@ class EidolonPiController:
             raise OperationsError("Host reset returned invalid evidence")
         return result
 
+    def controller_reset(self, *, apply: bool) -> dict[str, object]:
+        """Return a claimed Host to unclaimed so a new phone can manage it.
+
+        The Owner keeps everything else: Host identity, Owner binding, saved
+        Wi-Fi and all component data. Only the managing phones lose access.
+        """
+
+        self._validate_ssh_material()
+        if not apply:
+            return {
+                "status": "planned",
+                "host": self.config.host.target,
+                "revokes": "every Controller Grant; managing phones lose access immediately",
+                "preserves": [
+                    "Host identity and pinned TLS",
+                    "Owner binding, Companions and Persona",
+                    "saved Wi-Fi profiles and the current connection",
+                    "admitted Devices and their Kernel mounts",
+                ],
+                "next": "rerun controller-reset --apply, then claim the Host from a new phone",
+            }
+        result = self.transport.run_agent(
+            "controller-reset",
+            self._target_payload(),
+            timeout=180,
+        )
+        if result.get("status") != "reset":
+            raise OperationsError("Controller reset returned invalid evidence")
+        return result
+
     def lifecycle(self, action: str, *, dry_run: bool) -> dict[str, object]:
         if action not in {"start", "stop", "restart"}:
             raise OperationsError("unknown lifecycle action")

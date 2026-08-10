@@ -45,6 +45,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 reset_existing=arguments.reset_existing,
                 wipe_authority_data=arguments.wipe_authority_data,
             )
+        elif arguments.operation == "controller-reset":
+            result = controller.controller_reset(apply=arguments.apply)
         elif arguments.operation == "reset":
             result = controller.reset(
                 wipe_authority_data=arguments.wipe_authority_data,
@@ -154,6 +156,11 @@ def _parser() -> argparse.ArgumentParser:
     install.add_argument("--apply", action="store_true")
     install.add_argument("--reset-existing", action="store_true")
     install.add_argument("--wipe-authority-data", action="store_true")
+    controller_reset = operations.add_parser(
+        "controller-reset",
+        help="revoke every managing phone so a new one can claim this Host",
+    )
+    controller_reset.add_argument("--apply", action="store_true")
     reset = operations.add_parser("reset")
     reset.add_argument("--wipe-authority-data", action="store_true")
     reset.add_argument("--apply", action="store_true")

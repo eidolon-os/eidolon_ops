@@ -67,6 +67,9 @@ class HostController:
             wipe_authority_data=wipe_authority_data,
         )
 
+    def controller_reset(self, *, apply: bool) -> dict[str, object]:
+        return self._require_pi("controller-reset").controller_reset(apply=apply)
+
     def reset(self, *, wipe_authority_data: bool, apply: bool) -> dict[str, object]:
         return self._require_pi("reset").reset(
             wipe_authority_data=wipe_authority_data,

@@ -140,6 +140,7 @@ eidolon-ops --config HOST.toml provision [--apply]
 eidolon-ops --config HOST.toml init-inputs
 eidolon-ops --config HOST.toml install --release-id ID [--resume] [--apply]
 eidolon-ops --config HOST.toml reset [--wipe-authority-data] [--apply]
+eidolon-ops --config HOST.toml controller-reset [--apply]  # lost every managing phone
 eidolon-ops --config HOST.toml install --release-id ID \
   --reset-existing --wipe-authority-data [--apply]
 eidolon-ops --config HOST.toml deploy|update --release-id ID [--resume] [--activate]

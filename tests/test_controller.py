@@ -145,9 +145,12 @@ class FakeTransport:
         self.resumable_uploads: list[tuple[Path, str]] = []
         self.fail_actions: dict[str, Exception] = {}
         self.fail_remote_match: str | None = None
+        self.overrides: dict[str, dict] = {}
 
     def run_agent(self, action, payload, *, python="/usr/bin/python3", sudo=True, timeout=120):
         self.agent_calls.append((action, dict(payload), python, sudo))
+        if action in self.overrides:
+            return self.overrides[action]
         if action in self.fail_actions:
             raise self.fail_actions[action]
         values = {
@@ -176,6 +179,13 @@ class FakeTransport:
                 "removed": ["/opt/eidolon"],
             },
             "install": {"status": "installed"},
+            "controller-reset": {
+                "status": "reset",
+                "controller_reset": {
+                    "revoked_controllers": ["ectrl-0123456789abcdef0123"],
+                    "after": {"claim_state": "unclaimed", "reset_epoch": 1},
+                },
+            },
             "active-release": {
                 "status": "observed",
                 "release_id": "r1",
@@ -1004,3 +1014,33 @@ def test_diagnose_refuses_existing_output(setup_controller, tmp_path: Path) -> N
 
     with pytest.raises(OperationsError, match="already exists"):
         controller.diagnose(output=output)
+
+
+def test_controller_reset_defaults_to_a_plan_that_names_what_survives(
+    setup_controller,
+) -> None:
+    controller, _runner, transport = setup_controller
+
+    result = controller.controller_reset(apply=False)
+
+    assert result["status"] == "planned"
+    assert transport.agent_calls == []
+    assert any("Owner binding" in item for item in result["preserves"])
+
+
+def test_controller_reset_apply_returns_the_revoked_grants(setup_controller) -> None:
+    controller, _runner, transport = setup_controller
+
+    result = controller.controller_reset(apply=True)
+
+    assert result["status"] == "reset"
+    assert transport.agent_calls[-1][0] == "controller-reset"
+    assert result["controller_reset"]["after"]["claim_state"] == "unclaimed"
+
+
+def test_controller_reset_rejects_invalid_target_evidence(setup_controller) -> None:
+    controller, _runner, transport = setup_controller
+    transport.overrides["controller-reset"] = {"status": "observed"}
+
+    with pytest.raises(OperationsError, match="invalid evidence"):
+        controller.controller_reset(apply=True)

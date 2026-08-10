@@ -333,6 +333,7 @@ _FOUNDATION_LOCK = Path("/run/lock/eidolon-foundation.lock")
 _LOCAL_BIN = Path("/usr/local/bin")
 _LOCAL_LIB = Path("/usr/local/lib")
 _APP_PREFLIGHT = Path("/opt/eidolon/current/eidolon_admin/.venv/bin/eidolon-bootstrap-preflight")
+_BOOTSTRAP_CTL = Path("/opt/eidolon/current/eidolon_admin/.venv/bin/eidolon-bootstrapctl")
 _HOST_IDENTITY = Path("/var/lib/eidolon-bootstrap/host_identity.ed25519")
 _COMMISSIONING_TLS = Path("/var/lib/eidolon-bootstrap/commissioning_tls.pem")
 _BOOTSTRAP_SOCKET = Path("/run/eidolon-bootstrap/control.sock")
@@ -2121,6 +2122,27 @@ def reset_host(
     }
 
 
+def controller_reset(payload: Mapping[str, object]) -> dict[str, object]:
+    """Revoke every Controller Grant so a new phone can claim this Host again.
+
+    Recovery for an Owner who lost every managing phone. Bootstrap keeps the
+    Host identity, the Owner binding, saved Wi-Fi and all component data; only
+    the authority to manage this Host is withdrawn.
+    """
+
+    _fixed_units(payload)
+    if not _BOOTSTRAP_CTL.is_file() or not os.access(_BOOTSTRAP_CTL, os.X_OK):
+        raise TargetError("bootstrap control CLI is unavailable on this Host")
+    result = _checked("controller reset", (str(_BOOTSTRAP_CTL), "controller-reset"), timeout=120)
+    try:
+        document = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise TargetError("controller reset did not return one JSON document") from exc
+    if not isinstance(document, dict) or "revoked_controllers" not in document:
+        raise TargetError("controller reset returned invalid evidence")
+    return {"status": "reset", "controller_reset": document}
+
+
 def active_release(payload: Mapping[str, object]) -> dict[str, object]:
     """Resolve the active release's operator entries on the target itself.
 
@@ -2311,6 +2333,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = cleanup_stage(payload)
         elif action == "install":
             result = install(payload)
+        elif action == "controller-reset":
+            result = controller_reset(payload)
         elif action == "active-release":
             result = active_release(payload)
         elif action == "reset-plan":

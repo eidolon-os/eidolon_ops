@@ -687,6 +687,7 @@ def test_target_main_routes_all_actions_and_errors(monkeypatch, capsys) -> None:
         "cleanup-stage": "cleanup_stage",
         "install": "install",
         "active-release": "active_release",
+        "controller-reset": "controller_reset",
         "rollback-plan": "rollback_plan",
         "logs": "logs",
         "diagnose": "diagnose",
