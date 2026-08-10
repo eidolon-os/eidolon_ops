@@ -24,7 +24,6 @@ dev = [
 
 [project.scripts]
 eidolon-ops = "eidolon_ops.host_cli:run"
-eidolon-pi = "eidolon_ops.cli:run"
 eidolon-lan-ingress = "eidolon_ops.lan_ingress:main"
 
 [tool.hatch.build.targets.wheel]

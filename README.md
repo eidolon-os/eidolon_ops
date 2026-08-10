@@ -2,7 +2,7 @@
 
 `eidolon-ops` 是 Mac 开发 Host 与 Raspberry Pi 产品 Host 的统一管理入口。两端使用相同的路径角色、
 生命周期命令和诊断模型；区别只在 Host profile 与执行适配器（Mac 是本地 supervisord，Pi 是远程
-systemd）。`eidolon-pi` 暂时保留为 Pi 发布底层兼容入口，不再作为顶层操作界面。
+systemd）。`eidolon-ops` 是唯一入口；实现级诊断收敛在 `eidolon-ops debug` 之下。
 
 对一台刚刷好系统、已开放 SSH 的新 Pi，下面一条命令会完成基础环境检测/安装、精确提交发布、
 Data V2 初始化、15 个产品服务启动，并要求 Host 达到手机 App commissioning 门禁：
@@ -133,9 +133,9 @@ eidolon-ops --config HOST.toml start|stop|restart [--dry-run]
 eidolon-ops --config HOST.toml logs [--service SERVICE] [--lines N] [--since TEXT]
 
 # Mac implementation diagnostics (normal lifecycle uses top-level status/start/stop/restart)
-eidolon-ops --config HOST.toml core-contract start|stop|restart|status
-eidolon-ops --config HOST.toml os-control-plane prepare|validate|start|stop|restart|status
-eidolon-ops --config HOST.toml product-source prepare|validate|start|stop|restart|status
+eidolon-ops --config HOST.toml debug core-contract start|stop|restart|status
+eidolon-ops --config HOST.toml debug os-control-plane prepare|validate|start|stop|restart|status
+eidolon-ops --config HOST.toml debug product-source prepare|validate|start|stop|restart|status
 
 # Pi release/install capabilities
 eidolon-ops --config HOST.toml provision [--apply]

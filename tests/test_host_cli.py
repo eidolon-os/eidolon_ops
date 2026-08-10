@@ -102,9 +102,9 @@ def fake_host(monkeypatch) -> None:
         ),
         (["restart", "--dry-run"], "lifecycle"),
         (["logs", "--service", "agent", "--lines", "10"], "logs"),
-        (["core-contract", "status"], "local-profile"),
+        (["debug", "core-contract", "status"], "local-profile"),
         (
-            ["os-control-plane", "issue-operator-token", "--ttl-seconds", "60"],
+            ["debug", "os-control-plane", "issue-operator-token", "--ttl-seconds", "60"],
             "local-profile",
         ),
     ],

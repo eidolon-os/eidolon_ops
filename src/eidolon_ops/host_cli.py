@@ -72,15 +72,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                 strict=getattr(arguments, "strict", False),
                 wait_ready=not getattr(arguments, "no_wait_ready", False),
             )
-        elif arguments.operation in {"core-contract", "os-control-plane", "product-source"}:
+        elif arguments.operation == "debug":
             extras: tuple[str, ...] = ()
             if (
-                arguments.operation == "os-control-plane"
+                arguments.profile == "os-control-plane"
                 and arguments.profile_operation == "issue-operator-token"
             ):
                 extras = ("--ttl-seconds", str(arguments.ttl_seconds))
             result = controller.local_profile(
-                arguments.operation,
+                arguments.profile,
                 arguments.profile_operation,
                 arguments=extras,
             )
@@ -189,39 +189,16 @@ def _parser() -> argparse.ArgumentParser:
     logs.add_argument("--service")
     logs.add_argument("--lines", type=int, default=200)
     logs.add_argument("--since")
-    core = operations.add_parser("core-contract")
-    core.add_argument("profile_operation", choices=("start", "stop", "restart", "status"))
-    control = operations.add_parser("os-control-plane")
-    control.add_argument(
-        "profile_operation",
-        choices=(
-            "prepare",
-            "validate",
-            "issue-operator-token",
-            "start",
-            "stop",
-            "restart",
-            "status",
-        ),
+    debug = operations.add_parser(
+        "debug",
+        help="macOS implementation diagnostics; not a product operation",
     )
-    control.add_argument("--ttl-seconds", type=int, default=900)
-    product = operations.add_parser("product-source")
-    product.add_argument(
-        "profile_operation",
-        choices=(
-            "prepare",
-            "validate",
-            "start",
-            "stop",
-            "restart",
-            "status",
-            "web-start",
-            "web-stop",
-            "web-restart",
-            "web-status",
-            "commissioning-code",
-        ),
+    debug.add_argument(
+        "profile",
+        choices=("core-contract", "os-control-plane", "product-source"),
     )
+    debug.add_argument("profile_operation")
+    debug.add_argument("--ttl-seconds", type=int, default=900)
     return parser
 
 
