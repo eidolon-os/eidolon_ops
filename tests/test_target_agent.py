@@ -10,7 +10,11 @@ from types import MappingProxyType, SimpleNamespace
 import pytest
 
 from eidolon_ops import target_agent
-from eidolon_ops.target_agent import TargetError, TargetInstaller
+from eidolon_ops.target_agent import (
+    TargetError,
+    TargetInstaller,
+    TopologyExpansionInstaller,
+)
 
 pytestmark = pytest.mark.component
 
@@ -82,8 +86,8 @@ def install_fixture(tmp_path: Path):
     components = tuple(
         SimpleNamespace(
             component_id=component_id,
-            release_path=Path("/srv/eidolon/releases") / release_id / component_id,
-            current_link=Path("/srv/eidolon/current") / component_id,
+            release_path=target_agent._RELEASES / release_id / component_id,
+            current_link=target_agent.CURRENT_LINKS[component_id],
         )
         for component_id in component_ids
     )
@@ -114,6 +118,54 @@ def install_fixture(tmp_path: Path):
         manage_ownership=False,
     )
     return installer, host, command, stage, release, data
+
+
+@pytest.fixture
+def expansion_fixture(tmp_path: Path):
+    root = (tmp_path / "root").resolve()
+    source_release = "core-release"
+    release_id = "full-release"
+    components = tuple(
+        SimpleNamespace(
+            component_id=component_id,
+            release_path=target_agent._RELEASES / release_id / component_id,
+            current_link=path,
+        )
+        for component_id, path in target_agent.CURRENT_LINKS.items()
+    )
+    for component in components:
+        (root / component.release_path.relative_to("/")).mkdir(parents=True)
+    for component_id in target_agent.CORE_COMPONENTS:
+        old = root / target_agent._RELEASES.relative_to("/") / source_release / component_id
+        old.mkdir(parents=True)
+        link = root / target_agent.CURRENT_LINKS[component_id].relative_to("/")
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(old)
+    release = SimpleNamespace(
+        release_id=release_id,
+        components=components,
+        components_by_id=MappingProxyType(
+            {component.component_id: component for component in components}
+        ),
+    )
+    stage = root / "stage"
+    stage.mkdir()
+    for name in target_agent.EXPANSION_INPUTS:
+        (stage / name).write_text(f"private-{name}", encoding="utf-8")
+    data = dict(target_agent.FIXED_DATA)
+    installer = TopologyExpansionInstaller(
+        release=release,
+        secret_stage=stage,
+        data=data,
+        root=root,
+        manage_ownership=False,
+    )
+    payload = {
+        "release_id": release_id,
+        "units": list(target_agent.PRODUCT_UNITS),
+        "data": {name: str(path) for name, path in target_agent.FIXED_DATA.items()},
+    }
+    return installer, stage, release, payload
 
 
 def test_first_install_completes_all_phases(install_fixture) -> None:
@@ -264,7 +316,7 @@ def test_journal_records_hashes_not_secret_values(install_fixture) -> None:
         Path("/var/lib/eidolon-bootstrap/bootstrap.sqlite3"),
         Path("/etc/eidolon/data.env"),
         Path("/etc/systemd/system/eidolond.service"),
-        Path("/srv/eidolon/current/eidolon_kernel"),
+        target_agent.CURRENT_LINKS["eidolon_kernel"],
     ],
 )
 def test_first_install_refuses_unowned_existing_namespace(install_fixture, conflict: Path) -> None:
@@ -305,6 +357,130 @@ def test_secret_stage_rejects_symlink(install_fixture) -> None:
 
     with pytest.raises(TargetError, match="unsafe"):
         installer.install()
+
+
+def test_owned_core_topology_plan_is_read_only_and_eligible(expansion_fixture) -> None:
+    installer, _stage, _release, payload = expansion_fixture
+
+    result = target_agent.topology_expansion_plan(payload, root=installer.root)
+
+    assert result["status"] == "eligible"
+    assert result["source_release"] == "core-release"
+    assert all(
+        result["links"][component_id]["state"] == "managed"
+        for component_id in target_agent.CORE_COMPONENTS
+    )
+    assert all(
+        result["links"][component_id]["state"] == "absent"
+        for component_id in target_agent.EXPANSION_COMPONENTS
+    )
+    assert not installer.journal_path.exists()
+
+
+def test_topology_expansion_installs_only_new_inputs_idempotently(expansion_fixture) -> None:
+    installer, _stage, _release, _payload = expansion_fixture
+
+    first = installer.install_inputs()
+    second = installer.install_inputs()
+
+    assert first["status"] == "inputs_installed"
+    assert second["status"] == "inputs_installed"
+    assert first["source_release"] == "core-release"
+    for name, (destination, _user, _group, mode) in target_agent.EXPANSION_INPUTS.items():
+        installed = installer.root / destination.relative_to("/")
+        assert installed.read_text(encoding="utf-8") == f"private-{name}"
+        assert installed.stat().st_mode & 0o777 == mode
+    for destination, _user, _group, _mode in (
+        value
+        for name, value in target_agent.SECRET_INPUTS.items()
+        if name not in target_agent.EXPANSION_INPUTS
+    ):
+        assert not (installer.root / destination.relative_to("/")).exists()
+    journal = json.loads(installer.journal_path.read_text(encoding="utf-8"))
+    assert journal["status"] == "completed"
+    assert journal["source_release"] == "core-release"
+    assert all(len(value) == 64 for value in journal["input_sha256"].values())
+    assert "private-agent.env" not in installer.journal_path.read_text(encoding="utf-8")
+
+
+def test_topology_expansion_resume_rejects_changed_input(expansion_fixture) -> None:
+    installer, stage, _release, _payload = expansion_fixture
+    installer.install_inputs()
+    (stage / "agent.env").write_text("changed", encoding="utf-8")
+
+    with pytest.raises(TargetError, match="journal identity or inputs"):
+        installer.install_inputs()
+
+
+def test_topology_expansion_rejects_partial_link_or_unowned_input(expansion_fixture) -> None:
+    installer, _stage, release, payload = expansion_fixture
+    agent = release.components_by_id["eidolon_agent"]
+    link = installer.root / agent.current_link.relative_to("/")
+    link.symlink_to(installer.root / agent.release_path.relative_to("/"))
+
+    assert (
+        target_agent.topology_expansion_plan(payload, root=installer.root)["status"] == "conflict"
+    )
+    link.unlink()
+    destination = installer.root / Path("/etc/eidolon/agent.env").relative_to("/")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text("unowned", encoding="utf-8")
+
+    with pytest.raises(TargetError, match="unowned inputs"):
+        installer.install_inputs()
+
+
+def test_topology_expansion_plan_rejects_a_missing_core_link(expansion_fixture) -> None:
+    installer, _stage, release, payload = expansion_fixture
+    kernel = release.components_by_id["eidolon_kernel"]
+    (installer.root / kernel.current_link.relative_to("/")).unlink()
+
+    result = target_agent.topology_expansion_plan(payload, root=installer.root)
+
+    assert result["status"] == "conflict"
+    assert result["source_release"] is None
+
+
+def test_topology_expansion_plan_recognizes_full_managed_release(expansion_fixture) -> None:
+    installer, _stage, release, payload = expansion_fixture
+    for component in release.components:
+        link = installer.root / component.current_link.relative_to("/")
+        link.unlink(missing_ok=True)
+        link.symlink_to(installer.root / component.release_path.relative_to("/"))
+
+    result = target_agent.topology_expansion_plan(payload, root=installer.root)
+
+    assert result["status"] == "already_full"
+    assert result["source_release"] == "full-release"
+
+
+def test_topology_expansion_resume_rejects_installed_input_drift(expansion_fixture) -> None:
+    installer, _stage, _release, _payload = expansion_fixture
+    installer.install_inputs()
+    destination = installer.root / Path("/etc/eidolon/agent.env").relative_to("/")
+    destination.write_text("drift", encoding="utf-8")
+
+    with pytest.raises(TargetError, match="existing topology expansion input differs"):
+        installer.install_inputs()
+
+
+def test_completed_topology_expansion_recovers_after_operator_restart(
+    expansion_fixture,
+) -> None:
+    installer, _stage, release, _payload = expansion_fixture
+    installer.install_inputs()
+    for component in release.components:
+        link = installer.root / component.current_link.relative_to("/")
+        link.unlink(missing_ok=True)
+        link.symlink_to(installer.root / component.release_path.relative_to("/"))
+
+    result = installer.install_inputs()
+
+    assert result == {
+        "status": "already_expanded",
+        "release_id": "full-release",
+        "source_release": "core-release",
+    }
 
 
 def test_status_parses_systemd_properties(monkeypatch) -> None:
@@ -577,6 +753,18 @@ def test_status_reads_recent_receipt(monkeypatch, tmp_path: Path) -> None:
         json.dumps({"release_id": "r1", "status": "completed", "phase": "completed"}),
         encoding="utf-8",
     )
+    expansion_journal = evidence / "expand-r2" / "expand.json"
+    expansion_journal.parent.mkdir(parents=True)
+    expansion_journal.write_text(
+        json.dumps(
+            {
+                "release_id": "r2",
+                "source_release": "r1",
+                "status": "completed",
+            }
+        ),
+        encoding="utf-8",
+    )
     monkeypatch.setitem(target_agent.FIXED_DATA, "deployment_evidence", evidence)
     monkeypatch.setattr(
         target_agent,
@@ -600,6 +788,14 @@ def test_status_reads_recent_receipt(monkeypatch, tmp_path: Path) -> None:
             "release_id": "r1",
             "status": "completed",
             "phase": "completed",
+        }
+    ]
+    assert result["expansions"] == [
+        {
+            "path": str(expansion_journal),
+            "release_id": "r2",
+            "status": "completed",
+            "source_release": "r1",
         }
     ]
 
@@ -742,6 +938,34 @@ def test_install_wrapper_reuses_kernel_descriptor(monkeypatch, tmp_path: Path) -
     )
 
     assert result == {"status": "installed"}
+
+
+def test_expand_wrapper_reuses_kernel_descriptor(monkeypatch, tmp_path: Path) -> None:
+    release = SimpleNamespace(release_id="r1")
+
+    class Installer:
+        def __init__(self, **kwargs) -> None:
+            assert kwargs["release"] is release
+
+        def install_inputs(self):
+            return {"status": "inputs_installed"}
+
+    import eidolon_deploy.manifest
+
+    monkeypatch.setattr(eidolon_deploy.manifest, "load_release_descriptor", lambda path: release)
+    monkeypatch.setattr(target_agent, "TopologyExpansionInstaller", Installer)
+    monkeypatch.setattr(target_agent, "_RELEASES", tmp_path / "releases")
+    monkeypatch.setattr(target_agent, "_VAR_TMP", tmp_path)
+
+    result = target_agent.expand(
+        {
+            "release_id": "r1",
+            "units": list(target_agent.PRODUCT_UNITS),
+            "data": {name: str(path) for name, path in target_agent.FIXED_DATA.items()},
+        }
+    )
+
+    assert result == {"status": "inputs_installed"}
 
 
 def test_prerequisite_resume_detects_mode_drift(install_fixture) -> None:

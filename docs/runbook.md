@@ -36,6 +36,27 @@ validate Mac commands, SSH files, 8 repos/commits, 14 private inputs
 An existing unowned Eidolon database/link/secret/unit namespace fails closed. A partial install can resume only with
 the same release ID and identical input digests. Temporary secret staging is removed after success or failure.
 
+## Managed core Host: expand to the full App backend
+
+An older Host whose Kernel/Data/Hub/Admin links all point into one managed release is not a new install. Inspect and
+then expand it explicitly:
+
+```bash
+uv run eidolon-pi --config /absolute/path/eidolon-pi.toml \
+  expand --release-id 20260809-product-full
+
+uv run eidolon-pi --config /absolute/path/eidolon-pi.toml \
+  expand --release-id 20260809-product-full --apply
+```
+
+The read-only plan rejects a missing/mixed core link, any partial Agent/Channel/Memory link set, or an existing
+unowned new input. Apply provisions missing foundation dependencies, prepares the exact release, installs only the
+seven new Agent/Channel/Memory/LiveKit env/settings inputs, then activates through the normal sealed transaction.
+Its snapshot contains the four old core links and the system assets that really existed. If readiness or the
+App-ready gate fails, rollback restores those links/assets and removes links/assets introduced by the failed
+expansion. New private inputs remain as an auditable, digest-bound retry prerequisite; rollback never deletes secrets
+or authority data.
+
 ## App-ready meaning
 
 ```bash
@@ -67,7 +88,9 @@ checkpoint and Workspace setup.
 
 Activation is: sealed preflight → snapshot → quiesce → assets/links → start → 12 readiness → receipt. Failure runs
 exact snapshot restore. `--resume` never means “ignore a failed gate”; it skips only already-created bundle/upload/
-prepare and re-proves the sealed release.
+prepare and re-proves the sealed release. A degraded post-activation doctor or App-ready result also restores the
+exact activation snapshot; invalid or failed rollback evidence is surfaced as a hard failure and never reported as
+recovered.
 
 ## Lifecycle, logs and diagnosis
 
@@ -87,7 +110,8 @@ uv run eidolon-pi --config ... rollback --release-id <id> \
   --snapshot /var/lib/eidolon/deployments/<id>-<tx> --apply
 ```
 
-Rollback restores only 22 allowlist system assets and 7 component links from that exact snapshot. It never restores
-secret, Host identity or database. Schema changes and data backup are independent authority-owned procedures;
+Rollback restores only 22 allowlist system assets and component links that existed in that exact snapshot; a normal
+update has seven, while a core-to-full expansion has four and removes the three newly introduced links. It never
+restores secret, Host identity or database. Schema changes and data backup are independent authority-owned procedures;
 descriptor requires `database_migrations=[]`. If automatic restore reports `rollback_failed`, stop automation and
 collect status/logs/diagnose instead of retrying blindly.

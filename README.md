@@ -36,7 +36,7 @@ Git commit；7 个运行 component 一起切换，SDK 只作构建输入。
 
 Python 缺失时，CLI 通过受限 shell bootstrap 先验证同一硬件/OS/容量门禁，再安装 Python。下载使用固定
 URL/digest、原子缓存和版本目录；不会用 rsync 覆盖任何工作树。Foundation 每个阶段与失败原因写入
-`/var/lib/eidolon-ops/foundation-v1.json`，可诊断、可幂等重试。
+`/var/lib/eidolon/ops/foundation-v1.json`，可诊断、可幂等重试。
 
 ## 安装与配置
 
@@ -61,6 +61,7 @@ eidolon-pi status
 eidolon-pi doctor [--release-id ID]
 eidolon-pi provision [--apply]
 eidolon-pi install --release-id ID [--resume] [--apply]
+eidolon-pi expand --release-id ID [--resume] [--apply]
 eidolon-pi deploy|update --release-id ID [--resume] [--activate]
 eidolon-pi start|stop|restart [--dry-run]
 eidolon-pi app-ready
@@ -69,8 +70,10 @@ eidolon-pi logs [--unit UNIT] [--lines N] [--since TEXT]
 eidolon-pi diagnose --output /absolute/path/to/report.tar.gz
 ```
 
-所有有破坏性的入口默认计划/dry-run；`install --apply` 是明确的一键首次安装授权，`deploy/update` 必须
-追加 `--activate` 才切换，`rollback` 必须追加 `--apply` 才恢复。详细状态机见
+所有有破坏性的入口默认计划/dry-run；`install --apply` 只接受全新 Eidolon namespace。已由旧 4-component
+core release 管理的 Host 使用 `expand --apply`：它只新增 Agent/Channel/Memory/LiveKit 输入，再复用同一
+release snapshot/activation/App-ready 门禁完成 4→7 component 扩容。`deploy/update` 必须追加 `--activate`
+才切换，`rollback` 必须追加 `--apply` 才恢复。详细状态机见
 [`docs/runbook.md`](docs/runbook.md)，代码证据与方案选择见
 [`docs/architecture-audit.md`](docs/architecture-audit.md)，真实验证结果见
 [`docs/verification.md`](docs/verification.md)。

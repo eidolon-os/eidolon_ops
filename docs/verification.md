@@ -1,9 +1,17 @@
 # Verification report
 
 Updated: 2026-08-09 (Asia/Shanghai). No Pi state, formal database, Mac service lifecycle or sibling working tree was
-modified. Password authentication to `192.168.100.15` succeeded and the only remote command executed was the
-read-only `/usr/bin/id`; the session was closed immediately when the release matrix changed, before environment
-probing, upload or activation.
+modified. Password authentication to `192.168.100.15` was used only for an interactive, read-only probe; no password
+was persisted. No upload, package install, systemd mutation, database access or activation was performed.
+
+The probe verified a Raspberry Pi 5 Model B, Debian 13 arm64, systemd PID 1, 8-GB-class RAM, NVMe root with more than
+200 GiB free, non-interactive sudo, active NetworkManager/BlueZ/Avahi, an unblocked Bluetooth controller, healthy
+Bootstrap preflight and Local API HTTPS descriptor, and correct Host identity/TLS modes. It also found that this is
+not a blank Host: the active release manages Kernel/Data/Hub/Admin under the legacy `/srv/eidolon` namespace. The six
+new NATS/LiveKit/Memory/Agent/Channel units are not installed, and seven foundation packages plus the pinned
+uv/Node/NATS/LiveKit artifacts remain absent. Consequently first install is correctly inapplicable; a reviewed
+core-to-full expansion is required. The pinned release deliberately retains the active `/srv/eidolon` contract;
+concurrent `/opt/eidolon` migration work was excluded and must be handled as a separate migration decision.
 
 ## Workstation operations project
 
@@ -11,25 +19,28 @@ probing, upload or activation.
 uv run ruff check .
 All checks passed
 
-uv run pytest --cov=eidolon_ops --cov-report=term-missing --cov-fail-under=90 -q
-167 passed, 0 failed, 0 skipped
-branch-aware coverage: 91.91%
-revised-matrix pytest runtime reported: 1.15 seconds
-marker breakdown: 60 unit, 102 component, 4 Kernel-contract, 1 subprocess integration
+ruff format --check src/eidolon_ops tests
+17 files already formatted
 
-uv build --out-dir /private/tmp/eidolon-ops-build-final2
-sdist: 84,591 bytes; wheel: 32,942 bytes
+pytest --cov=eidolon_ops --cov-branch --cov-report=term-missing --cov-fail-under=90 -q
+187 passed, 0 failed, 0 skipped
+branch-aware coverage: 90.78%
+pytest runtime reported: 1.39 seconds
 
-python3 -m venv /private/tmp/eidolon-ops-wheel-smoke
+uv build --out-dir /private/tmp/eidolon-ops-build-expansion3
+sdist: 90,495 bytes; wheel: 35,650 bytes
+
+python3 -m venv /private/tmp/eidolon-ops-wheel-expansion3
 .../pip install --no-deps .../eidolon_ops-0.1.0-py3-none-any.whl
 .../eidolon-pi --help
-wheel install and all 13 CLI operation parsers: passed
+wheel install and all 14 CLI operation parsers: passed
 ```
 
 Tests cover strict config, shell-free SSH/SCP construction, Python-missing bootstrap, foundation platform/package/
 artifact/service gates, digest mismatch, safe tar handling, idempotent managed links, foundation failure evidence,
-first-install/resume/lock/secret cleanup, Data V2 baseline, App gate failure/recovery, lifecycle, rollback plan, bounded
-logs, redacted diagnosis and compatibility with the live Kernel release constants.
+first-install/resume/lock/secret cleanup, Data V2 baseline, core-to-full expansion/idempotency/input drift, post-
+activation doctor/App failure recovery, lifecycle, rollback plan, bounded logs, redacted diagnosis and compatibility
+with the pinned Kernel release constants.
 
 ## Kernel release boundary
 
@@ -37,9 +48,10 @@ logs, redacted diagnosis and compatibility with the live Kernel release constant
 uv run ruff check .
 All checks passed
 
-uv run pytest --cov=eidolon_deploy --cov-report=term --cov-fail-under=90 -q
-247 passed, 0 failed, 0 skipped
-eidolon_deploy branch-aware coverage: 90.32%
+pytest --cov=eidolon_deploy --cov-branch --cov-report=term-missing --cov-fail-under=90 -q
+244 passed, 0 failed, 6 skipped
+eidolon_deploy branch-aware coverage: 90.12%
+pytest runtime reported: 14.15 seconds
 ```
 
 The contract result is 8 source archives, 7 components, 22 assets, 11 required secrets, 13 affected units and 12
@@ -52,7 +64,7 @@ generic-2xx probes and systemd verification command failure injection.
 The final smoke used the committed Kernel revision plus these selected commits:
 
 ```text
-Kernel   cf668a338c0f6305164cccd49df16eaa7e92aa04
+Kernel   b8a40e4cc807346936b12bd1cea6e1865884264e
 Data     d81086e2807f44ca0c0e43e31103cd85e6165a46
 Hub      96438a2507fb76ad025824873a99b213a99016ad
 Admin    02f96b7ca4fc0b662dcfdfdb0c8d2293d3cfd8d0
@@ -62,15 +74,17 @@ Memory   303b6004c58abbf86eb311de1f4002748fa9457d
 SDK      8108970514d9fefd3d93e7466e91706a1681c331
 ```
 
-The revised-matrix command completed in 1.98 seconds and produced 8 exact-commit source archives plus the preparer,
-totalling 480 MiB under `/private/tmp/eidolon-full-product-bundle-matrix2`. Channel accounts for 467 MiB after
+The final expansion-matrix command completed in 2.090 seconds and produced 8 exact-commit source archives plus the
+preparer, totalling 480 MiB under `/private/tmp/eidolon-full-product-bundle-expansion4`. Channel accounts for 467 MiB after
 hydrating its 8 Git LFS model objects from the exact commit pointers. Each object was checked against the pointer
 SHA-256 and size;
 the final archive was scanned again and contained no LFS pointer payload. Four changed Admin production files were
-independently compared with their `02f96b7` Git blobs and matched byte-for-byte. This smoke stopped after local bundle
-validation; it performed no upload or Pi-native preparation.
+independently compared with their `02f96b7` Git blobs and matched byte-for-byte in the preceding identical-Admin
+archive smoke; the final Admin archive SHA remained `70a46467...382feb96`. The final Kernel `linux.py` and Admin
+`control_plane.py` archive bytes were also matched directly to their selected Git blobs. This smoke stopped after
+local bundle validation; it performed no upload or Pi-native preparation.
 
-The revised matrix was followed by `14 passed in 7.65s` for Kernel's focused `tests/deploy/test_bundle.py` suite.
+The final matrix was followed by `14 passed in 8.96s` for Kernel's focused `tests/deploy/test_bundle.py` suite.
 
 ## Foundation artifact evidence
 
@@ -84,7 +98,7 @@ reject incomplete cache content.
 
 ## Not executed; hardware acceptance remains
 
-- Real SCP/sudo and Raspberry Pi foundation mutation; SSH authentication and `/usr/bin/id` only were exercised.
+- Real SCP/upload and Raspberry Pi foundation mutation; SSH/sudo were exercised only by bounded read-only probes.
 - `apt` and fixed artifact downloads on Raspberry Pi OS 12/13; package availability on both versions.
 - Pi-native `uv sync` for all 7 environments, model load time, disk/RAM/thermal profile.
 - Real `systemd-analyze verify`, 14-unit start order, BlueZ/NetworkManager/Avahi and NetworkManager SSH continuity.
