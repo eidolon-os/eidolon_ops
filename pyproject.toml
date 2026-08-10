@@ -9,7 +9,9 @@ description = "Unified macOS and Raspberry Pi lifecycle, deployment and path man
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-dependencies = []
+dependencies = [
+  "supervisor>=4.2,<5",
+]
 
 [project.optional-dependencies]
 dev = [

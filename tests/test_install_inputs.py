@@ -146,6 +146,7 @@ def test_initializer_creates_one_private_consistent_input_set(config, tmp_path: 
     assert "SENSETIME_TTS_API_KEY" not in channel
     assert (target / "bootstrap.env").read_bytes() == b""
     assert "~/eidolon" not in (target / "agent.yaml").read_text(encoding="utf-8")
+    assert (target / "agent.yaml").read_text(encoding="utf-8").startswith("env: prod\n")
     assert "avatar:\n  enabled: false" in (target / "channel.yaml").read_text(encoding="utf-8")
     assert "model: bge-base-zh" in (target / "memory.yaml").read_text(encoding="utf-8")
 

@@ -22,3 +22,8 @@ bootstrap_runtime_root = "~/ai/eidolon/.eidolon/mac-product/bootstrap/run"
 
 [adapter]
 lifecycle_script = "../../deploy/dev/run_all.sh"
+operations_config = "../eidolon-pi.toml"
+# Mac reuses the already-running NATS/LiveKit after health and
+# credential-coherence checks; Ops owns the remaining source services.
+foundation_mode = "external"
+external_livekit_config = "../../../eidolon_admin/var/livekit/livekit.generated.yaml"

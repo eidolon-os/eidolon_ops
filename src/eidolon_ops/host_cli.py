@@ -72,7 +72,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 strict=getattr(arguments, "strict", False),
                 wait_ready=not getattr(arguments, "no_wait_ready", False),
             )
-        elif arguments.operation in {"core-contract", "os-control-plane"}:
+        elif arguments.operation in {"core-contract", "os-control-plane", "product-source"}:
             extras: tuple[str, ...] = ()
             if (
                 arguments.operation == "os-control-plane"
@@ -125,6 +125,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "reset",
         "initialized",
         "already_initialized",
+        "prepared",
+        "compatible",
     }
     return 0 if result.get("status") in success else 1
 
@@ -203,6 +205,22 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
     control.add_argument("--ttl-seconds", type=int, default=900)
+    product = operations.add_parser("product-source")
+    product.add_argument(
+        "profile_operation",
+        choices=(
+            "prepare",
+            "validate",
+            "start",
+            "stop",
+            "restart",
+            "status",
+            "web-start",
+            "web-stop",
+            "web-restart",
+            "web-status",
+        ),
+    )
     return parser
 
 

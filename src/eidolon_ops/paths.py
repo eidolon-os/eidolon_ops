@@ -23,6 +23,7 @@ class HostProfileError(ValueError):
 _HOST_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _PLATFORMS = {"macos", "raspberry-pi"}
 _DRIVERS = {"local-supervisord", "ssh-systemd"}
+_FOUNDATION_MODES = {"external"}
 _PATH_FIELDS = (
     "install_root",
     "current_root",
@@ -81,6 +82,8 @@ class HostProfile:
     paths: HostPaths
     lifecycle_script: Path | None
     operations_config: Path | None
+    foundation_mode: Literal["external"] | None = None
+    external_livekit_config: Path | None = None
 
     def environment(self) -> dict[str, str]:
         values = self.paths.environment()
@@ -91,6 +94,8 @@ class HostProfile:
                 "EIDOLON_HOST_DRIVER": self.driver,
             }
         )
+        if self.foundation_mode is not None:
+            values["EIDOLON_FOUNDATION_MODE"] = self.foundation_mode
         return values
 
 
@@ -137,11 +142,32 @@ def load_host_profile(path: Path) -> HostProfile:
     base = resolved.parent
     lifecycle_script: Path | None = None
     operations_config: Path | None = None
+    foundation_mode: Literal["external"] | None = None
+    external_livekit_config: Path | None = None
     if driver == "local-supervisord":
-        if set(adapter) != {"lifecycle_script"}:
-            raise HostProfileError("local adapter must contain only lifecycle_script")
+        if set(adapter) != {
+            "lifecycle_script",
+            "operations_config",
+            "foundation_mode",
+            "external_livekit_config",
+        }:
+            raise HostProfileError(
+                "local adapter must contain lifecycle, operations and foundation settings"
+            )
         lifecycle_script = _local_path(
             adapter["lifecycle_script"], base, "adapter.lifecycle_script"
+        )
+        operations_config = _local_path(
+            adapter["operations_config"], base, "adapter.operations_config"
+        )
+        mode = _text(adapter["foundation_mode"], "adapter.foundation_mode")
+        if mode not in _FOUNDATION_MODES:
+            raise HostProfileError(
+                f"adapter.foundation_mode must be one of {sorted(_FOUNDATION_MODES)}"
+            )
+        foundation_mode = mode  # type: ignore[assignment]
+        external_livekit_config = _local_path(
+            adapter["external_livekit_config"], base, "adapter.external_livekit_config"
         )
     else:
         if set(adapter) != {"operations_config"}:
@@ -158,6 +184,8 @@ def load_host_profile(path: Path) -> HostProfile:
         paths=paths,
         lifecycle_script=lifecycle_script,
         operations_config=operations_config,
+        foundation_mode=foundation_mode,
+        external_livekit_config=external_livekit_config,
     )
 
 

@@ -41,6 +41,9 @@ bootstrap_state_root = "{bootstrap}"
 bootstrap_runtime_root = "{bootstrap_runtime}"
 [adapter]
 lifecycle_script = "{script}"
+operations_config = "{tmp_path / "operations.toml"}"
+foundation_mode = "external"
+external_livekit_config = "{tmp_path / "livekit.yaml"}"
 {overrides}
 """,
         encoding="utf-8",
@@ -55,6 +58,8 @@ def test_mac_profile_exports_one_host_path_contract(tmp_path: Path) -> None:
 
     assert profile.platform == "macos"
     assert profile.lifecycle_script == script
+    assert profile.operations_config == tmp_path / "operations.toml"
+    assert profile.foundation_mode == "external"
     environment = profile.environment()
     assert environment["EIDOLON_ROOT"] == environment["EIDOLON_WORKSPACE_ROOT"]
     assert environment["EIDOLON_STATE_ROOT"] == str(tmp_path / "state")
@@ -67,6 +72,8 @@ def test_mac_example_uses_the_ops_owned_source_lifecycle() -> None:
     profile = load_host_profile(REPOSITORY_ROOT / "config/hosts/mac.example.toml")
 
     assert profile.lifecycle_script == (REPOSITORY_ROOT / "deploy/dev/run_all.sh").resolve()
+    assert profile.operations_config == (REPOSITORY_ROOT / "config/eidolon-pi.toml").resolve()
+    assert profile.foundation_mode == "external"
     product_root = Path.home() / "ai/eidolon/.eidolon/mac-product"
     assert profile.paths.config_root == product_root / "config"
     assert profile.paths.state_root == product_root / "state"

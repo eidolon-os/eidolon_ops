@@ -271,6 +271,45 @@ configure_supervisor_profile() {
       export EIDOLON_SUPERVISOR_LOG_FILE="${LOG_DIR}/admin/supervisord-${profile}.log"
       export EIDOLON_SUPERVISOR_CHILDLOG_DIR="${LOG_DIR}/admin/childlogs"
       ;;
+    product-source)
+      local profile_env="${EIDOLON_CONFIG_ROOT}/product-source.env"
+      if [[ ! -f "$profile_env" || -L "$profile_env" ]]; then
+        error "product-source profile is not prepared: $profile_env"
+        exit 1
+      fi
+      local name value
+      while IFS='=' read -r name value || [[ -n "$name" ]]; do
+        [[ -z "$name" ]] && continue
+        if [[ ! "$name" =~ ^EIDOLON_[A-Z0-9_]+$ || -z "$value" ]]; then
+          error "unsafe product-source profile entry: $name"
+          exit 1
+        fi
+        export "$name=$value"
+      done < "$profile_env"
+      # Product children load the one reviewed per-service env set. Do not let
+      # credentials inherited from an unrelated legacy shell/supervisor win.
+      unset LIVEKIT_API_KEY LIVEKIT_API_SECRET
+      EIDOLON_ADMIN_ROOT="$EIDOLON_SOURCE_ADMIN"
+      WEB_DIR="${EIDOLON_ADMIN_ROOT}/web"
+      API_HOST="${EIDOLON_ADMIN_API_HOST:-127.0.0.1}"
+      API_PORT="${EIDOLON_ADMIN_API_PORT:-9000}"
+      WEB_PORT="${EIDOLON_ADMIN_WEB_PORT:-9001}"
+      SV_PROFILE="$profile"
+      SV_CONF="$SV_PROFILE_CONF"
+      SV_PID="${VAR_DIR}/supervisord-${profile}.pid"
+      SV_SOCK="${VAR_DIR}/supervisor-${profile}.sock"
+      SUPERVISOR_PROFILE_ENABLED_DIR="${OPS_ROOT}/deploy/supervisor"
+      PREFLIGHT_SERVICE_IDS="admin,eidolond,data,data-workspace,hub,kernel,nats,livekit,memory,agent,channel"
+      export EIDOLON_SUPERVISOR_PROFILE="$profile"
+      export EIDOLON_SUPERVISOR_PID="$SV_PID"
+      export EIDOLON_SUPERVISOR_SOCKET="$SV_SOCK"
+      export EIDOLON_SUPERVISOR_ENABLED_DIR="$SUPERVISOR_PROFILE_ENABLED_DIR"
+      export EIDOLON_SUPERVISOR_INCLUDE_GLOB="${OPS_ROOT}/deploy/supervisor/product-source.conf"
+      export EIDOLON_ADMIN_SUPERVISOR_SOCKET="$SV_SOCK"
+      export EIDOLON_ADMIN_SUPERVISOR_ENABLED_DIR="$SUPERVISOR_PROFILE_ENABLED_DIR"
+      export EIDOLON_SUPERVISOR_LOG_FILE="${LOG_DIR}/admin/supervisord-${profile}.log"
+      export EIDOLON_SUPERVISOR_CHILDLOG_DIR="${LOG_DIR}/admin/childlogs"
+      ;;
     *)
       error "unknown supervisor profile: $profile"
       exit 1
@@ -287,6 +326,9 @@ materialize_supervisor_profile() {
       ;;
     os-control-plane)
       configs=(admin-os-control-plane eidolond data hub-os-control-plane kernel)
+      ;;
+    product-source)
+      return 0
       ;;
     *)
       error "unknown supervisor profile: $SV_PROFILE"
@@ -311,6 +353,10 @@ materialize_supervisor_profile() {
 # --- Deps -------------------------------------------------------------------
 
 ensure_api_deps() {
+  if [[ "$SV_PROFILE" == "product-source" ]]; then
+    ensure_product_source_deps
+    return 0
+  fi
   if [[ -z "$EIDOLON_NATS_SERVER" ]]; then
     error "nats-server is not on PATH"
     exit 1
@@ -320,6 +366,13 @@ ensure_api_deps() {
     python3 -m venv "$VENV"
     "${VENV}/bin/pip" install -q --upgrade pip
     "${VENV}/bin/pip" install -q -e "${OPS_ROOT}[dev]" -e "${EIDOLON_ADMIN_ROOT}[dev]"
+  fi
+}
+
+ensure_product_source_deps() {
+  if [[ ! -x "${VENV}/bin/supervisord" || ! -x "${VENV}/bin/supervisorctl" ]]; then
+    info "syncing the locked Ops product-source control runtime"
+    uv sync --frozen --extra dev
   fi
 }
 
@@ -649,7 +702,9 @@ do_sv_reread_update() {
 
 do_sv_start() {
   ensure_api_deps
-  eidolon_ensure_livekit_credentials
+  if [[ "$SV_PROFILE" != "product-source" ]]; then
+    eidolon_ensure_livekit_credentials
+  fi
   if sv_alive; then
     info "supervisord already running (PID $(sv_pid), socket $SV_SOCK)"
     info "  config reload only — use '$0 status' to inspect; '$0 restart' for full stop+start"
@@ -1003,6 +1058,85 @@ do_os_control_plane_sv() {
   do_sv_passthrough "$@"
 }
 
+do_product_source_start() {
+  configure_supervisor_profile product-source
+  ensure_product_source_deps
+  header "external foundation gate"
+  "${OPS_ROOT}/deploy/supervisor/wrappers/wait-tcp.sh" \
+    --host 127.0.0.1 --port 4222 --timeout 3 -- /usr/bin/true
+  "${OPS_ROOT}/deploy/supervisor/wrappers/wait-tcp.sh" \
+    --host 127.0.0.1 --port 7880 --timeout 3 -- /usr/bin/true
+  header "supervisord product-source (Mac source topology)"
+  do_sv_start
+  echo
+  do_sv_status
+}
+
+do_product_source_stop() {
+  configure_supervisor_profile product-source
+  header "supervisord product-source"
+  do_sv_stop
+}
+
+do_product_source_restart() {
+  do_product_source_stop
+  sleep 1
+  do_product_source_start
+}
+
+do_product_source_status() {
+  configure_supervisor_profile product-source
+  do_sv_status
+}
+
+do_product_source_sv() {
+  configure_supervisor_profile product-source
+  ensure_product_source_deps
+  do_sv_passthrough "$@"
+}
+
+do_product_source_web_start() {
+  configure_supervisor_profile product-source
+  ensure_product_source_deps
+  ensure_web_deps
+  do_sv_start
+  local state
+  state="$("${VENV}/bin/supervisorctl" -c "$SV_CONF" status admin-web 2>/dev/null || true)"
+  if [[ "$state" == *" RUNNING "* ]]; then
+    info "Admin Web already running / http://127.0.0.1:${WEB_PORT}/"
+    return 0
+  fi
+  "${VENV}/bin/supervisorctl" -c "$SV_CONF" start admin-web
+  info "Admin Web / http://127.0.0.1:${WEB_PORT}/"
+}
+
+do_product_source_web_stop() {
+  configure_supervisor_profile product-source
+  ensure_product_source_deps
+  local state
+  state="$("${VENV}/bin/supervisorctl" -c "$SV_CONF" status admin-web 2>/dev/null || true)"
+  if [[ "$state" == *" STOPPED "* || -z "$state" ]]; then
+    info "Admin Web not running"
+    return 0
+  fi
+  "${VENV}/bin/supervisorctl" -c "$SV_CONF" stop admin-web
+}
+
+do_product_source_web_restart() {
+  configure_supervisor_profile product-source
+  ensure_product_source_deps
+  ensure_web_deps
+  do_sv_start
+  "${VENV}/bin/supervisorctl" -c "$SV_CONF" restart admin-web
+  info "Admin Web / http://127.0.0.1:${WEB_PORT}/"
+}
+
+do_product_source_web_status() {
+  configure_supervisor_profile product-source
+  ensure_product_source_deps
+  "${VENV}/bin/supervisorctl" -c "$SV_CONF" status admin-web || true
+}
+
 do_status() {
   do_web_status
   echo
@@ -1126,6 +1260,29 @@ case "${1:-}" in
       *)
         error "unknown os-control-plane command: ${1:-}"
         error "usage: $0 os-control-plane prepare|validate|issue-operator-token|start|stop|restart|status|sv [...]"
+        exit 1
+        ;;
+    esac
+    ;;
+
+  product-source)
+    shift
+    case "${1:-status}" in
+      start)   do_product_source_start ;;
+      stop)    do_product_source_stop ;;
+      restart) do_product_source_restart ;;
+      status)  do_product_source_status ;;
+      web-start) do_product_source_web_start ;;
+      web-stop) do_product_source_web_stop ;;
+      web-restart) do_product_source_web_restart ;;
+      web-status) do_product_source_web_status ;;
+      sv)
+        shift
+        do_product_source_sv "$@"
+        ;;
+      *)
+        error "unknown product-source command: ${1:-}"
+        error "usage: $0 product-source start|stop|restart|status|web-start|web-stop|web-restart|web-status|sv [...]"
         exit 1
         ;;
     esac

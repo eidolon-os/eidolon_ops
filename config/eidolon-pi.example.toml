@@ -36,7 +36,7 @@ revision = "4bab6a0c5201c6adda7ba0f68241297034326cae"
 
 [sources.eidolon_admin]
 path = "../../eidolon_admin"
-revision = "d25eec1e424ad5398175d2337e5840ec5242b0dd"
+revision = "43eecc17561b8a831bf068e45ce8cf664e897a60"
 
 [sources.eidolon_agent]
 path = "../../eidolon_agent"

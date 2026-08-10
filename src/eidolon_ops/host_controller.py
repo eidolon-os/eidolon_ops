@@ -164,8 +164,16 @@ class HostController:
     ) -> dict[str, object]:
         if self.profile.driver != "local-supervisord":
             raise OperationsError("Supervisor profiles are available on the macOS adapter only")
-        if profile_name not in {"core-contract", "os-control-plane"}:
+        if profile_name not in {"core-contract", "os-control-plane", "product-source"}:
             raise OperationsError(f"unsupported local profile: {profile_name}")
+        if profile_name == "product-source":
+            product = self._local_product()
+            if operation == "prepare":
+                return product.prepare()
+            if operation == "validate":
+                return product.validate()
+            if operation in {"start", "restart", "web-start", "web-restart"}:
+                product.prepare()
         script = self._local_script()
         result = checked(
             f"local {profile_name} {operation}",
@@ -176,13 +184,32 @@ class HostController:
                 timeout=300,
             ),
         )
-        return {
+        response = {
             "status": "ok",
             "host_id": self.profile.host_id,
             "profile": profile_name,
             "operation": operation,
             "output": result.stdout.strip(),
         }
+        if profile_name == "product-source" and operation in {"start", "restart", "status"}:
+            health = product.health(wait_seconds=120 if operation in {"start", "restart"} else 0)
+            unhealthy_process = any(
+                marker in result.stdout for marker in (" FATAL ", " BACKOFF ", " EXITED ")
+            )
+            response["health"] = health
+            response["status"] = (
+                "healthy" if health["status"] == "healthy" and not unhealthy_process else "degraded"
+            )
+        return response
+
+    def _local_product(self):
+        from eidolon_ops.local_product import LocalProductSource
+
+        config_path = self.profile.operations_config
+        if config_path is None:
+            raise OperationsError("Mac product-source profile has no operations config")
+        config = load_config(config_path).with_revision_overrides(self.revision_overrides)
+        return LocalProductSource(self.profile, config, self.runner)
 
     def logs(self, *, service: str | None, lines: int, since: str | None) -> dict[str, object]:
         if self.profile.driver == "ssh-systemd":
