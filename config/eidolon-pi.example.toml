@@ -5,7 +5,7 @@ profile = "raspberry-pi-os-debian-arm64-v2"
 
 [host]
 user = "eidolon-pi5"
-hostname = "192.168.100.15"
+hostname = "192.168.1.26"
 port = 22
 identity_file = "/absolute/path/to/id_ed25519_eidolon_pi"
 known_hosts_file = "/absolute/path/to/eidolon_pi_known_hosts"
@@ -24,11 +24,11 @@ python_concurrent_downloads = 4
 
 [sources.eidolon_kernel]
 path = "../../eidolon_kernel"
-revision = "4e3b3fb20f066eceb39fe5b3eae9d876b0aad997"
+revision = "6f0fc4811383c2dcad2add8bfe4a05d2ef4566db"
 
 [sources.eidolon_data]
 path = "../../eidolon_data"
-revision = "d81086e2807f44ca0c0e43e31103cd85e6165a46"
+revision = "4b588c2ba4399061861b5d99f17358fadad95b9f"
 
 [sources.eidolon_hub]
 path = "../../eidolon_hub"
@@ -36,7 +36,7 @@ revision = "4bab6a0c5201c6adda7ba0f68241297034326cae"
 
 [sources.eidolon_admin]
 path = "../../eidolon_admin"
-revision = "941988caaf22c84caa1860ec8956bced7d4760c7"
+revision = "d25eec1e424ad5398175d2337e5840ec5242b0dd"
 
 [sources.eidolon_agent]
 path = "../../eidolon_agent"
@@ -48,7 +48,7 @@ revision = "8843de6c1268bf01bf8e303ce26fb209df3e033b"
 
 [sources.eidolon_memory]
 path = "../../eidolon_memory"
-revision = "01908709bb6482d426e7a519a65e5d8570152ffe"
+revision = "4945e87dcd198673b986281163e1875dd616fd6f"
 
 [sources.eidolon_sdk]
 path = "../../eidolon_sdk"

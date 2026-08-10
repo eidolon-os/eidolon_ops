@@ -74,6 +74,7 @@ def initialize_install_inputs(
         )
 
     data_token = secrets.token_urlsafe(32)
+    memory_roster_token = secrets.token_urlsafe(32)
     workspace_token = secrets.token_urlsafe(32)
     local_api_token = secrets.token_urlsafe(32)
     hub_reader_token = secrets.token_urlsafe(32)
@@ -95,6 +96,7 @@ def initialize_install_inputs(
     env_documents: dict[str, Mapping[str, str]] = {
         "data.env": {
             "EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN": data_token,
+            "EIDOLON_DATA_MEMORY_RUNTIME_ROSTER_TOKEN": memory_roster_token,
             "EIDOLON_DATA_WORKSPACE_AUTHORITY_TOKEN": workspace_token,
             "EIDOLON_DATA_SQLITE_PATH": "/var/lib/eidolon/eidolon-system.sqlite3",
             "EIDOLON_DATA_DATABASE_URL": (
@@ -139,6 +141,7 @@ def initialize_install_inputs(
             "EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN": data_token,
         },
         "memory.env": {
+            "EIDOLON_DATA_MEMORY_RUNTIME_ROSTER_TOKEN": memory_roster_token,
             "EIDOLON_MEMORY_LLM_API_KEY": providers["eidolon_memory"]["EIDOLON_MEMORY_LLM_API_KEY"],
             "EIDOLON_MEMORY_MCP_TOKEN": memory_token,
         },
@@ -194,6 +197,7 @@ def validate_install_input_contract(
     exact_keys = {
         "data.env": {
             "EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN",
+            "EIDOLON_DATA_MEMORY_RUNTIME_ROSTER_TOKEN",
             "EIDOLON_DATA_WORKSPACE_AUTHORITY_TOKEN",
             "EIDOLON_DATA_SQLITE_PATH",
             "EIDOLON_DATA_DATABASE_URL",
@@ -227,6 +231,7 @@ def validate_install_input_contract(
             "PAIRING_JWT_SECRET",
         },
         "memory.env": {
+            "EIDOLON_DATA_MEMORY_RUNTIME_ROSTER_TOKEN",
             "EIDOLON_MEMORY_LLM_API_KEY",
             "EIDOLON_MEMORY_MCP_TOKEN",
         },
@@ -296,6 +301,11 @@ def validate_install_input_contract(
     memory = envs["memory.env"]
     livekit = envs["livekit.env"]
     relationships = (
+        (
+            data["EIDOLON_DATA_MEMORY_RUNTIME_ROSTER_TOKEN"],
+            memory["EIDOLON_DATA_MEMORY_RUNTIME_ROSTER_TOKEN"],
+            "Data/Memory runtime roster token",
+        ),
         (
             data["EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN"],
             kernel["EIDOLON_KERNEL_COMPANION_AUTHORITY_TOKEN"],

@@ -6,17 +6,19 @@ platform = "macos"
 driver = "local-supervisord"
 
 [paths]
-# Code is a working tree on macOS. Runtime data stays in the existing
-# ~/eidolon namespace, but every lifetime has one explicit sub-root.
+# Code stays in the multi-repository workspace. Generated configuration,
+# credentials, state, runtime files, logs and caches are contained under one
+# ignored workspace-local product root instead of being written into sibling
+# repositories or the historical ~/eidolon namespace.
 install_root = "~/ai/eidolon"
 current_root = "~/ai/eidolon"
-config_root = "~/ai/eidolon/eidolon_ops/config"
-state_root = "~/eidolon/data"
-runtime_root = "~/eidolon/run"
-log_root = "~/eidolon/logs"
-cache_root = "~/eidolon/cache"
-bootstrap_state_root = "~/eidolon/bootstrap"
-bootstrap_runtime_root = "~/eidolon/run/bootstrap"
+config_root = "~/ai/eidolon/.eidolon/mac-product/config"
+state_root = "~/ai/eidolon/.eidolon/mac-product/state"
+runtime_root = "~/ai/eidolon/.eidolon/mac-product/run"
+log_root = "~/ai/eidolon/.eidolon/mac-product/logs"
+cache_root = "~/ai/eidolon/.eidolon/mac-product/cache"
+bootstrap_state_root = "~/ai/eidolon/.eidolon/mac-product/bootstrap/state"
+bootstrap_runtime_root = "~/ai/eidolon/.eidolon/mac-product/bootstrap/run"
 
 [adapter]
 lifecycle_script = "../../deploy/dev/run_all.sh"

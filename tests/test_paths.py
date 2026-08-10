@@ -67,6 +67,14 @@ def test_mac_example_uses_the_ops_owned_source_lifecycle() -> None:
     profile = load_host_profile(REPOSITORY_ROOT / "config/hosts/mac.example.toml")
 
     assert profile.lifecycle_script == (REPOSITORY_ROOT / "deploy/dev/run_all.sh").resolve()
+    product_root = Path.home() / "ai/eidolon/.eidolon/mac-product"
+    assert profile.paths.config_root == product_root / "config"
+    assert profile.paths.state_root == product_root / "state"
+    assert profile.paths.runtime_root == product_root / "run"
+    assert profile.paths.log_root == product_root / "logs"
+    assert profile.paths.cache_root == product_root / "cache"
+    assert profile.paths.bootstrap_state_root == product_root / "bootstrap/state"
+    assert profile.paths.bootstrap_runtime_root == product_root / "bootstrap/run"
 
 
 def test_pi_profile_requires_reviewed_fhs_paths(tmp_path: Path) -> None:

@@ -106,6 +106,10 @@ def test_initializer_creates_one_private_consistent_input_set(config, tmp_path: 
     agent = _env(target / "agent.env")
     channel = _env(target / "channel.env")
     memory = _env(target / "memory.env")
+    assert (
+        memory["EIDOLON_DATA_MEMORY_RUNTIME_ROSTER_TOKEN"]
+        == data["EIDOLON_DATA_MEMORY_RUNTIME_ROSTER_TOKEN"]
+    )
     livekit = _env(target / "livekit.env")
     hub = _env(target / "hub.env")
     assert (
