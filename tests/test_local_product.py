@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from ipaddress import IPv4Address
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -13,12 +14,13 @@ from eidolon_ops.local_product import (
     LocalProductSource,
     _http_health,
     _read_environment_file,
+    _read_service_environment_file,
     _replace_environment_values,
     _serialize_plain_environment,
     _unix_http_health,
 )
-from eidolon_ops.paths import HostPaths, HostProfile
-from eidolon_ops.process import ProcessResult
+from eidolon_ops.paths import AppAccess, HostPaths, HostProfile
+from eidolon_ops.process import ProcessResult, SubprocessRunner
 
 
 def _product(tmp_path: Path, *, foundation_mode: str) -> LocalProductSource:
@@ -43,6 +45,13 @@ def _product(tmp_path: Path, *, foundation_mode: str) -> LocalProductSource:
         operations_config=tmp_path / "operations.toml",
         foundation_mode=cast(Any, foundation_mode),
         external_livekit_config=tmp_path / "livekit.yaml",
+        app=AppAccess(
+            lan_ipv4=IPv4Address("192.168.1.25"),
+            hub_hostname="eidolon-hub.local",
+            hub_https_port=8443,
+            livekit_client_url="ws://192.168.1.25:7880",
+            allow_insecure_livekit=True,
+        ),
     )
     return LocalProductSource(profile, cast(Any, None), cast(Any, None))
 
@@ -191,6 +200,12 @@ def test_prepare_materializes_one_canonical_mac_product_contract(
                         "livekit:\n  api_url: http://127.0.0.1:7880\n",
                         "",
                     )
+                if target.endswith("config/hub.systemd.example.yaml"):
+                    return ProcessResult(
+                        0,
+                        "onboarding:\n  public_base_url: https://eidolon-hub.local\n",
+                        "",
+                    )
                 return ProcessResult(0, "service: product\n", "")
             return ProcessResult(0, "", "")
 
@@ -199,6 +214,16 @@ def test_prepare_materializes_one_canonical_mac_product_contract(
         local_product_module, "validate_install_input_contract", lambda *_a, **_k: None
     )
     product = LocalProductSource(profile, cast(Any, config), runner)
+
+    def create_test_tls_identity() -> None:
+        tls = profile.paths.config_root / "tls"
+        tls.mkdir(parents=True, exist_ok=True)
+        for name in ("hub.crt", "hub.key"):
+            path = tls / name
+            path.write_text("test identity\n", encoding="utf-8")
+            path.chmod(0o600)
+
+    monkeypatch.setattr(product, "_ensure_hub_tls_identity", create_test_tls_identity)
 
     result = product.prepare()
 
@@ -220,6 +245,43 @@ def test_prepare_materializes_one_canonical_mac_product_contract(
     (inputs / "host_identity.ed25519").write_bytes(b"n" * 32)
     assert product.prepare()["status"] == "prepared"
     assert identity.read_bytes() == b"i" * 32
+
+
+def test_hub_tls_identity_is_generated_validated_and_reused(tmp_path: Path) -> None:
+    product = _product(tmp_path, foundation_mode="external")
+    tls = product.profile.paths.config_root / "tls"
+    tls.mkdir(parents=True)
+    product.runner = SubprocessRunner()
+
+    product._ensure_hub_tls_identity()
+
+    certificate = tls / "hub.crt"
+    private_key = tls / "hub.key"
+    assert certificate.is_file()
+    assert private_key.is_file()
+    assert certificate.stat().st_mode & 0o777 == 0o600
+    assert private_key.stat().st_mode & 0o777 == 0o600
+    decoded = local_product_module.ssl._ssl._test_decode_cert(str(certificate))
+    assert ("DNS", "eidolon-hub.local") in decoded["subjectAltName"]
+    original = certificate.read_bytes(), private_key.read_bytes()
+
+    product._ensure_hub_tls_identity()
+    assert (certificate.read_bytes(), private_key.read_bytes()) == original
+
+
+def test_hub_tls_identity_fails_closed_for_partial_or_invalid_files(tmp_path: Path) -> None:
+    product = _product(tmp_path, foundation_mode="external")
+    tls = product.profile.paths.config_root / "tls"
+    tls.mkdir(parents=True)
+    certificate = tls / "hub.crt"
+    private_key = tls / "hub.key"
+    certificate.write_text("partial", encoding="utf-8")
+    with pytest.raises(OperationsError, match="incomplete"):
+        product._ensure_hub_tls_identity()
+
+    private_key.write_text("invalid", encoding="utf-8")
+    with pytest.raises(OperationsError, match="invalid"):
+        product._ensure_hub_tls_identity()
 
 
 def test_product_health_uses_canonical_endpoints(monkeypatch, tmp_path: Path) -> None:
@@ -249,6 +311,63 @@ def test_product_health_uses_canonical_endpoints(monkeypatch, tmp_path: Path) ->
     )
 
 
+def test_app_ready_requires_device_reachable_contract(monkeypatch, tmp_path: Path) -> None:
+    product = _product(tmp_path, foundation_mode="external")
+
+    class InterfaceRunner:
+        def run(self, command, **_kwargs):
+            assert tuple(command) == ("ifconfig",)
+            return ProcessResult(0, "en0: flags\n\tinet 192.168.1.25 netmask 0xffffff00\n", "")
+
+    product.runner = InterfaceRunner()
+    root = product.profile.paths.config_root
+    (root / "env").mkdir(parents=True)
+    (root / "settings").mkdir(parents=True)
+    product.profile.paths.log_root.joinpath("admin").mkdir(parents=True)
+    certificate = root / "tls/hub.crt"
+    (root / "env/local-api.env").write_text(
+        "EIDOLON_LOCAL_API_HUB_ID=eidolon-hub-local\n"
+        "EIDOLON_LOCAL_API_HUB_DESCRIPTOR_URI="
+        "https://eidolon-hub.local:8443/api/device-onboarding/v1/descriptor\n"
+        f"EIDOLON_LOCAL_API_HUB_TLS_CERTIFICATE={certificate}\n",
+        encoding="utf-8",
+    )
+    (root / "env/channel.env").write_text(
+        "EIDOLON_LIVEKIT_CLIENT_URL=ws://192.168.1.25:7880\n"
+        "EIDOLON_CHANNEL_PROVIDER_ALLOW_INSECURE_LAN_CLIENT_URL=1\n",
+        encoding="utf-8",
+    )
+    (root / "settings/hub.yaml").write_text(
+        "onboarding:\n  public_base_url: https://eidolon-hub.local:8443\n",
+        encoding="utf-8",
+    )
+    external_livekit = cast(Path, product.profile.external_livekit_config)
+    external_livekit.write_text("rtc:\n  node_ip: 192.168.1.25\n", encoding="utf-8")
+    product.profile.paths.log_root.joinpath("admin/local-api-mdns.log").write_text(
+        "Got a reply for service Eidolon Local API: Name now registered and active\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(product, "health", lambda: {"status": "healthy"})
+    monkeypatch.setattr(
+        local_product_module,
+        "_http_health",
+        lambda _url: {"healthy": True, "http_status": 200},
+    )
+    monkeypatch.setattr(local_product_module, "_tcp_health", lambda *_a: {"healthy": True})
+
+    result = product.app_ready()
+
+    assert result["status"] == "app_ready"
+    assert all(result["checks"].values())
+
+    product.runner = SimpleNamespace(
+        run=lambda *_a, **_k: ProcessResult(0, "inet 172.16.20.211\n", "")
+    )
+    degraded = product.app_ready()
+    assert degraded["status"] == "degraded"
+    assert degraded["checks"]["lan_address_present"] is False
+
+
 def test_generated_environment_helpers_reject_ambiguous_inputs(tmp_path: Path) -> None:
     assert _serialize_plain_environment({"EIDOLON_OK": "value"}) == "EIDOLON_OK=value\n"
     with pytest.raises(OperationsError, match="profile key"):
@@ -262,6 +381,15 @@ def test_generated_environment_helpers_reject_ambiguous_inputs(tmp_path: Path) -
     environment.write_text("EIDOLON_ONE=1\nEIDOLON_ONE=2\n", encoding="utf-8")
     with pytest.raises(OperationsError, match="env file"):
         _read_environment_file(environment)
+
+    environment.write_text("LIVEKIT_API_KEY=key\nEIDOLON_ONE=1\n", encoding="utf-8")
+    assert _read_service_environment_file(environment) == {
+        "LIVEKIT_API_KEY": "key",
+        "EIDOLON_ONE": "1",
+    }
+    environment.write_text("lowercase=value\n", encoding="utf-8")
+    with pytest.raises(OperationsError, match="service env file"):
+        _read_service_environment_file(environment)
 
     assert _replace_environment_values("A=old\nB=kept\n", {"A": "new"}) == ("A=new\nB=kept\n")
     with pytest.raises(OperationsError, match="environment is invalid"):

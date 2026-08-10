@@ -12,8 +12,10 @@ import os
 import re
 import tomllib
 from dataclasses import dataclass
+from ipaddress import IPv4Address, ip_address
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlparse
 
 
 class HostProfileError(ValueError):
@@ -74,6 +76,17 @@ class HostPaths:
 
 
 @dataclass(frozen=True, slots=True)
+class AppAccess:
+    """Device-reachable application endpoints for one Host."""
+
+    lan_ipv4: IPv4Address
+    hub_hostname: str
+    hub_https_port: int
+    livekit_client_url: str
+    allow_insecure_livekit: bool
+
+
+@dataclass(frozen=True, slots=True)
 class HostProfile:
     path: Path
     host_id: str
@@ -84,6 +97,7 @@ class HostProfile:
     operations_config: Path | None
     foundation_mode: Literal["external"] | None = None
     external_livekit_config: Path | None = None
+    app: AppAccess | None = None
 
     def environment(self) -> dict[str, str]:
         values = self.paths.environment()
@@ -105,9 +119,12 @@ def load_host_profile(path: Path) -> HostProfile:
         document = tomllib.loads(resolved.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
         raise HostProfileError(f"host profile is unreadable: {resolved}") from exc
-    if set(document) != {"schema_version", "host", "paths", "adapter"}:
+    if set(document) not in (
+        {"schema_version", "host", "paths", "adapter"},
+        {"schema_version", "host", "paths", "adapter", "app"},
+    ):
         raise HostProfileError(
-            "host profile root must contain only schema_version, host, paths and adapter"
+            "host profile root must contain only schema_version, host, paths, adapter and app"
         )
     if document["schema_version"] != 1:
         raise HostProfileError("host profile schema_version must be 1")
@@ -176,6 +193,7 @@ def load_host_profile(path: Path) -> HostProfile:
             adapter["operations_config"], base, "adapter.operations_config"
         )
 
+    app = _app_access(document.get("app"))
     return HostProfile(
         path=resolved,
         host_id=host_id,
@@ -186,6 +204,7 @@ def load_host_profile(path: Path) -> HostProfile:
         operations_config=operations_config,
         foundation_mode=foundation_mode,
         external_livekit_config=external_livekit_config,
+        app=app,
     )
 
 
@@ -242,6 +261,59 @@ def _text(value: object, label: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise HostProfileError(f"{label} must be a non-empty string")
     return value.strip()
+
+
+def _app_access(value: object | None) -> AppAccess | None:
+    if value is None:
+        return None
+    document = _table(value, "app")
+    expected = {
+        "lan_ipv4",
+        "hub_hostname",
+        "hub_https_port",
+        "livekit_client_url",
+        "allow_insecure_livekit",
+    }
+    if set(document) != expected:
+        raise HostProfileError(f"app must contain exactly {', '.join(sorted(expected))}")
+    try:
+        address = ip_address(_text(document["lan_ipv4"], "app.lan_ipv4"))
+    except ValueError as exc:
+        raise HostProfileError("app.lan_ipv4 must be a private IPv4 address") from exc
+    if not isinstance(address, IPv4Address) or not address.is_private or address.is_loopback:
+        raise HostProfileError("app.lan_ipv4 must be a private IPv4 address")
+    hostname = _text(document["hub_hostname"], "app.hub_hostname").lower()
+    if re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.local", hostname) is None:
+        raise HostProfileError("app.hub_hostname must be one single-label .local hostname")
+    port = document["hub_https_port"]
+    if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:
+        raise HostProfileError("app.hub_https_port must be a valid TCP port")
+    livekit_url = _text(document["livekit_client_url"], "app.livekit_client_url")
+    parsed = urlparse(livekit_url)
+    if (
+        parsed.scheme not in {"ws", "wss"}
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path not in {"", "/"}
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise HostProfileError("app.livekit_client_url must be a plain ws/wss origin")
+    allow_insecure = document["allow_insecure_livekit"]
+    if not isinstance(allow_insecure, bool):
+        raise HostProfileError("app.allow_insecure_livekit must be boolean")
+    if parsed.scheme == "ws" and not allow_insecure:
+        raise HostProfileError("an insecure LiveKit URL requires explicit development opt-in")
+    if parsed.scheme == "ws" and parsed.hostname != str(address):
+        raise HostProfileError("an insecure LiveKit URL must use app.lan_ipv4")
+    return AppAccess(
+        lan_ipv4=address,
+        hub_hostname=hostname,
+        hub_https_port=port,
+        livekit_client_url=livekit_url.rstrip("/"),
+        allow_insecure_livekit=allow_insecure,
+    )
 
 
 def _absolute_path(value: object, label: str) -> Path:

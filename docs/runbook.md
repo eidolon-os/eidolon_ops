@@ -88,9 +88,14 @@ checkpoint and Workspace setup.
 
 `app-ready` does not yet prove device conversation. The pinned matrix now owns Hub's
 `POST /v1/device-channels/provision|revoke` dependency through `eidolon-channel-provider` on 8767, and Admin owns the
-Mobile onboarding target/admission workflow. Hub still binds plaintext loopback 8082 with no LAN TLS terminator;
-LiveKit also lacks a device-verifiable WSS origin. Treat those transports as hard product gates. Do not derive Hub
-TLS trust from mDNS, substitute the Host SPKI, or disable ESP certificate verification.
+Mobile onboarding target/admission workflow. On the Mac development profile, the same command additionally proves
+the configured LAN address, Local API HTTPS, deployment-owned Hub 8443 TLS ingress, Hub public descriptor URL,
+Local API mDNS registration, external LiveKit reachability/node IP and the explicit insecure-LAN LiveKit opt-in.
+The generated Hub certificate is installation configuration consumed by Local API; mDNS is discovery only.
+
+The Pi product assets still have no equivalent Hub TLS terminator/certificate input, and LiveKit still lacks a
+device-verifiable WSS origin. Treat those as Pi release hard gates. Do not copy the Mac development opt-in into the
+Pi profile, derive Hub TLS trust from mDNS, substitute the Host SPKI, or disable ESP certificate verification.
 
 ## Daily update
 

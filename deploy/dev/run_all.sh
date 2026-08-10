@@ -694,10 +694,14 @@ do_sv_reread_update() {
     return 1
   fi
   info "supervisord reread + update (reload enabled/*.conf)"
-  "${VENV}/bin/supervisorctl" -c "$SV_CONF" reread \
-    || warn "supervisorctl reread failed"
-  "${VENV}/bin/supervisorctl" -c "$SV_CONF" update \
-    || warn "supervisorctl update failed"
+  if ! "${VENV}/bin/supervisorctl" -c "$SV_CONF" reread; then
+    error "supervisorctl reread failed; restart is required before this configuration is active"
+    return 1
+  fi
+  if ! "${VENV}/bin/supervisorctl" -c "$SV_CONF" update; then
+    error "supervisorctl update failed; restart is required before this configuration is active"
+    return 1
+  fi
 }
 
 do_sv_start() {
@@ -708,7 +712,9 @@ do_sv_start() {
   if sv_alive; then
     info "supervisord already running (PID $(sv_pid), socket $SV_SOCK)"
     info "  config reload only — use '$0 status' to inspect; '$0 restart' for full stop+start"
-    do_sv_reread_update
+    if ! do_sv_reread_update; then
+      return 1
+    fi
     return 0
   fi
   # If a stale socket lingers from a crashed daemon, supervisord will refuse

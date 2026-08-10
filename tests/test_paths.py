@@ -44,6 +44,12 @@ lifecycle_script = "{script}"
 operations_config = "{tmp_path / "operations.toml"}"
 foundation_mode = "external"
 external_livekit_config = "{tmp_path / "livekit.yaml"}"
+[app]
+lan_ipv4 = "192.168.1.25"
+hub_hostname = "eidolon-hub.local"
+hub_https_port = 8443
+livekit_client_url = "ws://192.168.1.25:7880"
+allow_insecure_livekit = true
 {overrides}
 """,
         encoding="utf-8",
@@ -60,6 +66,9 @@ def test_mac_profile_exports_one_host_path_contract(tmp_path: Path) -> None:
     assert profile.lifecycle_script == script
     assert profile.operations_config == tmp_path / "operations.toml"
     assert profile.foundation_mode == "external"
+    assert profile.app is not None
+    assert str(profile.app.lan_ipv4) == "192.168.1.25"
+    assert profile.app.livekit_client_url == "ws://192.168.1.25:7880"
     environment = profile.environment()
     assert environment["EIDOLON_ROOT"] == environment["EIDOLON_WORKSPACE_ROOT"]
     assert environment["EIDOLON_STATE_ROOT"] == str(tmp_path / "state")
@@ -74,6 +83,8 @@ def test_mac_example_uses_the_ops_owned_source_lifecycle() -> None:
     assert profile.lifecycle_script == (REPOSITORY_ROOT / "deploy/dev/run_all.sh").resolve()
     assert profile.operations_config == (REPOSITORY_ROOT / "config/eidolon-pi.toml").resolve()
     assert profile.foundation_mode == "external"
+    assert profile.app is not None
+    assert profile.app.hub_hostname == "eidolon-hub.local"
     product_root = Path.home() / "ai/eidolon/.eidolon/mac-product"
     assert profile.paths.config_root == product_root / "config"
     assert profile.paths.state_root == product_root / "state"
@@ -213,3 +224,89 @@ def test_profile_rejects_unreadable_and_extra_root_keys(tmp_path: Path) -> None:
     )
     with pytest.raises(HostProfileError, match="schema_version"):
         load_host_profile(path)
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "message"),
+    [
+        ("schema_version = 1", "schema_version = 1\nunexpected = true", "profile root"),
+        ('id = "mac-test"', 'id = "mac-test"\nextra = true', "host must contain"),
+        ('driver = "local-supervisord"', 'driver = "unknown"', "host.driver"),
+        (
+            'cache_root = "{cache}"',
+            'cache_root = "{cache}"\nextra_path = "/tmp/extra"',
+            "paths must contain",
+        ),
+        (
+            'foundation_mode = "external"',
+            'foundation_mode = "external"\nextra_adapter = true',
+            "local adapter",
+        ),
+    ],
+)
+def test_profile_rejects_unknown_structural_fields(
+    tmp_path: Path, old: str, new: str, message: str
+) -> None:
+    script = tmp_path / "run.sh"
+    script.write_text("", encoding="utf-8")
+    path = _write_mac_profile(tmp_path, script=script)
+    old = old.format(cache=tmp_path / "cache")
+    new = new.format(cache=tmp_path / "cache")
+    path.write_text(path.read_text(encoding="utf-8").replace(old, new), encoding="utf-8")
+
+    with pytest.raises(HostProfileError, match=message):
+        load_host_profile(path)
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "message"),
+    [
+        ('lan_ipv4 = "192.168.1.25"', 'lan_ipv4 = "127.0.0.1"', "private IPv4"),
+        ('lan_ipv4 = "192.168.1.25"', 'lan_ipv4 = "not-an-ip"', "private IPv4"),
+        ('lan_ipv4 = "192.168.1.25"', 'lan_ipv4 = "fd00::25"', "private IPv4"),
+        ('hub_hostname = "eidolon-hub.local"', 'hub_hostname = "hub.example.com"', ".local"),
+        ("hub_https_port = 8443", "hub_https_port = true", "valid TCP port"),
+        ("hub_https_port = 8443", "hub_https_port = 0", "valid TCP port"),
+        (
+            'livekit_client_url = "ws://192.168.1.25:7880"',
+            'livekit_client_url = "ws://user@192.168.1.25:7880/path?query=1"',
+            "plain ws/wss origin",
+        ),
+        (
+            'livekit_client_url = "ws://192.168.1.25:7880"',
+            'livekit_client_url = "ws://192.168.1.99:7880"',
+            "must use app.lan_ipv4",
+        ),
+        ("allow_insecure_livekit = true", 'allow_insecure_livekit = "yes"', "boolean"),
+        ("allow_insecure_livekit = true", "allow_insecure_livekit = false", "opt-in"),
+    ],
+)
+def test_profile_rejects_unsafe_app_access(
+    tmp_path: Path, old: str, new: str, message: str
+) -> None:
+    script = tmp_path / "run.sh"
+    script.write_text("#!/bin/sh\n", encoding="utf-8")
+    path = _write_mac_profile(tmp_path, script=script)
+    path.write_text(path.read_text(encoding="utf-8").replace(old, new), encoding="utf-8")
+
+    with pytest.raises(HostProfileError, match=message):
+        load_host_profile(path)
+
+
+def test_profile_accepts_secure_livekit_origin_without_development_opt_in(tmp_path: Path) -> None:
+    script = tmp_path / "run.sh"
+    script.write_text("#!/bin/sh\n", encoding="utf-8")
+    path = _write_mac_profile(tmp_path, script=script)
+    text = path.read_text(encoding="utf-8").replace(
+        'livekit_client_url = "ws://192.168.1.25:7880"',
+        'livekit_client_url = "wss://livekit.example.test"',
+    )
+    path.write_text(
+        text.replace("allow_insecure_livekit = true", "allow_insecure_livekit = false"),
+        encoding="utf-8",
+    )
+
+    profile = load_host_profile(path)
+    assert profile.app is not None
+    assert profile.app.livekit_client_url == "wss://livekit.example.test"
+    assert profile.app.allow_insecure_livekit is False

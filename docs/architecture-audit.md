@@ -1,6 +1,7 @@
 # Eidolon OS Raspberry Pi deployment / operations audit
 
-Audit updated: 2026-08-09 (Asia/Shanghai). The running Mac stack and sibling working trees were not changed. On the
+Audit updated: 2026-08-10 (Asia/Shanghai). The Mac product-source stack was restarted after isolated validation to
+activate the deployment-owned development LAN ingress and discovery configuration. On the
 Pi, the fixed legacy code/unit/config/staging namespace was removed without a data wipe, then the non-product
 Foundation v2 was installed and verified. One obsolete candidate was uploaded and entered native preparation; it
 failed closed on a PyPI timeout before sealing/activation, so no product service or authority data changed.
@@ -16,7 +17,7 @@ The multi-repository root is not Git. The selected release commits remain explic
 | Hub | `4bab6a0c5201c6adda7ba0f68241297034326cae` | proof-bound onboarding + dedicated Provider port |
 | Admin | `987c69282a5a91361b0e9d20144bb7163b8241b3` | Mobile admission orchestration + isolated FHS systemd fix |
 | Agent | `309ba573f249f9376275e14a5cc2f5ea1049b022` | session-authorized Companion brain + authority E2E |
-| Channel | `8843de6c1268bf01bf8e303ce26fb209df3e033b` | voice runtime + formal Hub Channel Provider |
+| Channel | `95164e3dbebb31fb6f6152a7da549f8d6f8c0f35` | voice runtime + formal Hub Channel Provider + explicit Mac LAN development transport |
 | Memory | `303b6004c58abbf86eb311de1f4002748fa9457d` | supervisor/discovery, no direct Data integration |
 | SDK | `8108970514d9fefd3d93e7466e91706a1681c331` | runtime-authority/session support source |
 
@@ -52,9 +53,14 @@ atomicity. Data V2 begins only at its tracked baseline; old migrations and old `
 The selected contract now owns both former consumer gaps. Channel provides authenticated, idempotent
 `/v1/device-channels/provision|revoke` on 8767 with LiveKit health, and Admin provides Controller-authenticated Local
 API onboarding target/admission with forward-only Hub claim → Kernel mount → optional Companion attach. The remaining
-device-conversation blocker is the deployment-owned LAN TLS/WSS ingress and certificate trust described below.
+Pi device-conversation blocker is the deployment-owned LAN TLS/WSS ingress and certificate trust described below.
 
-The public Hub transport is also incomplete in the release assets. `eidolon-hub.service` binds plaintext HTTP only to
+For Mac source development only, Ops now owns a stable self-signed Hub leaf certificate, a TLS relay from LAN 8443
+to Hub loopback 8082, Local API trust-source configuration, `_eidolon-local-api._tcp` registration and an explicit
+private-LAN `ws://` LiveKit client opt-in. This closes the host-side transport gate needed for local Pad testing while
+retaining Hub SPKI verification. It is deliberately not part of the Pi product release contract.
+
+The public Hub transport is incomplete in the Pi release assets. `eidolon-hub.service` binds plaintext HTTP only to
 `127.0.0.1:8082`, while the pinned Hub config and mDNS advertiser claim `https://eidolon-hub.local` on port 443. No
 unit, reverse proxy, Hub certificate input or readiness check owns that TLS endpoint. The Local API certificate/SPKI
 cannot be reused by assumption. A started Hub may therefore advertise an unreachable/untrusted endpoint; process and
@@ -94,8 +100,9 @@ foundation provision, first install, 15-unit lifecycle/status/logs/diagnostics a
 | Explicit rollback | restores selected code/assets snapshot only | never restores DB/secrets |
 | Offline cached retry | exact source and Python cache bundle may be resumed/reused | a new Pi needs network for apt/foundation artifacts, not PyPI during product prepare |
 | Multiple Pis | one strict config per Pi, same CLI/release contract | no fleet fan-out/concurrent scheduler yet |
-| App commissioning | `app-ready` proves Host-side Bootstrap/BLE/network/mDNS/TLS descriptor gate | target-selection/admission Local API contracts and real phone E2E remain |
-| Device conversation | Hub approval obtains a real Channel Assignment from the Provider | LAN Hub HTTPS and LiveKit WSS trust remain hard blocked |
+| App commissioning | `app-ready` proves Host-side Bootstrap/BLE/network/mDNS/TLS descriptor gate | real phone E2E remains |
+| Mac device conversation | Hub approval obtains a real Channel Assignment; development LAN ingress is host-ready | real Pad onboarding/audio/Agent E2E remains |
+| Pi device conversation | Hub approval obtains a real Channel Assignment from the Provider | LAN Hub HTTPS and LiveKit WSS trust remain hard blocked |
 
 ## Safety conclusion
 

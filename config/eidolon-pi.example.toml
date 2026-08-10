@@ -44,7 +44,7 @@ revision = "309ba573f249f9376275e14a5cc2f5ea1049b022"
 
 [sources.eidolon_channel]
 path = "../../eidolon_channel"
-revision = "8843de6c1268bf01bf8e303ce26fb209df3e033b"
+revision = "95164e3dbebb31fb6f6152a7da549f8d6f8c0f35"
 
 [sources.eidolon_memory]
 path = "../../eidolon_memory"

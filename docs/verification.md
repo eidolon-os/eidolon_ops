@@ -1,6 +1,6 @@
 # Verification report
 
-Updated: 2026-08-09 (Asia/Shanghai). Superseding evidence: release upload now uses digest-guarded resumable rsync
+Updated: 2026-08-10 (Asia/Shanghai). Superseding evidence: release upload now uses digest-guarded resumable rsync
 staging. A 494-MiB obsolete candidate reached Pi-native preparation without activation: Kernel prepared, then Data
 dependency installation failed closed after five PyPI retries for `packaging==26.3` timed out. No product unit,
 current link, secret or database was activated by that attempt. A dedicated Ed25519 SSH key passes BatchMode with strict checking against the
@@ -39,6 +39,15 @@ present, were re-compared byte-for-byte with the current Mac source `.env` files
 
 ## Workstation operations project
 
+On the Mac development Host, `product-source restart` activated one canonical source stack. A subsequent real
+`app-ready` returned `app_ready` with 11/11 checks true for LAN address `192.168.1.25`, Local API HTTPS 9002, Hub TLS
+ingress 8443, LiveKit 7880, Hub target/public URL, LiveKit client URL/node IP and Local API mDNS. Direct LAN requests
+returned Local API health `ok`, Hub health `ok` and the Hub descriptor for `eidolon-hub-local`. Bonjour browsing saw
+both `_eidolon-local-api._tcp` and `_eidolon-hub._tcp`; it also saw a separate stale Pi5 Local API advertisement,
+which was observed only and not changed. The connected Pad has Mobile 0.1.0 installed but the app was not running and
+`RECORD_AUDIO` was not granted at measurement time. Therefore host readiness is proven; real Pad onboarding and
+conversation are not yet claimed.
+
 ```text
 uv run ruff check .
 All checks passed
@@ -47,9 +56,9 @@ uv run ruff format --check .
 35 files already formatted
 
 pytest --cov=eidolon_ops --cov-branch --cov-report=term-missing --cov-fail-under=90 -q
-315 passed, 0 failed, 0 skipped
-branch-aware coverage: 90.11%
-pytest runtime reported: 3.91 seconds
+354 passed, 0 failed, 0 skipped
+branch-aware coverage: 90.17%
+pytest runtime reported: 3.63 seconds
 
 uv build --out-dir /private/tmp/eidolon-ops-build-20260809-final-1
 sdist: 158,426 bytes; wheel: 62,154 bytes
@@ -96,7 +105,7 @@ Data     d81086e2807f44ca0c0e43e31103cd85e6165a46
 Hub      4bab6a0c5201c6adda7ba0f68241297034326cae
 Admin    987c69282a5a91361b0e9d20144bb7163b8241b3
 Agent    309ba573f249f9376275e14a5cc2f5ea1049b022
-Channel  8843de6c1268bf01bf8e303ce26fb209df3e033b
+Channel  95164e3dbebb31fb6f6152a7da549f8d6f8c0f35
 Memory   303b6004c58abbf86eb311de1f4002748fa9457d
 SDK      8108970514d9fefd3d93e7466e91706a1681c331
 ```
@@ -134,7 +143,7 @@ an authenticated Provider on 8767; Kernel owns its unit, readiness and lifecycle
 Controller-authenticated onboarding target/admission workflow and derives Owner/controller authority server-side.
 These are product implementations, not Ops compatibility handlers.
 
-Pinned transport assets retain a trust blocker: Hub listens on plaintext loopback `127.0.0.1:8082`, but its public
+Pinned Pi transport assets retain a trust blocker: Hub listens on plaintext loopback `127.0.0.1:8082`, but its public
 base URL requires HTTPS. The 15-unit matrix contains no TLS terminator, Hub certificate/key input or LAN HTTPS
 readiness probe. LiveKit likewise has no device-verifiable WSS origin. Mobile can consume only an installation-verified
 Hub leaf SPKI, while the ESP firmware requires a trusted public CA or an authenticated provisioning channel. Neither

@@ -12,6 +12,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Mapping
 from pathlib import Path
+from urllib.parse import urlparse
 
 from eidolon_ops.config import OperationsConfig
 from eidolon_ops.controller import OperationsError
@@ -71,6 +72,7 @@ class LocalProductSource:
             paths.config_root,
             paths.config_root / "env",
             paths.config_root / "settings",
+            paths.config_root / "tls",
             paths.state_root,
             paths.runtime_root,
             paths.log_root,
@@ -81,6 +83,8 @@ class LocalProductSource:
             directory.mkdir(parents=True, exist_ok=True)
         os.chmod(paths.config_root, 0o700)
         os.chmod(paths.config_root / "env", 0o700)
+        os.chmod(paths.config_root / "tls", 0o700)
+        self._ensure_hub_tls_identity()
 
         source_inputs = next(iter(self.config.install_files.values())).parent
         expected: dict[Path, bytes] = {}
@@ -93,6 +97,28 @@ class LocalProductSource:
                 rendered = _replace_environment_values(
                     rendered,
                     self._external_livekit_credentials(),
+                )
+            if name == "local-api.env":
+                rendered = _merge_environment_values(
+                    rendered,
+                    {
+                        "EIDOLON_LOCAL_API_HUB_ID": "eidolon-hub-local",
+                        "EIDOLON_LOCAL_API_HUB_DESCRIPTOR_URI": (
+                            self._hub_public_base_url() + "/api/device-onboarding/v1/descriptor"
+                        ),
+                        "EIDOLON_LOCAL_API_HUB_TLS_CERTIFICATE": str(self._hub_certificate_path()),
+                    },
+                )
+            if name == "channel.env":
+                app = self._require_app_access()
+                rendered = _merge_environment_values(
+                    rendered,
+                    {
+                        "EIDOLON_LIVEKIT_CLIENT_URL": app.livekit_client_url,
+                        "EIDOLON_CHANNEL_PROVIDER_ALLOW_INSECURE_LAN_CLIENT_URL": (
+                            "1" if app.allow_insecure_livekit else "0"
+                        ),
+                    },
                 )
             expected[paths.config_root / "env" / name] = rendered.encode("utf-8")
         for name in _SETTING_INPUT_NAMES:
@@ -112,6 +138,13 @@ class LocalProductSource:
                     source_path,
                 )
             )
+            if name == "hub.yaml":
+                rendered = _replace_exactly_once(
+                    rendered,
+                    "public_base_url: https://eidolon-hub.local",
+                    f"public_base_url: {self._hub_public_base_url()}",
+                    label="Hub public base URL",
+                )
             expected[paths.config_root / "settings" / name] = rendered.encode("utf-8")
         provider_settings = self._read_exact_file(
             "eidolon_channel",
@@ -174,6 +207,8 @@ class LocalProductSource:
             root / "settings/livekit.yaml",
             root / "product-source.env",
             self.profile.paths.bootstrap_state_root / "host_identity.ed25519",
+            self._hub_certificate_path(),
+            self._hub_private_key_path(),
         ]
         missing = [str(path) for path in required if not path.is_file() or path.is_symlink()]
         if missing:
@@ -224,6 +259,83 @@ class LocalProductSource:
             "status": "healthy" if healthy else "degraded",
             "foundation_mode": self.profile.foundation_mode,
             "checks": checks,
+        }
+
+    def app_ready(self) -> dict[str, object]:
+        app = self._require_app_access()
+        ports = self._ports()
+        backend = self.health()
+        interface_result = self.runner.run(("ifconfig",), timeout=10)
+        interface_addresses = set(
+            re.findall(r"\binet\s+(\d+\.\d+\.\d+\.\d+)\b", interface_result.stdout)
+        )
+        local_api = _http_health(f"https://{app.lan_ipv4}:{ports['local_api']}/healthz")
+        hub = _http_health(f"https://{app.lan_ipv4}:{app.hub_https_port}/health")
+        livekit_origin = urlparse(app.livekit_client_url)
+        livekit = _tcp_health(
+            str(app.lan_ipv4),
+            livekit_origin.port or (443 if livekit_origin.scheme == "wss" else 80),
+        )
+        local_api_env = _read_environment_file(self.profile.paths.config_root / "env/local-api.env")
+        channel_env = _read_service_environment_file(
+            self.profile.paths.config_root / "env/channel.env"
+        )
+        settings = (self.profile.paths.config_root / "settings/hub.yaml").read_text(
+            encoding="utf-8"
+        )
+        generated_livekit = self.profile.external_livekit_config
+        livekit_node_ip = ""
+        if generated_livekit is not None and generated_livekit.is_file():
+            match = re.search(
+                r"(?m)^\s*node_ip:\s*(\d+\.\d+\.\d+\.\d+)\s*$",
+                generated_livekit.read_text(encoding="utf-8"),
+            )
+            livekit_node_ip = match.group(1) if match else ""
+        mdns_log = self.profile.paths.log_root / "admin/local-api-mdns.log"
+        mdns_registered = mdns_log.is_file() and "Name now registered" in mdns_log.read_text(
+            encoding="utf-8", errors="replace"
+        )
+        contract = {
+            "lan_address_present": str(app.lan_ipv4) in interface_addresses,
+            "local_api_target": (
+                local_api_env.get("EIDOLON_LOCAL_API_HUB_ID") == "eidolon-hub-local"
+                and local_api_env.get("EIDOLON_LOCAL_API_HUB_DESCRIPTOR_URI")
+                == self._hub_public_base_url() + "/api/device-onboarding/v1/descriptor"
+                and local_api_env.get("EIDOLON_LOCAL_API_HUB_TLS_CERTIFICATE")
+                == str(self._hub_certificate_path())
+            ),
+            "hub_public_url": f"public_base_url: {self._hub_public_base_url()}" in settings,
+            "livekit_client_url": (
+                channel_env.get("EIDOLON_LIVEKIT_CLIENT_URL") == app.livekit_client_url
+            ),
+            "livekit_development_opt_in": (
+                channel_env.get("EIDOLON_CHANNEL_PROVIDER_ALLOW_INSECURE_LAN_CLIENT_URL")
+                == ("1" if app.allow_insecure_livekit else "0")
+            ),
+            "livekit_rtc_node_ip": livekit_node_ip == str(app.lan_ipv4),
+            "local_api_mdns_registered": mdns_registered,
+        }
+        checks = {
+            "backend": backend["status"] == "healthy",
+            "local_api_lan_https": bool(local_api["healthy"]),
+            "hub_lan_https": bool(hub["healthy"]),
+            "livekit_lan_tcp": bool(livekit["healthy"]),
+            **contract,
+        }
+        healthy = all(checks.values())
+        return {
+            "status": "app_ready" if healthy else "degraded",
+            "host_id": self.profile.host_id,
+            "lan_ipv4": str(app.lan_ipv4),
+            "checks": checks,
+            "endpoints": {
+                "local_api": f"https://{app.lan_ipv4}:{ports['local_api']}",
+                "hub": self._hub_public_base_url(),
+                "livekit": app.livekit_client_url,
+            },
+            "scope": (
+                "Host-side LAN contract only; a Pad conversation remains the final external gate"
+            ),
         }
 
     def _validate_exact_worktrees(self) -> None:
@@ -292,6 +404,81 @@ class LocalProductSource:
             "local_api": 9002,
         }
 
+    def _require_app_access(self):
+        if self.profile.app is None:
+            raise OperationsError("Mac product-source profile requires an app access contract")
+        return self.profile.app
+
+    def _hub_public_base_url(self) -> str:
+        app = self._require_app_access()
+        return f"https://{app.hub_hostname}:{app.hub_https_port}"
+
+    def _hub_certificate_path(self) -> Path:
+        return self.profile.paths.config_root / "tls/hub.crt"
+
+    def _hub_private_key_path(self) -> Path:
+        return self.profile.paths.config_root / "tls/hub.key"
+
+    def _ensure_hub_tls_identity(self) -> None:
+        app = self._require_app_access()
+        certificate = self._hub_certificate_path()
+        private_key = self._hub_private_key_path()
+        existing = (certificate.exists(), private_key.exists())
+        if any(existing) and not all(existing):
+            raise OperationsError("Mac Hub TLS identity is incomplete")
+        if not all(existing):
+            temporary_certificate = certificate.with_name(f".{certificate.name}.{os.getpid()}")
+            temporary_key = private_key.with_name(f".{private_key.name}.{os.getpid()}")
+            try:
+                checked(
+                    "Mac Hub TLS identity generation",
+                    self.runner.run(
+                        (
+                            "openssl",
+                            "req",
+                            "-x509",
+                            "-newkey",
+                            "ec",
+                            "-pkeyopt",
+                            "ec_paramgen_curve:P-256",
+                            "-sha256",
+                            "-nodes",
+                            "-days",
+                            "3650",
+                            "-subj",
+                            f"/CN={app.hub_hostname}",
+                            "-addext",
+                            f"subjectAltName=DNS:{app.hub_hostname}",
+                            "-keyout",
+                            str(temporary_key),
+                            "-out",
+                            str(temporary_certificate),
+                        ),
+                        timeout=30,
+                    ),
+                )
+                if not temporary_certificate.is_file() or not temporary_key.is_file():
+                    raise OperationsError("OpenSSL did not create the Mac Hub TLS identity")
+                os.replace(temporary_certificate, certificate)
+                os.replace(temporary_key, private_key)
+            finally:
+                temporary_certificate.unlink(missing_ok=True)
+                temporary_key.unlink(missing_ok=True)
+        for path in (certificate, private_key):
+            if path.is_symlink() or not path.is_file():
+                raise OperationsError("Mac Hub TLS identity is unsafe")
+            os.chmod(path, 0o600)
+        try:
+            decoded = ssl._ssl._test_decode_cert(str(certificate))
+            sans = decoded.get("subjectAltName", ())
+            expires = ssl.cert_time_to_seconds(decoded["notAfter"])
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.load_cert_chain(certificate, private_key)
+        except (KeyError, OSError, ssl.SSLError, ValueError) as exc:
+            raise OperationsError("Mac Hub TLS identity is invalid") from exc
+        if ("DNS", app.hub_hostname) not in sans or expires <= time.time():
+            raise OperationsError("Mac Hub TLS identity does not match the app contract")
+
     def _eidolond_settings(self) -> str:
         paths = self.profile.paths
         port = self._ports()["eidolond"]
@@ -346,6 +533,10 @@ interface:
             "EIDOLON_PRODUCT_CHANNEL_WORKER_PORT": str(ports["channel_worker"]),
             "EIDOLON_PRODUCT_CHANNEL_PROVIDER_PORT": str(ports["channel_provider"]),
             "EIDOLON_PRODUCT_LOCAL_API_PORT": str(ports["local_api"]),
+            "EIDOLON_APP_LAN_IPV4": str(self._require_app_access().lan_ipv4),
+            "EIDOLON_APP_HUB_HTTPS_PORT": str(self._require_app_access().hub_https_port),
+            "EIDOLON_APP_HUB_TLS_CERTIFICATE": str(self._hub_certificate_path()),
+            "EIDOLON_APP_HUB_TLS_PRIVATE_KEY": str(self._hub_private_key_path()),
             "EIDOLON_SOURCE_KERNEL": str(self.config.sources["eidolon_kernel"].path),
             "EIDOLON_SOURCE_DATA": str(self.config.sources["eidolon_data"].path),
             "EIDOLON_SOURCE_HUB": str(self.config.sources["eidolon_hub"].path),
@@ -572,6 +763,23 @@ def _read_environment_file(path: Path) -> dict[str, str]:
     return values
 
 
+def _read_service_environment_file(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        if not raw:
+            continue
+        key, separator, value = raw.partition("=")
+        if (
+            not separator
+            or re.fullmatch(r"[A-Z][A-Z0-9_]*", key) is None
+            or not value
+            or key in values
+        ):
+            raise OperationsError(f"generated service env file is invalid: {path.name}")
+        values[key] = value
+    return values
+
+
 def _replace_environment_values(value: str, replacements: Mapping[str, str]) -> str:
     parsed: dict[str, str] = {}
     for raw in value.splitlines():
@@ -586,6 +794,32 @@ def _replace_environment_values(value: str, replacements: Mapping[str, str]) -> 
             raise OperationsError(f"generated product environment lacks {key}")
         parsed[key] = replacement
     return "".join(f"{key}={parsed[key]}\n" for key in sorted(parsed))
+
+
+def _merge_environment_values(value: str, replacements: Mapping[str, str]) -> str:
+    parsed: dict[str, str] = {}
+    for raw in value.splitlines():
+        if not raw:
+            continue
+        key, separator, current = raw.partition("=")
+        if not separator or not key or key in parsed or not current:
+            raise OperationsError("generated product environment is invalid")
+        parsed[key] = current
+    for key, replacement in replacements.items():
+        if (
+            not key.replace("_", "").isalnum()
+            or not replacement
+            or any(character in replacement for character in "\n\r\0")
+        ):
+            raise OperationsError("generated product environment merge is unsafe")
+        parsed[key] = replacement
+    return "".join(f"{key}={parsed[key]}\n" for key in sorted(parsed))
+
+
+def _replace_exactly_once(value: str, old: str, new: str, *, label: str) -> str:
+    if value.count(old) != 1:
+        raise OperationsError(f"{label} template drifted")
+    return value.replace(old, new)
 
 
 def _atomic_private_file(path: Path, content: bytes) -> None:
@@ -630,3 +864,12 @@ def _unix_http_health(path: Path) -> dict[str, object]:
     match = re.match(rb"HTTP/\d(?:\.\d)? (\d{3})(?: |\r)", response)
     status = int(match.group(1)) if match else None
     return {"healthy": status == 200, "http_status": status}
+
+
+def _tcp_health(host: str, port: int) -> dict[str, object]:
+    try:
+        with socket.create_connection((host, port), timeout=1.5):
+            pass
+    except OSError:
+        return {"healthy": False}
+    return {"healthy": True}

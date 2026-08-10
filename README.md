@@ -39,10 +39,12 @@ Git commit；7 个运行 component 一起切换，SDK 只作构建输入。
 不是 Pi 产品 unit；它们不属于“手机 App 可管理 Host”所需的后端范围。
 
 当前矩阵已纳入正式 `eidolon-channel-provider`（8767）以及 Admin 的 Mobile onboarding target/admission
-契约。剩余产品级硬门禁是 LAN transport：Hub 还只有 loopback 8082 明文监听，却会宣告 HTTPS
-endpoint；LiveKit 的设备地址也必须是设备可验证的 WSS。release 尚未拥有 TLS 终止器和对应证书，
-因此 15 个 unit 即使全部健康，也只能报告为后端运行，不能报告为“所有设备可对话”。Ops 不会关闭
-证书校验、从 mDNS 建立信任或用临时兼容服务掩盖缺口。
+契约。Mac 源码 profile 还拥有一个明确限定为开发用途的 LAN 接入层：稳定生成的 Hub 叶子证书由
+Local API 安装配置固定并计算 SPKI，8443 TLS ingress 转发到 loopback Hub；LiveKit 客户端地址可在显式
+opt-in 后使用私网 `ws://`。这不是关闭 Mobile 的 Hub 证书校验，也不从 mDNS 学习信任。
+
+Pi release 仍没有上述 LAN ingress/certificate 资产，LiveKit 也仍缺少产品级 WSS 信任路径。因此 Mac
+真机联调门禁与 Pi 正式发布门禁必须分开报告，不能用开发 profile 的放宽替代产品结论。
 
 ## 基础环境 profile
 
@@ -126,9 +128,10 @@ eidolon-ops --config HOST.toml migrate-paths [--apply]  # Mac one-time state cut
 eidolon-ops --config HOST.toml start|stop|restart [--dry-run]
 eidolon-ops --config HOST.toml logs [--service SERVICE] [--lines N] [--since TEXT]
 
-# Mac-only isolated profiles
+# Mac implementation diagnostics (normal lifecycle still uses the top-level commands)
 eidolon-ops --config HOST.toml core-contract start|stop|restart|status
 eidolon-ops --config HOST.toml os-control-plane prepare|validate|start|stop|restart|status
+eidolon-ops --config HOST.toml product-source prepare|validate|start|stop|restart|status
 
 # Pi release/install capabilities
 eidolon-ops --config HOST.toml provision [--apply]

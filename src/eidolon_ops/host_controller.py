@@ -29,6 +29,8 @@ class HostController:
         return self._pi().status()
 
     def app_ready(self) -> dict[str, object]:
+        if self.profile.driver == "local-supervisord":
+            return self._local_product().app_ready()
         return self._require_pi("app-ready").app_ready()
 
     def provision(self, *, apply: bool) -> dict[str, object]:

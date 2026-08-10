@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -129,6 +130,14 @@ def test_local_controller_exposes_explicit_path_cutover(tmp_path: Path) -> None:
 
     assert applied["status"] == "migrated"
     assert Path(str(applied["evidence"])).is_file()
+
+
+def test_local_controller_exposes_product_app_ready(monkeypatch, tmp_path: Path) -> None:
+    controller = HostController(_profile(tmp_path), Runner())
+    product = SimpleNamespace(app_ready=lambda: {"status": "app_ready"})
+    monkeypatch.setattr(controller, "_local_product", lambda: product)
+
+    assert controller.app_ready() == {"status": "app_ready"}
 
 
 def test_local_controller_rejects_missing_script_and_unknown_operation(tmp_path: Path) -> None:
