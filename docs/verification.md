@@ -4,7 +4,7 @@ Updated: 2026-08-09 (Asia/Shanghai). Superseding evidence: release upload now us
 staging. A 494-MiB obsolete candidate reached Pi-native preparation without activation: Kernel prepared, then Data
 dependency installation failed closed after five PyPI retries for `packaging==26.3` timed out. No product unit,
 current link, secret or database was activated by that attempt. A dedicated Ed25519 SSH key passes BatchMode with strict checking against the
-recorded key for `eidolon-pi5@192.168.100.15`; no password was persisted. No Mac service lifecycle or dirty sibling
+recorded key for `eidolon-pi5@192.168.1.26`; no password was persisted. No Mac service lifecycle or dirty sibling
 working tree was changed. The Pi was changed only inside the reviewed cleanup/Foundation boundaries described below;
 no new Eidolon release was uploaded, prepared or activated, and no database contents were read or written.
 
@@ -47,9 +47,9 @@ uv run ruff format --check .
 35 files already formatted
 
 pytest --cov=eidolon_ops --cov-branch --cov-report=term-missing --cov-fail-under=90 -q
-313 passed, 0 failed, 0 skipped
-branch-aware coverage: 90.06%
-pytest runtime reported: 3.46 seconds
+315 passed, 0 failed, 0 skipped
+branch-aware coverage: 90.11%
+pytest runtime reported: 3.91 seconds
 
 uv build --out-dir /private/tmp/eidolon-ops-build-20260809-final-1
 sdist: 158,426 bytes; wheel: 62,154 bytes
@@ -91,7 +91,7 @@ generic-2xx probes and systemd verification command failure injection.
 The next exact bundle smoke is configured with these selected commits:
 
 ```text
-Kernel   267d5dad38e2c2a83d56f0f8e2bf6fb42897fb61
+Kernel   f6b2efad080ab51115de287c25fdb8e420361cc4
 Data     d81086e2807f44ca0c0e43e31103cd85e6165a46
 Hub      4bab6a0c5201c6adda7ba0f68241297034326cae
 Admin    987c69282a5a91361b0e9d20144bb7163b8241b3
@@ -103,19 +103,13 @@ SDK      8108970514d9fefd3d93e7466e91706a1681c331
 
 Local preflight proves that the release CLI itself is a clean worktree at the exact pinned Kernel commit, all 15 unit
 blobs pass the FHS matrix, and the regenerated 14-file input set passes the new Hub/Admin/Provider token relations.
-The selected matrix's 480-MiB exact bundle passed local digest validation and guarded resumable upload. A resumed
-target-native attempt completed Kernel, Data, Hub and Admin, then spent more than the original 30-minute controller
-window populating the Agent environment. The controller timed out while the Pi process continued under PID 1; that
-process later exited without sealing and the preparer's failure path removed the unsealed release root. Immutable
-staging and 437 MiB of verified uv cache remained, while zero product units were installed. Ops now requires an
-explicit credential-free HTTPS default index plus bounded uv timeout/retry values, records them in preflight evidence,
-and allows 60 minutes for the complete native phase. Frozen locks can retain direct PyPI artifact URLs, so this is not
-an offline wheel bundle and must not be reported as one.
-
-The next retry additionally caps uv downloads at two on this Pi. The preceding Agent evidence showed repeated
-concurrent waves of the same twelve 1.1--16.2 MiB wheels over a lossy WLAN (`-68 dBm`, driver retry count 3072), while
-TCP collapsed to a congestion window of three. Limiting concurrency is therefore a measured target-network policy,
-not a dependency or lock relaxation.
+The earlier 480-MiB source-only bundle reached Pi preparation but failed while repeated target downloads crossed the
+lossy WLAN. Bundle schema v2 now uses pinned uv 0.11.15 on Mac to prefetch every frozen Python 3.13/Linux aarch64
+dependency, records the public index and build-tool pins, compresses the deduplicated cache and hashes it. A real
+seven-project prefetch completed; its 1.8-GiB unpacked cache compressed to 498 MiB. After extracting that archive into
+a fresh cache, an `UV_OFFLINE=1 --offline --no-editable` smoke built Agent plus local Data/SDK/Memory packages and
+installed 108 distributions in 128 ms, including the Agent executable. Pi product preparation can no longer fall
+back to PyPI; final exact-matrix bundle/upload and all seven target venvs remain the next hardware gate.
 
 Long-running SSH, SCP and rsync transports also send a 15-second server keepalive and tolerate twenty missed replies.
 The prior controller had no protocol keepalive while the target-native command buffered all uv output; the WLAN reset
@@ -151,9 +145,7 @@ client may learn trust from mDNS or disable certificate verification.
 - Permanent deletion of the three old authority roots; the user authorized clean replacement, but the final matrix
   gate has not yet reached the destructive install phase. Their metadata-only inventory includes old Data/Hub/Kernel/eidolond SQLite files, release receipts,
   Admin job roots and Bootstrap identity/TLS/database files.
-- Complete Pi-native preparation for all seven component environments. The selected matrix completed four and reached
-  Agent before the old 30-minute controller window expired. A retry can reuse the exact staging and 437-MiB uv cache;
-  direct artifact URLs in frozen locks still require their recorded CDN to be reachable.
+- Complete Pi-native offline preparation for all seven component environments from the schema-v2 dependency cache.
 - Real `systemd-analyze verify`, 15-unit start order and health after clean install; Local API/Hub/provider ports and
   mDNS must be re-measured after activation.
 - Full reboot recovery, concurrent operator race, disk-full/power-loss/failure auto-restore and explicit rollback on
@@ -165,3 +157,6 @@ Therefore the Pi Foundation and Ops clean-install mechanics are ready for the ne
 the whole product is not yet safe-approved or device-conversation-ready. Clean replacement is authorized; the open
 product blockers are complete target-native preparation plus device-verifiable Hub HTTPS/LiveKit WSS, followed by
 activation and hardware acceptance.
+
+The current target address `192.168.1.26` passed strict host-key/BatchMode probing as Linux aarch64 host
+`eidolon-pi5`; that probe did not mutate the target.

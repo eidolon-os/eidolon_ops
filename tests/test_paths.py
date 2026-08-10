@@ -4,7 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from eidolon_ops.paths import HostProfileError, load_host_profile, merged_environment
+from eidolon_ops.paths import (
+    HostProfileError,
+    load_host_profile,
+    merged_environment,
+)
+
+REPOSITORY_ROOT = Path(__file__).parents[1]
 
 
 def _write_mac_profile(tmp_path: Path, *, script: Path, overrides: str = "") -> Path:
@@ -55,6 +61,12 @@ def test_mac_profile_exports_one_host_path_contract(tmp_path: Path) -> None:
     assert environment["EIDOLON_BOOTSTRAP_STATE_ROOT"] == str(tmp_path / "bootstrap")
     assert environment["EIDOLON_BOOTSTRAP_RUNTIME_DIR"] == str(tmp_path / "bootstrap-run")
     assert merged_environment(profile)["EIDOLON_HOST_DRIVER"] == "local-supervisord"
+
+
+def test_mac_example_uses_the_ops_owned_source_lifecycle() -> None:
+    profile = load_host_profile(REPOSITORY_ROOT / "config/hosts/mac.example.toml")
+
+    assert profile.lifecycle_script == (REPOSITORY_ROOT / "deploy/dev/run_all.sh").resolve()
 
 
 def test_pi_profile_requires_reviewed_fhs_paths(tmp_path: Path) -> None:

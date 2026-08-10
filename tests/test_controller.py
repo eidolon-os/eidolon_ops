@@ -24,12 +24,14 @@ class ControllerRunner:
         invalid_release_matrix: bool = False,
         cli_revision_mismatch: bool = False,
         dirty_cli: bool = False,
+        wrong_uv_version: bool = False,
     ) -> None:
         self.config = config
         self.wrong_revision = wrong_revision
         self.invalid_release_matrix = invalid_release_matrix
         self.cli_revision_mismatch = cli_revision_mismatch
         self.dirty_cli = dirty_cli
+        self.wrong_uv_version = wrong_uv_version
         self.calls: list[tuple[str, ...]] = []
 
     def run(self, command, **kwargs):
@@ -70,6 +72,9 @@ class ControllerRunner:
             )
         if "status" in command and "--porcelain" in command:
             return ProcessResult(0, " M eidolon_deploy/cli.py\n" if self.dirty_cli else "", "")
+        if command[-1:] == ("--version",) and command[0].endswith("/uv"):
+            version = "uv 0.11.14" if self.wrong_uv_version else "uv 0.11.15"
+            return ProcessResult(0, version + "\n", "")
         if len(command) > 1 and command[1] == "bundle":
             output = Path(command[3])
             output.mkdir(parents=True)
@@ -89,16 +94,31 @@ class ControllerRunner:
                 )
             preparer = output / "prepare_target.py"
             preparer.write_bytes(b"preparer")
+            dependencies = output / "python-dependencies.tar.gz"
+            dependencies.write_bytes(b"arm64 dependency cache")
             (output / "bundle.json").write_text(
                 json.dumps(
                     {
-                        "schema_version": 1,
+                        "schema_version": 2,
                         "release_id": command[2],
                         "target": {"system": "linux", "machine": "aarch64"},
                         "sources": records,
                         "preparer": {
                             "path": "prepare_target.py",
                             "sha256": hashlib.sha256(preparer.read_bytes()).hexdigest(),
+                        },
+                        "python_dependencies": {
+                            "path": "python-dependencies.tar.gz",
+                            "sha256": hashlib.sha256(dependencies.read_bytes()).hexdigest(),
+                            "uv_version": "0.11.15",
+                            "python_version": "3.13",
+                            "platform": "aarch64-unknown-linux-gnu",
+                            "build_requirements": [
+                                "setuptools==80.9.0",
+                                "wheel==0.45.1",
+                                "hatchling==1.27.0",
+                            ],
+                            "index_url": "https://pypi.org/simple",
                         },
                     }
                 ),
@@ -263,6 +283,20 @@ def test_local_preflight_rejects_dirty_release_authority(config) -> None:
     )
 
     with pytest.raises(OperationsError, match="tracked changes"):
+        controller.local_preflight(require_install_files=False)
+
+
+def test_local_preflight_requires_exact_bundle_uv(config) -> None:
+    controller = EidolonPiController(
+        config,
+        ControllerRunner(config, wrong_uv_version=True),
+        transport=FakeTransport(),
+    )
+    with pytest.raises(OperationsError, match=r"must be 0\.11\.15"):
+        controller.local_preflight(require_install_files=False)
+
+    config.workspace.release_cli.with_name("uv").unlink()
+    with pytest.raises(OperationsError, match="local uv executable is missing"):
         controller.local_preflight(require_install_files=False)
 
 

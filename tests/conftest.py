@@ -48,6 +48,9 @@ def config_path(tmp_path: Path) -> Path:
     release_cli.parent.mkdir(parents=True)
     release_cli.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     release_cli.chmod(0o755)
+    local_uv = release_cli.with_name("uv")
+    local_uv.write_text("#!/bin/sh\necho 'uv 0.11.15'\n", encoding="utf-8")
+    local_uv.chmod(0o755)
     path = tmp_path / "eidolon-pi.toml"
     path.write_text(
         f"""\

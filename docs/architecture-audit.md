@@ -11,7 +11,7 @@ The multi-repository root is not Git. The selected release commits remain explic
 
 | Source | Selected exact release input | Role |
 | --- | --- | --- |
-| Kernel | `267d5dad38e2c2a83d56f0f8e2bf6fb42897fb61` | FHS release authority + Channel Provider topology |
+| Kernel | `f6b2efad080ab51115de287c25fdb8e420361cc4` | FHS release authority + Mac-prefetched ARM64 dependency bundle |
 | Data | `d81086e2807f44ca0c0e43e31103cd85e6165a46` | Data V2 + Workspace/runtime authority |
 | Hub | `4bab6a0c5201c6adda7ba0f68241297034326cae` | proof-bound onboarding + dedicated Provider port |
 | Admin | `987c69282a5a91361b0e9d20144bb7163b8241b3` | Mobile admission orchestration + isolated FHS systemd fix |
@@ -23,7 +23,8 @@ The multi-repository root is not Git. The selected release commits remain explic
 The selected matrix is now a deployable **candidate**: Admin commit `987c692` combines the formal Mobile admission
 workflow with the isolated FHS systemd fix. The upload preflight reads all 15 units directly from
 their Git objects and accepted the `/etc/eidolon/host.env`, `/opt/eidolon/current/eidolon_admin/` and FHS state-path
-contracts. The exact 8-source bundle and the 14-file private-input contract also passed locally. Current sibling
+contracts. The 15-unit exact-object matrix and 14-file private-input contract passed locally. Bundle schema v2 also
+passed a real Mac-prefetch/compress/extract/offline-build smoke; the final new-Kernel exact bundle is not yet uploaded. Current sibling
 branches and dirty working trees remain outside the release input: Ops does not stage, overwrite or copy them. The
 candidate is not production-qualified until the product contract blockers below are resolved and target-native
 preparation, activation and hardware acceptance pass.
@@ -91,7 +92,7 @@ foundation provision, first install, 15-unit lifecycle/status/logs/diagnostics a
 | Daily commit update | bundle/prepare/dry-run, then explicit resume+activate | schema gate must remain compatible |
 | Activation/health gate failure | exact system asset/link snapshot auto-restored; evidence retained | `rollback_failed` requires manual stop |
 | Explicit rollback | restores selected code/assets snapshot only | never restores DB/secrets |
-| Offline cached retry | pinned artifact cache and existing release may be reused | a truly new Pi still needs apt/PyPI/Git dependency network |
+| Offline cached retry | exact source and Python cache bundle may be resumed/reused | a new Pi needs network for apt/foundation artifacts, not PyPI during product prepare |
 | Multiple Pis | one strict config per Pi, same CLI/release contract | no fleet fan-out/concurrent scheduler yet |
 | App commissioning | `app-ready` proves Host-side Bootstrap/BLE/network/mDNS/TLS descriptor gate | target-selection/admission Local API contracts and real phone E2E remain |
 | Device conversation | Hub approval obtains a real Channel Assignment from the Provider | LAN Hub HTTPS and LiveKit WSS trust remain hard blocked |

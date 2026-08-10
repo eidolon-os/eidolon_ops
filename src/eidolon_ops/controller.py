@@ -227,6 +227,17 @@ class EidolonPiController:
             raise OperationsError(
                 f"eidolon-release CLI is missing or not executable: {release_cli}"
             )
+        local_uv = release_cli.with_name("uv")
+        if not local_uv.is_file() or not os.access(local_uv, os.X_OK):
+            raise OperationsError(f"pinned local uv executable is missing: {local_uv}")
+        local_uv_version = checked(
+            "pinned local uv verification",
+            self.runner.run((str(local_uv), "--version")),
+        ).stdout.strip()
+        if local_uv_version != "uv 0.11.15" and not local_uv_version.startswith("uv 0.11.15 "):
+            raise OperationsError(
+                f"pinned local uv must be 0.11.15, got: {local_uv_version or 'no version'}"
+            )
         release_cli_root = release_cli.parent.parent.parent
         if not (release_cli_root / ".git").exists():
             raise OperationsError("eidolon-release CLI is not inside a Git worktree")
@@ -287,6 +298,8 @@ class EidolonPiController:
         return {
             "release_cli": str(release_cli),
             "release_cli_revision": cli_revision,
+            "local_uv": str(local_uv),
+            "local_uv_version": local_uv_version,
             "sources": source_evidence,
             "release_matrix": release_matrix,
             "ssh": {
@@ -895,9 +908,21 @@ class EidolonPiController:
             for source_id in SOURCE_IDS:
                 flag = source_id.removeprefix("eidolon_").replace("eidolon-", "")
                 command.extend((f"--{flag}-revision", self.config.sources[source_id].revision))
+            command.extend(("--uv", str(self.config.workspace.release_cli.with_name("uv"))))
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "UV_DEFAULT_INDEX": self.config.workspace.python_index_url,
+                    "UV_HTTP_TIMEOUT": str(self.config.workspace.python_http_timeout_seconds),
+                    "UV_HTTP_RETRIES": str(self.config.workspace.python_http_retries),
+                    "UV_CONCURRENT_DOWNLOADS": str(
+                        self.config.workspace.python_concurrent_downloads
+                    ),
+                }
+            )
             bundle = checked(
                 "commit-pinned source bundle",
-                self.runner.run(command, timeout=300),
+                self.runner.run(command, env=environment, timeout=1800),
             )
             bundle_result = self._parse_json(bundle.stdout, "bundle")
             transfer_id = self._validate_existing_bundle(output, release_id)
@@ -972,6 +997,19 @@ class EidolonPiController:
             or self._file_sha256(output / "prepare_target.py") != preparer["sha256"]
         ):
             raise OperationsError("existing bundle preparer digest drifted")
+        dependencies = document.get("python_dependencies")
+        if (
+            document.get("schema_version") != 2
+            or not isinstance(dependencies, dict)
+            or dependencies.get("path") != "python-dependencies.tar.gz"
+            or dependencies.get("uv_version") != "0.11.15"
+            or dependencies.get("python_version") != "3.13"
+            or dependencies.get("platform") != "aarch64-unknown-linux-gnu"
+            or dependencies.get("index_url") != self.config.workspace.python_index_url
+            or not isinstance(dependencies.get("sha256"), str)
+            or self._file_sha256(output / "python-dependencies.tar.gz") != dependencies["sha256"]
+        ):
+            raise OperationsError("existing bundle Python dependency cache drifted")
         return self._file_sha256(manifest)
 
     @staticmethod
