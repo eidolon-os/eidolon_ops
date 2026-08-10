@@ -8,7 +8,7 @@ The multi-repository root is not Git. The selected release commits remain explic
 
 | Source | Selected exact release input | Role |
 | --- | --- | --- |
-| Kernel | `cf668a338c0f6305164cccd49df16eaa7e92aa04` | release authority/system assets |
+| Kernel | `11612db234dd034ddf2b27ce27da0d3aa0986723` | release authority/system assets + rollback-safe core expansion |
 | Data | `d81086e2807f44ca0c0e43e31103cd85e6165a46` | Data V2 + Workspace/runtime authority |
 | Hub | `96438a2507fb76ad025824873a99b213a99016ad` | Device/Hub authority |
 | Admin | `02f96b7ca4fc0b662dcfdfdb0c8d2293d3cfd8d0` | merged control-plane semantics + owner runtime projection |
@@ -72,8 +72,9 @@ foundation provision, first install, 14-unit lifecycle/status/logs/diagnostics a
 | Newly flashed Pi | one `install --apply` provisions foundation, installs and starts full backend | SSH/known_hosts/sudo and 14 private inputs exist |
 | Environment audit only | `provision` and `doctor` are read-only and return nonzero when degraded | Pi reachable |
 | First install interruption | durable foundation/install phases; same commit/input digests resume | retain release ID and inputs |
+| Managed 4-component Pi | explicit `expand` proves one owned core release, adds only new inputs, then uses normal activation | path namespace must match the sealed release contract |
 | Daily commit update | bundle/prepare/dry-run, then explicit resume+activate | schema gate must remain compatible |
-| Activation failure | exact system asset/link snapshot auto-restored; evidence retained | `rollback_failed` requires manual stop |
+| Activation/health gate failure | exact system asset/link snapshot auto-restored; evidence retained | `rollback_failed` requires manual stop |
 | Explicit rollback | restores selected code/assets snapshot only | never restores DB/secrets |
 | Offline cached retry | pinned artifact cache and existing release may be reused | a truly new Pi still needs apt/PyPI/Git dependency network |
 | Multiple Pis | one strict config per Pi, same CLI/release contract | no fleet fan-out/concurrent scheduler yet |

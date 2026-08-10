@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import stat
 import tarfile
@@ -11,6 +12,7 @@ import tempfile
 from pathlib import Path
 
 from eidolon_ops.config import (
+    EXPANSION_FILE_NAMES,
     INSTALL_FILE_NAMES,
     SOURCE_IDS,
     ConfigurationError,
@@ -212,12 +214,7 @@ class EidolonPiController:
                 )
             source_evidence[source_id] = source.revision
         if require_install_files:
-            if set(self.config.install_files) != set(INSTALL_FILE_NAMES):
-                raise ConfigurationError("install.files is required for first install")
-            for name in INSTALL_FILE_NAMES:
-                validate_private_local_file(
-                    self.config.install_files[name], label=f"install.files.{name}"
-                )
+            self._validate_install_inputs(INSTALL_FILE_NAMES)
         return {
             "release_cli": str(release_cli),
             "sources": source_evidence,
@@ -229,6 +226,14 @@ class EidolonPiController:
             },
             "install_prerequisites_checked": require_install_files,
         }
+
+    def _validate_install_inputs(self, names: tuple[str, ...]) -> None:
+        if set(self.config.install_files) != set(INSTALL_FILE_NAMES):
+            raise ConfigurationError("install.files is required for install or expansion")
+        for name in names:
+            validate_private_local_file(
+                self.config.install_files[name], label=f"install.files.{name}"
+            )
 
     def deploy(
         self,
@@ -264,12 +269,49 @@ class EidolonPiController:
             timeout=600,
         )
         phases.append({"phase": "activate", "result": activation})
-        doctor = self._remote_json(
-            "release doctor",
-            (cli, "doctor", descriptor),
-            timeout=300,
-        )
-        phases.append({"phase": "doctor", "result": doctor})
+        transaction_id = activation.get("transaction_id")
+        if (
+            activation.get("status") != "activated"
+            or not isinstance(transaction_id, str)
+            or re.fullmatch(r"[0-9a-f]{32}", transaction_id) is None
+        ):
+            raise OperationsError("release activation returned invalid transaction evidence")
+        snapshot = self.config.data.deployment_evidence / f"{release_id}-{transaction_id}"
+        gate_error: Exception | None = None
+        try:
+            doctor = self._remote_json(
+                "release doctor",
+                (cli, "doctor", descriptor),
+                timeout=300,
+            )
+            phases.append({"phase": "doctor", "result": doctor})
+            if doctor.get("status") != "healthy":
+                raise OperationsError("release doctor degraded after activation")
+            app = self.app_ready()
+            phases.append({"phase": "app_ready", "result": app})
+            if app.get("status") != "app_ready":
+                raise OperationsError("mobile App gate degraded after activation")
+        except Exception as exc:
+            gate_error = exc
+        if gate_error is not None:
+            try:
+                restored = self._remote_json(
+                    "post-activation gate release rollback",
+                    (cli, "rollback", descriptor, str(snapshot)),
+                    timeout=600,
+                )
+                if restored.get("status") != "restored":
+                    raise OperationsError("release rollback returned invalid recovery evidence")
+            except Exception as rollback_exc:
+                raise OperationsError(
+                    f"post-activation health gate failed ({gate_error}) and rollback failed: "
+                    f"{rollback_exc}"
+                ) from rollback_exc
+            phases.append({"phase": "health_gate_rollback", "result": restored})
+            raise OperationsError(
+                f"post-activation health gate failed ({gate_error}); the exact release snapshot "
+                "was restored"
+            )
         return {
             "status": "activated",
             "release_id": release_id,
@@ -342,6 +384,124 @@ class EidolonPiController:
             raise primary_error
         return {
             "status": "installed",
+            "release_id": release_id,
+            "foundation": foundation,
+            "local": local,
+            "phases": phases,
+        }
+
+    def expand(
+        self,
+        *,
+        release_id: str,
+        resume: bool,
+        apply: bool,
+    ) -> dict[str, object]:
+        """Expand an owned four-component core Host into the full topology."""
+
+        release_id = validate_release_id(release_id)
+        local = self.local_preflight(require_install_files=False)
+        plan_payload = self._target_payload()
+        plan_payload["release_id"] = release_id
+        topology = self.transport.run_agent(
+            "expansion-plan",
+            plan_payload,
+            timeout=180,
+        )
+        if not apply:
+            foundation = self.provision(apply=False)
+            if topology.get("status") == "conflict":
+                raise OperationsError(str(topology.get("reason")))
+            return {
+                "status": "planned" if topology.get("status") == "eligible" else "already_full",
+                "release_id": release_id,
+                "local": local,
+                "foundation": foundation,
+                "topology": topology,
+                "mutations": [
+                    "install only the seven new Agent/Channel/Memory/LiveKit inputs",
+                    "prepare and activate the exact full-product release",
+                    "snapshot existing assets and four core component links",
+                    "remove newly introduced links/assets if activation or App gate fails",
+                ],
+                "next": "rerun with --apply after reviewing the owned core release evidence",
+            }
+        if topology.get("status") == "already_full":
+            raise OperationsError("Host is already full; use update for a new release")
+        if topology.get("status") != "eligible":
+            raise OperationsError(str(topology.get("reason")))
+        self._validate_install_inputs(EXPANSION_FILE_NAMES)
+        foundation = self.provision(apply=True)
+        phases: list[dict[str, object]] = []
+        if not resume:
+            phases.extend(self._bundle_upload_prepare(release_id))
+        stage = f"/var/tmp/eidolon-secrets-{release_id}"
+        self._stage_install_files(
+            release_id,
+            stage,
+            names=EXPANSION_FILE_NAMES,
+        )
+        payload = self._target_payload()
+        payload["release_id"] = release_id
+        python = f"/srv/eidolon/releases/{release_id}/eidolon_kernel/.venv/bin/python"
+        primary_error: Exception | None = None
+        staged: dict[str, object] | None = None
+        try:
+            staged = self.transport.run_agent(
+                "expand",
+                payload,
+                python=python,
+                timeout=300,
+            )
+            phases.append({"phase": "expansion_inputs", "result": staged})
+        except Exception as exc:
+            primary_error = exc
+        try:
+            cleanup = self.transport.run_agent(
+                "cleanup-stage",
+                {"release_id": release_id},
+                timeout=120,
+            )
+            phases.append({"phase": "secret_cleanup", "result": cleanup})
+        except Exception as cleanup_exc:
+            if primary_error is not None:
+                raise OperationsError(
+                    f"expansion input staging failed ({primary_error}); cleanup also failed: "
+                    f"{cleanup_exc}"
+                ) from cleanup_exc
+            raise
+        if primary_error is not None:
+            raise primary_error
+        if staged is not None and staged.get("status") == "already_expanded":
+            doctor = self._remote_json(
+                "expanded release doctor",
+                (
+                    self._remote_release_cli(release_id),
+                    "doctor",
+                    self._remote_descriptor(release_id),
+                ),
+                timeout=300,
+            )
+            app = self.app_ready()
+            if app.get("status") != "app_ready":
+                raise OperationsError("already-expanded release is not App-ready")
+            phases.extend(
+                (
+                    {"phase": "doctor", "result": doctor},
+                    {"phase": "app_ready", "result": app},
+                )
+            )
+            return {
+                "status": "already_expanded",
+                "release_id": release_id,
+                "foundation": foundation,
+                "local": local,
+                "phases": phases,
+            }
+        activated = self.deploy(release_id=release_id, resume=True, activate=True)
+        phases.extend(activated["phases"])
+        return {
+            "status": "expanded",
             "release_id": release_id,
             "foundation": foundation,
             "local": local,
@@ -518,7 +678,13 @@ class EidolonPiController:
             {"phase": "prepare", "result": prepare},
         ]
 
-    def _stage_install_files(self, release_id: str, stage: str) -> None:
+    def _stage_install_files(
+        self,
+        release_id: str,
+        stage: str,
+        *,
+        names: tuple[str, ...] = INSTALL_FILE_NAMES,
+    ) -> None:
         self.transport.run_agent(
             "cleanup-stage",
             {"release_id": release_id},
@@ -528,7 +694,7 @@ class EidolonPiController:
             sudo=False,
             operation="private secret staging directory creation",
         )
-        for name in INSTALL_FILE_NAMES:
+        for name in names:
             self.transport.upload(
                 self.config.install_files[name],
                 f"{stage}/{_STAGED_INSTALL_NAMES[name]}",

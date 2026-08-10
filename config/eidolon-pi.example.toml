@@ -18,7 +18,7 @@ release_cli = "../../eidolon_kernel/.venv/bin/eidolon-release"
 
 [sources.eidolon_kernel]
 path = "../../eidolon_kernel"
-revision = "cf668a338c0f6305164cccd49df16eaa7e92aa04"
+revision = "11612db234dd034ddf2b27ce27da0d3aa0986723"
 
 [sources.eidolon_data]
 path = "../../eidolon_data"

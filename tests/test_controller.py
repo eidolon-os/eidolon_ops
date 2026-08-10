@@ -56,10 +56,15 @@ class FakeTransport:
             "foundation-doctor": {"status": "healthy"},
             "foundation-install": {"status": "installed"},
             "app-ready": {"status": "app_ready"},
+            "expansion-plan": {
+                "status": "eligible",
+                "source_release": "core-release",
+            },
             "doctor-host": {"status": "healthy", "checks": {}},
             "guard-upload": {"status": "ready_for_upload"},
             "cleanup-stage": {"status": "cleaned"},
             "install": {"status": "installed"},
+            "expand": {"status": "inputs_installed", "source_release": "core-release"},
             "start": {"status": "started"},
             "stop": {"status": "stopped"},
             "restart": {"status": "restarted"},
@@ -92,7 +97,7 @@ class FakeTransport:
         elif "rollback" in remote:
             payload = {"status": "restored"}
         elif "deploy" in remote:
-            payload = {"status": "activated"}
+            payload = {"status": "activated", "transaction_id": "a" * 32}
         else:
             payload = {"status": "ok"}
         return ProcessResult(0, json.dumps(payload), "")
@@ -300,9 +305,113 @@ def test_deploy_resume_activate_skips_transfer(setup_controller) -> None:
         "dry_run",
         "activate",
         "doctor",
+        "app_ready",
     ]
     assert transport.uploads == []
     assert not any(len(call) > 1 and call[1] == "bundle" for call in runner.calls)
+
+
+def test_deploy_app_gate_failure_restores_exact_activation_snapshot(config) -> None:
+    transport = FakeTransport()
+    original = transport.run_agent
+
+    def degraded(action, payload, **kwargs):
+        if action == "app-ready":
+            transport.agent_calls.append(
+                (action, dict(payload), kwargs.get("python", "/usr/bin/python3"), True)
+            )
+            return {"status": "degraded"}
+        return original(action, payload, **kwargs)
+
+    transport.run_agent = degraded
+    controller = EidolonPiController(config, ControllerRunner(config), transport=transport)
+
+    with pytest.raises(OperationsError, match="snapshot was restored"):
+        controller.deploy(release_id="r1", resume=True, activate=True)
+
+    rollback = next(call for call, _sudo in transport.remote_calls if "rollback" in call)
+    assert rollback[-1] == "/var/lib/eidolon/deployments/r1-" + "a" * 32
+
+
+def test_deploy_doctor_failure_restores_exact_activation_snapshot(config) -> None:
+    transport = FakeTransport()
+    original = transport.run
+
+    def degraded(remote, **kwargs):
+        if "doctor" in remote:
+            return ProcessResult(0, json.dumps({"status": "degraded"}), "")
+        return original(remote, **kwargs)
+
+    transport.run = degraded
+    controller = EidolonPiController(config, ControllerRunner(config), transport=transport)
+
+    with pytest.raises(OperationsError, match="snapshot was restored"):
+        controller.deploy(release_id="r1", resume=True, activate=True)
+
+    assert any("rollback" in call for call, _sudo in transport.remote_calls)
+    assert not any(call[0] == "app-ready" for call in transport.agent_calls)
+
+
+def test_deploy_reports_health_gate_and_rollback_failure(config) -> None:
+    transport = FakeTransport()
+    original = transport.run_agent
+
+    def degraded(action, payload, **kwargs):
+        if action == "app-ready":
+            return {"status": "degraded"}
+        return original(action, payload, **kwargs)
+
+    transport.run_agent = degraded
+    transport.fail_remote_match = "rollback"
+    controller = EidolonPiController(config, ControllerRunner(config), transport=transport)
+
+    with pytest.raises(OperationsError, match=r"health gate failed.*rollback failed"):
+        controller.deploy(release_id="r1", resume=True, activate=True)
+
+
+def test_deploy_rejects_invalid_activation_evidence_without_guessing_snapshot(config) -> None:
+    transport = FakeTransport()
+    original = transport.run
+
+    def invalid(remote, **kwargs):
+        if "deploy" in remote and "--dry-run" not in remote:
+            return ProcessResult(
+                0,
+                json.dumps({"status": "activated", "transaction_id": "not-a-transaction"}),
+                "",
+            )
+        return original(remote, **kwargs)
+
+    transport.run = invalid
+    controller = EidolonPiController(config, ControllerRunner(config), transport=transport)
+
+    with pytest.raises(OperationsError, match="invalid transaction evidence"):
+        controller.deploy(release_id="r1", resume=True, activate=True)
+
+    assert not any("rollback" in call for call, _sudo in transport.remote_calls)
+
+
+def test_deploy_rejects_invalid_rollback_evidence(config) -> None:
+    transport = FakeTransport()
+    original_agent = transport.run_agent
+    original_remote = transport.run
+
+    def degraded(action, payload, **kwargs):
+        if action == "app-ready":
+            return {"status": "degraded"}
+        return original_agent(action, payload, **kwargs)
+
+    def invalid_recovery(remote, **kwargs):
+        if "rollback" in remote:
+            return ProcessResult(0, json.dumps({"status": "unknown"}), "")
+        return original_remote(remote, **kwargs)
+
+    transport.run_agent = degraded
+    transport.run = invalid_recovery
+    controller = EidolonPiController(config, ControllerRunner(config), transport=transport)
+
+    with pytest.raises(OperationsError, match="invalid recovery evidence"):
+        controller.deploy(release_id="r1", resume=True, activate=True)
 
 
 def test_deploy_refuses_existing_local_bundle(config) -> None:
@@ -390,6 +499,114 @@ def test_install_and_cleanup_failure_reports_both(setup_controller) -> None:
 
     with pytest.raises(OperationsError, match="cleanup also failed"):
         controller.install(release_id="r1", resume=True, apply=True)
+
+
+def test_expand_without_apply_is_read_only(setup_controller) -> None:
+    controller, _runner, transport = setup_controller
+
+    result = controller.expand(release_id="r1", resume=False, apply=False)
+
+    assert result["status"] == "planned"
+    assert result["topology"]["source_release"] == "core-release"
+    assert transport.uploads == []
+    assert [call[0] for call in transport.agent_calls] == [
+        "expansion-plan",
+        "foundation-doctor",
+    ]
+
+
+def test_expand_apply_stages_only_new_inputs_then_activates(setup_controller) -> None:
+    controller, _runner, transport = setup_controller
+
+    result = controller.expand(release_id="r1", resume=False, apply=True)
+
+    assert result["status"] == "expanded"
+    destinations = [item[1] for item in transport.uploads if "eidolon-secrets" in item[1]]
+    assert destinations == [
+        "/var/tmp/eidolon-secrets-r1/agent.env",
+        "/var/tmp/eidolon-secrets-r1/channel.env",
+        "/var/tmp/eidolon-secrets-r1/memory.env",
+        "/var/tmp/eidolon-secrets-r1/livekit.env",
+        "/var/tmp/eidolon-secrets-r1/agent.yaml",
+        "/var/tmp/eidolon-secrets-r1/channel.yaml",
+        "/var/tmp/eidolon-secrets-r1/memory.yaml",
+    ]
+    assert [phase["phase"] for phase in result["phases"]] == [
+        "bundle",
+        "upload_guard",
+        "prepare",
+        "expansion_inputs",
+        "secret_cleanup",
+        "dry_run",
+        "activate",
+        "doctor",
+        "app_ready",
+    ]
+
+
+def test_expand_refuses_topology_conflict_before_foundation_mutation(config) -> None:
+    transport = FakeTransport()
+    original = transport.run_agent
+
+    def conflict(action, payload, **kwargs):
+        if action == "expansion-plan":
+            transport.agent_calls.append(
+                (action, dict(payload), kwargs.get("python", "/usr/bin/python3"), True)
+            )
+            return {"status": "conflict", "reason": "partial links"}
+        return original(action, payload, **kwargs)
+
+    transport.run_agent = conflict
+    controller = EidolonPiController(config, ControllerRunner(config), transport=transport)
+
+    with pytest.raises(OperationsError, match="partial links"):
+        controller.expand(release_id="r1", resume=False, apply=True)
+
+    assert [call[0] for call in transport.agent_calls] == ["expansion-plan"]
+
+
+def test_expand_refuses_an_already_full_host_before_foundation_mutation(config) -> None:
+    transport = FakeTransport()
+    original = transport.run_agent
+
+    def already_full(action, payload, **kwargs):
+        if action == "expansion-plan":
+            transport.agent_calls.append(
+                (action, dict(payload), kwargs.get("python", "/usr/bin/python3"), True)
+            )
+            return {"status": "already_full", "source_release": "r0"}
+        return original(action, payload, **kwargs)
+
+    transport.run_agent = already_full
+    controller = EidolonPiController(config, ControllerRunner(config), transport=transport)
+
+    with pytest.raises(OperationsError, match="already full"):
+        controller.expand(release_id="r1", resume=False, apply=True)
+
+    assert [call[0] for call in transport.agent_calls] == ["expansion-plan"]
+
+
+def test_expand_completed_transaction_rechecks_doctor_and_app(config) -> None:
+    transport = FakeTransport()
+    original = transport.run_agent
+
+    def completed(action, payload, **kwargs):
+        if action == "expand":
+            return {"status": "already_expanded", "source_release": "r0"}
+        return original(action, payload, **kwargs)
+
+    transport.run_agent = completed
+    controller = EidolonPiController(config, ControllerRunner(config), transport=transport)
+
+    result = controller.expand(release_id="r1", resume=True, apply=True)
+
+    assert result["status"] == "already_expanded"
+    assert [phase["phase"] for phase in result["phases"]] == [
+        "expansion_inputs",
+        "secret_cleanup",
+        "doctor",
+        "app_ready",
+    ]
 
 
 @pytest.mark.parametrize("action", ["start", "stop", "restart"])

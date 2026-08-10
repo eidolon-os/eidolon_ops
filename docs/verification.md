@@ -1,9 +1,16 @@
 # Verification report
 
 Updated: 2026-08-09 (Asia/Shanghai). No Pi state, formal database, Mac service lifecycle or sibling working tree was
-modified. Password authentication to `192.168.100.15` succeeded and the only remote command executed was the
-read-only `/usr/bin/id`; the session was closed immediately when the release matrix changed, before environment
-probing, upload or activation.
+modified. Password authentication to `192.168.100.15` was used only for an interactive, read-only probe; no password
+was persisted. No upload, package install, systemd mutation, database access or activation was performed.
+
+The probe verified a Raspberry Pi 5 Model B, Debian 13 arm64, systemd PID 1, 8-GB-class RAM, NVMe root with more than
+200 GiB free, non-interactive sudo, active NetworkManager/BlueZ/Avahi, an unblocked Bluetooth controller, healthy
+Bootstrap preflight and Local API HTTPS descriptor, and correct Host identity/TLS modes. It also found that this is
+not a blank Host: the active release manages Kernel/Data/Hub/Admin under the legacy `/srv/eidolon` namespace. The six
+new NATS/LiveKit/Memory/Agent/Channel units are not installed, and seven foundation packages plus the pinned
+uv/Node/NATS/LiveKit artifacts remain absent. Consequently first install is correctly inapplicable; a reviewed
+core-to-full expansion and an explicit path-contract decision are required before any mutation.
 
 ## Workstation operations project
 
@@ -52,7 +59,7 @@ generic-2xx probes and systemd verification command failure injection.
 The final smoke used the committed Kernel revision plus these selected commits:
 
 ```text
-Kernel   cf668a338c0f6305164cccd49df16eaa7e92aa04
+Kernel   11612db234dd034ddf2b27ce27da0d3aa0986723
 Data     d81086e2807f44ca0c0e43e31103cd85e6165a46
 Hub      96438a2507fb76ad025824873a99b213a99016ad
 Admin    02f96b7ca4fc0b662dcfdfdb0c8d2293d3cfd8d0

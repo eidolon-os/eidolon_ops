@@ -34,6 +34,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 resume=arguments.resume,
                 apply=arguments.apply,
             )
+        elif arguments.operation == "expand":
+            result = controller.expand(
+                release_id=arguments.release_id,
+                resume=arguments.resume,
+                apply=arguments.apply,
+            )
         elif arguments.operation in {"deploy", "update"}:
             result = controller.deploy(
                 release_id=arguments.release_id,
@@ -112,6 +118,13 @@ def _parser() -> argparse.ArgumentParser:
     install.add_argument("--release-id", required=True)
     install.add_argument("--resume", action="store_true")
     install.add_argument("--apply", action="store_true")
+
+    expand = operations.add_parser(
+        "expand", help="expand an owned core release into the full product topology"
+    )
+    expand.add_argument("--release-id", required=True)
+    expand.add_argument("--resume", action="store_true")
+    expand.add_argument("--apply", action="store_true")
 
     for name in ("deploy", "update"):
         deploy = operations.add_parser(
