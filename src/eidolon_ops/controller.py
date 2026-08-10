@@ -937,9 +937,21 @@ class EidolonPiController:
                 {"phase": "bundle", "result": bundle_result},
                 {"phase": "upload_guard", "result": guard},
             ]
-        if guard.get("status") not in {"ready_for_upload", "resume_upload"}:
+        if guard.get("status") not in {
+            "ready_for_upload",
+            "resume_upload",
+            "ready_for_prepare",
+        }:
             raise OperationsError("remote upload guard returned invalid evidence")
-        self.transport.upload_directory_resumable(output, remote_bundle)
+        if guard.get("status") != "ready_for_prepare":
+            self.transport.upload_directory_resumable(output, remote_bundle)
+        finalized = self.transport.run_agent(
+            "finalize-upload",
+            {"release_id": release_id, "transfer_id": transfer_id},
+            sudo=False,
+        )
+        if finalized.get("status") not in {"finalized", "already_finalized"}:
+            raise OperationsError("remote upload finalization returned invalid evidence")
         prepare = self._remote_json(
             "target-native release preparation",
             (
@@ -959,6 +971,7 @@ class EidolonPiController:
         return [
             {"phase": "bundle", "result": bundle_result},
             {"phase": "upload_guard", "result": guard},
+            {"phase": "upload_finalize", "result": finalized},
             {"phase": "prepare", "result": prepare},
         ]
 

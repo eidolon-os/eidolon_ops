@@ -664,6 +664,7 @@ def test_target_main_routes_all_actions_and_errors(monkeypatch, capsys) -> None:
         "expansion-plan": "topology_expansion_plan",
         "doctor-host": "doctor_host",
         "guard-upload": "guard_upload",
+        "finalize-upload": "finalize_upload",
         "cleanup-stage": "cleanup_stage",
         "retire-legacy-root": "retire_legacy_root",
         "cleanup-legacy": "cleanup_legacy",

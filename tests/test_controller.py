@@ -157,6 +157,7 @@ class FakeTransport:
             },
             "doctor-host": {"status": "healthy", "checks": {}},
             "guard-upload": {"status": "ready_for_upload"},
+            "finalize-upload": {"status": "finalized"},
             "cleanup-stage": {"status": "cleaned"},
             "retire-legacy-root": {"status": "retired"},
             "abort-replacement": {"status": "aborted"},
@@ -453,6 +454,7 @@ def test_deploy_defaults_to_prepare_and_dry_run(setup_controller) -> None:
     assert [phase["phase"] for phase in result["phases"]] == [
         "bundle",
         "upload_guard",
+        "upload_finalize",
         "prepare",
         "dry_run",
     ]
@@ -508,6 +510,27 @@ def test_deploy_resume_revalidates_and_resumes_existing_bundle(setup_controller)
         (controller.config.workspace.bundle_root / "r1", "/var/tmp/eidolon-release-r1")
     ]
     assert not any(len(call) > 1 and call[1] == "bundle" for call in runner.calls)
+
+
+def test_deploy_skips_transfer_for_finalized_remote_bundle(setup_controller) -> None:
+    controller, _runner, transport = setup_controller
+    original = transport.run_agent
+
+    def finalized_guard(action, payload, **kwargs):
+        if action == "guard-upload":
+            transport.agent_calls.append(
+                (action, dict(payload), kwargs.get("python", "/usr/bin/python3"), True)
+            )
+            return {"status": "ready_for_prepare"}
+        return original(action, payload, **kwargs)
+
+    transport.run_agent = finalized_guard
+
+    result = controller.deploy(release_id="r1", resume=False, activate=False)
+
+    assert result["status"] == "dry_run"
+    assert transport.resumable_uploads == []
+    assert [call[0] for call in transport.agent_calls].count("finalize-upload") == 1
 
 
 def test_deploy_resume_rejects_existing_bundle_digest_drift(setup_controller) -> None:
@@ -852,6 +875,7 @@ def test_expand_apply_stages_only_new_inputs_then_activates(setup_controller) ->
     assert [phase["phase"] for phase in result["phases"]] == [
         "bundle",
         "upload_guard",
+        "upload_finalize",
         "prepare",
         "expansion_inputs",
         "secret_cleanup",

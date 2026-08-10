@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import hashlib
 import json
 import subprocess
 import sys
@@ -941,6 +942,80 @@ def test_guard_upload_resumes_only_matching_owned_transfer(monkeypatch, tmp_path
     assert second["status"] == "resume_upload"
     with pytest.raises(TargetError, match="drifted"):
         target_agent.guard_upload({"release_id": "resume", "transfer_id": "c" * 64})
+
+
+def test_upload_finalization_hands_one_closed_bundle_to_kernel(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(target_agent, "_VAR_TMP", tmp_path)
+    release_id = "closed-bundle"
+    manifest_bytes = b'{"schema_version":2}\n'
+    transfer_id = hashlib.sha256(manifest_bytes).hexdigest()
+    payload = {"release_id": release_id, "transfer_id": transfer_id}
+    target_agent.guard_upload(payload)
+    bundle = tmp_path / f"eidolon-release-{release_id}"
+    (bundle / "bundle.json").write_bytes(manifest_bytes)
+    (bundle / "prepare_target.py").write_text("preparer", encoding="utf-8")
+    (bundle / "python-dependencies.tar.gz").write_bytes(b"dependencies")
+    (bundle / "sources").mkdir()
+
+    result = target_agent.finalize_upload(payload)
+
+    assert result["status"] == "finalized"
+    assert not (bundle / ".eidolon-upload.json").exists()
+    assert target_agent.finalize_upload(payload)["status"] == "already_finalized"
+    assert target_agent.guard_upload(payload)["status"] == "ready_for_prepare"
+
+
+def test_upload_finalization_rejects_missing_or_unowned_staging(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(target_agent, "_VAR_TMP", tmp_path)
+    with pytest.raises(TargetError, match="transfer identity"):
+        target_agent.finalize_upload({"release_id": "missing", "transfer_id": "short"})
+    payload = {"release_id": "missing", "transfer_id": "a" * 64}
+    with pytest.raises(TargetError, match="directory is missing"):
+        target_agent.finalize_upload(payload)
+
+    staging = tmp_path / "eidolon-release-missing"
+    staging.mkdir(mode=0o755)
+    with pytest.raises(TargetError, match="ownership drifted"):
+        target_agent.finalize_upload(payload)
+
+
+def test_upload_finalization_rejects_marker_shape_and_digest_drift(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(target_agent, "_VAR_TMP", tmp_path)
+    payload = {"release_id": "drift", "transfer_id": "b" * 64}
+    target_agent.guard_upload(payload)
+    bundle = tmp_path / "eidolon-release-drift"
+    marker = bundle / ".eidolon-upload.json"
+    marker.write_text("not-json", encoding="utf-8")
+    with pytest.raises(TargetError, match="marker is unreadable"):
+        target_agent.finalize_upload(payload)
+
+    marker.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "release_id": "drift",
+                "transfer_id": "b" * 64,
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(TargetError, match="shape or identity drifted"):
+        target_agent.finalize_upload(payload)
+
+    marker.unlink()
+    with pytest.raises(TargetError, match="shape or identity drifted"):
+        target_agent.finalize_upload(payload)
+
+    (bundle / "bundle.json").write_text("wrong", encoding="utf-8")
+    (bundle / "prepare_target.py").write_text("preparer", encoding="utf-8")
+    (bundle / "python-dependencies.tar.gz").write_bytes(b"dependencies")
+    (bundle / "sources").mkdir()
+    with pytest.raises(TargetError, match="manifest digest drifted"):
+        target_agent.finalize_upload(payload)
 
 
 def test_guard_upload_rejects_invalid_transfer_identity(monkeypatch, tmp_path: Path) -> None:
