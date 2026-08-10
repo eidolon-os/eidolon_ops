@@ -73,17 +73,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 wait_ready=not getattr(arguments, "no_wait_ready", False),
             )
         elif arguments.operation == "debug":
-            extras: tuple[str, ...] = ()
-            if (
-                arguments.profile == "os-control-plane"
-                and arguments.profile_operation == "issue-operator-token"
-            ):
-                extras = ("--ttl-seconds", str(arguments.ttl_seconds))
-            result = controller.local_profile(
-                arguments.profile,
-                arguments.profile_operation,
-                arguments=extras,
-            )
+            result = controller.local_profile("product-source", arguments.profile_operation)
         else:
             result = controller.logs(
                 service=arguments.service,
@@ -191,14 +181,21 @@ def _parser() -> argparse.ArgumentParser:
     logs.add_argument("--since")
     debug = operations.add_parser(
         "debug",
-        help="macOS implementation diagnostics; not a product operation",
+        help="macOS product-source diagnostics; not a product operation",
     )
     debug.add_argument(
-        "profile",
-        choices=("core-contract", "os-control-plane", "product-source"),
+        "profile_operation",
+        choices=(
+            "prepare",
+            "validate",
+            "status",
+            "web-start",
+            "web-stop",
+            "web-restart",
+            "web-status",
+            "commissioning-code",
+        ),
     )
-    debug.add_argument("profile_operation")
-    debug.add_argument("--ttl-seconds", type=int, default=900)
     return parser
 
 

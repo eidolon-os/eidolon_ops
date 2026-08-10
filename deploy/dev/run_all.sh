@@ -31,9 +31,7 @@
 #   ./deploy/dev/run_all.sh status --readiness
 #                                        # include one-shot service readiness diagnostics
 #   ./deploy/dev/run_all.sh foreground     # admin-api + web in foreground (no sub-projects)
-#   ./deploy/dev/run_all.sh core-contract start
 #                                        # supervised admin + agent + memory + nats only
-#   ./deploy/dev/run_all.sh core-contract stop|status|restart|sv [...]
 #
 #   ./deploy/dev/run_all.sh sv [...]       # passthrough to supervisorctl
 #                                        # e.g. sv status, sv restart channel:channel-worker
@@ -71,9 +69,6 @@ header(){ echo -e "${CYAN}==== $* ====${NC}"; }
 
 # --- Paths ------------------------------------------------------------------
 VAR_DIR="${EIDOLON_RUNTIME_ROOT}/ops"
-if [[ "${1:-}" == "os-control-plane" ]]; then
-  export EIDOLON_ADMIN_CONTROL_PLANE_ROOT="${EIDOLON_ADMIN_CONTROL_PLANE_ROOT:-${EIDOLON_STATE_ROOT}/admin/control-plane}"
-fi
 LOG_DIR="$EIDOLON_LOG_ROOT"
 export EIDOLON_LOG_ROOT="$LOG_DIR"
 RUN_DIR="$EIDOLON_RUNTIME_ROOT"
@@ -237,41 +232,6 @@ source "${OPS_ROOT}/deploy/supervisor/wrappers/livekit-credentials.sh"
 configure_supervisor_profile() {
   local profile=$1
   case "$profile" in
-    core-contract)
-      SV_PROFILE="$profile"
-      SV_CONF="$SV_PROFILE_CONF"
-      SV_PID="${VAR_DIR}/supervisord-${profile}.pid"
-      SV_SOCK="${VAR_DIR}/supervisor-${profile}.sock"
-      SUPERVISOR_PROFILE_ENABLED_DIR="${VAR_DIR}/supervisor-profiles/${profile}/enabled"
-      PREFLIGHT_SERVICE_IDS="admin,agent,memory,nats"
-      export EIDOLON_SUPERVISOR_PROFILE="$profile"
-      export EIDOLON_SUPERVISOR_PID="$SV_PID"
-      export EIDOLON_SUPERVISOR_SOCKET="$SV_SOCK"
-      export EIDOLON_SUPERVISOR_ENABLED_DIR="$SUPERVISOR_PROFILE_ENABLED_DIR"
-      export EIDOLON_SUPERVISOR_INCLUDE_GLOB="${SUPERVISOR_PROFILE_ENABLED_DIR}/*.conf"
-      export EIDOLON_ADMIN_SUPERVISOR_SOCKET="$SV_SOCK"
-      export EIDOLON_ADMIN_SUPERVISOR_ENABLED_DIR="$SUPERVISOR_PROFILE_ENABLED_DIR"
-      export EIDOLON_SUPERVISOR_LOG_FILE="${LOG_DIR}/admin/supervisord-${profile}.log"
-      export EIDOLON_SUPERVISOR_CHILDLOG_DIR="${LOG_DIR}/admin/childlogs"
-      ;;
-    os-control-plane)
-      SV_PROFILE="$profile"
-      SV_CONF="$SV_PROFILE_CONF"
-      SV_PID="${VAR_DIR}/supervisord-${profile}.pid"
-      SV_SOCK="${VAR_DIR}/supervisor-${profile}.sock"
-      SUPERVISOR_PROFILE_ENABLED_DIR="${VAR_DIR}/supervisor-profiles/${profile}/enabled"
-      PREFLIGHT_SERVICE_IDS="admin,eidolond,data,data-workspace,hub,kernel"
-      export EIDOLON_SUPERVISOR_PROFILE="$profile"
-      export EIDOLON_SUPERVISOR_PID="$SV_PID"
-      export EIDOLON_SUPERVISOR_SOCKET="$SV_SOCK"
-      export EIDOLON_SUPERVISOR_ENABLED_DIR="$SUPERVISOR_PROFILE_ENABLED_DIR"
-      export EIDOLON_SUPERVISOR_INCLUDE_GLOB="${SUPERVISOR_PROFILE_ENABLED_DIR}/*.conf"
-      export EIDOLON_ADMIN_SUPERVISOR_SOCKET="$SV_SOCK"
-      export EIDOLON_ADMIN_SUPERVISOR_ENABLED_DIR="$SUPERVISOR_PROFILE_ENABLED_DIR"
-      export EIDOLON_ADMIN_CONTROL_PLANE_ROOT="${EIDOLON_ADMIN_CONTROL_PLANE_ROOT:-${EIDOLON_STATE_ROOT}/admin/control-plane}"
-      export EIDOLON_SUPERVISOR_LOG_FILE="${LOG_DIR}/admin/supervisord-${profile}.log"
-      export EIDOLON_SUPERVISOR_CHILDLOG_DIR="${LOG_DIR}/admin/childlogs"
-      ;;
     product-source)
       local profile_env="${EIDOLON_CONFIG_ROOT}/product-source.env"
       if [[ ! -f "$profile_env" || -L "$profile_env" ]]; then
@@ -322,12 +282,6 @@ materialize_supervisor_profile() {
   [[ -n "$SV_PROFILE" ]] || return 0
   local configs=()
   case "$SV_PROFILE" in
-    core-contract)
-      configs=(admin agent memory nats)
-      ;;
-    os-control-plane)
-      configs=(admin-os-control-plane eidolond data hub-os-control-plane kernel)
-      ;;
     product-source)
       return 0
       ;;
@@ -950,121 +904,6 @@ do_restart() {
   do_start
 }
 
-do_core_contract_start() {
-  configure_supervisor_profile core-contract
-  collect_ports_registry
-  load_ports_env
-  migrate_system_data
-  materialize_supervisor_profile
-  header "pre-flight core-contract port audit"
-  do_preflight
-  echo
-  header "supervisord core-contract"
-  do_sv_start
-  do_stop_busy_optionals
-  echo
-  header "service readiness core-contract"
-  do_readiness_wait 0
-}
-
-do_core_contract_stop() {
-  configure_supervisor_profile core-contract
-  header "supervisord core-contract"
-  do_sv_stop
-}
-
-do_core_contract_restart() {
-  do_core_contract_stop
-  sleep 1
-  do_core_contract_start
-}
-
-do_core_contract_status() {
-  configure_supervisor_profile core-contract
-  do_sv_status
-}
-
-do_core_contract_sv() {
-  configure_supervisor_profile core-contract
-  do_sv_passthrough "$@"
-}
-
-do_os_control_plane_prepare() {
-  configure_supervisor_profile os-control-plane
-  ensure_api_deps
-  collect_ports_registry
-  load_ports_env
-  materialize_supervisor_profile
-  "${VENV}/bin/python" "${EIDOLON_ADMIN_ROOT}/deploy/dev/control_plane.py" prepare
-  "${VENV}/bin/python" "${EIDOLON_ADMIN_ROOT}/deploy/dev/control_plane.py" validate-supervisor
-}
-
-do_os_control_plane_validate() {
-  configure_supervisor_profile os-control-plane
-  ensure_api_deps
-  collect_ports_registry
-  load_ports_env
-  materialize_supervisor_profile
-  "${VENV}/bin/python" "${EIDOLON_ADMIN_ROOT}/deploy/dev/control_plane.py" validate
-  "${VENV}/bin/python" "${EIDOLON_ADMIN_ROOT}/deploy/dev/control_plane.py" validate-supervisor
-}
-
-do_os_control_plane_issue_token() {
-  configure_supervisor_profile os-control-plane
-  ensure_api_deps
-  "${VENV}/bin/python" "${EIDOLON_ADMIN_ROOT}/deploy/dev/control_plane.py" \
-    issue-operator-token "$@"
-}
-
-do_os_control_plane_start() {
-  configure_supervisor_profile os-control-plane
-  collect_ports_registry
-  load_ports_env
-  materialize_supervisor_profile
-  header "isolated OS control-plane preparation"
-  "${VENV}/bin/python" "${EIDOLON_ADMIN_ROOT}/deploy/dev/control_plane.py" prepare
-  echo
-  header "pre-flight OS control-plane port audit"
-  do_preflight
-  echo
-  header "supervisord OS control-plane"
-  do_sv_start
-  do_stop_busy_optionals
-  echo
-  header "admin web"
-  do_web_start
-  echo
-  header "service readiness OS control-plane"
-  do_readiness_wait 1
-}
-
-do_os_control_plane_stop() {
-  configure_supervisor_profile os-control-plane
-  header "admin web"
-  do_web_stop
-  echo
-  header "supervisord OS control-plane"
-  do_sv_stop
-}
-
-do_os_control_plane_restart() {
-  do_os_control_plane_stop
-  sleep 1
-  do_os_control_plane_start
-}
-
-do_os_control_plane_status() {
-  configure_supervisor_profile os-control-plane
-  do_web_status
-  echo
-  do_sv_status
-}
-
-do_os_control_plane_sv() {
-  configure_supervisor_profile os-control-plane
-  do_sv_passthrough "$@"
-}
-
 do_product_source_start() {
   configure_supervisor_profile product-source
   ensure_product_source_deps
@@ -1250,54 +1089,6 @@ case "${1:-}" in
   foreground) do_foreground ;;
   "")         do_foreground ;;
 
-  core-contract)
-    shift
-    case "${1:-status}" in
-      start)   do_core_contract_start ;;
-      stop)    do_core_contract_stop ;;
-      restart) do_core_contract_restart ;;
-      status)  do_core_contract_status ;;
-      sv)
-        shift
-        do_core_contract_sv "$@"
-        ;;
-      *)
-        error "unknown core-contract command: ${1:-}"
-        error "usage: $0 core-contract start|stop|restart|status|sv [...]"
-        exit 1
-        ;;
-    esac
-    ;;
-  core-contract-start|start-core-contract)     do_core_contract_start ;;
-  core-contract-stop|stop-core-contract)       do_core_contract_stop ;;
-  core-contract-restart|restart-core-contract) do_core_contract_restart ;;
-  core-contract-status|status-core-contract)   do_core_contract_status ;;
-
-  os-control-plane)
-    shift
-    case "${1:-status}" in
-      prepare)  do_os_control_plane_prepare ;;
-      validate) do_os_control_plane_validate ;;
-      issue-operator-token)
-        shift
-        do_os_control_plane_issue_token "$@"
-        ;;
-      start)    do_os_control_plane_start ;;
-      stop)     do_os_control_plane_stop ;;
-      restart)  do_os_control_plane_restart ;;
-      status)   do_os_control_plane_status ;;
-      sv)
-        shift
-        do_os_control_plane_sv "$@"
-        ;;
-      *)
-        error "unknown os-control-plane command: ${1:-}"
-        error "usage: $0 os-control-plane prepare|validate|issue-operator-token|start|stop|restart|status|sv [...]"
-        exit 1
-        ;;
-    esac
-    ;;
-
   product-source)
     shift
     case "${1:-status}" in
@@ -1372,8 +1163,6 @@ case "${1:-}" in
     error "  $0 restart [--force-cleanup] stop then start (use if stack already running)"
     error "  $0 status                    show vite + supervisorctl (no port check)"
     error "  $0 foreground                admin-api + vite only (no NATS / sub-projects)"
-    error "  $0 os-control-plane prepare  create isolated credentials/config/Data V2 DB"
-    error "  $0 os-control-plane start    start Admin + eidolond-managed Data/Hub/Kernel"
     error ""
     error "Partial / passthrough:"
     error "  $0 {start,stop,restart,status}-web"

@@ -104,11 +104,11 @@ def test_local_lifecycle_uses_canonical_product_source_profile(monkeypatch, tmp_
     assert runner.calls[-1][0][-2:] == ("product-source", "start")
     with pytest.raises(OperationsError, match="legacy Mac lifecycle flags"):
         controller.lifecycle("start", force_cleanup=True, strict=True, wait_ready=False)
-    profile_result = controller.local_profile(
-        "os-control-plane", "issue-operator-token", arguments=("--ttl-seconds", "900")
-    )
-    assert profile_result["profile"] == "os-control-plane"
-    assert runner.calls[-1][0][-3:] == ("issue-operator-token", "--ttl-seconds", "900")
+    profile_result = controller.local_profile("product-source", "web-status")
+    assert profile_result["profile"] == "product-source"
+    assert runner.calls[-1][0][-2:] == ("product-source", "web-status")
+    with pytest.raises(OperationsError, match="unsupported local profile"):
+        controller.local_profile("os-control-plane", "status")
 
 
 def test_local_doctor_and_bounded_logs(tmp_path: Path) -> None:

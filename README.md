@@ -133,9 +133,7 @@ eidolon-ops --config HOST.toml start|stop|restart [--dry-run]
 eidolon-ops --config HOST.toml logs [--service SERVICE] [--lines N] [--since TEXT]
 
 # Mac implementation diagnostics (normal lifecycle uses top-level status/start/stop/restart)
-eidolon-ops --config HOST.toml debug core-contract start|stop|restart|status
-eidolon-ops --config HOST.toml debug os-control-plane prepare|validate|start|stop|restart|status
-eidolon-ops --config HOST.toml debug product-source prepare|validate|start|stop|restart|status
+eidolon-ops --config HOST.toml debug prepare|validate|status|web-start|web-stop|web-restart|web-status
 
 # Pi release/install capabilities
 eidolon-ops --config HOST.toml provision [--apply]

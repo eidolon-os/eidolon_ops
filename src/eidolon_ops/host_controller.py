@@ -156,7 +156,7 @@ class HostController:
     ) -> dict[str, object]:
         if self.profile.driver != "local-supervisord":
             raise OperationsError("Supervisor profiles are available on the macOS adapter only")
-        if profile_name not in {"core-contract", "os-control-plane", "product-source"}:
+        if profile_name != "product-source":
             raise OperationsError(f"unsupported local profile: {profile_name}")
         if profile_name == "product-source":
             product = self._local_product()

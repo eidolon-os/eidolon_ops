@@ -102,11 +102,8 @@ def fake_host(monkeypatch) -> None:
         ),
         (["restart", "--dry-run"], "lifecycle"),
         (["logs", "--service", "agent", "--lines", "10"], "logs"),
-        (["debug", "core-contract", "status"], "local-profile"),
-        (
-            ["debug", "os-control-plane", "issue-operator-token", "--ttl-seconds", "60"],
-            "local-profile",
-        ),
+        (["debug", "status"], "local-profile"),
+        (["debug", "prepare"], "local-profile"),
     ],
 )
 def test_unified_cli_routes_host_capabilities(capsys, arguments: list[str], expected: str) -> None:
