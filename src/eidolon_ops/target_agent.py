@@ -176,6 +176,9 @@ _STAGING_NAME = re.compile(r"^eidolon-(?:release|secrets)-[A-Za-z0-9][A-Za-z0-9.
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _VAR_TMP = Path("/var/tmp")
 _RELEASES = Path("/opt/eidolon/releases")
+#: Component-neutral operator entries published inside every sealed release.
+RELEASE_ACTIVATOR = ".release/bin/eidolon-release"
+RELEASE_INTERPRETER = ".release/bin/python"
 _CURRENT_KERNEL = Path("/opt/eidolon/current/eidolon_kernel")
 HOST_ENV_PATH = Path("/etc/eidolon/host.env")
 HOST_ENV_VALUE = (
@@ -600,7 +603,6 @@ def status(payload: Mapping[str, object]) -> dict[str, object]:
     evidence = FIXED_DATA["deployment_evidence"]
     receipts: list[dict[str, object]] = []
     installations: list[dict[str, object]] = []
-    expansions: list[dict[str, object]] = []
     if evidence.is_dir():
         for receipt in sorted(
             evidence.glob("*/receipt.json"), key=lambda item: item.stat().st_mtime
@@ -634,22 +636,6 @@ def status(payload: Mapping[str, object]) -> dict[str, object]:
                         "phase": document.get("phase"),
                     }
                 )
-        for journal in sorted(
-            evidence.glob("expand-*/expand.json"), key=lambda item: item.stat().st_mtime
-        )[-10:]:
-            try:
-                document = json.loads(journal.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                continue
-            if isinstance(document, dict):
-                expansions.append(
-                    {
-                        "path": str(journal),
-                        "release_id": document.get("release_id"),
-                        "status": document.get("status"),
-                        "source_release": document.get("source_release"),
-                    }
-                )
     return {
         "status": "observed",
         "host": platform.node(),
@@ -666,7 +652,6 @@ def status(payload: Mapping[str, object]) -> dict[str, object]:
         "current_links": links,
         "recent_receipts": receipts,
         "installations": installations,
-        "expansions": expansions,
     }
 
 
@@ -692,7 +677,7 @@ def doctor_host(payload: Mapping[str, object]) -> dict[str, object]:
     release_doctor: object = None
     if release_id is not None:
         descriptor = _RELEASES / release_id / "release.json"
-        cli = _RELEASES / release_id / "eidolon_kernel/.venv/bin/eidolon-release"
+        cli = _RELEASES / release_id / RELEASE_ACTIVATOR
         result = _run((str(cli), "doctor", str(descriptor)), timeout=180)
         if result.returncode != 0:
             release_doctor = {
@@ -2136,6 +2121,35 @@ def reset_host(
     }
 
 
+def active_release(payload: Mapping[str, object]) -> dict[str, object]:
+    """Resolve the active release's operator entries on the target itself.
+
+    The deployer must not derive these from a component directory name; the
+    target owns its own layout and reports the published, component-neutral
+    entries here.
+    """
+
+    _fixed_units(payload)
+    if not _CURRENT_KERNEL.is_symlink():
+        raise TargetError("no Eidolon release is currently active")
+    release_root = _CURRENT_KERNEL.resolve().parent
+    if release_root.parent != _RELEASES:
+        raise TargetError("the active release link points outside the release root")
+    entries = {
+        "activator": release_root / RELEASE_ACTIVATOR,
+        "interpreter": release_root / RELEASE_INTERPRETER,
+    }
+    for name, path in entries.items():
+        if not path.is_file() or not os.access(path, os.X_OK):
+            raise TargetError(f"the active release does not publish its {name}")
+    return {
+        "status": "observed",
+        "release_id": release_root.name,
+        "release_root": str(release_root),
+        **{name: str(path) for name, path in entries.items()},
+    }
+
+
 def lifecycle(action: str, payload: Mapping[str, object]) -> dict[str, object]:
     _fixed_units(payload)
     app = _optional_app(payload)
@@ -2297,6 +2311,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = cleanup_stage(payload)
         elif action == "install":
             result = install(payload)
+        elif action == "active-release":
+            result = active_release(payload)
         elif action == "reset-plan":
             result = reset_plan(payload)
         elif action == "reset-host":

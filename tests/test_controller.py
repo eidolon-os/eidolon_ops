@@ -24,30 +24,22 @@ class ControllerRunner:
         *,
         wrong_revision: bool = False,
         invalid_release_matrix: bool = False,
-        cli_revision_mismatch: bool = False,
-        dirty_cli: bool = False,
         wrong_uv_version: bool = False,
+        release_contract_overrides: dict | None = None,
     ) -> None:
         self.config = config
         self.wrong_revision = wrong_revision
         self.invalid_release_matrix = invalid_release_matrix
-        self.cli_revision_mismatch = cli_revision_mismatch
-        self.dirty_cli = dirty_cli
         self.wrong_uv_version = wrong_uv_version
+        self.release_contract_overrides = release_contract_overrides or {}
         self.calls: list[tuple[str, ...]] = []
 
     def run(self, command, **kwargs):
         command = tuple(command)
         self.calls.append(command)
         if "rev-parse" in command:
-            revision = (
-                self.config.sources["eidolon_kernel"].revision
-                if command[-1] == "HEAD"
-                else command[-1].removesuffix("^{commit}")
-            )
-            if self.cli_revision_mismatch and command[-1] == "HEAD":
-                revision = "e" * 40
-            if self.wrong_revision and command[-1] != "HEAD":
+            revision = command[-1].removesuffix("^{commit}")
+            if self.wrong_revision:
                 revision = "f" * 40
             return ProcessResult(0, revision + "\n", "")
         if "show" in command:
@@ -72,8 +64,18 @@ class ControllerRunner:
                 f"ExecStart={executable}\n",
                 "",
             )
-        if "status" in command and "--porcelain" in command:
-            return ProcessResult(0, " M eidolon_deploy/cli.py\n" if self.dirty_cli else "", "")
+        if command[-1:] == ("contract",) and command[0].endswith("/eidolon-release"):
+            document = {
+                "tool": "eidolon-release",
+                "cli_contract_version": 1,
+                "bundle_schema_version": 2,
+                "descriptor_schema_version": 2,
+                "snapshot_schema_version": 2,
+                "activator_relative_path": ".release/bin/eidolon-release",
+                "interpreter_relative_path": ".release/bin/python",
+            }
+            document.update(self.release_contract_overrides)
+            return ProcessResult(0, json.dumps(document), "")
         if command[-1:] == ("--version",) and command[0].endswith("/uv"):
             version = "uv 0.11.14" if self.wrong_uv_version else "uv 0.11.15"
             return ProcessResult(0, version + "\n", "")
@@ -174,7 +176,13 @@ class FakeTransport:
                 "removed": ["/opt/eidolon"],
             },
             "install": {"status": "installed"},
-            "expand": {"status": "inputs_installed", "source_release": "core-release"},
+            "active-release": {
+                "status": "observed",
+                "release_id": "r1",
+                "release_root": "/opt/eidolon/releases/r1",
+                "activator": "/opt/eidolon/releases/r1/.release/bin/eidolon-release",
+                "interpreter": "/opt/eidolon/releases/r1/.release/bin/python",
+            },
             "start": {"status": "started"},
             "stop": {"status": "stopped"},
             "restart": {"status": "restarted"},
@@ -254,7 +262,8 @@ def test_local_preflight_proves_exact_commits(config) -> None:
         source_id: config.sources[source_id].revision for source_id in SOURCE_IDS
     }
     assert result["install_prerequisites_checked"] is True
-    assert result["release_cli_revision"] == config.sources["eidolon_kernel"].revision
+    assert result["release_tool_contract"]["tool"] == "eidolon-release"
+    assert result["release_tool_contract"]["bundle_schema_version"] == 2
     assert result["install_input_contract"] == {"status": "compatible"}
     assert result["python_resolver"] == {
         "index_url": "https://pypi.org/simple",
@@ -276,25 +285,30 @@ def test_local_preflight_rejects_revision_alias(config) -> None:
         controller.local_preflight(require_install_files=False)
 
 
-def test_local_preflight_rejects_mismatched_release_authority(config) -> None:
+def test_local_preflight_rejects_an_activator_speaking_another_contract(config) -> None:
+    """A stale activator is rejected by its own report, not by repository layout."""
+
     controller = EidolonPiController(
         config,
-        ControllerRunner(config, cli_revision_mismatch=True),
+        ControllerRunner(config, release_contract_overrides={"bundle_schema_version": 1}),
         transport=FakeTransport(),
     )
 
-    with pytest.raises(OperationsError, match="pinned Kernel"):
+    with pytest.raises(OperationsError, match="bundle_schema_version"):
         controller.local_preflight(require_install_files=False)
 
 
-def test_local_preflight_rejects_dirty_release_authority(config) -> None:
+def test_local_preflight_rejects_unexpected_published_operator_entries(config) -> None:
     controller = EidolonPiController(
         config,
-        ControllerRunner(config, dirty_cli=True),
+        ControllerRunner(
+            config,
+            release_contract_overrides={"interpreter_relative_path": "eidolon_kernel/.venv/bin/python"},
+        ),
         transport=FakeTransport(),
     )
 
-    with pytest.raises(OperationsError, match="tracked changes"):
+    with pytest.raises(OperationsError, match="operator entries"):
         controller.local_preflight(require_install_files=False)
 
 
@@ -923,13 +937,14 @@ def test_lifecycle_dry_run_has_no_remote_mutation(setup_controller, action: str)
 
 
 @pytest.mark.parametrize("action", ["start", "stop", "restart"])
-def test_lifecycle_uses_active_kernel_runtime(setup_controller, action: str) -> None:
+def test_lifecycle_runs_under_the_active_release_interpreter(setup_controller, action: str) -> None:
     controller, _runner, transport = setup_controller
 
     result = controller.lifecycle(action, dry_run=False)
 
     assert result["status"] == (action + "ed" if action != "stop" else "stopped")
-    assert transport.agent_calls[-1][2] == ("/opt/eidolon/current/eidolon_kernel/.venv/bin/python")
+    assert transport.agent_calls[-2][0] == "active-release"
+    assert transport.agent_calls[-1][2] == "/opt/eidolon/releases/r1/.release/bin/python"
 
 
 def test_rollback_defaults_to_plan(setup_controller) -> None:

@@ -61,6 +61,21 @@ _STAGED_INSTALL_NAMES = {
     "memory_settings": "memory.yaml",
 }
 
+#: Release formats this deployer speaks. The activator reports its own versions
+#: through `eidolon-release contract`, so interoperability is proven against a
+#: declared contract rather than against the Kernel repository layout.
+_RELEASE_TOOL_CONTRACT = {
+    "tool": "eidolon-release",
+    "cli_contract_version": 1,
+    "bundle_schema_version": 2,
+    "descriptor_schema_version": 2,
+    "snapshot_schema_version": 2,
+}
+
+#: Component-neutral operator entries published inside every sealed release.
+_RELEASE_ACTIVATOR = ".release/bin/eidolon-release"
+_RELEASE_INTERPRETER = ".release/bin/python"
+
 
 class OperationsError(RuntimeError):
     """An orchestration invariant or phase failed."""
@@ -249,30 +264,7 @@ class EidolonPiController:
             raise OperationsError(
                 f"pinned local uv must be 0.11.15, got: {local_uv_version or 'no version'}"
             )
-        release_cli_root = release_cli.parent.parent.parent
-        if not (release_cli_root / ".git").exists():
-            raise OperationsError("eidolon-release CLI is not inside a Git worktree")
-        cli_revision = checked(
-            "exact eidolon-release authority verification",
-            self.runner.run((self.git, "-C", str(release_cli_root), "rev-parse", "HEAD")),
-        ).stdout.strip()
-        if cli_revision != self.config.sources["eidolon_kernel"].revision:
-            raise OperationsError("eidolon-release CLI does not match the pinned Kernel commit")
-        cli_status = checked(
-            "clean eidolon-release authority verification",
-            self.runner.run(
-                (
-                    self.git,
-                    "-C",
-                    str(release_cli_root),
-                    "status",
-                    "--porcelain",
-                    "--untracked-files=no",
-                )
-            ),
-        ).stdout
-        if cli_status.strip():
-            raise OperationsError("eidolon-release CLI worktree has tracked changes")
+        release_contract = self._release_tool_contract(release_cli)
         source_evidence: dict[str, str] = {}
         for source_id in SOURCE_IDS:
             source = self.config.sources[source_id]
@@ -308,7 +300,7 @@ class EidolonPiController:
             install_input_contract = self._validate_install_inputs(INSTALL_FILE_NAMES)
         return {
             "release_cli": str(release_cli),
-            "release_cli_revision": cli_revision,
+            "release_tool_contract": release_contract,
             "local_uv": str(local_uv),
             "local_uv_version": local_uv_version,
             "sources": source_evidence,
@@ -329,6 +321,39 @@ class EidolonPiController:
             "install_prerequisites_checked": require_install_files,
             "install_input_contract": install_input_contract,
         }
+
+    def _release_tool_contract(self, release_cli: Path) -> dict[str, object]:
+        """Prove the activator speaks this deployer's release formats.
+
+        The activator reports its own contract, so a stale or modified copy is
+        rejected without this deployer knowing where it lives in its repository.
+        """
+
+        result = checked(
+            "eidolon-release contract verification",
+            self.runner.run((str(release_cli), "contract"), timeout=60),
+        )
+        try:
+            document = json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            raise OperationsError("eidolon-release contract output is not JSON") from exc
+        if not isinstance(document, dict):
+            raise OperationsError("eidolon-release contract output is not an object")
+        mismatched = sorted(
+            name for name, expected in _RELEASE_TOOL_CONTRACT.items() if document.get(name) != expected
+        )
+        if mismatched:
+            raise OperationsError(
+                "eidolon-release does not speak this deployer's release contract: "
+                + ", ".join(mismatched)
+            )
+        published = {
+            "activator_relative_path": _RELEASE_ACTIVATOR,
+            "interpreter_relative_path": _RELEASE_INTERPRETER,
+        }
+        if any(document.get(name) != value for name, value in published.items()):
+            raise OperationsError("eidolon-release publishes unexpected operator entries")
+        return document
 
     def _read_exact_source_file(self, source_id: str, revision: str, path: str) -> str:
         source = self.config.sources[source_id]
@@ -504,7 +529,7 @@ class EidolonPiController:
         self._stage_install_files(release_id, stage)
         payload = self._target_payload()
         payload["release_id"] = release_id
-        python = f"/opt/eidolon/releases/{release_id}/eidolon_kernel/.venv/bin/python"
+        python = f"/opt/eidolon/releases/{release_id}/{_RELEASE_INTERPRETER}"
         primary_error: Exception | None = None
         try:
             result = self.transport.run_agent(
@@ -574,13 +599,25 @@ class EidolonPiController:
                 "units": self.config.units,
                 "authority": "eidolond remains the Data/Hub/Kernel desired-state owner",
             }
-        python = "/opt/eidolon/current/eidolon_kernel/.venv/bin/python"
         return self.transport.run_agent(
             action,
             self._target_payload(),
-            python=python,
+            python=self._active_release_interpreter(),
             timeout=300,
         )
+
+    def _active_release_interpreter(self) -> str:
+        """Ask the target which interpreter can drive its active release."""
+
+        active = self.transport.run_agent(
+            "active-release",
+            self._target_payload(),
+            timeout=120,
+        )
+        interpreter = active.get("interpreter")
+        if active.get("status") != "observed" or not isinstance(interpreter, str):
+            raise OperationsError("target did not report an active release interpreter")
+        return interpreter
 
     def rollback(
         self,
@@ -955,7 +992,7 @@ class EidolonPiController:
 
     @staticmethod
     def _remote_release_cli(release_id: str) -> str:
-        return f"/opt/eidolon/releases/{release_id}/eidolon_kernel/.venv/bin/eidolon-release"
+        return f"/opt/eidolon/releases/{release_id}/{_RELEASE_ACTIVATOR}"
 
     @staticmethod
     def _remote_descriptor(release_id: str) -> str:

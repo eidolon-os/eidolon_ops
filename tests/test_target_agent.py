@@ -878,18 +878,6 @@ def test_status_reads_recent_receipt(monkeypatch, tmp_path: Path) -> None:
         json.dumps({"release_id": "r1", "status": "completed", "phase": "completed"}),
         encoding="utf-8",
     )
-    expansion_journal = evidence / "expand-r2" / "expand.json"
-    expansion_journal.parent.mkdir(parents=True)
-    expansion_journal.write_text(
-        json.dumps(
-            {
-                "release_id": "r2",
-                "source_release": "r1",
-                "status": "completed",
-            }
-        ),
-        encoding="utf-8",
-    )
     monkeypatch.setitem(target_agent.FIXED_DATA, "deployment_evidence", evidence)
     monkeypatch.setattr(
         target_agent,
@@ -913,14 +901,6 @@ def test_status_reads_recent_receipt(monkeypatch, tmp_path: Path) -> None:
             "release_id": "r1",
             "status": "completed",
             "phase": "completed",
-        }
-    ]
-    assert result["expansions"] == [
-        {
-            "path": str(expansion_journal),
-            "release_id": "r2",
-            "status": "completed",
-            "source_release": "r1",
         }
     ]
 
@@ -1085,3 +1065,50 @@ def test_command_checked_reports_failure(install_fixture) -> None:
 
     with pytest.raises(TargetError, match="denied"):
         installer._command_checked("operation", ("false",))
+
+
+def test_active_release_reports_component_neutral_operator_entries(tmp_path, monkeypatch) -> None:
+    """The target resolves its own layout so the deployer never spells a component."""
+
+    releases = tmp_path / "opt/eidolon/releases"
+    release_root = releases / "r7"
+    for relative in (target_agent.RELEASE_ACTIVATOR, target_agent.RELEASE_INTERPRETER):
+        entry = release_root / relative
+        entry.parent.mkdir(parents=True, exist_ok=True)
+        entry.write_text("#!/bin/sh\n", encoding="utf-8")
+        entry.chmod(0o755)
+    current = tmp_path / "opt/eidolon/current/eidolon_kernel"
+    current.parent.mkdir(parents=True, exist_ok=True)
+    current.symlink_to(release_root / "eidolon_kernel")
+    (release_root / "eidolon_kernel").mkdir()
+    monkeypatch.setattr(target_agent, "_RELEASES", releases)
+    monkeypatch.setattr(target_agent, "_CURRENT_KERNEL", current)
+
+    result = target_agent.active_release({"units": list(target_agent.PRODUCT_UNITS)})
+
+    assert result["release_id"] == "r7"
+    assert result["interpreter"] == str(release_root / target_agent.RELEASE_INTERPRETER)
+    assert result["activator"] == str(release_root / target_agent.RELEASE_ACTIVATOR)
+
+
+def test_active_release_fails_closed_without_an_activated_release(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(target_agent, "_CURRENT_KERNEL", tmp_path / "missing")
+
+    with pytest.raises(TargetError, match="currently active"):
+        target_agent.active_release({"units": list(target_agent.PRODUCT_UNITS)})
+
+
+def test_active_release_rejects_a_release_missing_its_operator_entries(
+    tmp_path, monkeypatch
+) -> None:
+    releases = tmp_path / "opt/eidolon/releases"
+    release_root = releases / "r8"
+    (release_root / "eidolon_kernel").mkdir(parents=True)
+    current = tmp_path / "opt/eidolon/current/eidolon_kernel"
+    current.parent.mkdir(parents=True, exist_ok=True)
+    current.symlink_to(release_root / "eidolon_kernel")
+    monkeypatch.setattr(target_agent, "_RELEASES", releases)
+    monkeypatch.setattr(target_agent, "_CURRENT_KERNEL", current)
+
+    with pytest.raises(TargetError, match="does not publish its"):
+        target_agent.active_release({"units": list(target_agent.PRODUCT_UNITS)})

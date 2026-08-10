@@ -686,6 +686,7 @@ def test_target_main_routes_all_actions_and_errors(monkeypatch, capsys) -> None:
         "finalize-upload": "finalize_upload",
         "cleanup-stage": "cleanup_stage",
         "install": "install",
+        "active-release": "active_release",
         "rollback-plan": "rollback_plan",
         "logs": "logs",
         "diagnose": "diagnose",
