@@ -57,8 +57,8 @@ uv run ruff format --check .
 
 pytest --cov=eidolon_ops --cov-branch --cov-report=term-missing --cov-fail-under=90 -q
 354 passed, 0 failed, 0 skipped
-branch-aware coverage: 90.17%
-pytest runtime reported: 3.63 seconds
+branch-aware coverage: 90.41%
+pytest runtime reported: 3.47 seconds
 
 uv build --out-dir /private/tmp/eidolon-ops-build-20260809-final-1
 sdist: 158,426 bytes; wheel: 62,154 bytes

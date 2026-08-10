@@ -72,32 +72,38 @@ def _pi_profile(tmp_path: Path) -> HostProfile:
     )
 
 
-def test_local_lifecycle_uses_profile_environment(tmp_path: Path) -> None:
+def test_local_lifecycle_uses_canonical_product_source_profile(monkeypatch, tmp_path: Path) -> None:
     profile = _profile(tmp_path)
     runner = Runner()
     controller = HostController(profile, runner)
+    prepared: list[bool] = []
+    product = SimpleNamespace(
+        prepare=lambda: prepared.append(True) or {"status": "prepared"},
+        health=lambda **_kwargs: {"status": "healthy"},
+    )
+    monkeypatch.setattr(controller, "_local_product", lambda: product)
 
     result = controller.status()
-    assert result["status"] == "ok"
+    assert result["status"] == "healthy"
     command, cwd, environment = runner.calls[-1]
-    assert command == (str(profile.lifecycle_script), "status")
+    assert command == (str(profile.lifecycle_script), "product-source", "status")
     assert cwd == profile.paths.current_root
     assert environment is not None
     assert environment["EIDOLON_STATE_ROOT"] == str(profile.paths.state_root)
 
     dry_run = controller.lifecycle("restart", dry_run=True)
     assert dry_run["status"] == "dry_run"
+    assert dry_run["command"] == [
+        str(profile.lifecycle_script),
+        "product-source",
+        "restart",
+    ]
     assert len(runner.calls) == 1
-    assert (
-        controller.lifecycle("start", force_cleanup=True, strict=True, wait_ready=False)["status"]
-        == "ok"
-    )
-    assert runner.calls[-1][0][-4:] == (
-        "start",
-        "--force-cleanup",
-        "--strict",
-        "--no-wait-ready",
-    )
+    assert controller.lifecycle("start")["status"] == "healthy"
+    assert prepared == [True]
+    assert runner.calls[-1][0][-2:] == ("product-source", "start")
+    with pytest.raises(OperationsError, match="legacy Mac lifecycle flags"):
+        controller.lifecycle("start", force_cleanup=True, strict=True, wait_ready=False)
     profile_result = controller.local_profile(
         "os-control-plane", "issue-operator-token", arguments=("--ttl-seconds", "900")
     )
@@ -146,7 +152,7 @@ def test_local_controller_rejects_missing_script_and_unknown_operation(tmp_path:
     profile.lifecycle_script.unlink()
     controller = HostController(profile, Runner())
     with pytest.raises(OperationsError, match="missing"):
-        controller.status()
+        controller._local_lifecycle("status")
     with pytest.raises(OperationsError, match="unsupported"):
         controller.lifecycle("deploy")
     with pytest.raises(OperationsError, match="Pi adapter"):

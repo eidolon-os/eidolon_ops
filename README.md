@@ -128,7 +128,7 @@ eidolon-ops --config HOST.toml migrate-paths [--apply]  # Mac one-time state cut
 eidolon-ops --config HOST.toml start|stop|restart [--dry-run]
 eidolon-ops --config HOST.toml logs [--service SERVICE] [--lines N] [--since TEXT]
 
-# Mac implementation diagnostics (normal lifecycle still uses the top-level commands)
+# Mac implementation diagnostics (normal lifecycle uses top-level status/start/stop/restart)
 eidolon-ops --config HOST.toml core-contract start|stop|restart|status
 eidolon-ops --config HOST.toml os-control-plane prepare|validate|start|stop|restart|status
 eidolon-ops --config HOST.toml product-source prepare|validate|start|stop|restart|status

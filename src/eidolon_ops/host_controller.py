@@ -25,7 +25,7 @@ class HostController:
 
     def status(self) -> dict[str, object]:
         if self.profile.driver == "local-supervisord":
-            return self._local_lifecycle("status")
+            return self.local_profile("product-source", "status")
         return self._pi().status()
 
     def app_ready(self) -> dict[str, object]:
@@ -140,23 +140,20 @@ class HostController:
         if self.profile.driver == "local-supervisord":
             from eidolon_ops.local_path_migration import LocalPathMigrator
 
-            arguments = [operation]
-            if force_cleanup:
-                arguments.append("--force-cleanup")
-            if strict:
-                arguments.append("--strict")
-            if not wait_ready:
-                arguments.append("--no-wait-ready")
+            if force_cleanup or strict or not wait_ready:
+                raise OperationsError(
+                    "legacy Mac lifecycle flags are not valid for the canonical product-source stack"
+                )
             if dry_run:
                 return {
                     "status": "dry_run",
                     "driver": self.profile.driver,
-                    "command": [str(self._local_script()), *arguments],
+                    "command": [str(self._local_script()), "product-source", operation],
                     "environment": self.profile.environment(),
                 }
             if operation in {"start", "restart"}:
                 LocalPathMigrator(self.profile).require_clean()
-            return self._local_lifecycle(tuple(arguments))
+            return self.local_profile("product-source", operation)
         if force_cleanup or strict or not wait_ready:
             raise OperationsError("Mac lifecycle flags are not valid for the systemd adapter")
         return self._pi().lifecycle(operation, dry_run=dry_run)
