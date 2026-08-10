@@ -112,7 +112,7 @@ class ControllerRunner:
                             "sha256": hashlib.sha256(dependencies.read_bytes()).hexdigest(),
                             "uv_version": "0.11.15",
                             "python_version": "3.13",
-                            "platform": "aarch64-unknown-linux-gnu",
+                            "platform": "aarch64-manylinux_2_40",
                             "build_requirements": [
                                 "setuptools==80.9.0",
                                 "wheel==0.45.1",

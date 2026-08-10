@@ -1017,7 +1017,7 @@ class EidolonPiController:
             or dependencies.get("path") != "python-dependencies.tar.gz"
             or dependencies.get("uv_version") != "0.11.15"
             or dependencies.get("python_version") != "3.13"
-            or dependencies.get("platform") != "aarch64-unknown-linux-gnu"
+            or dependencies.get("platform") != "aarch64-manylinux_2_40"
             or dependencies.get("index_url") != self.config.workspace.python_index_url
             or not isinstance(dependencies.get("sha256"), str)
             or self._file_sha256(output / "python-dependencies.tar.gz") != dependencies["sha256"]
