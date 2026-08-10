@@ -218,6 +218,7 @@ seed_enabled_symlinks() {
 VENV="${OPS_ROOT}/.venv"
 export EIDOLON_OPS_VENV="$VENV"
 export EIDOLON_NATS_SERVER="${EIDOLON_NATS_SERVER:-$(command -v nats-server || true)}"
+export EIDOLON_LIVEKIT_BIN="${EIDOLON_LIVEKIT_BIN:-$(command -v livekit-server || true)}"
 WEB_DIR="${EIDOLON_ADMIN_ROOT}/web"
 VITE_BIN_REL="node_modules/.bin/vite"
 
@@ -1067,11 +1068,17 @@ do_os_control_plane_sv() {
 do_product_source_start() {
   configure_supervisor_profile product-source
   ensure_product_source_deps
-  header "external foundation gate"
+  header "external NATS gate"
   "${OPS_ROOT}/deploy/supervisor/wrappers/wait-tcp.sh" \
     --host 127.0.0.1 --port 4222 --timeout 3 -- /usr/bin/true
-  "${OPS_ROOT}/deploy/supervisor/wrappers/wait-tcp.sh" \
-    --host 127.0.0.1 --port 7880 --timeout 3 -- /usr/bin/true
+  if [[ -z "$EIDOLON_LIVEKIT_BIN" || ! -x "$EIDOLON_LIVEKIT_BIN" ]]; then
+    error "livekit-server is not on PATH"
+    return 1
+  fi
+  if [[ ! -f "$EIDOLON_LIVEKIT_GENERATED_CONFIG" || -L "$EIDOLON_LIVEKIT_GENERATED_CONFIG" ]]; then
+    error "external LiveKit config is missing or unsafe"
+    return 1
+  fi
   header "supervisord product-source (Mac source topology)"
   do_sv_start
   echo
@@ -1093,6 +1100,26 @@ do_product_source_restart() {
 do_product_source_status() {
   configure_supervisor_profile product-source
   do_sv_status
+}
+
+do_product_source_commissioning_code() {
+  configure_supervisor_profile product-source
+  ensure_product_source_deps
+  local ttl=600
+  if [[ "${1:-}" == "--ttl" ]]; then
+    ttl="${2:-}"
+  elif [[ $# -ne 0 ]]; then
+    error "usage: $0 product-source commissioning-code [--ttl SECONDS]"
+    return 2
+  fi
+  if [[ ! "$ttl" =~ ^[0-9]+$ || "$ttl" -lt 60 || "$ttl" -gt 86400 ]]; then
+    error "commissioning code TTL must be between 60 and 86400 seconds"
+    return 2
+  fi
+  "${OPS_ROOT}/deploy/supervisor/wrappers/with-env.sh" \
+    "$EIDOLON_SOURCE_ADMIN" \
+    "${EIDOLON_PRODUCT_ENV_ROOT}/bootstrap.env" \
+    -- "$EIDOLON_SOURCE_ADMIN/.venv/bin/eidolon-bootstrapctl" dev code --ttl "$ttl"
 }
 
 do_product_source_sv() {
@@ -1278,6 +1305,10 @@ case "${1:-}" in
       stop)    do_product_source_stop ;;
       restart) do_product_source_restart ;;
       status)  do_product_source_status ;;
+      commissioning-code)
+        shift
+        do_product_source_commissioning_code "$@"
+        ;;
       web-start) do_product_source_web_start ;;
       web-stop) do_product_source_web_stop ;;
       web-restart) do_product_source_web_restart ;;
@@ -1288,7 +1319,7 @@ case "${1:-}" in
         ;;
       *)
         error "unknown product-source command: ${1:-}"
-        error "usage: $0 product-source start|stop|restart|status|web-start|web-stop|web-restart|web-status|sv [...]"
+        error "usage: $0 product-source start|stop|restart|status|web-start|web-stop|web-restart|web-status|commissioning-code|sv [...]"
         exit 1
         ;;
     esac

@@ -39,6 +39,17 @@ class HostController:
     def initialize_inputs(self) -> dict[str, object]:
         return self._require_pi("init-inputs").initialize_inputs()
 
+    def commissioning_code(self, *, ttl_seconds: int) -> dict[str, object]:
+        if self.profile.driver != "local-supervisord":
+            raise OperationsError("commissioning-code is available on the Mac adapter only")
+        if not 60 <= ttl_seconds <= 86400:
+            raise OperationsError("commissioning-code TTL must be between 60 and 86400 seconds")
+        return self.local_profile(
+            "product-source",
+            "commissioning-code",
+            arguments=("--ttl", str(ttl_seconds)),
+        )
+
     def install(
         self,
         *,
@@ -207,7 +218,11 @@ class HostController:
         config_path = self.profile.operations_config
         if config_path is None:
             raise OperationsError("Mac product-source profile has no operations config")
-        config = load_config(config_path).with_revision_overrides(self.revision_overrides)
+        config = (
+            load_config(config_path)
+            .with_source_overrides(self.profile.source_overrides)
+            .with_revision_overrides(self.revision_overrides)
+        )
         return LocalProductSource(self.profile, config, self.runner)
 
     def logs(self, *, service: str | None, lines: int, since: str | None) -> dict[str, object]:

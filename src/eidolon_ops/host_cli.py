@@ -35,6 +35,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = controller.provision(apply=arguments.apply)
         elif arguments.operation == "init-inputs":
             result = controller.initialize_inputs()
+        elif arguments.operation == "commissioning-code":
+            result = controller.commissioning_code(ttl_seconds=arguments.ttl_seconds)
         elif arguments.operation == "install":
             result = controller.install(
                 release_id=arguments.release_id,
@@ -156,6 +158,8 @@ def _parser() -> argparse.ArgumentParser:
     provision = operations.add_parser("provision")
     provision.add_argument("--apply", action="store_true")
     operations.add_parser("init-inputs")
+    commissioning_code = operations.add_parser("commissioning-code")
+    commissioning_code.add_argument("--ttl-seconds", type=int, default=600)
     install = operations.add_parser("install")
     install.add_argument("--release-id", required=True)
     install.add_argument("--resume", action="store_true")
@@ -219,6 +223,7 @@ def _parser() -> argparse.ArgumentParser:
             "web-stop",
             "web-restart",
             "web-status",
+            "commissioning-code",
         ),
     )
     return parser

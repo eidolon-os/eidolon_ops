@@ -145,6 +145,12 @@ class LocalProductSource:
                     f"public_base_url: {self._hub_public_base_url()}",
                     label="Hub public base URL",
                 )
+                rendered = _replace_exactly_once(
+                    rendered,
+                    f"path: {self.profile.paths.state_root}/eidolon-hub.sqlite3",
+                    f"path: {self.profile.paths.state_root}/hub/eidolon-hub.sqlite3",
+                    label="Mac Hub database path",
+                )
             expected[paths.config_root / "settings" / name] = rendered.encode("utf-8")
         provider_settings = self._read_exact_file(
             "eidolon_channel",
@@ -545,6 +551,8 @@ interface:
             "EIDOLON_SOURCE_CHANNEL": str(self.config.sources["eidolon_channel"].path),
             "EIDOLON_SOURCE_MEMORY": str(self.config.sources["eidolon_memory"].path),
         }
+        if self.profile.external_livekit_config is not None:
+            values["EIDOLON_LIVEKIT_GENERATED_CONFIG"] = str(self.profile.external_livekit_config)
         return _serialize_plain_environment(values)
 
     def _admin_ports_yaml(self) -> str:

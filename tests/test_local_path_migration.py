@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -111,3 +112,22 @@ def test_local_path_migration_treats_signal_permission_error_as_live(
 
     assert plan["apply_ready"] is False
     assert plan["live_processes"] == [{"pid": 4242, "pid_file": str(pid)}]
+
+
+def test_external_foundation_supervisor_does_not_block_product_state_cutover(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    profile = _profile(tmp_path)
+    profile = replace(profile, foundation_mode="external")
+    legacy = profile.paths.current_root / "eidolon_admin/var/supervisord.pid"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text("4242", encoding="utf-8")
+    product = profile.paths.runtime_root / "ops/supervisord-product-source.pid"
+    product.parent.mkdir(parents=True)
+    product.write_text("4343", encoding="utf-8")
+
+    monkeypatch.setattr(os, "kill", lambda pid, _signal: None)
+
+    assert LocalPathMigrator(profile).plan()["live_processes"] == [
+        {"pid": 4343, "pid_file": str(product)}
+    ]

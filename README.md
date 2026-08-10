@@ -124,6 +124,7 @@ Owner 变更的权限边界；它的 state/runtime 目录均不与产品主进�
 
 ```text
 eidolon-ops --config HOST.toml status|doctor
+eidolon-ops --config HOST.toml commissioning-code [--ttl-seconds 600]  # Mac Debug Host
 eidolon-ops --config HOST.toml migrate-paths [--apply]  # Mac one-time state cutover
 eidolon-ops --config HOST.toml start|stop|restart [--dry-run]
 eidolon-ops --config HOST.toml logs [--service SERVICE] [--lines N] [--since TEXT]
@@ -145,6 +146,13 @@ eidolon-ops --config HOST.toml app-ready
 eidolon-ops --config HOST.toml rollback --release-id ID --snapshot /var/lib/eidolon/deployments/... [--apply]
 eidolon-ops --config HOST.toml diagnose --output /absolute/path/to/report.tar.gz
 ```
+
+Mac 的 Host profile 可用严格的 `source_overrides.<source>` 指向一个干净、精确提交的本地 worktree；这只
+改变该 Mac source-run，不改变共用的 Pi release matrix。当前开发接入使用此机制运行 Admin，生产/Pi
+仍使用各自的 commit-pinned 发布输入。
+
+Mac product-source 在 canonical 7880 上直接管理 LiveKit 进程；`external` 表示复用已验证的二进制和
+凭据配置，不表示继续依赖旧 Admin supervisor。NATS 仍由 external foundation 提供并在启动前受健康门禁。
 
 所有有破坏性的入口默认计划/dry-run；`install --apply` 只接受全新 Eidolon namespace。旧部署不再走
 `/srv` 兼容迁移：先用 `reset` 查看精确删除范围；需要一条命令全新重装时，显式同时传入

@@ -7,6 +7,7 @@ import pytest
 from eidolon_ops.config import (
     PRODUCT_UNITS,
     ConfigurationError,
+    SourceConfig,
     load_config,
     validate_private_local_file,
     validate_release_id,
@@ -194,6 +195,18 @@ def test_revision_overrides_are_immutable(config) -> None:
 
     assert config.sources["eidolon_data"].revision == original
     assert updated.sources["eidolon_data"].revision == replacement
+
+
+def test_source_overrides_replace_path_and_revision_immutably(config, tmp_path: Path) -> None:
+    original = config.sources["eidolon_admin"]
+    replacement = SourceConfig(path=tmp_path / "admin", revision="e" * 40)
+
+    updated = config.with_source_overrides({"eidolon_admin": replacement})
+
+    assert config.sources["eidolon_admin"] == original
+    assert updated.sources["eidolon_admin"] == replacement
+    with pytest.raises(ConfigurationError, match="unknown source"):
+        config.with_source_overrides({"unknown": replacement})
 
 
 @pytest.mark.parametrize(

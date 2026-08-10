@@ -146,6 +146,27 @@ def test_local_controller_exposes_product_app_ready(monkeypatch, tmp_path: Path)
     assert controller.app_ready() == {"status": "app_ready"}
 
 
+def test_local_controller_issues_bounded_commissioning_code(monkeypatch, tmp_path: Path) -> None:
+    controller = HostController(_profile(tmp_path), Runner())
+    monkeypatch.setattr(
+        controller,
+        "_local_product",
+        lambda: SimpleNamespace(),
+    )
+
+    result = controller.commissioning_code(ttl_seconds=300)
+
+    assert result["status"] == "ok"
+    assert controller.runner.calls[-1][0][-4:] == (
+        "product-source",
+        "commissioning-code",
+        "--ttl",
+        "300",
+    )
+    with pytest.raises(OperationsError, match="TTL"):
+        controller.commissioning_code(ttl_seconds=30)
+
+
 def test_local_controller_rejects_missing_script_and_unknown_operation(tmp_path: Path) -> None:
     profile = _profile(tmp_path)
     assert profile.lifecycle_script is not None

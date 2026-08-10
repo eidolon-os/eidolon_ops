@@ -60,6 +60,14 @@ to Hub loopback 8082, Local API trust-source configuration, `_eidolon-local-api.
 private-LAN `ws://` LiveKit client opt-in. This closes the host-side transport gate needed for local Pad testing while
 retaining Hub SPKI verification. It is deliberately not part of the Pi product release contract.
 
+The Mac Host profile may additionally override one exact source path and commit without changing the shared Pi
+release matrix. The current Mac-only Admin input is `4b05f9f8d2e3aa484fa91c735b15b59be23fc64d`. It exposes a
+development-only LAN commissioning transport when Bootstrap is in development mode with the disabled commissioning
+adapter and memory network adapter. Discovery remains untrusted; Mobile verifies the Host-signed commissioning
+endpoint, then uses the advertised SPKI pin for the existing short-code Controller claim. Production and Pi BLE
+commissioning do not enable this route. The corresponding Mobile debug client is
+`f7d2f51a52bf9d55755d1624130c5d64f4b19d9e`.
+
 The public Hub transport is incomplete in the Pi release assets. `eidolon-hub.service` binds plaintext HTTP only to
 `127.0.0.1:8082`, while the pinned Hub config and mDNS advertiser claim `https://eidolon-hub.local` on port 443. No
 unit, reverse proxy, Hub certificate input or readiness check owns that TLS endpoint. The Local API certificate/SPKI

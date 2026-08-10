@@ -48,6 +48,25 @@ which was observed only and not changed. The connected Pad has Mobile 0.1.0 inst
 `RECORD_AUDIO` was not granted at measurement time. Therefore host readiness is proven; real Pad onboarding and
 conversation are not yet claimed.
 
+After the workstation changed networks, the Mac Host profile was updated to the observed address `192.168.100.16`.
+The exact Admin source override `4b05f9f8d2e3aa484fa91c735b15b59be23fc64d` was prepared in an isolated worktree;
+its independent environment uses SDK `8108970514d9fefd3d93e7466e91706a1681c331`. A real restart returned 12/12
+backend health and `app_ready` with all 11 LAN checks true. Local API returned a valid Host-signed development
+commissioning endpoint with no active setup session. LiveKit now starts under the Ops product-source supervisor on
+canonical port 7880; the retired Admin supervisor's LiveKit entry remains stopped, while NATS remains the explicitly
+gated external foundation service.
+
+The restart also exposed a stale Hub path translation: the old root path was recreated after the one-time migration.
+Ops now renders the Mac Hub database at `state/hub/eidolon-hub.sqlite3`. Before reconciliation, both databases were
+stopped and inspected only for schema and aggregate row counts; each had the current two-table schema and zero device
+and event rows. The newly-created root database plus WAL/SHM/lock was moved, not deleted, into the Host diagnostic
+cache, and the preserved earlier database remains authoritative. A repeated start then passed all health gates.
+
+Mobile debug commit `f7d2f51a52bf9d55755d1624130c5d64f4b19d9e` passed 84 Flutter tests, `flutter analyze`
+and APK build before installation. The 187-MiB debug APK was installed with data preservation on Pad `df331f93` and
+launched. `RECORD_AUDIO` remains ungranted. No short code has yet been issued and no Pad Controller claim, Workspace
+selection or conversation has yet been asserted.
+
 ```text
 uv run ruff check .
 All checks passed

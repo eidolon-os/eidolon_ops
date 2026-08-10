@@ -77,6 +77,47 @@ def test_mac_profile_exports_one_host_path_contract(tmp_path: Path) -> None:
     assert merged_environment(profile)["EIDOLON_HOST_DRIVER"] == "local-supervisord"
 
 
+def test_mac_profile_accepts_exact_local_source_override(tmp_path: Path) -> None:
+    script = tmp_path / "run.sh"
+    script.write_text("#!/bin/sh\n", encoding="utf-8")
+    admin = tmp_path / "admin-worktree"
+    profile = load_host_profile(
+        _write_mac_profile(
+            tmp_path,
+            script=script,
+            overrides=(
+                f'[source_overrides.eidolon_admin]\npath = "{admin}"\nrevision = "{"a" * 40}"\n'
+            ),
+        )
+    )
+
+    assert profile.source_overrides["eidolon_admin"].path == admin
+    assert profile.source_overrides["eidolon_admin"].revision == "a" * 40
+
+
+@pytest.mark.parametrize(
+    ("body", "message"),
+    [
+        (
+            '[source_overrides.unknown]\npath = "/tmp/source"\nrevision = "' + "a" * 40 + '"\n',
+            "unknown source",
+        ),
+        (
+            '[source_overrides.eidolon_admin]\npath = "/tmp/source"\nrevision = "short"\n',
+            "40 lowercase hex",
+        ),
+    ],
+)
+def test_mac_profile_rejects_unsafe_source_override(
+    tmp_path: Path, body: str, message: str
+) -> None:
+    script = tmp_path / "run.sh"
+    script.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    with pytest.raises(HostProfileError, match=message):
+        load_host_profile(_write_mac_profile(tmp_path, script=script, overrides=body))
+
+
 def test_mac_example_uses_the_ops_owned_source_lifecycle() -> None:
     profile = load_host_profile(REPOSITORY_ROOT / "config/hosts/mac.example.toml")
 

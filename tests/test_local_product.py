@@ -203,7 +203,8 @@ def test_prepare_materializes_one_canonical_mac_product_contract(
                 if target.endswith("config/hub.systemd.example.yaml"):
                     return ProcessResult(
                         0,
-                        "onboarding:\n  public_base_url: https://eidolon-hub.local\n",
+                        "onboarding:\n  public_base_url: https://eidolon-hub.local\n"
+                        "persistence:\n  path: /var/lib/eidolon/eidolon-hub.sqlite3\n",
                         "",
                     )
                 return ProcessResult(0, "service: product\n", "")
@@ -235,6 +236,9 @@ def test_prepare_materializes_one_canonical_mac_product_contract(
     assert "18084" not in environment
     assert "NATS (external)" in (root / "settings/services.yaml").read_text(encoding="utf-8")
     assert "port: 8767" in (root / "settings/channel-provider.yaml").read_text(encoding="utf-8")
+    assert f"path: {profile.paths.state_root}/hub/eidolon-hub.sqlite3" in (
+        root / "settings/hub.yaml"
+    ).read_text(encoding="utf-8")
     assert (root / "env/channel.env").read_text(encoding="utf-8").count(
         "LIVEKIT_API_KEY=shared-key"
     ) == 1

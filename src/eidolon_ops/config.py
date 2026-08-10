@@ -147,6 +147,18 @@ class OperationsConfig:
             seen.add(source_id)
         return replace(self, sources=MappingProxyType(sources))
 
+    def with_source_overrides(self, values: Mapping[str, SourceConfig]) -> OperationsConfig:
+        sources = dict(self.sources)
+        unknown = set(values).difference(sources)
+        if unknown:
+            raise ConfigurationError(
+                "source override contains unknown source: " + ", ".join(sorted(unknown))
+            )
+        for source_id, source in values.items():
+            _require_revision(source.revision, f"source override for {source_id}")
+            sources[source_id] = source
+        return replace(self, sources=MappingProxyType(sources))
+
 
 def validate_release_id(value: str) -> str:
     if _RELEASE_ID.fullmatch(value) is None:

@@ -114,8 +114,14 @@ class LocalPathMigrator:
     def _live_processes(self) -> list[dict[str, object]]:
         candidates = list((self.profile.paths.runtime_root / "ops").glob("*.pid"))
         candidates.extend(self.profile.paths.runtime_root.glob("eidolon-admin*.pid"))
-        # One-time guard for the executor location being retired from Admin.
-        candidates.extend((self.profile.paths.current_root / "eidolon_admin/var").glob("*.pid"))
+        # An external-foundation profile intentionally reuses a pre-existing
+        # infrastructure supervisor (currently NATS/client-web). It owns no
+        # product SQLite path in this migration, so only the Ops-owned product
+        # supervisor must be stopped.
+        # Other profiles retain the one-time guard for the executor location
+        # being retired from Admin.
+        if self.profile.foundation_mode != "external":
+            candidates.extend((self.profile.paths.current_root / "eidolon_admin/var").glob("*.pid"))
         live: list[dict[str, object]] = []
         for path in candidates:
             try:

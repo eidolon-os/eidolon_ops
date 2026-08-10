@@ -11,11 +11,15 @@ from __future__ import annotations
 import os
 import re
 import tomllib
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from ipaddress import IPv4Address, ip_address
 from pathlib import Path
+from types import MappingProxyType
 from typing import Literal
 from urllib.parse import urlparse
+
+from eidolon_ops.config import SOURCE_IDS, SourceConfig
 
 
 class HostProfileError(ValueError):
@@ -98,6 +102,9 @@ class HostProfile:
     foundation_mode: Literal["external"] | None = None
     external_livekit_config: Path | None = None
     app: AppAccess | None = None
+    source_overrides: Mapping[str, SourceConfig] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
 
     def environment(self) -> dict[str, str]:
         values = self.paths.environment()
@@ -119,12 +126,13 @@ def load_host_profile(path: Path) -> HostProfile:
         document = tomllib.loads(resolved.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
         raise HostProfileError(f"host profile is unreadable: {resolved}") from exc
-    if set(document) not in (
-        {"schema_version", "host", "paths", "adapter"},
-        {"schema_version", "host", "paths", "adapter", "app"},
-    ):
+    allowed_root = {"schema_version", "host", "paths", "adapter", "app", "source_overrides"}
+    if not {"schema_version", "host", "paths", "adapter"}.issubset(document) or not set(
+        document
+    ).issubset(allowed_root):
         raise HostProfileError(
-            "host profile root must contain only schema_version, host, paths, adapter and app"
+            "host profile root must contain schema_version, host, paths and adapter, with only app "
+            "and source_overrides optional"
         )
     if document["schema_version"] != 1:
         raise HostProfileError("host profile schema_version must be 1")
@@ -193,6 +201,9 @@ def load_host_profile(path: Path) -> HostProfile:
             adapter["operations_config"], base, "adapter.operations_config"
         )
 
+    source_overrides = _source_overrides(document.get("source_overrides"), base=base)
+    if source_overrides and driver != "local-supervisord":
+        raise HostProfileError("source_overrides are available only for local-supervisord hosts")
     app = _app_access(document.get("app"))
     return HostProfile(
         path=resolved,
@@ -205,6 +216,7 @@ def load_host_profile(path: Path) -> HostProfile:
         foundation_mode=foundation_mode,
         external_livekit_config=external_livekit_config,
         app=app,
+        source_overrides=source_overrides,
     )
 
 
@@ -314,6 +326,34 @@ def _app_access(value: object | None) -> AppAccess | None:
         livekit_client_url=livekit_url.rstrip("/"),
         allow_insecure_livekit=allow_insecure,
     )
+
+
+def _source_overrides(value: object | None, *, base: Path) -> Mapping[str, SourceConfig]:
+    if value is None:
+        return MappingProxyType({})
+    document = _table(value, "source_overrides")
+    unknown = set(document).difference(SOURCE_IDS)
+    if unknown:
+        raise HostProfileError(
+            "source_overrides contains unknown source: " + ", ".join(sorted(unknown))
+        )
+    overrides: dict[str, SourceConfig] = {}
+    for source_id, raw in document.items():
+        source = _table(raw, f"source_overrides.{source_id}")
+        if set(source) != {"path", "revision"}:
+            raise HostProfileError(
+                f"source_overrides.{source_id} must contain exactly path and revision"
+            )
+        revision = _text(source["revision"], f"source_overrides.{source_id}.revision")
+        if re.fullmatch(r"[0-9a-f]{40}", revision) is None:
+            raise HostProfileError(
+                f"source_overrides.{source_id}.revision must be exactly 40 lowercase hex"
+            )
+        overrides[source_id] = SourceConfig(
+            path=_local_path(source["path"], base, f"source_overrides.{source_id}.path"),
+            revision=revision,
+        )
+    return MappingProxyType(overrides)
 
 
 def _absolute_path(value: object, label: str) -> Path:
