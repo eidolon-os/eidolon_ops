@@ -75,6 +75,12 @@ class HostController:
             wipe_authority_data=wipe_authority_data,
         )
 
+    def backup(self, *, output: Path) -> dict[str, object]:
+        return self._require_pi("backup").backup(output=output)
+
+    def restore(self, *, source: Path, apply: bool) -> dict[str, object]:
+        return self._require_pi("restore").restore(source=source, apply=apply)
+
     def controller_reset(self, *, apply: bool) -> dict[str, object]:
         return self._require_pi("controller-reset").controller_reset(apply=apply)
 

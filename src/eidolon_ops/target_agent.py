@@ -18,6 +18,7 @@ import platform
 import pwd
 import re
 import shutil
+import sqlite3
 import ssl
 import stat
 import subprocess
@@ -28,6 +29,7 @@ import time
 import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from ipaddress import IPv4Address, ip_address
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlparse
@@ -190,6 +192,49 @@ FIXED_DATA = {
     "bootstrap_database": Path("/var/lib/eidolon-bootstrap/bootstrap.sqlite3"),
     "deployment_evidence": Path("/var/lib/eidolon/deployments"),
 }
+#: Every authority a backup copies, and the identity that owns it back.
+#:
+#: A built-in table because no component declares its own operational facts
+#: yet; when they do, this is the first thing that should come from them
+#: rather than from here. Each of these is SQLite, which can be snapshotted
+#: consistently while the service that owns it keeps running.
+BACKED_UP_AUTHORITIES = {
+    "system": (Path("/var/lib/eidolon/eidolon-system.sqlite3"), "eidolon", "eidolon"),
+    "eidolond": (Path("/var/lib/eidolon/eidolond.sqlite3"), "eidolon", "eidolon"),
+    "kernel": (Path("/var/lib/eidolon/eidolon-kernel.sqlite3"), "eidolon", "eidolon"),
+    "hub": (Path("/var/lib/eidolon/hub/eidolon-hub.sqlite3"), "eidolon", "eidolon"),
+    "agent": (Path("/var/lib/eidolon/agent/eidolon-agent.sqlite3"), "eidolon", "eidolon"),
+    "channel": (Path("/var/lib/eidolon/channel/provider.sqlite3"), "eidolon", "eidolon"),
+    "bootstrap": (
+        Path("/var/lib/eidolon-bootstrap/bootstrap.sqlite3"),
+        "eidolon-bootstrap",
+        "eidolon-bootstrap",
+    ),
+}
+
+#: State a backup does not carry, named rather than quietly omitted. Each of
+#: these needs its owning component to say how it is copied and how that copy
+#: is checked; guessing at a vector index or a JetStream directory would
+#: produce a backup that restores into something subtly wrong, which is worse
+#: than one that says what it left out.
+UNCOVERED_STATE = {
+    "memory": (
+        Path("/var/lib/eidolon/memory"),
+        "palace, vector index and knowledge graph have no declared snapshot",
+    ),
+    "nats": (
+        Path("/var/lib/eidolon/nats/jetstream"),
+        "JetStream stores are not a file copy while the server is running",
+    ),
+    "objects": (
+        Path("/var/lib/eidolon/objects"),
+        "normalized media is large and has no declared snapshot",
+    ),
+    "voiceprints": (
+        Path("/var/lib/eidolon/voiceprints"),
+        "voiceprint material has no declared snapshot",
+    ),
+}
 MANAGED_SYSTEM_ASSETS = (
     *(Path("/etc/systemd/system") / unit for unit in PRODUCT_UNITS),
     Path("/etc/eidolon/eidolond.yaml"),
@@ -215,7 +260,7 @@ RESET_AUTHORITY_ROOTS = (
     Path("/var/lib/eidolon-admin"),
 )
 _RELEASE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
-_STAGING_NAME = re.compile(r"^eidolon-(?:release|secrets)-[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_STAGING_NAME = re.compile(r"^eidolon-(?:release|secrets|backup)-[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _VAR_TMP = Path("/var/tmp")
 _RELEASES = Path("/opt/eidolon/releases")
@@ -2340,6 +2385,198 @@ def commissioning_code(payload: Mapping[str, object]) -> dict[str, object]:
     }
 
 
+def backup(payload: Mapping[str, object]) -> dict[str, object]:
+    """Snapshot every authority that can say how it is snapshotted.
+
+    SQLite can hand out a consistent copy of a database another process is
+    writing, so nothing is stopped for this. Each authority is copied on its
+    own, which means each carries its own instant: this is a set of backups,
+    not one moment of the whole Host, and it does not pretend otherwise.
+
+    What has no declared snapshot is named in the result rather than skipped
+    quietly, because a backup believed to be complete is worse than one known
+    to be partial.
+    """
+
+    _fixed_units(payload)
+    release_id = _release_id(payload)
+    destination = _VAR_TMP / f"eidolon-backup-{release_id}"
+    if destination.parent != _VAR_TMP or _STAGING_NAME.fullmatch(destination.name) is None:
+        raise TargetError("backup staging path is unsafe")
+    if destination.exists():
+        shutil.rmtree(destination)
+    destination.mkdir(mode=0o700, parents=True)
+    authorities: list[dict[str, object]] = []
+    # These carry the Owner, the Companions and every Controller grant, so the
+    # copy stays as closed as the original. It is handed to the account that
+    # invoked this, which already holds root here, rather than opened up so a
+    # transfer can read it.
+    _give_to_invoking_operator(destination)
+    for name, (source, _user, _group) in sorted(BACKED_UP_AUTHORITIES.items()):
+        if not source.is_file() or source.is_symlink():
+            raise TargetError(f"authority database is missing: {source}")
+        copy = destination / f"{name}.sqlite3"
+        connection = sqlite3.connect(f"file:{source}?mode=ro", uri=True)
+        try:
+            # VACUUM INTO takes a consistent snapshot of a live database
+            # without holding the writer out of it.
+            connection.execute("VACUUM INTO ?", (str(copy),))
+        except sqlite3.Error as exc:
+            raise TargetError(f"authority snapshot failed: {name}: {exc}") from exc
+        finally:
+            connection.close()
+        os.chmod(copy, 0o600)
+        _give_to_invoking_operator(copy)
+        authorities.append(
+            {
+                "authority": name,
+                "source": str(source),
+                "file": copy.name,
+                "sha256": _file_sha256(copy),
+                "bytes": copy.stat().st_size,
+                "taken_at": _now_timestamp(),
+            }
+        )
+    return {
+        "status": "captured",
+        "release_id": release_id,
+        "host_id": _host_id_or_none(),
+        "directory": str(destination),
+        "authorities": authorities,
+        "not_covered": [
+            {"state": name, "path": str(path), "reason": reason}
+            for name, (path, reason) in sorted(UNCOVERED_STATE.items())
+        ],
+        "consistency": (
+            "each authority is snapshotted on its own instant; this is not a "
+            "point-in-time image of the whole Host"
+        ),
+    }
+
+
+def restore(payload: Mapping[str, object]) -> dict[str, object]:
+    """Put a backup back on the Host it came from, or refuse.
+
+    A restore that lands on a different Host quietly produces a machine whose
+    Controller grants, Hub identity and TLS names all describe somewhere else,
+    so the identity is checked before anything is written rather than after
+    someone notices their phone no longer recognises the Host.
+
+    Services stop for this. SQLite can be read consistently while it is being
+    written; it cannot be replaced underneath a process that has it open.
+    """
+
+    _fixed_units(payload)
+    release_id = _release_id(payload)
+    manifest_value = payload.get("manifest")
+    if not isinstance(manifest_value, dict):
+        raise TargetError("restore requires the manifest its backup produced")
+    if manifest_value.get("host_id") != _host_id_or_none():
+        raise TargetError(
+            "backup belongs to a different Host; restoring it here would "
+            "describe a machine that does not exist"
+        )
+    if manifest_value.get("release_id") != release_id:
+        raise TargetError("backup was taken from a different release")
+    source_directory = _VAR_TMP / f"eidolon-backup-{release_id}"
+    entries = manifest_value.get("authorities")
+    if not isinstance(entries, list) or not entries:
+        raise TargetError("backup manifest names no authority")
+    prepared: list[tuple[str, Path, Path, str, str]] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise TargetError("backup manifest entry is malformed")
+        name = entry.get("authority")
+        if name not in BACKED_UP_AUTHORITIES:
+            raise TargetError(f"backup names an authority this Host does not have: {name}")
+        copy = source_directory / str(entry.get("file"))
+        if copy.parent != source_directory or not copy.is_file():
+            raise TargetError(f"backup file is missing: {entry.get('file')}")
+        if _file_sha256(copy) != entry.get("sha256"):
+            raise TargetError(f"backup file does not match its digest: {name}")
+        destination, user, group = BACKED_UP_AUTHORITIES[name]
+        prepared.append((name, copy, destination, user, group))
+    if {name for name, *_ in prepared} != set(BACKED_UP_AUTHORITIES):
+        raise TargetError("backup does not cover every authority this Host keeps")
+
+    stopped = command_stop_units(RESET_STOP_UNITS)
+    restored: list[str] = []
+    try:
+        for name, copy, destination, user, group in prepared:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            for suffix in ("-wal", "-shm"):
+                destination.with_name(destination.name + suffix).unlink(missing_ok=True)
+            temporary = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.tmp")
+            try:
+                shutil.copyfile(copy, temporary)
+                os.chmod(temporary, 0o640 if name != "bootstrap" else 0o600)
+                _chown_path(temporary, user, group)
+                os.replace(temporary, destination)
+            finally:
+                temporary.unlink(missing_ok=True)
+            restored.append(name)
+    finally:
+        _checked("systemd reload", ("/usr/bin/systemctl", "daemon-reload"), timeout=120)
+    # A restore that leaves the product down is half an operation: the operator
+    # would have to know which units to start and in what order, which is the
+    # knowledge this tool exists to hold.
+    started = lifecycle("start", payload)
+    return {
+        "status": "restored",
+        "release_id": release_id,
+        "host_id": manifest_value.get("host_id"),
+        "restored": restored,
+        "stopped": stopped,
+        "started": started.get("status"),
+        "not_restored": [name for name in sorted(UNCOVERED_STATE)],
+    }
+
+
+def command_stop_units(units: Sequence[str]) -> list[str]:
+    """Take the product down in the order that survives its own manager."""
+
+    present = [
+        unit
+        for unit in units
+        if _run(
+            ("/usr/bin/systemctl", "show", "--property", "LoadState", "--value", unit),
+            timeout=20,
+        ).stdout.strip()
+        != "not-found"
+    ]
+    for phase in (
+        [unit for unit in present if unit in RESET_RECONCILER_UNITS],
+        [unit for unit in present if unit not in RESET_RECONCILER_UNITS],
+    ):
+        if phase:
+            _run(("/usr/bin/systemctl", "stop", *phase), timeout=300)
+    return present
+
+
+def _give_to_invoking_operator(path: Path) -> None:
+    """Hand a Host-produced file to whoever ran sudo, and to nobody else."""
+
+    uid = os.environ.get("SUDO_UID")
+    gid = os.environ.get("SUDO_GID")
+    if uid is None or gid is None:
+        return
+    try:
+        os.chown(path, int(uid), int(gid))
+    except (OSError, ValueError) as exc:
+        raise TargetError(f"backup could not be handed to the operator: {exc}") from exc
+
+
+def _now_timestamp() -> str:
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _host_id_or_none() -> str | None:
+    identity = Path("/var/lib/eidolon-bootstrap/host_identity.ed25519")
+    if not identity.is_file():
+        return None
+    return "ehost-" + hashlib.sha256(identity.read_bytes()).hexdigest()[:20]
+
+
 def refresh_host_application(payload: Mapping[str, object]) -> dict[str, object]:
     """Deliver the Host layer the operator derived, without a reinstall.
 
@@ -2573,6 +2810,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = commissioning_code(payload)
         elif action == "refresh-host-application":
             result = refresh_host_application(payload)
+        elif action == "backup":
+            result = backup(payload)
+        elif action == "restore":
+            result = restore(payload)
         elif action == "active-release":
             result = active_release(payload)
         elif action == "reset-plan":

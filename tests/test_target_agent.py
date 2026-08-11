@@ -4,6 +4,7 @@ import base64
 import contextlib
 import hashlib
 import json
+import sqlite3
 import subprocess
 import sys
 from ipaddress import IPv4Address
@@ -1507,3 +1508,113 @@ def test_the_tls_pair_is_never_among_what_a_refresh_rewrites() -> None:
     assert not set(target_agent.REFRESHABLE_HOST_APPLICATION_INPUTS) & set(
         target_agent.SECRET_INPUTS
     )
+
+
+def _authority_fixture(tmp_path: Path, monkeypatch):
+    """Give the Host a set of real SQLite authorities to snapshot."""
+
+    monkeypatch.setattr(target_agent, "_VAR_TMP", tmp_path / "var-tmp")
+    (tmp_path / "var-tmp").mkdir(parents=True)
+    table = {}
+    for name in target_agent.BACKED_UP_AUTHORITIES:
+        database = tmp_path / "authorities" / f"{name}.sqlite3"
+        database.parent.mkdir(parents=True, exist_ok=True)
+        connection = sqlite3.connect(database)
+        connection.execute("CREATE TABLE truth (value TEXT)")
+        connection.execute("INSERT INTO truth VALUES (?)", (f"{name}-before",))
+        connection.commit()
+        connection.close()
+        table[name] = (database, "root", "root")
+    monkeypatch.setattr(target_agent, "BACKED_UP_AUTHORITIES", table)
+    monkeypatch.setattr(target_agent, "_chown_path", lambda *_a: None)
+    monkeypatch.setattr(
+        target_agent, "_checked", lambda *_a, **_k: subprocess.CompletedProcess((), 0, "", "")
+    )
+    monkeypatch.setattr(target_agent, "_host_id_or_none", lambda: "ehost-0123456789abcdefabcd")
+    return table
+
+
+def test_a_backup_covers_every_authority_and_names_what_it_cannot(tmp_path, monkeypatch) -> None:
+    """A backup believed to be complete is worse than one known to be partial."""
+
+    table = _authority_fixture(tmp_path, monkeypatch)
+
+    result = target_agent.backup({"units": list(target_agent.PRODUCT_UNITS), "release_id": "r1"})
+
+    assert result["status"] == "captured"
+    assert {entry["authority"] for entry in result["authorities"]} == set(table)
+    assert {entry["state"] for entry in result["not_covered"]} == set(target_agent.UNCOVERED_STATE)
+    for entry in result["not_covered"]:
+        assert entry["reason"]
+    assert "not a point-in-time image" in result["consistency"]
+    for entry in result["authorities"]:
+        copy = Path(result["directory"]) / entry["file"]
+        assert copy.is_file()
+        assert target_agent._file_sha256(copy) == entry["sha256"]
+
+
+def test_a_backup_round_trips_through_a_restore(tmp_path, monkeypatch) -> None:
+    """A backup nobody has restored is not known to work."""
+
+    table = _authority_fixture(tmp_path, monkeypatch)
+    monkeypatch.setattr(target_agent, "command_stop_units", lambda units: list(units))
+    monkeypatch.setattr(target_agent, "lifecycle", lambda *_a: {"status": "started"})
+    payload = {"units": list(target_agent.PRODUCT_UNITS), "release_id": "r1"}
+    manifest = target_agent.backup(payload)
+
+    for name, (database, _user, _group) in table.items():
+        connection = sqlite3.connect(database)
+        connection.execute("UPDATE truth SET value = ?", (f"{name}-after",))
+        connection.commit()
+        connection.close()
+
+    result = target_agent.restore({**payload, "manifest": manifest})
+
+    assert result["status"] == "restored"
+    # The product is running again; an operator should not have to know which
+    # units to start and in what order.
+    assert result["started"] == "started"
+    assert sorted(result["restored"]) == sorted(table)
+    for name, (database, _user, _group) in table.items():
+        connection = sqlite3.connect(database)
+        try:
+            assert connection.execute("SELECT value FROM truth").fetchone()[0] == f"{name}-before"
+        finally:
+            connection.close()
+
+
+def test_a_backup_from_another_host_is_refused(tmp_path, monkeypatch) -> None:
+    """Restoring it would produce a machine whose Controller grants, Hub
+    identity and TLS names all describe somewhere else."""
+
+    _authority_fixture(tmp_path, monkeypatch)
+    payload = {"units": list(target_agent.PRODUCT_UNITS), "release_id": "r1"}
+    manifest = target_agent.backup(payload)
+    manifest["host_id"] = "ehost-ffffffffffffffffffff"
+
+    with pytest.raises(TargetError, match="different Host"):
+        target_agent.restore({**payload, "manifest": manifest})
+
+
+def test_a_backup_that_no_longer_matches_its_digest_is_refused(tmp_path, monkeypatch) -> None:
+    _authority_fixture(tmp_path, monkeypatch)
+    payload = {"units": list(target_agent.PRODUCT_UNITS), "release_id": "r1"}
+    manifest = target_agent.backup(payload)
+    tampered = Path(manifest["directory"]) / manifest["authorities"][0]["file"]
+    tampered.write_bytes(tampered.read_bytes() + b"\x00")
+
+    with pytest.raises(TargetError, match="does not match its digest"):
+        target_agent.restore({**payload, "manifest": manifest})
+
+
+def test_a_backup_missing_an_authority_is_refused(tmp_path, monkeypatch) -> None:
+    """Restoring some of the authorities leaves the Host describing two
+    different pasts at once."""
+
+    _authority_fixture(tmp_path, monkeypatch)
+    payload = {"units": list(target_agent.PRODUCT_UNITS), "release_id": "r1"}
+    manifest = target_agent.backup(payload)
+    manifest["authorities"] = manifest["authorities"][:-1]
+
+    with pytest.raises(TargetError, match="every authority"):
+        target_agent.restore({**payload, "manifest": manifest})

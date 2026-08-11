@@ -86,10 +86,8 @@ class SSHTransport:
             raise TransportError(f"remote {action} returned a non-object JSON document")
         return value
 
-    def upload(self, source: Path, destination: str, *, recursive: bool = False) -> None:
-        if not source.exists() or _REMOTE_TOKEN.fullmatch(destination) is None:
-            raise TransportError("upload source is missing or destination is unsafe")
-        options = [
+    def _scp_options(self) -> list[str]:
+        return [
             self.scp,
             "-P",
             str(self.host.port),
@@ -110,6 +108,11 @@ class SSHTransport:
             "-o",
             "TCPKeepAlive=yes",
         ]
+
+    def upload(self, source: Path, destination: str, *, recursive: bool = False) -> None:
+        if not source.exists() or _REMOTE_TOKEN.fullmatch(destination) is None:
+            raise TransportError("upload source is missing or destination is unsafe")
+        options = [*self._scp_options()]
         if recursive:
             options.append("-r")
         result = self.runner.run(
@@ -117,6 +120,21 @@ class SSHTransport:
             timeout=1800,
         )
         checked("SCP upload", result)
+
+    def download(self, source: str, destination: Path, *, recursive: bool = False) -> None:
+        """Bring a Host-produced directory back to the operator's machine."""
+
+        if _REMOTE_TOKEN.fullmatch(source) is None:
+            raise TransportError("download source is unsafe")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        options = [*self._scp_options()]
+        if recursive:
+            options.append("-r")
+        result = self.runner.run(
+            (*options, f"{self.host.target}:{source}", str(destination)),
+            timeout=1800,
+        )
+        checked("SCP download", result)
 
     def upload_directory_resumable(self, source: Path, destination: str) -> None:
         """Resume an immutable release bundle into an already guarded directory."""

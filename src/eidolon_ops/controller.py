@@ -762,6 +762,80 @@ class EidolonPiController:
         payload["ttl_seconds"] = ttl_seconds
         return self.transport.run_agent("commissioning-code", payload, timeout=180)
 
+    def backup(self, *, output: Path) -> dict[str, object]:
+        """Take a backup on the Host and bring it here.
+
+        Left on the Host it would be lost with the Host, which is most of what
+        a backup is for.
+        """
+
+        self._validate_ssh_material()
+        active = self.transport.run_agent(
+            "active-release",
+            self._target_payload(),
+            timeout=120,
+        )
+        release_id = active.get("release_id")
+        if active.get("status") != "observed" or not isinstance(release_id, str):
+            raise OperationsError("target did not report an active release")
+        result = self.transport.run_agent(
+            "backup",
+            {**self._target_payload(), "release_id": release_id},
+            timeout=900,
+        )
+        directory = str(result["directory"])
+        destination = output / f"{release_id}-{result['host_id']}"
+        if destination.exists():
+            raise OperationsError(f"backup destination already exists: {destination}")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        self.transport.download(directory, destination, recursive=True)
+        manifest = destination / "backup.json"
+        manifest.write_text(
+            json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        return {**result, "local_directory": str(destination)}
+
+    def restore(self, *, source: Path, apply: bool) -> dict[str, object]:
+        """Put a backup back, after proving it belongs to this Host."""
+
+        self._validate_ssh_material()
+        manifest_path = source / "backup.json"
+        if not manifest_path.is_file():
+            raise OperationsError(f"backup manifest is missing: {manifest_path}")
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise OperationsError("backup manifest is not one JSON document") from exc
+        if not isinstance(manifest, dict):
+            raise OperationsError("backup manifest is not an object")
+        release_id = validate_release_id(str(manifest.get("release_id")))
+        if not apply:
+            return {
+                "status": "planned",
+                "release_id": release_id,
+                "host_id": manifest.get("host_id"),
+                "authorities": [
+                    entry.get("authority") for entry in manifest.get("authorities", [])
+                ],
+                "not_restored": [entry["state"] for entry in manifest.get("not_covered", [])],
+                "next": "rerun with --apply; the product stops while its authorities are replaced",
+            }
+        remote = f"/var/tmp/eidolon-backup-{release_id}"
+        self.transport.run(
+            ("/bin/rm", "-rf", remote),
+            sudo=True,
+            operation="previous backup staging removal",
+        )
+        self.transport.upload(source, remote, recursive=True)
+        return self.transport.run_agent(
+            "restore",
+            {**self._target_payload(), "release_id": release_id, "manifest": manifest},
+            # A restore ends by starting the product again, and only the
+            # release's own interpreter can drive its activation.
+            python=self._active_release_interpreter(),
+            timeout=900,
+        )
+
     def controller_reset(self, *, apply: bool) -> dict[str, object]:
         """Return a claimed Host to unclaimed so a new phone can manage it.
 

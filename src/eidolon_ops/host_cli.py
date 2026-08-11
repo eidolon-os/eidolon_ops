@@ -35,6 +35,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = controller.provision(apply=arguments.apply)
         elif arguments.operation == "init-inputs":
             result = controller.initialize_inputs()
+        elif arguments.operation == "backup":
+            result = controller.backup(output=arguments.output)
+        elif arguments.operation == "restore":
+            result = controller.restore(source=arguments.source, apply=arguments.apply)
         elif arguments.operation == "commissioning-code":
             result = controller.commissioning_code(ttl_seconds=arguments.ttl_seconds)
         elif arguments.operation == "install":
@@ -148,6 +152,17 @@ def _parser() -> argparse.ArgumentParser:
     provision = operations.add_parser("provision")
     provision.add_argument("--apply", action="store_true")
     operations.add_parser("init-inputs")
+    backup = operations.add_parser(
+        "backup",
+        help="snapshot every authority that can be snapshotted, and fetch it here",
+    )
+    backup.add_argument("--output", type=Path, required=True)
+    restore = operations.add_parser(
+        "restore",
+        help="put a backup back on the Host it came from; the product stops for it",
+    )
+    restore.add_argument("--source", type=Path, required=True)
+    restore.add_argument("--apply", action="store_true")
     commissioning_code = operations.add_parser("commissioning-code")
     commissioning_code.add_argument("--ttl-seconds", type=int, default=600)
     install = operations.add_parser("install")
