@@ -1196,3 +1196,35 @@ def test_input_initialization_reports_the_host_binding_it_established(
     assert binding["hub_hostname"].endswith(".local")
     # Private material must not ride along in the reported contract.
     assert not [key for key in binding if "key" in key.lower() or "token" in key.lower()]
+
+
+def test_a_degraded_app_gate_names_what_it_found() -> None:
+    """A gate failure rolls the release back and the phases go with it, so
+    "degraded" was the whole report an operator got for an undone install."""
+
+    from eidolon_ops.controller import _degraded_detail
+
+    detail = _degraded_detail(
+        {
+            "status": "degraded",
+            "local_api": {"healthy": True},
+            "mdns": {"healthy": False},
+            "preflight": {"ok": True},
+            "host_application": {
+                "checks": {"certificate": True, "hub_lan_health": False},
+                "hub_health": {"error": "Hub LAN ingress self-check failed: refused"},
+            },
+        }
+    )
+
+    assert "mdns" in detail
+    assert "host_application.hub_lan_health" in detail
+    assert "refused" in detail
+    assert "certificate" not in detail
+    assert "local_api" not in detail
+
+
+def test_a_gate_that_fails_for_no_stated_reason_still_says_something() -> None:
+    from eidolon_ops.controller import _degraded_detail
+
+    assert "degraded" in _degraded_detail({"status": "degraded"})

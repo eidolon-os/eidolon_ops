@@ -87,6 +87,14 @@ DIRECT_ENABLE_UNITS = (
 #: so the Hub declares Wants= on it and nothing here starts it by hand.
 HOST_APPLICATION_UNIT = "eidolon-hub-ingress.service"
 HOST_APPLICATION_READY_SECONDS = 30.0
+#: How long the release's own components get to answer after an activation.
+#: Sized on the board rather than on a laptop: the Channel worker alone spends
+#: 45s in TimeoutStopSec on the way down and then loads its ONNX turn-detector
+#: on the way up, and the manager reconciles it only after it has started
+#: itself. At 90s a rollback reported "readiness timeout: agent, channel" for
+#: services that were healthy moments later — and a spurious rollback is a far
+#: worse failure than a slow one.
+RELEASE_READINESS_SECONDS = 240
 CURRENT_LINKS = {
     "eidolon_kernel": Path("/opt/eidolon/current/eidolon_kernel"),
     "eidolon_data": Path("/opt/eidolon/current/eidolon_data"),
@@ -2102,7 +2110,7 @@ def install(payload: Mapping[str, object]) -> dict[str, object]:
         raise TargetError("prepared release identity mismatch")
     host = LinuxDeploymentHost(
         runner=_DeploymentRunner(CommandResult),
-        readiness_timeout_seconds=90,
+        readiness_timeout_seconds=RELEASE_READINESS_SECONDS,
     )
     return TargetInstaller(
         release=release,
@@ -2354,7 +2362,7 @@ def lifecycle(action: str, payload: Mapping[str, object]) -> dict[str, object]:
     active_kernel = _CURRENT_KERNEL.resolve()
     descriptor = active_kernel.parent / "release.json"
     release = load_release_descriptor(descriptor)
-    host = LinuxDeploymentHost(readiness_timeout_seconds=90)
+    host = LinuxDeploymentHost(readiness_timeout_seconds=RELEASE_READINESS_SECONDS)
     with host.exclusive_activation():
         host.preflight(release)
         if action in {"stop", "restart"}:

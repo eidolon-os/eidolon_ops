@@ -93,6 +93,32 @@ class OperationsError(RuntimeError):
     """An orchestration invariant or phase failed."""
 
 
+def _degraded_detail(app: dict[str, object]) -> str:
+    """Name what the App gate found, not merely that it was unhappy.
+
+    A gate failure rolls the release back and the collected phases go with it,
+    so "degraded" was the entire report an operator received for a decision
+    that had just undone an install.
+    """
+
+    reasons: list[str] = []
+    for name in ("local_api", "mdns", "preflight"):
+        section = app.get(name)
+        # Two spellings across the sections: a probe reports healthy, a
+        # checklist reports ok.
+        if isinstance(section, dict) and False in (section.get("healthy"), section.get("ok")):
+            reasons.append(name)
+    binding = app.get("host_application")
+    if isinstance(binding, dict):
+        checks = binding.get("checks")
+        if isinstance(checks, dict):
+            reasons.extend(f"host_application.{key}" for key, ok in checks.items() if not ok)
+        health = binding.get("hub_health")
+        if isinstance(health, dict) and health.get("error"):
+            reasons.append(str(health["error"]))
+    return "; ".join(reasons) or f"status={app.get('status')!r}"
+
+
 class EidolonPiController:
     def __init__(
         self,
@@ -535,7 +561,9 @@ class EidolonPiController:
             app = self.app_ready()
             phases.append({"phase": "app_ready", "result": app})
             if app.get("status") != "app_ready":
-                raise OperationsError("mobile App gate degraded after activation")
+                raise OperationsError(
+                    "mobile App gate degraded after activation: " + _degraded_detail(app)
+                )
         except Exception as exc:
             gate_error = exc
         if gate_error is not None:
