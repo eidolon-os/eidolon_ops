@@ -1089,3 +1089,61 @@ def test_preflight_refuses_a_pinned_commit_without_the_deploy_package(config) ->
 
     with pytest.raises(OperationsError, match="ships no eidolon_deploy"):
         controller.local_preflight(require_install_files=False)
+
+
+def test_an_annotated_tag_must_still_name_the_pinned_commit(config) -> None:
+    """A tag makes a release reviewable; it must never redefine one.
+
+    Tags are movable references, so following one silently would make the
+    release irreproducible. Ops reports the move instead.
+    """
+
+    from dataclasses import replace as _replace
+
+    tagged = _replace(
+        config,
+        sources={
+            **config.sources,
+            "eidolon_kernel": _replace(config.sources["eidolon_kernel"], tag="kernel/v9.9.9"),
+        },
+    )
+
+    class MovedTag(ControllerRunner):
+        def run(self, command, **kwargs):
+            command = tuple(command)
+            if "rev-parse" in command and command[-1].startswith("kernel/v9.9.9"):
+                return ProcessResult(0, "e" * 40 + "\n", "")
+            return super().run(command, **kwargs)
+
+    controller = EidolonPiController(
+        tagged, MovedTag(tagged), transport=FakeTransport()
+    )
+
+    with pytest.raises(OperationsError, match="tag no longer names the pinned commit"):
+        controller.local_preflight(require_install_files=False)
+
+
+def test_a_tag_that_still_resolves_is_accepted(config) -> None:
+    from dataclasses import replace as _replace
+
+    revision = config.sources["eidolon_kernel"].revision
+    tagged = _replace(
+        config,
+        sources={
+            **config.sources,
+            "eidolon_kernel": _replace(config.sources["eidolon_kernel"], tag="kernel/v1.0.0"),
+        },
+    )
+
+    class ResolvingTag(ControllerRunner):
+        def run(self, command, **kwargs):
+            command = tuple(command)
+            if "rev-parse" in command and command[-1].startswith("kernel/v1.0.0"):
+                return ProcessResult(0, revision + "\n", "")
+            return super().run(command, **kwargs)
+
+    controller = EidolonPiController(
+        tagged, ResolvingTag(tagged), transport=FakeTransport()
+    )
+
+    assert controller.local_preflight(require_install_files=False)["sources"]

@@ -29,6 +29,10 @@ python_concurrent_downloads = 4
 [sources.eidolon_kernel]
 path = "../../eidolon_kernel"
 revision = "6f0fc4811383c2dcad2add8bfe4a05d2ef4566db"
+# Optional human label. The commit above is the identity; a tag is a movable
+# reference, so Ops verifies it still resolves to that commit rather than
+# following it.
+# tag = "kernel/v0.4.2"
 
 [sources.eidolon_data]
 path = "../../eidolon_data"

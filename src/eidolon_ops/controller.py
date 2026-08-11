@@ -17,6 +17,7 @@ from eidolon_ops.config import (
     SOURCE_IDS,
     ConfigurationError,
     OperationsConfig,
+    SourceConfig,
     validate_private_local_file,
     validate_release_id,
 )
@@ -292,6 +293,7 @@ class EidolonPiController:
                 raise OperationsError(
                     f"source revision is not the exact commit object: {source_id}"
                 )
+            self._require_tag_resolves(source_id, source)
             source_evidence[source_id] = source.revision
         try:
             release_matrix = validate_release_systemd_matrix(
@@ -326,6 +328,35 @@ class EidolonPiController:
             "install_prerequisites_checked": require_install_files,
             "install_input_contract": install_input_contract,
         }
+
+    def _require_tag_resolves(self, source_id: str, source: SourceConfig) -> None:
+        """Prove an annotated tag still names the commit this release pins.
+
+        A tag is a movable reference, so it cannot define a release. It can
+        still make one reviewable — as long as moving it is reported instead of
+        silently followed.
+        """
+
+        if source.tag is None:
+            return
+        resolved = checked(
+            f"tag resolution for {source_id}",
+            self.runner.run(
+                (
+                    self.git,
+                    "-C",
+                    str(source.path),
+                    "rev-parse",
+                    "--verify",
+                    f"{source.tag}^{{commit}}",
+                )
+            ),
+        ).stdout.strip()
+        if resolved != source.revision:
+            raise OperationsError(
+                f"tag no longer names the pinned commit: {source_id} "
+                f"{source.tag} -> {resolved[:12]}, expected {source.revision[:12]}"
+            )
 
     def _release_tool_contract(self, release_cli: Path) -> dict[str, object]:
         """Prove the activator speaks this deployer's release formats.

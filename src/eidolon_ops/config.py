@@ -64,6 +64,7 @@ FIXED_DATA_PATHS = {
 }
 
 _REVISION = re.compile(r"^[0-9a-f]{40}$")
+_TAG = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$")
 _HOST = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$")
 _USER = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
 _RELEASE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
@@ -106,6 +107,10 @@ class WorkspaceConfig:
 class SourceConfig:
     path: Path
     revision: str
+    #: Optional human label for the commit. The commit is the identity — a tag
+    #: is a movable reference, so it annotates the release rather than defining
+    #: it, and Ops proves it still resolves to this revision.
+    tag: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -266,12 +271,22 @@ def load_config(path: Path) -> OperationsConfig:
     sources: dict[str, SourceConfig] = {}
     for source_id in SOURCE_IDS:
         source_wire = _mapping(sources_wire[source_id], f"sources.{source_id}")
-        _require_keys(source_wire, required={"path", "revision"}, label=f"sources.{source_id}")
+        _require_keys(
+            source_wire,
+            required={"path", "revision"},
+            optional={"tag"},
+            label=f"sources.{source_id}",
+        )
         revision = _string(source_wire["revision"], f"sources.{source_id}.revision")
         _require_revision(revision, f"sources.{source_id}.revision")
+        raw_tag = source_wire.get("tag")
+        tag = None if raw_tag is None else _string(raw_tag, f"sources.{source_id}.tag")
+        if tag is not None and _TAG.fullmatch(tag) is None:
+            raise ConfigurationError(f"sources.{source_id}.tag is invalid")
         sources[source_id] = SourceConfig(
             path=_local_path(source_wire["path"], base, f"sources.{source_id}.path"),
             revision=revision,
+            tag=tag,
         )
 
     services_wire = _mapping(document["services"], "services")
