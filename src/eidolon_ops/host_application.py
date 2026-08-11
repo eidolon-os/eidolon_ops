@@ -208,7 +208,15 @@ WantedBy=multi-user.target
 
     @staticmethod
     def _hub_service_override() -> str:
+        # The ingress declares PartOf=, which carries stop and restart downward
+        # but never start. Activation stopped the Hub, took the ingress with it,
+        # started the Hub again and left the LAN closed — the App gate saw a
+        # refused connection on the Hub port and rolled the release back. Wants=
+        # completes the pair, so whoever starts the Hub opens the LAN with it.
         return """\
+[Unit]
+Wants=eidolon-hub-ingress.service
+
 [Service]
 Environment=EIDOLON_HUB_SETTINGS_YAML=/etc/eidolon/generated/hub.yaml
 """

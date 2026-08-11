@@ -136,3 +136,28 @@ def test_host_application_rejects_incomplete_and_unsafe_paths(config) -> None:
     identity_path.symlink_to(root / "missing")
     with pytest.raises(HostApplicationError, match="identity input"):
         materializer.identity()
+
+
+def test_starting_the_hub_opens_the_lan_with_it(config) -> None:
+    """PartOf carries stop and restart downward, never start.
+
+    Activation stopped the Hub, took the ingress down with it, started the Hub
+    again and left port 8443 closed. The App gate read that as a refused
+    connection and rolled the whole release back, so an update could never
+    finish. The two directives have to be stated as a pair.
+    """
+
+    identity_path = config.install_files["host_identity"]
+    identity_path.write_bytes(b"a" * 32)
+    identity_path.chmod(0o600)
+    materializer = HostApplicationMaterializer(config, _app("192.168.100.15"), b"runtime")
+
+    assets = materializer.prepare(HUB_TEMPLATE)
+
+    override = assets.files["hub-service-override.conf"].decode()
+    ingress = assets.files["hub-ingress.service"].decode()
+    assert "Wants=eidolon-hub-ingress.service" in override
+    assert "PartOf=eidolon-hub.service" in ingress
+    # Wants= carries no ordering, and the ingress orders itself after the Hub,
+    # so the pair cannot deadlock systemd.
+    assert "After=network-online.target eidolon-hub.service" in ingress
