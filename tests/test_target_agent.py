@@ -1214,3 +1214,55 @@ def test_host_env_carries_configuration_that_is_not_a_secret() -> None:
     assert "EIDOLON_MEMORY_EMBEDDING_MODEL=bge-base-zh" in target_agent.HOST_ENV_VALUE
     assert "TOKEN" not in target_agent.HOST_ENV_VALUE
     assert "KEY" not in target_agent.HOST_ENV_VALUE
+
+
+def test_the_host_states_where_the_port_registry_is() -> None:
+    """Admin defaults to an ``eidolon_ops`` checkout beside its own source.
+
+    That is a workstation shape. On a Host there is no checkout, so Admin got
+    an empty registry and raised ``KeyError: 'admin'`` before serving anything
+    — the whole Pi install then failed its readiness gate on Admin.
+    """
+
+    assert (
+        f"EIDOLON_PORTS_FILE={target_agent.HOST_PORTS_PATH}"
+        in target_agent.HOST_ENV_VALUE
+    )
+
+
+def _declarations(text: str) -> list[str]:
+    """The YAML body with comments and blank lines removed.
+
+    Ops has no YAML parser on purpose — the target agent ships as one file and
+    runs against the board's bare system Python — so the comparison is textual.
+    """
+
+    return [
+        line.rstrip()
+        for line in text.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+
+
+def test_the_host_port_registry_agrees_with_the_operator_one() -> None:
+    """Two copies exist because the target agent ships as one standalone file
+    and cannot read the operator's checkout. They describe one topology, so a
+    port that moves in only one of them is a bug, not a configuration."""
+
+    operator = (Path(__file__).resolve().parents[1] / "config" / "ports.yaml").read_text(
+        encoding="utf-8"
+    )
+
+    assert _declarations(target_agent.HOST_PORTS_VALUE) == _declarations(operator)
+
+
+def test_every_port_admin_interpolates_is_present() -> None:
+    """Admin's ``services.yaml`` interpolates these by name; a missing one
+    surfaces as a Pydantic parse error on the literal ``$EIDOLON_...`` text."""
+
+    declarations = _declarations(target_agent.HOST_PORTS_VALUE)
+
+    assert "    port: 9000" in declarations  # admin api
+    assert "    port: 8180" in declarations  # agent http
+    for section in ("client_web:", "mementos:", "nats:", "livekit:"):
+        assert section in declarations

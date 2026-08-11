@@ -181,6 +181,81 @@ RELEASE_ACTIVATOR = ".release/bin/eidolon-release"
 RELEASE_INTERPRETER = ".release/bin/python"
 _CURRENT_KERNEL = Path("/opt/eidolon/current/eidolon_kernel")
 HOST_ENV_PATH = Path("/etc/eidolon/host.env")
+HOST_PORTS_PATH = Path("/etc/eidolon/generated/ports.yaml")
+#: Which port every component binds. Admin reads this to build the service
+#: catalog and to export the ``EIDOLON_*`` variables its ``services.yaml``
+#: interpolates; without it Admin looks for an ``eidolon_ops`` checkout beside
+#: its own source, finds none, and dies before it can serve ``/healthz``.
+#:
+#: This is Host topology, so the Host authority states it. It must stay equal
+#: to the operator-side ``config/ports.yaml``; ``tests/test_target_agent.py``
+#: fails if the two ever disagree.
+HOST_PORTS_VALUE = """\
+# Eidolon Host port registry, written by Ops. Read-only to the services.
+#
+# Ports are fixed by the deployment contract, not by the board, so this file
+# is the same on every Host. Edit config/ports.yaml in eidolon_ops instead;
+# a test keeps the two in agreement.
+
+admin:
+  api:
+    host: 127.0.0.1
+    port: 9000
+  web:
+    port: 9001
+hub:
+  api:
+    host: 0.0.0.0
+    port: 8082
+data:
+  api:
+    host: 127.0.0.1
+    port: 8084
+  workspace_api:
+    host: 127.0.0.1
+    port: 8085
+kernel:
+  api:
+    host: 127.0.0.1
+    port: 8083
+eidolond:
+  api:
+    host: 127.0.0.1
+    port: 8090
+agent:
+  http:
+    port: 8180
+  admin:
+    port: 8081
+  grpc:
+    port: 45051
+memory:
+  discovery:
+    host: 127.0.0.1
+    port: 8020
+  mcp:
+    port: 10030
+  supervisor_http:
+    host: 127.0.0.1
+    port: 8019
+channel:
+  worker:
+    port: 8766
+client_web:
+  port: 3001
+nats:
+  port: 4222
+  http_port: 8222
+livekit:
+  port: 7880
+  turn_udp_port: 3478
+  rtc_port_start: 50000
+  rtc_port_end: 60000
+mementos:
+  sidecar:
+    host: 127.0.0.1
+    port: 18765
+"""
 HOST_ENV_VALUE = (
     "EIDOLON_INSTALL_ROOT=/opt/eidolon\n"
     "EIDOLON_WORKSPACE_ROOT=/opt/eidolon/current\n"
@@ -198,6 +273,9 @@ HOST_ENV_VALUE = (
     # laptop runs. Measured on a Pi 5, bge-large costs 626 MB and 104 ms/doc
     # against base's 198 MB and 32 ms, for MRR 0.813 against 0.787.
     "EIDOLON_MEMORY_EMBEDDING_MODEL=bge-base-zh\n"
+    # Admin resolves the port registry relative to an operator's checkout when
+    # nobody names one, which is a Mac-workstation shape. Name the Host copy.
+    f"EIDOLON_PORTS_FILE={HOST_PORTS_PATH}\n"
 )
 HOST_DIRECTORIES = (
     (Path("/opt/eidolon"), 0o755, "root", "root"),
@@ -451,6 +529,13 @@ def _ensure_host_path_contract(
         path.mkdir(parents=True, exist_ok=True)
         os.chmod(path, mode)
         chown(path, user, group)
+    # Derived from this contract rather than supplied by anyone, so rewriting
+    # it is how it stays true; only the credentials are write-once.
+    ports = _host_path(root, HOST_PORTS_PATH)
+    if ports.is_symlink():
+        raise TargetError("existing /etc/eidolon/generated/ports.yaml is not a regular file")
+    _atomic_text(ports, HOST_PORTS_VALUE, mode=0o640)
+    chown(ports, "root", "eidolon")
     host_env = _host_path(root, HOST_ENV_PATH)
     if host_env.exists() or host_env.is_symlink():
         if (
@@ -685,6 +770,8 @@ def doctor_host(payload: Mapping[str, object]) -> dict[str, object]:
         "uv": Path(remote_uv).is_file() and os.access(remote_uv, os.X_OK),
         "host_path_contract": host_env.is_file()
         and host_env.read_text(encoding="utf-8") == HOST_ENV_VALUE,
+        "port_registry": HOST_PORTS_PATH.is_file()
+        and HOST_PORTS_PATH.read_text(encoding="utf-8") == HOST_PORTS_VALUE,
     }
     release_id = _release_id(payload, required=False)
     release_doctor: object = None
