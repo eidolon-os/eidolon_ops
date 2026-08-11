@@ -1166,3 +1166,41 @@ def test_controller_reset_rejects_output_that_is_not_bootstrap_evidence(
 
     with pytest.raises(TargetError, match="invalid evidence"):
         target_agent.controller_reset({"units": list(target_agent.PRODUCT_UNITS)})
+
+
+def test_a_host_without_a_declared_address_reports_the_one_it_has(monkeypatch) -> None:
+    """An address a Host once had says nothing about reaching it now."""
+
+    monkeypatch.setattr(
+        target_agent,
+        "_run",
+        lambda command, **kwargs: subprocess.CompletedProcess(
+            command, 0, "1.1.1.1 via 192.168.1.1 dev eth0 src 192.168.1.26 uid 0\n", ""
+        ),
+    )
+
+    assert str(target_agent._observed_lan_address()) == "192.168.1.26"
+
+
+def test_a_host_with_no_routable_address_fails_closed(monkeypatch) -> None:
+    monkeypatch.setattr(
+        target_agent,
+        "_run",
+        lambda command, **kwargs: subprocess.CompletedProcess(command, 1, "", "unreachable"),
+    )
+
+    with pytest.raises(TargetError, match="no routable IPv4"):
+        target_agent._observed_lan_address()
+
+
+def test_a_loopback_default_route_is_refused(monkeypatch) -> None:
+    monkeypatch.setattr(
+        target_agent,
+        "_run",
+        lambda command, **kwargs: subprocess.CompletedProcess(
+            command, 0, "1.1.1.1 dev lo src 127.0.0.1 uid 0\n", ""
+        ),
+    )
+
+    with pytest.raises(TargetError, match="must be private IPv4"):
+        target_agent._observed_lan_address()

@@ -282,11 +282,13 @@ class LocalProductSource:
         interface_addresses = set(
             re.findall(r"\binet\s+(\d+\.\d+\.\d+\.\d+)\b", interface_result.stdout)
         )
-        local_api = _http_health(f"https://{app.lan_ipv4}:{ports['local_api']}/healthz")
-        hub = _http_health(f"https://{app.lan_ipv4}:{app.hub_https_port}/health")
+        observed = self._observed_lan_address(interface_addresses)
+        address = str(app.lan_ipv4) if app.lan_ipv4 is not None else observed
+        local_api = _http_health(f"https://{address}:{ports['local_api']}/healthz")
+        hub = _http_health(f"https://{address}:{app.hub_https_port}/health")
         livekit_origin = urlparse(app.livekit_client_url)
         livekit = _tcp_health(
-            str(app.lan_ipv4),
+            address,
             livekit_origin.port or (443 if livekit_origin.scheme == "wss" else 80),
         )
         local_api_env = _read_environment_file(self.profile.paths.config_root / "env/local-api.env")
@@ -319,7 +321,13 @@ class LocalProductSource:
             encoding="utf-8", errors="replace"
         )
         contract = {
-            "lan_address_present": str(app.lan_ipv4) in interface_addresses,
+            # A declared address must still be one this Host has; a discovered
+            # one is true by construction, so the check that carries meaning is
+            # whether devices can find the Host under its published name.
+            "lan_address_present": bool(address) and address in interface_addresses,
+            "mdns_name_resolves_to_lan_address": self._mdns_matches(
+                identity.hub_hostname, address
+            ),
             "local_api_target": (
                 local_api_env.get("EIDOLON_LOCAL_API_HUB_ID") == self._host_lan_identity().hub_id
                 and local_api_env.get("EIDOLON_LOCAL_API_HUB_DESCRIPTOR_URI")
@@ -354,7 +362,7 @@ class LocalProductSource:
         return {
             "status": "app_ready" if healthy else "degraded",
             "host_id": self.profile.host_id,
-            "lan_ipv4": str(app.lan_ipv4),
+            "lan_ipv4": address,
             "checks": checks,
             "endpoints": {
                 "local_api": f"https://{app.lan_ipv4}:{ports['local_api']}",
@@ -431,6 +439,36 @@ class LocalProductSource:
             "admin_web": 9001,
             "local_api": 9002,
         }
+
+    def _observed_lan_address(self, interface_addresses: set[str]) -> str:
+        """The address this Host currently answers on, not one it once had."""
+
+        route = self.runner.run(("/sbin/route", "-n", "get", "default"), timeout=10)
+        interface = ""
+        for line in route.stdout.splitlines():
+            name, separator, value = line.partition(":")
+            if separator and name.strip() == "interface":
+                interface = value.strip()
+                break
+        if interface:
+            detail = self.runner.run(("ifconfig", interface), timeout=10)
+            found = re.search(r"\binet\s+(\d+\.\d+\.\d+\.\d+)\b", detail.stdout)
+            if found is not None:
+                return found.group(1)
+        routable = sorted(
+            value for value in interface_addresses if not value.startswith("127.")
+        )
+        return routable[0] if routable else ""
+
+    def _mdns_matches(self, hostname: str, address: str) -> bool:
+        """A device finds this Host by name; the name has to reach the address."""
+
+        if not address:
+            return False
+        result = self.runner.run(("dscacheutil", "-q", "host", "-a", "name", hostname), timeout=10)
+        return address in re.findall(
+            r"\bip_address:\s*(\d+\.\d+\.\d+\.\d+)\b", result.stdout
+        )
 
     def _require_app_access(self):
         if self.profile.app is None:

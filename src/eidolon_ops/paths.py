@@ -30,6 +30,7 @@ _HOST_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _PLATFORMS = {"macos", "raspberry-pi"}
 _DRIVERS = {"local-supervisord", "ssh-systemd"}
 _FOUNDATION_MODES = {"external"}
+_IPV4_LITERAL = re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}$")
 _PATH_FIELDS = (
     "install_root",
     "current_root",
@@ -81,9 +82,16 @@ class HostPaths:
 
 @dataclass(frozen=True, slots=True)
 class AppAccess:
-    """Device-reachable application endpoints for one Host."""
+    """Device-reachable application endpoints for one Host.
 
-    lan_ipv4: IPv4Address
+    ``lan_ipv4`` is optional because an address is observed state, not a
+    decision. A Host that gets its address from DHCP has no stable value to
+    declare, and a declaration that silently goes stale makes every reachability
+    check ambiguous: you cannot tell a real network fault from an old config.
+    Leave it out and the Host reports the address it currently has.
+    """
+
+    lan_ipv4: IPv4Address | None
     hub_https_port: int
     livekit_client_url: str
     allow_insecure_livekit: bool
@@ -278,20 +286,19 @@ def _app_access(value: object | None) -> AppAccess | None:
     if value is None:
         return None
     document = _table(value, "app")
-    expected = {
-        "lan_ipv4",
-        "hub_https_port",
-        "livekit_client_url",
-        "allow_insecure_livekit",
-    }
-    if set(document) != expected:
-        raise HostProfileError(f"app must contain exactly {', '.join(sorted(expected))}")
-    try:
-        address = ip_address(_text(document["lan_ipv4"], "app.lan_ipv4"))
-    except ValueError as exc:
-        raise HostProfileError("app.lan_ipv4 must be a private IPv4 address") from exc
-    if not isinstance(address, IPv4Address) or not address.is_private or address.is_loopback:
-        raise HostProfileError("app.lan_ipv4 must be a private IPv4 address")
+    required = {"hub_https_port", "livekit_client_url", "allow_insecure_livekit"}
+    if not required <= set(document) or not set(document) <= (required | {"lan_ipv4"}):
+        raise HostProfileError(
+            f"app must contain exactly {', '.join(sorted(required))}, with lan_ipv4 optional"
+        )
+    address: IPv4Address | None = None
+    if "lan_ipv4" in document:
+        try:
+            address = ip_address(_text(document["lan_ipv4"], "app.lan_ipv4"))
+        except ValueError as exc:
+            raise HostProfileError("app.lan_ipv4 must be a private IPv4 address") from exc
+        if not isinstance(address, IPv4Address) or not address.is_private or address.is_loopback:
+            raise HostProfileError("app.lan_ipv4 must be a private IPv4 address")
     port = document["hub_https_port"]
     if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:
         raise HostProfileError("app.hub_https_port must be a valid TCP port")
@@ -312,7 +319,12 @@ def _app_access(value: object | None) -> AppAccess | None:
         raise HostProfileError("app.allow_insecure_livekit must be boolean")
     if parsed.scheme == "ws" and not allow_insecure:
         raise HostProfileError("an insecure LiveKit URL requires explicit development opt-in")
-    if parsed.scheme == "ws" and parsed.hostname != str(address):
+    if address is None and _IPV4_LITERAL.fullmatch(parsed.hostname or "") is not None:
+        raise HostProfileError(
+            "app.livekit_client_url must not embed a literal address when lan_ipv4 is "
+            "discovered; use the Host-bound hostname so it cannot go stale either"
+        )
+    if address is not None and parsed.scheme == "ws" and parsed.hostname != str(address):
         raise HostProfileError("an insecure LiveKit URL must use app.lan_ipv4")
     return AppAccess(
         lan_ipv4=address,

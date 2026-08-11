@@ -325,7 +325,12 @@ def test_app_ready_requires_device_reachable_contract(monkeypatch, tmp_path: Pat
 
     class InterfaceRunner:
         def run(self, command, **_kwargs):
-            assert tuple(command) == ("ifconfig",)
+            command = tuple(command)
+            if command[:2] == ("/sbin/route", "-n"):
+                return ProcessResult(0, "   interface: en0\n", "")
+            if command[0] == "dscacheutil":
+                return ProcessResult(0, "ip_address: 192.168.1.25\n", "")
+            assert command[0] == "ifconfig"
             return ProcessResult(0, "en0: flags\n\tinet 192.168.1.25 netmask 0xffffff00\n", "")
 
     product.runner = InterfaceRunner()

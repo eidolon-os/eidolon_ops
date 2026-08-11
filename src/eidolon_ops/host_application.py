@@ -110,7 +110,11 @@ class HostApplicationMaterializer:
             "hub_hostname": identity.hub_hostname,
             "hub_https_port": self.app.hub_https_port,
             "hub_origin": identity.hub_origin(self.app.hub_https_port),
-            "lan_ipv4": str(self.app.lan_ipv4),
+            **(
+                {"lan_ipv4": str(self.app.lan_ipv4)}
+                if self.app.lan_ipv4 is not None
+                else {}
+            ),
             "livekit_client_url": self.app.livekit_client_url,
             "allow_insecure_livekit": self.app.allow_insecure_livekit,
         }

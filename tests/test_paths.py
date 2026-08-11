@@ -349,3 +349,40 @@ def test_profile_accepts_secure_livekit_origin_without_development_opt_in(tmp_pa
     assert profile.app is not None
     assert profile.app.livekit_client_url == "wss://livekit.example.test"
     assert profile.app.allow_insecure_livekit is False
+
+
+def test_a_host_may_leave_its_address_to_discovery(tmp_path: Path) -> None:
+    """An address is observed state; a Host on DHCP has none to declare."""
+
+    script = tmp_path / "run.sh"
+    script.write_text("#!/bin/sh\n", encoding="utf-8")
+    script.chmod(0o755)
+    original = _write_mac_profile(tmp_path, script=script)
+    text = original.read_text(encoding="utf-8")
+    text = text.replace('lan_ipv4 = "192.168.1.25"\n', "")
+    text = text.replace(
+        'livekit_client_url = "ws://192.168.1.25:7880"',
+        'livekit_client_url = "ws://eidolon-hub-0123456789abcdef0123.local:7880"',
+    )
+    discovered = tmp_path / "mac-discovered.toml"
+    discovered.write_text(text, encoding="utf-8")
+
+    profile = load_host_profile(discovered)
+
+    assert profile.app is not None
+    assert profile.app.lan_ipv4 is None
+
+
+def test_a_discovered_address_forbids_a_literal_one_in_the_client_url(tmp_path: Path) -> None:
+    """Otherwise the URL goes stale exactly the way the declaration did."""
+
+    script = tmp_path / "run.sh"
+    script.write_text("#!/bin/sh\n", encoding="utf-8")
+    script.chmod(0o755)
+    original = _write_mac_profile(tmp_path, script=script)
+    text = original.read_text(encoding="utf-8").replace('lan_ipv4 = "192.168.1.25"\n', "")
+    stale = tmp_path / "mac-stale-url.toml"
+    stale.write_text(text, encoding="utf-8")
+
+    with pytest.raises(HostProfileError, match="must not embed a literal address"):
+        load_host_profile(stale)

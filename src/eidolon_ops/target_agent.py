@@ -510,11 +510,12 @@ def _fixed_app(payload: Mapping[str, object]) -> dict[str, object]:
         "hub_hostname",
         "hub_https_port",
         "hub_origin",
-        "lan_ipv4",
         "livekit_client_url",
         "allow_insecure_livekit",
     }
-    if not isinstance(value, dict) or set(value) != expected:
+    if not isinstance(value, dict) or not expected <= set(value):
+        raise TargetError("Host application contract is missing or malformed")
+    if not set(value) <= (expected | {"lan_ipv4"}):
         raise TargetError("Host application contract is missing or malformed")
     host_id = value.get("host_id")
     if not isinstance(host_id, str) or re.fullmatch(r"ehost-[0-9a-f]{20}", host_id) is None:
@@ -531,12 +532,19 @@ def _fixed_app(payload: Mapping[str, object]) -> dict[str, object]:
         or value.get("hub_origin") != f"https://{hub_hostname}:{port}"
     ):
         raise TargetError("Host application Hub identity is not Host-bound")
-    try:
-        address = ip_address(str(value.get("lan_ipv4")))
-    except ValueError as exc:
-        raise TargetError("Host application LAN address is invalid") from exc
-    if not isinstance(address, IPv4Address) or not address.is_private or address.is_loopback:
-        raise TargetError("Host application LAN address must be private IPv4")
+    # A declared address is honoured for static setups; otherwise the Host
+    # reports the one it currently answers on, because an address it once had
+    # tells an operator nothing about whether devices can reach it now.
+    declared = value.get("lan_ipv4")
+    if declared is None:
+        address = _observed_lan_address()
+    else:
+        try:
+            address = ip_address(str(declared))
+        except ValueError as exc:
+            raise TargetError("Host application LAN address is invalid") from exc
+        if not isinstance(address, IPv4Address) or not address.is_private or address.is_loopback:
+            raise TargetError("Host application LAN address must be private IPv4")
     livekit = value.get("livekit_client_url")
     try:
         parsed = urlparse(livekit) if isinstance(livekit, str) else None
@@ -1216,6 +1224,21 @@ def _environment_values(path: Path) -> dict[str, str]:
             raise TargetError(f"Host application environment is invalid: {path}")
         values[key] = value
     return values
+
+
+def _observed_lan_address() -> IPv4Address:
+    """The address this Host currently answers on, read from its default route."""
+
+    route = _run(("/usr/sbin/ip", "-4", "route", "get", "1.1.1.1"), timeout=15)
+    if route.returncode != 0:
+        route = _run(("/sbin/ip", "-4", "route", "get", "1.1.1.1"), timeout=15)
+    found = re.search(r"\bsrc\s+(\d+\.\d+\.\d+\.\d+)\b", route.stdout)
+    if found is None:
+        raise TargetError("Host has no routable IPv4 address")
+    address = ip_address(found.group(1))
+    if not isinstance(address, IPv4Address) or not address.is_private or address.is_loopback:
+        raise TargetError("Host default route address must be private IPv4")
+    return address
 
 
 def _host_application_ready(

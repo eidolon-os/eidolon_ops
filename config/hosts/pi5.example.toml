@@ -20,6 +20,8 @@ bootstrap_runtime_root = "/run/eidolon-bootstrap"
 operations_config = "../eidolon-pi.toml"
 
 [app]
+# lan_ipv4 is optional; without it the Host reports the address on its
+# default route, so a DHCP lease change does not stale the profile.
 lan_ipv4 = "192.168.100.15"
 hub_https_port = 8443
 livekit_client_url = "ws://192.168.100.15:7880"
