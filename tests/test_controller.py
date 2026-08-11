@@ -8,6 +8,11 @@ from pathlib import Path
 
 import pytest
 
+# The overlay still rewrites specific literals in three components' settings,
+# so refreshing the derived inputs must be exercised against text that actually
+# contains them. Shared with the install-inputs suite.
+from test_install_inputs import _settings_reader as _product_settings_reader
+
 from eidolon_ops.config import SOURCE_IDS, ConfigurationError
 from eidolon_ops.controller import EidolonPiController, OperationsError
 from eidolon_ops.paths import AppAccess
@@ -55,6 +60,11 @@ class ControllerRunner:
             return ProcessResult(0, revision + "\n", "")
         if "show" in command:
             path = command[-1].partition(":")[2]
+            if path == "config/settings.yaml":
+                # Component settings are read from the pinned commit whenever the
+                # derived inputs are refreshed.
+                source = command[command.index("-C") + 1].rsplit("/", 1)[-1]
+                return ProcessResult(0, _product_settings_reader(source, "", path), "")
             contract = next(item for item in SYSTEMD_ASSET_CONTRACTS if item.path == path)
             if self.invalid_release_matrix:
                 return ProcessResult(
@@ -753,6 +763,8 @@ def test_input_initialization_is_local_and_exact_revision_pinned(setup_controlle
     assert transport.agent_calls == []
     settings_checks = [call for call in runner.calls if "rev-parse" in call]
     assert len(settings_checks) == 3
+    # Derived settings follow the pinned commits; credentials are not reissued.
+    assert result["refreshed_settings"] == ["agent.yaml", "channel.yaml", "memory.yaml"]
 
 
 def test_install_apply_stages_exact_files_and_cleans(setup_controller) -> None:

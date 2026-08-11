@@ -156,8 +156,20 @@ def test_initializer_creates_one_private_consistent_input_set(config, tmp_path: 
     # host.env, where changing it does not mean reissuing every secret.
     assert "EIDOLON_MEMORY_EMBEDDING_MODEL" not in _env(target / "memory.env")
 
-    repeated = initialize_install_inputs(configured, lambda *_args: "should not read")
+    # Credentials are never reissued, but the derived settings follow the pinned
+    # commits: a component changing a default must not require an operator to
+    # reissue every secret on the Host.
+    repeated = initialize_install_inputs(configured, _settings_reader)
     assert repeated["status"] == "already_initialized"
+    assert repeated["refreshed_settings"] == []
+
+    (target / "memory.yaml").write_bytes(b"stale: true\n")
+    refreshed = initialize_install_inputs(configured, _settings_reader)
+    assert refreshed["refreshed_settings"] == ["memory.yaml"]
+    assert (target / "memory.yaml").read_text(encoding="utf-8") == _settings_reader(
+        "eidolon_memory", "", "config/settings.yaml"
+    )
+    assert stat.S_IMODE((target / "memory.yaml").stat().st_mode) == 0o600
     validated = validate_install_input_contract(configured, _settings_reader)
     assert validated["status"] == "compatible"
     assert validated["contract"] == "pi-private-inputs-v1"

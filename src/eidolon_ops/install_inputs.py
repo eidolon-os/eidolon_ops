@@ -56,7 +56,7 @@ def initialize_install_inputs(
 
     target = _target_directory(config)
     if target.exists() or target.is_symlink():
-        return _validate_existing(target)
+        return _validate_existing(target, config, read_exact_file)
 
     providers = {
         source_id: _parse_provider_env(config.sources[source_id].path / "config/.env")
@@ -180,7 +180,7 @@ def validate_install_input_contract(
     """Re-prove identities, token relationships and exact product settings."""
 
     target = _target_directory(config)
-    _validate_existing(target)
+    _require_safe_input_directory(target)
     envs = {
         name: _parse_provider_env(target / name)
         for name in (
@@ -580,7 +580,9 @@ def _ensure_private_parent(parent: Path) -> None:
         raise InstallInputError(f"install input parent must be a private directory: {parent}")
 
 
-def _validate_existing(target: Path) -> dict[str, object]:
+def _require_safe_input_directory(target: Path) -> set[str]:
+    """Prove the private input set is complete and private. Reads no value."""
+
     if target.is_symlink() or not target.is_dir() or stat.S_IMODE(target.stat().st_mode) != 0o700:
         raise InstallInputError(f"install input directory is unsafe: {target}")
     expected = set(INSTALL_DESTINATION_NAMES.values())
@@ -590,9 +592,51 @@ def _validate_existing(target: Path) -> dict[str, object]:
     for path in target.iterdir():
         if path.is_symlink() or not path.is_file() or stat.S_IMODE(path.stat().st_mode) != 0o600:
             raise InstallInputError(f"existing install input is unsafe: {path.name}")
+    return actual
+
+
+def _validate_existing(
+    target: Path,
+    config: OperationsConfig,
+    read_exact_file: Callable[[str, str, str], str],
+) -> dict[str, object]:
+    actual = _require_safe_input_directory(target)
+    # Settings are derived from the pinned commits, not generated here: they
+    # carry no secret and are simply what those commits say. Refreshing them is
+    # safe, and not refreshing them would mean a component cannot change a
+    # default without an operator reissuing every credential on the Host.
+    refreshed = _refresh_derived_settings(target, config, read_exact_file)
     return {
         "status": "already_initialized",
         "directory": str(target),
         "files": sorted(actual),
+        "refreshed_settings": refreshed,
         "redaction": "existing credential values were not read or returned",
     }
+
+
+def _refresh_derived_settings(
+    target: Path,
+    config: OperationsConfig,
+    read_exact_file: Callable[[str, str, str], str],
+) -> list[str]:
+    """Rewrite the settings that follow the pinned commits; never a credential."""
+
+    refreshed: list[str] = []
+    for name, value in _product_settings(config, read_exact_file).items():
+        path = target / name
+        payload = value.encode("utf-8")
+        if path.read_bytes() == payload:
+            continue
+        temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            with os.fdopen(descriptor, "wb") as stream:
+                stream.write(payload)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
+        refreshed.append(name)
+    return refreshed
