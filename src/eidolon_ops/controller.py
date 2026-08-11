@@ -133,8 +133,10 @@ class EidolonPiController:
             result = initialize_install_inputs(self.config, self._read_exact_source_file)
             if self.app is None:
                 return result
-            application = self._prepare_host_application()
-            return {**result, "host_application": application.public_contract()}
+            self._prepare_host_application()
+            # The contract describes the Host binding, which the materializer
+            # owns; the assets it produced are the private material itself.
+            return {**result, "host_application": self._host_application().public_contract()}
         except (InstallInputError, HostApplicationError) as exc:
             raise OperationsError(str(exc)) from exc
 

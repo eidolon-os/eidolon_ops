@@ -29,6 +29,11 @@ DEPLOY_TREE_LISTING = (
 )
 DEPLOY_PACKAGE_DIGEST = "4a0a4e9c29dbbebd3c4ddbd73fccbee20aba0cdf1cc9360bbe9fafc0277c262a"
 
+# The Hub settings template the Host binding rewrites; only the two literals the
+# materializer replaces have to be present for it to be a faithful stand-in.
+HUB_SETTINGS_TEMPLATE_PATH = "config/hub.systemd.example.yaml"
+HUB_SETTINGS_TEMPLATE = "hub_id: eidolon-hub-local\npublic_base_url: https://eidolon-hub.local\n"
+
 
 class ControllerRunner:
     def __init__(
@@ -65,6 +70,8 @@ class ControllerRunner:
                 # derived inputs are refreshed.
                 source = command[command.index("-C") + 1].rsplit("/", 1)[-1]
                 return ProcessResult(0, _product_settings_reader(source, "", path), "")
+            if path == HUB_SETTINGS_TEMPLATE_PATH:
+                return ProcessResult(0, HUB_SETTINGS_TEMPLATE, "")
             contract = next(item for item in SYSTEMD_ASSET_CONTRACTS if item.path == path)
             if self.invalid_release_matrix:
                 return ProcessResult(
@@ -1159,3 +1166,33 @@ def test_a_tag_that_still_resolves_is_accepted(config) -> None:
     )
 
     assert controller.local_preflight(require_install_files=False)["sources"]
+
+
+def test_input_initialization_reports_the_host_binding_it_established(
+    setup_controller,
+) -> None:
+    """The contract describes the Host binding; the assets are private material.
+
+    Asking the produced assets for a contract raised AttributeError, so
+    init-inputs failed outright on any Host that declares an app contract.
+    """
+
+    controller, _runner, _transport = setup_controller
+    identity = controller.config.install_files["host_identity"]
+    identity.parent.mkdir(parents=True, exist_ok=True)
+    identity.write_bytes(b"i" * 32)
+    identity.chmod(0o600)
+    controller.app = AppAccess(
+        lan_ipv4=None,
+        hub_https_port=8443,
+        livekit_client_url="wss://eidolon-hub.local:7880",
+        allow_insecure_livekit=False,
+    )
+
+    result = controller.initialize_inputs()
+
+    binding = result["host_application"]
+    assert binding["host_id"].startswith("ehost-")
+    assert binding["hub_hostname"].endswith(".local")
+    # Private material must not ride along in the reported contract.
+    assert not [key for key in binding if "key" in key.lower() or "token" in key.lower()]
