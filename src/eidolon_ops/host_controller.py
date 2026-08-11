@@ -40,14 +40,22 @@ class HostController:
         return self._require_pi("init-inputs").initialize_inputs()
 
     def commissioning_code(self, *, ttl_seconds: int) -> dict[str, object]:
-        if self.profile.driver != "local-supervisord":
-            raise OperationsError("commissioning-code is available on the Mac adapter only")
+        """Issue the Setup code a phone types, on whichever Host this profile is.
+
+        This was refused anywhere but the Mac, and nothing else could create a
+        commissioning session, so a product Host could not be claimed at all.
+        """
+
         if not 60 <= ttl_seconds <= 86400:
             raise OperationsError("commissioning-code TTL must be between 60 and 86400 seconds")
-        return self.local_profile(
-            "product-source",
-            "commissioning-code",
-            arguments=("--ttl", str(ttl_seconds)),
+        if self.profile.driver == "local-supervisord":
+            return self.local_profile(
+                "product-source",
+                "commissioning-code",
+                arguments=("--ttl", str(ttl_seconds)),
+            )
+        return self._require_pi("commissioning-code").commissioning_code(
+            ttl_seconds=ttl_seconds
         )
 
     def install(

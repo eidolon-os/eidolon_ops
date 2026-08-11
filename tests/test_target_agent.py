@@ -1398,3 +1398,51 @@ def test_a_readiness_deadline_outside_reason_is_refused() -> None:
     for value in (0, 29, 1801, "240", True, None):
         with pytest.raises(TargetError, match="readiness timeout is invalid"):
             target_agent._release_readiness_seconds({"readiness_timeout_seconds": value})
+
+
+def test_a_setup_code_is_issued_through_the_hosts_own_control_socket(monkeypatch, tmp_path) -> None:
+    """Authority is reaching the socket, not the build being a development one.
+
+    Issuance used to be refused unless the process ran in development mode, and
+    nothing else could create a commissioning session — so a shipped Host could
+    not be claimed by any phone, ever.
+    """
+
+    monkeypatch.setattr(target_agent, "_BOOTSTRAP_CTL", tmp_path / "eidolon-bootstrapctl")
+    target_agent._BOOTSTRAP_CTL.write_text("#!/bin/sh\n", encoding="utf-8")
+    target_agent._BOOTSTRAP_CTL.chmod(0o755)
+    calls: list[tuple[str, ...]] = []
+
+    def run(command, **_kwargs):
+        calls.append(tuple(command))
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            "Setup code: 48273916\n"
+            "Host: ehost-0123456789abcdefabcd\n"
+            "Commissioning: 123e4567-e89b-42d3-a456-426614174000\n"
+            "Expires: 2026-08-12T01:00:00Z\n",
+            "",
+        )
+
+    monkeypatch.setattr(target_agent, "_run", run)
+
+    result = target_agent.commissioning_code(
+        {"units": list(target_agent.PRODUCT_UNITS), "ttl_seconds": 600}
+    )
+
+    assert calls[0][1:] == ("commissioning-code", "--ttl", "600")
+    assert result["setup_code"] == "48273916"
+    # The phone needs the session as well as the code; the code alone has
+    # nowhere to be spent.
+    assert result["commissioning_id"] == "123e4567-e89b-42d3-a456-426614174000"
+    assert result["expires_at"] == "2026-08-12T01:00:00Z"
+
+
+def test_a_setup_code_request_without_a_sane_lifetime_is_refused(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(target_agent, "_BOOTSTRAP_CTL", tmp_path / "eidolon-bootstrapctl")
+    for ttl in (0, 59, 86401, "600", True, None):
+        with pytest.raises(TargetError, match="TTL must be between"):
+            target_agent.commissioning_code(
+                {"units": list(target_agent.PRODUCT_UNITS), "ttl_seconds": ttl}
+            )

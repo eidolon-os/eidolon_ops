@@ -2277,6 +2277,50 @@ def controller_reset(payload: Mapping[str, object]) -> dict[str, object]:
     return {"status": "reset", "controller_reset": document}
 
 
+def commissioning_code(payload: Mapping[str, object]) -> dict[str, object]:
+    """Mint the one-time Setup code a phone types to claim this Host.
+
+    The authority is the Host's own root-owned control socket, which this
+    reaches by having arrived here at all. Before this, issuance was refused
+    unless the build was a development one, and nothing else could create a
+    commissioning session — so a shipped Host could not be claimed by any
+    phone.
+    """
+
+    _fixed_units(payload)
+    ttl = payload.get("ttl_seconds")
+    if not isinstance(ttl, int) or isinstance(ttl, bool) or not 60 <= ttl <= 86400:
+        raise TargetError("commissioning code TTL must be between 60 and 86400 seconds")
+    if not _BOOTSTRAP_CTL.is_file() or not os.access(_BOOTSTRAP_CTL, os.X_OK):
+        raise TargetError("bootstrap control CLI is unavailable on this Host")
+    result = _checked(
+        "commissioning code",
+        (str(_BOOTSTRAP_CTL), "commissioning-code", "--ttl", str(ttl)),
+        timeout=120,
+    )
+    setup_code = ""
+    commissioning_id = ""
+    expires_at = ""
+    for line in result.stdout.splitlines():
+        label, separator, value = line.partition(":")
+        if not separator:
+            continue
+        if label.strip() == "Setup code":
+            setup_code = value.strip()
+        elif label.strip() == "Commissioning":
+            commissioning_id = value.strip()
+        elif label.strip() == "Expires":
+            expires_at = value.strip()
+    if not setup_code:
+        raise TargetError("commissioning code issuance returned no Setup code")
+    return {
+        "status": "issued",
+        "setup_code": setup_code,
+        "expires_at": expires_at,
+        "commissioning_id": commissioning_id,
+    }
+
+
 def active_release(payload: Mapping[str, object]) -> dict[str, object]:
     """Resolve the active release's operator entries on the target itself.
 
@@ -2461,6 +2505,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = install(payload)
         elif action == "controller-reset":
             result = controller_reset(payload)
+        elif action == "commissioning-code":
+            result = commissioning_code(payload)
         elif action == "active-release":
             result = active_release(payload)
         elif action == "reset-plan":

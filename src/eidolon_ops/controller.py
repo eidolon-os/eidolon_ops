@@ -741,6 +741,19 @@ class EidolonPiController:
             raise OperationsError("Host reset returned invalid evidence")
         return result
 
+    def commissioning_code(self, *, ttl_seconds: int) -> dict[str, object]:
+        """Mint the one-time Setup code a phone types to claim this Host.
+
+        SSH to the Host is what authorises this, the same way it authorises
+        controller-reset: both reach a root-owned local socket, and issuing a
+        code is the lesser of the two acts.
+        """
+
+        self._validate_ssh_material()
+        payload = self._target_payload()
+        payload["ttl_seconds"] = ttl_seconds
+        return self.transport.run_agent("commissioning-code", payload, timeout=180)
+
     def controller_reset(self, *, apply: bool) -> dict[str, object]:
         """Return a claimed Host to unclaimed so a new phone can manage it.
 

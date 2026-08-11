@@ -958,7 +958,7 @@ do_product_source_commissioning_code() {
   "${OPS_ROOT}/deploy/supervisor/wrappers/with-env.sh" \
     "$EIDOLON_SOURCE_ADMIN" \
     "${EIDOLON_PRODUCT_ENV_ROOT}/bootstrap.env" \
-    -- "$EIDOLON_SOURCE_ADMIN/.venv/bin/eidolon-bootstrapctl" dev code --ttl "$ttl"
+    -- "$EIDOLON_SOURCE_ADMIN/.venv/bin/eidolon-bootstrapctl" commissioning-code --ttl "$ttl"
 }
 
 do_product_source_sv() {
