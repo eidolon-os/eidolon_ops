@@ -76,6 +76,11 @@ _RELEASE_TOOL_CONTRACT = {
 _RELEASE_ACTIVATOR = ".release/bin/eidolon-release"
 _RELEASE_INTERPRETER = ".release/bin/python"
 
+#: Sealing runs from the release's own activator, so the one this deployer runs
+#: must be byte-identical to the one the pinned Kernel commit ships.
+_DEPLOY_PACKAGE = "eidolon_deploy"
+_DEPLOY_DIGEST_SUFFIXES = (".py", ".json")
+
 
 class OperationsError(RuntimeError):
     """An orchestration invariant or phase failed."""
@@ -353,7 +358,54 @@ class EidolonPiController:
         }
         if any(document.get(name) != value for name, value in published.items()):
             raise OperationsError("eidolon-release publishes unexpected operator entries")
+        self._require_shipped_activator(document.get("package_digest"))
         return document
+
+    def _require_shipped_activator(self, reported: object) -> None:
+        """Refuse to build a release with an activator that will not ship in it.
+
+        Sealing runs on the target from the release's own copy, so a fix made
+        here does nothing unless the Kernel pin moves with it. Without this
+        check that mismatch is invisible until an install has already run.
+        """
+
+        source = self.config.sources["eidolon_kernel"]
+        listing = checked(
+            "pinned eidolon_deploy listing",
+            self.runner.run(
+                (
+                    self.git,
+                    "-C",
+                    str(source.path),
+                    "ls-tree",
+                    "-r",
+                    source.revision,
+                    "--",
+                    _DEPLOY_PACKAGE,
+                )
+            ),
+        ).stdout
+        entries: list[tuple[str, str]] = []
+        for line in listing.splitlines():
+            metadata, separator, path = line.partition("\t")
+            if not separator:
+                continue
+            relative = path[len(_DEPLOY_PACKAGE) + 1 :]
+            if relative.endswith(_DEPLOY_DIGEST_SUFFIXES):
+                entries.append((relative, metadata.split()[2]))
+        if not entries:
+            raise OperationsError(
+                "the pinned Kernel commit ships no eidolon_deploy package"
+            )
+        digest = hashlib.sha256()
+        for relative, blob in sorted(entries):
+            digest.update(f"{relative}:{blob}\n".encode())
+        expected = digest.hexdigest()
+        if reported != expected:
+            raise OperationsError(
+                "the configured eidolon-release is not the one this release will "
+                "ship: move the eidolon_kernel pin to the commit that contains it"
+            )
 
     def _read_exact_source_file(self, source_id: str, revision: str, path: str) -> str:
         source = self.config.sources[source_id]

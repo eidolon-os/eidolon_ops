@@ -17,6 +17,14 @@ from eidolon_ops.release_matrix import SYSTEMD_ASSET_CONTRACTS
 pytestmark = pytest.mark.component
 
 
+DEPLOY_TREE_LISTING = (
+    "100644 blob aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\teidolon_deploy/bundle.py\n"
+    "100644 blob bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\teidolon_deploy/cli.py\n"
+    "100644 blob cccccccccccccccccccccccccccccccccccccccc\teidolon_deploy/contracts/schemas/x.schema.json\n"
+)
+DEPLOY_PACKAGE_DIGEST = "4a0a4e9c29dbbebd3c4ddbd73fccbee20aba0cdf1cc9360bbe9fafc0277c262a"
+
+
 class ControllerRunner:
     def __init__(
         self,
@@ -37,6 +45,9 @@ class ControllerRunner:
     def run(self, command, **kwargs):
         command = tuple(command)
         self.calls.append(command)
+        if "ls-tree" in command:
+            # A synthetic eidolon_deploy tree; the digest below must agree.
+            return ProcessResult(0, DEPLOY_TREE_LISTING, "")
         if "rev-parse" in command:
             revision = command[-1].removesuffix("^{commit}")
             if self.wrong_revision:
@@ -73,6 +84,7 @@ class ControllerRunner:
                 "snapshot_schema_version": 2,
                 "activator_relative_path": ".release/bin/eidolon-release",
                 "interpreter_relative_path": ".release/bin/python",
+                "package_digest": DEPLOY_PACKAGE_DIGEST,
             }
             document.update(self.release_contract_overrides)
             return ProcessResult(0, json.dumps(document), "")
@@ -1044,3 +1056,36 @@ def test_controller_reset_rejects_invalid_target_evidence(setup_controller) -> N
 
     with pytest.raises(OperationsError, match="invalid evidence"):
         controller.controller_reset(apply=True)
+
+
+def test_preflight_refuses_an_activator_the_release_will_not_ship(config) -> None:
+    """Sealing runs from the release's own activator.
+
+    A behaviour fix on the workstation does nothing unless the Kernel pin moves
+    with it, and without this check the mismatch only surfaces after a full
+    install has already run on the target.
+    """
+
+    controller = EidolonPiController(
+        config,
+        ControllerRunner(config, release_contract_overrides={"package_digest": "0" * 64}),
+        transport=FakeTransport(),
+    )
+
+    with pytest.raises(OperationsError, match="move the eidolon_kernel pin"):
+        controller.local_preflight(require_install_files=False)
+
+
+def test_preflight_refuses_a_pinned_commit_without_the_deploy_package(config) -> None:
+    class EmptyTree(ControllerRunner):
+        def run(self, command, **kwargs):
+            if "ls-tree" in tuple(command):
+                return ProcessResult(0, "", "")
+            return super().run(command, **kwargs)
+
+    controller = EidolonPiController(
+        config, EmptyTree(config), transport=FakeTransport()
+    )
+
+    with pytest.raises(OperationsError, match="ships no eidolon_deploy"):
+        controller.local_preflight(require_install_files=False)
