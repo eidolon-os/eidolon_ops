@@ -574,6 +574,14 @@ class EidolonPiController:
             timeout=600,
         )
         phases.append({"phase": "activate", "result": activation})
+        if self.app is not None:
+            # An activation replaces components and leaves the Host layer Ops
+            # derives — the ingress unit, the rendered Hub settings — exactly
+            # as it found them. A fix to those could otherwise reach a Host no
+            # way but by installing it again.
+            phases.append(
+                {"phase": "host_application", "result": self._refresh_host_application(release_id)}
+            )
         transaction_id = activation.get("transaction_id")
         if (
             activation.get("status") != "activated"
@@ -1100,8 +1108,10 @@ class EidolonPiController:
             sudo=False,
             operation="private secret staging directory creation",
         )
-        full_install = names == INSTALL_FILE_NAMES
-        application = self._prepare_host_application() if full_install and self.app else None
+        # The full name set gates the private inputs, which are written once.
+        # The Host layer is derived rather than kept, so it is staged whenever
+        # this profile has one — a refresh asks for it without the credentials.
+        application = self._prepare_host_application() if self.app else None
         with tempfile.TemporaryDirectory(prefix="eidolon-host-application-") as temporary_value:
             temporary = Path(temporary_value)
             for name in names:
@@ -1120,6 +1130,15 @@ class EidolonPiController:
                     source.write_bytes(application.files[name])
                     os.chmod(source, 0o600)
                     self.transport.upload(source, f"{stage}/{name}")
+
+    def _refresh_host_application(self, release_id: str) -> dict[str, object]:
+        stage = f"/var/tmp/eidolon-secrets-{release_id}"
+        self._stage_install_files(release_id, stage, names=("host_identity",))
+        return self.transport.run_agent(
+            "refresh-host-application",
+            {**self._target_payload(), "release_id": release_id},
+            timeout=180,
+        )
 
     def _remote_json(
         self,

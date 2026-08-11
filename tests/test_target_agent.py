@@ -1446,3 +1446,64 @@ def test_a_setup_code_request_without_a_sane_lifetime_is_refused(monkeypatch, tm
             target_agent.commissioning_code(
                 {"units": list(target_agent.PRODUCT_UNITS), "ttl_seconds": ttl}
             )
+
+
+def test_the_derived_host_layer_is_delivered_without_a_reinstall(tmp_path, monkeypatch) -> None:
+    """An activation replaces components and leaves this layer as it found it.
+
+    A fix to the ingress unit could therefore reach a Host no way but by
+    installing it again, which is exactly what happened: updates kept
+    succeeding while the fix sat undelivered.
+    """
+
+    monkeypatch.setattr(target_agent, "_VAR_TMP", tmp_path / "var-tmp")
+    stage = tmp_path / "var-tmp" / "eidolon-secrets-r1"
+    stage.mkdir(parents=True)
+    for name in target_agent.REFRESHABLE_HOST_APPLICATION_INPUTS:
+        (stage / name).write_text(f"new-{name}", encoding="utf-8")
+    monkeypatch.setattr(target_agent, "_chown_path", lambda *_a: None)
+    monkeypatch.setattr(
+        target_agent, "_checked", lambda *_a, **_k: subprocess.CompletedProcess((), 0, "", "")
+    )
+    placed: dict[str, Path] = {}
+    for name in target_agent.REFRESHABLE_HOST_APPLICATION_INPUTS:
+        destination = tmp_path / "host" / name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        placed[name] = destination
+    monkeypatch.setattr(
+        target_agent,
+        "HOST_APPLICATION_INPUTS",
+        {
+            **{
+                name: (placed[name], "root", "root", 0o644)
+                for name in target_agent.REFRESHABLE_HOST_APPLICATION_INPUTS
+            }
+        },
+    )
+
+    result = target_agent.refresh_host_application(
+        {"units": list(target_agent.PRODUCT_UNITS), "release_id": "r1"}
+    )
+
+    assert result["status"] == "refreshed"
+    assert len(result["changed"]) == len(target_agent.REFRESHABLE_HOST_APPLICATION_INPUTS)
+    for name, destination in placed.items():
+        assert destination.read_text(encoding="utf-8") == f"new-{name}"
+
+    # Second run has nothing to deliver, so systemd is left alone.
+    assert target_agent.refresh_host_application(
+        {"units": list(target_agent.PRODUCT_UNITS), "release_id": "r1"}
+    )["changed"] == []
+
+
+def test_the_tls_pair_is_never_among_what_a_refresh_rewrites() -> None:
+    """Material is written once; only renderings of it are refreshed."""
+
+    assert "hub.crt" not in target_agent.REFRESHABLE_HOST_APPLICATION_INPUTS
+    assert "hub.key" not in target_agent.REFRESHABLE_HOST_APPLICATION_INPUTS
+    assert set(target_agent.REFRESHABLE_HOST_APPLICATION_INPUTS) <= set(
+        target_agent.HOST_APPLICATION_INPUTS
+    )
+    assert not set(target_agent.REFRESHABLE_HOST_APPLICATION_INPUTS) & set(
+        target_agent.SECRET_INPUTS
+    )

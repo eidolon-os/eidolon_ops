@@ -163,6 +163,21 @@ HOST_APPLICATION_INPUTS = {
     ),
 }
 INSTALL_INPUTS = {**SECRET_INPUTS, **HOST_APPLICATION_INPUTS}
+#: The Host layer Ops derives rather than keeps: settings rendered from the
+#: Host identity, the ingress program, and the two units that run it. Unlike a
+#: credential these are a function of the operator's own source, so a Host that
+#: is never allowed to receive a newer one can only be corrected by reinstalling
+#: it — which is how a fix for the ingress unit sat undelivered while updates
+#: kept succeeding.
+#:
+#: The TLS pair is deliberately absent. That is material, not a rendering of
+#: it, and material is written once.
+REFRESHABLE_HOST_APPLICATION_INPUTS = (
+    "hub.generated.yaml",
+    "hub-ingress.py",
+    "hub-ingress.service",
+    "hub-service-override.conf",
+)
 CORE_COMPONENTS = (
     "eidolon_kernel",
     "eidolon_data",
@@ -1314,6 +1329,15 @@ def _await_host_application(run: Callable[..., object], root: Path = Path("/")) 
         time.sleep(0.5)
 
 
+def _chown_path(path: Path, user: str, group: str) -> None:
+    try:
+        uid = pwd.getpwnam(user).pw_uid
+        gid = grp.getgrnam(group).gr_gid
+    except KeyError as exc:
+        raise TargetError(f"required service identity is missing: {user}:{group}") from exc
+    os.chown(path, uid, gid)
+
+
 def _observed_lan_address() -> IPv4Address:
     """The address this Host currently answers on, read from its default route."""
 
@@ -2039,12 +2063,7 @@ class TargetInstaller:
     def _chown(self, path: Path, user: str, group: str) -> None:
         if not self.manage_ownership or self.root != Path("/"):
             return
-        try:
-            uid = pwd.getpwnam(user).pw_uid
-            gid = grp.getgrnam(group).gr_gid
-        except KeyError as exc:
-            raise TargetError(f"required service identity is missing: {user}:{group}") from exc
-        os.chown(path, uid, gid)
+        _chown_path(path, user, group)
 
 
 def install(payload: Mapping[str, object]) -> dict[str, object]:
@@ -2321,6 +2340,51 @@ def commissioning_code(payload: Mapping[str, object]) -> dict[str, object]:
     }
 
 
+def refresh_host_application(payload: Mapping[str, object]) -> dict[str, object]:
+    """Deliver the Host layer the operator derived, without a reinstall.
+
+    An activation replaces components and leaves this layer alone, so a fix to
+    the ingress unit or the rendered Hub settings could reach a Host no way but
+    by installing it again. The TLS pair is not among these: material is
+    written once, and only the renderings of it are refreshed.
+    """
+
+    _fixed_units(payload)
+    release_id = _release_id(payload)
+    stage = _VAR_TMP / f"eidolon-secrets-{release_id}"
+    if stage.parent != _VAR_TMP or _STAGING_NAME.fullmatch(stage.name) is None:
+        raise TargetError("secret staging path is unsafe")
+    if not stage.is_dir() or stage.is_symlink():
+        raise TargetError("Host application staging directory is missing")
+    changed: list[str] = []
+    for name in REFRESHABLE_HOST_APPLICATION_INPUTS:
+        source = stage / name
+        if not source.is_file():
+            raise TargetError(f"Host application asset was not staged: {name}")
+        destination_value, user, group, mode = HOST_APPLICATION_INPUTS[name]
+        destination = _host_path(Path("/"), destination_value)
+        if (
+            destination.is_file()
+            and not destination.is_symlink()
+            and destination.read_bytes() == source.read_bytes()
+            and stat.S_IMODE(destination.stat().st_mode) == mode
+        ):
+            continue
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            shutil.copyfile(source, temporary)
+            os.chmod(temporary, mode)
+            _chown_path(temporary, user, group)
+            os.replace(temporary, destination)
+        finally:
+            temporary.unlink(missing_ok=True)
+        changed.append(str(destination_value))
+    if changed:
+        _checked("systemd reload", ("/usr/bin/systemctl", "daemon-reload"), timeout=120)
+    return {"status": "refreshed", "changed": changed}
+
+
 def active_release(payload: Mapping[str, object]) -> dict[str, object]:
     """Resolve the active release's operator entries on the target itself.
 
@@ -2507,6 +2571,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = controller_reset(payload)
         elif action == "commissioning-code":
             result = commissioning_code(payload)
+        elif action == "refresh-host-application":
+            result = refresh_host_application(payload)
         elif action == "active-release":
             result = active_release(payload)
         elif action == "reset-plan":
