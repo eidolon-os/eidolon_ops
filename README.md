@@ -104,7 +104,8 @@ Mac 还必须安装 `git-lfs`；bundle 只从 exact commit pointer 导出 Channe
 不会读取 Channel working tree 中的 hydrated 文件。
 
 配置显式固定 foundation profile、目标/SSH、8 个 repo/commit、15 个 release unit、authority 数据路径、
-14 个私密基础输入文件、统一 `[app]` LAN 契约，以及 Python 索引/超时/重试/并发策略。Host-bound Hub
+14 个私密基础输入文件、统一 `[app]` LAN 契约、`workspace.release_cli` 与 `workspace.uv` 两个工作站工具，
+以及 Python 索引/超时/重试/并发策略。Host-bound Hub
 配置、证书、ingress 与 systemd overlay 由 Ops 从 Host identity 原子生成，不进入 Git 或 release bundle。
 Python 依赖仍由各仓库的 frozen `uv.lock` 精确
 约束，但 Linux/aarch64 artifact 在 Mac 上预取、压缩、哈希后随 bundle 传输；Pi prepare 强制 offline，
