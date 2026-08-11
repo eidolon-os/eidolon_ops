@@ -348,7 +348,9 @@ class LocalProductSource:
                 channel_env.get("EIDOLON_CHANNEL_PROVIDER_ALLOW_INSECURE_LAN_CLIENT_URL")
                 == ("1" if app.allow_insecure_livekit else "0")
             ),
-            "livekit_rtc_node_ip": livekit_node_ip == str(app.lan_ipv4),
+            # WebRTC has to advertise a reachable address, so this compares
+            # against the one the Host actually answers on, not a declaration.
+            "livekit_rtc_node_ip": livekit_node_ip == address,
             "local_api_mdns_registered": mdns_registered,
         }
         checks = {
