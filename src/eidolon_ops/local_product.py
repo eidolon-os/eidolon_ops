@@ -170,12 +170,6 @@ class LocalProductSource:
                     f"public_base_url: {self._hub_public_base_url()}",
                     label="Hub public base URL",
                 )
-                rendered = _replace_exactly_once(
-                    rendered,
-                    f"path: {self.profile.paths.state_root}/eidolon-hub.sqlite3",
-                    f"path: {self.profile.paths.state_root}/hub/eidolon-hub.sqlite3",
-                    label="Mac Hub database path",
-                )
             expected[paths.config_root / "settings" / name] = rendered.encode("utf-8")
         provider_settings = self._read_exact_file(
             "eidolon_channel",

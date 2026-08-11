@@ -20,7 +20,7 @@ discovery:
 channel_provider:
   contract_url: http://127.0.0.1:8767/v1
 persistence:
-  path: /var/lib/eidolon/eidolon-hub.sqlite3
+  path: /var/lib/eidolon/hub/eidolon-hub.sqlite3
 """
 
 

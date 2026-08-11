@@ -795,7 +795,7 @@ def test_unified_pi_stage_renders_host_bound_application_assets(config) -> None:
                     "  public_base_url: https://eidolon-hub.local\n"
                     "discovery:\n  mdns:\n    enabled: true\n"
                     "channel_provider:\n  contract_url: http://127.0.0.1:8767/v1\n"
-                    "persistence:\n  path: /var/lib/eidolon/eidolon-hub.sqlite3\n",
+                    "persistence:\n  path: /var/lib/eidolon/hub/eidolon-hub.sqlite3\n",
                     "",
                 )
             return super().run(command, **kwargs)

@@ -168,14 +168,6 @@ class HostApplicationMaterializer:
             f"public_base_url: {identity.hub_origin(self.app.hub_https_port)}",
             "Hub public base URL",
         )
-        legacy_path = "path: /var/lib/eidolon/eidolon-hub.sqlite3"
-        if legacy_path in rendered:
-            rendered = _replace_once(
-                rendered,
-                legacy_path,
-                "path: /var/lib/eidolon/hub/eidolon-hub.sqlite3",
-                "Hub authority path",
-            )
         return rendered
 
     def _ingress_service(self) -> str:

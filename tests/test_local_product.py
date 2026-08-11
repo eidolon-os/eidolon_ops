@@ -208,7 +208,7 @@ def test_prepare_materializes_one_canonical_mac_product_contract(
                         0,
                         "onboarding:\n  hub_id: eidolon-hub-local\n"
                         "  public_base_url: https://eidolon-hub.local\n"
-                        "persistence:\n  path: /var/lib/eidolon/eidolon-hub.sqlite3\n",
+                        "persistence:\n  path: /var/lib/eidolon/hub/eidolon-hub.sqlite3\n",
                         "",
                     )
                 return ProcessResult(0, "service: product\n", "")
