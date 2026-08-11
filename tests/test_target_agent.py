@@ -359,11 +359,15 @@ def test_reset_can_explicitly_wipe_all_authority_data_for_clean_install(tmp_path
         assert not (tmp_path / value.relative_to("/")).exists()
 
 
-def test_reset_stops_every_product_unit_in_one_transaction(tmp_path: Path) -> None:
-    """One systemd transaction, not one call per unit.
+def test_reset_stops_the_manager_before_the_workers_it_would_restore(tmp_path: Path) -> None:
+    """systemd orders a transaction by dependencies, not by argument order.
 
-    A unit still inside its restart loop re-enqueues start jobs for whatever it
-    depends on, which cancels a pending stop job for a unit already handled.
+    Naming the manager first inside one long call therefore said nothing: its
+    stop job was cancelled, it outlived the sweep, and six seconds later it had
+    reconciled the workers back up while the reset was still running. One
+    transaction per phase still holds — a unit inside its restart loop
+    re-enqueues start jobs for whatever it depends on — but the manager needs
+    a phase to itself.
     """
 
     _materialize_reset_fixture(tmp_path)
@@ -376,10 +380,22 @@ def test_reset_stops_every_product_unit_in_one_transaction(tmp_path: Path) -> No
         "eidolon-hub-ingress.service",
     }
     disables = [call for call in command.calls if call[1:3] == ("disable", "--now")]
-    assert len(disables) == 1
-    assert disables[0][3:] == tuple(target_agent.RESET_STOP_UNITS)
+    assert len(disables) == 2
+    assert disables[0][3:] == target_agent.RESET_RECONCILER_UNITS
+    assert disables[1][3:] == tuple(
+        unit
+        for unit in target_agent.RESET_STOP_UNITS
+        if unit not in target_agent.RESET_RECONCILER_UNITS
+    )
     assert not [call for call in command.calls if call[1] == "stop"]
     assert ("/usr/bin/systemctl", "daemon-reload") in command.calls
+
+
+def test_every_reconciler_is_a_unit_the_reset_stops(tmp_path: Path) -> None:
+    """A reconciler outside the stop set would be named into a phase that
+    never runs, and would go on restoring workers unopposed."""
+
+    assert set(target_agent.RESET_RECONCILER_UNITS) <= set(target_agent.RESET_STOP_UNITS)
 
 
 def test_reset_refuses_to_delete_while_a_unit_is_still_active(tmp_path: Path) -> None:

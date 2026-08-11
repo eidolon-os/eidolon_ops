@@ -49,6 +49,13 @@ PRODUCT_UNITS = (
     "eidolon-channel-provider.service",
     "eidolon-channel.service",
 )
+#: Units that bring other units up. They have to be stopped in a transaction
+#: of their own, before the workers they manage: systemd orders a transaction
+#: by unit dependencies rather than by the order of the arguments, so naming
+#: the manager first in one long call never reached it. Its own stop job was
+#: cancelled, it outlived the sweep, and it reconciled every worker back up
+#: while the reset was still running.
+RESET_RECONCILER_UNITS = ("eidolond.service",)
 # Stop control/reconciliation entry points before their managed workers.  In
 # particular, an active legacy eidolond can race a later Kernel stop with a
 # start transaction and make systemd cancel the reset job.
@@ -2225,12 +2232,26 @@ def reset_host(
                     continue
                 present.append(unit)
             if present:
-                # One transaction, not one call per unit: a unit still in its
-                # restart loop re-enqueues start jobs for what it depends on,
-                # which cancels a pending stop job for a unit already handled.
-                stopped = command(
-                    ("/usr/bin/systemctl", "disable", "--now", *present), timeout=300
+                # One transaction per phase, not one call per unit: a unit
+                # still in its restart loop re-enqueues start jobs for what it
+                # depends on, which cancels a pending stop job for a unit
+                # already handled. Two phases, because the manager has to be
+                # gone before the workers it would otherwise put back.
+                phases = (
+                    [unit for unit in present if unit in RESET_RECONCILER_UNITS],
+                    [unit for unit in present if unit not in RESET_RECONCILER_UNITS],
                 )
+                reports: list[str] = []
+                returncode = 0
+                for phase in phases:
+                    if not phase:
+                        continue
+                    stopped = command(
+                        ("/usr/bin/systemctl", "disable", "--now", *phase), timeout=300
+                    )
+                    returncode = returncode or stopped.returncode
+                    if stopped.stderr.strip():
+                        reports.append(stopped.stderr.strip())
                 lingering = [
                     unit
                     for unit in present
@@ -2239,10 +2260,12 @@ def reset_host(
                     not in {"inactive", "failed", "unknown"}
                 ]
                 if lingering:
-                    detail = stopped.stderr.strip() or ", ".join(lingering)
+                    detail = ", ".join(lingering) + (
+                        f" ({'; '.join(reports)})" if reports else ""
+                    )
                     raise TargetError(f"reset could not stop product unit: {detail}")
                 service_results.extend(
-                    {"unit": unit, "state": "stopped", "returncode": stopped.returncode}
+                    {"unit": unit, "state": "stopped", "returncode": returncode}
                     for unit in present
                 )
         for value in _reset_paths(wipe_authority_data=wipe_authority_data):
