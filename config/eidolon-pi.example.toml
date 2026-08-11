@@ -16,8 +16,9 @@ remote_uv = "/usr/local/bin/uv"
 bundle_root = "/private/tmp/eidolon-release-bundles"
 release_cli = "../../eidolon_kernel/.venv/bin/eidolon-release"
 # Workstation build tool, declared rather than derived from the activator's
-# directory. Must be exactly uv 0.11.15.
-uv = "../../eidolon_kernel/.venv/bin/uv"
+# directory. Must be exactly uv 0.11.15, and it is not necessarily installed
+# next to the activator.
+uv = "/absolute/path/to/uv-0.11.15"
 # The target still installs only locked artifacts. An alternate HTTPS index can
 # improve availability without relaxing the exact uv.lock resolution.
 python_index_url = "https://pypi.org/simple"
