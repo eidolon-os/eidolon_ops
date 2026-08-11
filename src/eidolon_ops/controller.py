@@ -76,6 +76,10 @@ _RELEASE_TOOL_CONTRACT = {
 #: Component-neutral operator entries published inside every sealed release.
 _RELEASE_ACTIVATOR = ".release/bin/eidolon-release"
 _RELEASE_INTERPRETER = ".release/bin/python"
+#: Dependencies this workstation has already fetched, kept between builds so a
+#: release costs the network only what actually changed. Named a dot entry so
+#: it cannot be mistaken for a release id when the bundle root is listed.
+_DEPENDENCY_CACHE_SEED = ".uv-cache-seed"
 
 #: Sealing runs from the release's own activator, so the one this deployer runs
 #: must be byte-identical to the one the pinned Kernel commit ships.
@@ -881,6 +885,11 @@ class EidolonPiController:
                     "UV_HTTP_RETRIES": str(self.config.workspace.python_http_retries),
                     "UV_CONCURRENT_DOWNLOADS": str(
                         self.config.workspace.python_concurrent_downloads
+                    ),
+                    # Beside the bundles on purpose: copy-on-write clones only
+                    # work within one volume, and that is the whole saving.
+                    "EIDOLON_RELEASE_UV_CACHE_SEED": str(
+                        self.config.workspace.bundle_root / _DEPENDENCY_CACHE_SEED
                     ),
                 }
             )
