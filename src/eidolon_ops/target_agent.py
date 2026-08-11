@@ -76,6 +76,10 @@ DIRECT_ENABLE_UNITS = (
     "eidolon-local-api.service",
     "eidolon-admin.service",
 )
+#: The Host layer Ops owns on top of a release: it fronts the Hub on the LAN,
+#: so the Hub declares Wants= on it and nothing here starts it by hand.
+HOST_APPLICATION_UNIT = "eidolon-hub-ingress.service"
+HOST_APPLICATION_READY_SECONDS = 30.0
 CURRENT_LINKS = {
     "eidolon_kernel": Path("/opt/eidolon/current/eidolon_kernel"),
     "eidolon_data": Path("/opt/eidolon/current/eidolon_data"),
@@ -1320,6 +1324,29 @@ def _environment_values(path: Path) -> dict[str, str]:
     return values
 
 
+def _await_host_application(run: Callable[..., object], root: Path = Path("/")) -> None:
+    """Wait for the Host layer, the way the release waits for its components.
+
+    Starting it is the Hub's job now: the Hub declares ``Wants=`` on the
+    ingress, so every path that brings the Hub up brings the LAN up with it.
+    What no unit can express is the barrier — a release's readiness set covers
+    release components only, and the App gate downstream reads the Hub port
+    once, without retrying. So this waits, and never starts.
+    """
+
+    if not _host_path(root, HOST_APPLICATION_INPUTS["hub-ingress.service"][0]).is_file():
+        return
+    deadline = time.monotonic() + HOST_APPLICATION_READY_SECONDS
+    while True:
+        result = run(("/usr/bin/systemctl", "is-active", HOST_APPLICATION_UNIT), timeout=30)
+        if result.returncode == 0:
+            return
+        if time.monotonic() >= deadline:
+            state = (result.stdout or "").strip() or "unknown"
+            raise TargetError(f"Host application ingress is not active: {state}")
+        time.sleep(0.5)
+
+
 def _observed_lan_address() -> IPv4Address:
     """The address this Host currently answers on, read from its default route."""
 
@@ -1794,12 +1821,12 @@ class TargetInstaller:
                 if self._before(phase, "started"):
                     self.host.start_release(self.release)
                     self.host.wait_ready(self.release)
-                    self._start_host_application()
+                    self._await_host_application()
                     result = self.host.doctor(self.release)
                     app_result = self._require_app_ready()
                     phase = self._record(journal, "started")
                 else:
-                    self._start_host_application()
+                    self._await_host_application()
                     result = self.host.doctor(self.release)
                     app_result = self._require_app_ready()
                 phase = self._record(journal, "completed", status="completed")
@@ -2030,13 +2057,8 @@ class TargetInstaller:
                 ("/usr/bin/systemctl", "enable", "eidolon-hub-ingress.service"),
             )
 
-    def _start_host_application(self) -> None:
-        ingress = _host_path(self.root, HOST_APPLICATION_INPUTS["hub-ingress.service"][0])
-        if ingress.is_file():
-            self._command_checked(
-                "Host application ingress start",
-                ("/usr/bin/systemctl", "start", "eidolon-hub-ingress.service"),
-            )
+    def _await_host_application(self) -> None:
+        _await_host_application(self.command, self.root)
 
     def _command_checked(self, operation: str, command: Sequence[str]):
         result = self.command(command, timeout=120)
@@ -2318,15 +2340,7 @@ def lifecycle(action: str, payload: Mapping[str, object]) -> dict[str, object]:
             host.start_release(release)
             host.wait_ready(release)
             if app is not None:
-                ingress = _run(
-                    ("/usr/bin/systemctl", "start", "eidolon-hub-ingress.service"),
-                    timeout=120,
-                )
-                if ingress.returncode != 0:
-                    raise TargetError(
-                        "Host application ingress failed to start: "
-                        + (ingress.stderr.strip() or ingress.stdout.strip() or "no output")
-                    )
+                _await_host_application(_run)
     return {
         "status": action + "ed" if action != "stop" else "stopped",
         "release_id": release.release_id,

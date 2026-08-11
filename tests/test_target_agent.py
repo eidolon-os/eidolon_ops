@@ -1313,3 +1313,58 @@ def test_the_readiness_reporter_finds_the_address_the_contract_carries(monkeypat
 
     for key in ("hub_hostname", "hub_id", "lan_ipv4", "hub_https_port", "hub_origin", "host_id"):
         assert key in app
+
+
+def _ingress_installed(root: Path) -> Path:
+    unit = root / target_agent.HOST_APPLICATION_INPUTS["hub-ingress.service"][0].relative_to("/")
+    unit.parent.mkdir(parents=True, exist_ok=True)
+    unit.write_text("[Unit]\n", encoding="utf-8")
+    return unit
+
+
+def test_the_host_layer_is_waited_for_never_started(tmp_path: Path) -> None:
+    """Two call sites used to each start the ingress by hand.
+
+    The Hub now declares Wants= on it, so start belongs to systemd. What Ops
+    still owes is the barrier: a release's readiness set covers release
+    components only, and the App gate downstream reads the Hub port once.
+    """
+
+    _ingress_installed(tmp_path)
+    calls: list[tuple[str, ...]] = []
+
+    def run(command, **_kwargs):
+        calls.append(tuple(command))
+        return subprocess.CompletedProcess(command, 0, "active\n", "")
+
+    target_agent._await_host_application(run, tmp_path)
+
+    assert calls == [("/usr/bin/systemctl", "is-active", target_agent.HOST_APPLICATION_UNIT)]
+    assert not [call for call in calls if "start" in call]
+
+
+def test_a_host_without_the_layer_is_not_waited_for(tmp_path: Path) -> None:
+    """A Host profile with no [app] never installs the unit; asking systemd
+    about a unit that was never written would fail forever."""
+
+    calls: list[tuple[str, ...]] = []
+
+    def run(command, **_kwargs):
+        calls.append(tuple(command))
+        return subprocess.CompletedProcess(command, 3, "inactive\n", "")
+
+    target_agent._await_host_application(run, tmp_path)
+
+    assert calls == []
+
+
+def test_a_host_layer_that_never_opens_fails_the_install(tmp_path: Path, monkeypatch) -> None:
+    _ingress_installed(tmp_path)
+    monkeypatch.setattr(target_agent, "HOST_APPLICATION_READY_SECONDS", 0.0)
+    monkeypatch.setattr(target_agent.time, "sleep", lambda _seconds: None)
+
+    def run(command, **_kwargs):
+        return subprocess.CompletedProcess(command, 3, "activating\n", "")
+
+    with pytest.raises(TargetError, match="ingress is not active: activating"):
+        target_agent._await_host_application(run, tmp_path)
