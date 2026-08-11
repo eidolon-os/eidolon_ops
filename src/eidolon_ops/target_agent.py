@@ -656,7 +656,10 @@ def _fixed_app(payload: Mapping[str, object]) -> dict[str, object]:
         or (parsed.scheme == "ws" and parsed.hostname != str(address))
     ):
         raise TargetError("Host application LiveKit origin is invalid")
-    return dict(value)
+    # The resolved address travels with the contract. Discovery ran here, so a
+    # consumer that repeated it could disagree with what was just validated —
+    # and one that read the declared value found nothing when none was declared.
+    return {**value, "lan_ipv4": str(address)}
 
 
 def _optional_app(payload: Mapping[str, object]) -> dict[str, object] | None:

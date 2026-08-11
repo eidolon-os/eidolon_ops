@@ -6,6 +6,7 @@ import hashlib
 import json
 import subprocess
 import sys
+from ipaddress import IPv4Address
 from pathlib import Path
 from types import MappingProxyType, ModuleType, SimpleNamespace
 
@@ -1266,3 +1267,49 @@ def test_every_port_admin_interpolates_is_present() -> None:
     assert "    port: 8180" in declarations  # agent http
     for section in ("client_web:", "mementos:", "nats:", "livekit:"):
         assert section in declarations
+
+
+def _app_contract(**overrides: object) -> dict[str, object]:
+    host_id = "ehost-0123456789abcdefabcd"
+    suffix = host_id.removeprefix("ehost-")
+    return {
+        "host_id": host_id,
+        "hub_id": f"eidolon-hub-{suffix}",
+        "hub_hostname": f"eidolon-hub-{suffix}.local",
+        "hub_https_port": 8443,
+        "hub_origin": f"https://eidolon-hub-{suffix}.local:8443",
+        "livekit_client_url": "wss://placeholder.invalid:7880",
+        "allow_insecure_livekit": True,
+        **overrides,
+    }
+
+
+def test_the_resolved_lan_address_travels_with_the_app_contract(monkeypatch) -> None:
+    """Discovery happens during validation, on the Host that owns the answer.
+
+    Throwing the result away left the readiness reporter to read a declared
+    ``lan_ipv4`` that no longer has to exist, and the install died on
+    ``KeyError: 'lan_ipv4'`` after the release was already activated.
+    """
+
+    monkeypatch.setattr(target_agent, "_observed_lan_address", lambda: IPv4Address("192.168.1.26"))
+
+    result = target_agent._fixed_app({"app": _app_contract()})
+
+    assert result["lan_ipv4"] == "192.168.1.26"
+
+
+def test_a_declared_lan_address_is_still_honoured() -> None:
+    result = target_agent._fixed_app({"app": _app_contract(lan_ipv4="10.0.0.4")})
+
+    assert result["lan_ipv4"] == "10.0.0.4"
+
+
+def test_the_readiness_reporter_finds_the_address_the_contract_carries(monkeypatch) -> None:
+    """The exact seam that broke: every key the reporter indexes must be there."""
+
+    monkeypatch.setattr(target_agent, "_observed_lan_address", lambda: IPv4Address("192.168.1.26"))
+    app = target_agent._fixed_app({"app": _app_contract()})
+
+    for key in ("hub_hostname", "hub_id", "lan_ipv4", "hub_https_port", "hub_origin", "host_id"):
+        assert key in app
