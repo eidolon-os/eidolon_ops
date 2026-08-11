@@ -1043,6 +1043,9 @@ def test_install_wrapper_reuses_kernel_descriptor(monkeypatch, tmp_path: Path) -
     class Installer:
         def __init__(self, **kwargs) -> None:
             assert kwargs["release"] is release
+            # The registry travels with the operation; the installer never
+            # reaches for one of its own.
+            assert kwargs["port_registry"] == "admin:\n  api:\n    port: 9000\n"
 
         def install(self):
             return {"status": "installed"}
@@ -1056,6 +1059,7 @@ def test_install_wrapper_reuses_kernel_descriptor(monkeypatch, tmp_path: Path) -
         {
             "release_id": "r1",
             "data": {name: str(path) for name, path in target_agent.FIXED_DATA.items()},
+            "port_registry": "admin:\n  api:\n    port: 9000\n",
         }
     )
 
@@ -1247,42 +1251,31 @@ def test_the_host_states_where_the_port_registry_is() -> None:
     )
 
 
-def _declarations(text: str) -> list[str]:
-    """The YAML body with comments and blank lines removed.
+def test_the_port_registry_is_carried_not_restated(tmp_path: Path) -> None:
+    """The registry has one author, on the operator side.
 
-    Ops has no YAML parser on purpose — the target agent ships as one file and
-    runs against the board's bare system Python — so the comparison is textual.
+    A copy of it inside the target agent was a second, and the copy a Host
+    wrote for itself is precisely the one nobody would think to update.
     """
 
-    return [
-        line.rstrip()
-        for line in text.splitlines()
-        if line.strip() and not line.lstrip().startswith("#")
-    ]
+    assert not hasattr(target_agent, "HOST_PORTS_VALUE")
+
+    registry = "admin:\n  api:\n    port: 9000\n"
+    target_agent._ensure_host_path_contract(tmp_path, lambda *_a: None, registry)
+
+    written = tmp_path / target_agent.HOST_PORTS_PATH.relative_to("/")
+    assert written.read_text(encoding="utf-8") == registry
+    assert oct(written.stat().st_mode)[-3:] == "640"
 
 
-def test_the_host_port_registry_agrees_with_the_operator_one() -> None:
-    """Two copies exist because the target agent ships as one standalone file
-    and cannot read the operator's checkout. They describe one topology, so a
-    port that moves in only one of them is a bug, not a configuration."""
+def test_an_operation_without_a_port_registry_is_refused() -> None:
+    """Inventing one would put a Host's own guess where Admin looks."""
 
-    operator = (Path(__file__).resolve().parents[1] / "config" / "ports.yaml").read_text(
-        encoding="utf-8"
-    )
+    with pytest.raises(TargetError, match="port registry is missing"):
+        target_agent._fixed_port_registry({"units": []})
 
-    assert _declarations(target_agent.HOST_PORTS_VALUE) == _declarations(operator)
-
-
-def test_every_port_admin_interpolates_is_present() -> None:
-    """Admin's ``services.yaml`` interpolates these by name; a missing one
-    surfaces as a Pydantic parse error on the literal ``$EIDOLON_...`` text."""
-
-    declarations = _declarations(target_agent.HOST_PORTS_VALUE)
-
-    assert "    port: 9000" in declarations  # admin api
-    assert "    port: 8180" in declarations  # agent http
-    for section in ("client_web:", "mementos:", "nats:", "livekit:"):
-        assert section in declarations
+    with pytest.raises(TargetError, match="port registry is missing"):
+        target_agent._fixed_port_registry({"port_registry": "   "})
 
 
 def _app_contract(**overrides: object) -> dict[str, object]:
@@ -1384,3 +1377,24 @@ def test_a_host_layer_that_never_opens_fails_the_install(tmp_path: Path, monkeyp
 
     with pytest.raises(TargetError, match="ingress is not active: activating"):
         target_agent._await_host_application(run, tmp_path)
+
+
+def test_a_host_states_how_long_its_own_services_need() -> None:
+    """A board is not a laptop, and a deadline compiled in cannot say so.
+
+    The Channel worker spends its stop timeout shutting down and then loads an
+    ONNX model coming up; at 90s a rollback reported a readiness timeout for
+    services that were healthy moments later, and undid a good release for it.
+    """
+
+    assert target_agent._release_readiness_seconds({"readiness_timeout_seconds": 600}) == 600
+    assert (
+        target_agent._release_readiness_seconds({})
+        == target_agent.DEFAULT_RELEASE_READINESS_SECONDS
+    )
+
+
+def test_a_readiness_deadline_outside_reason_is_refused() -> None:
+    for value in (0, 29, 1801, "240", True, None):
+        with pytest.raises(TargetError, match="readiness timeout is invalid"):
+            target_agent._release_readiness_seconds({"readiness_timeout_seconds": value})

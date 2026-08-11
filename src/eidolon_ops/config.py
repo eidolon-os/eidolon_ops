@@ -84,6 +84,12 @@ class HostConfig:
     known_hosts_file: Path
     connect_timeout_seconds: int
     remote_uv: Path
+    #: How long this Host's own services may take to answer after an
+    #: activation. A board is not a laptop — the Channel worker alone spends
+    #: its stop timeout shutting down and then loads an ONNX model coming up —
+    #: and a deadline too short turns a healthy release into a rolled-back one.
+    #: A platform property, so it is stated per Host rather than compiled in.
+    readiness_timeout_seconds: int = 240
 
     @property
     def target(self) -> str:
@@ -207,6 +213,7 @@ def load_config(path: Path) -> OperationsConfig:
             "connect_timeout_seconds",
             "remote_uv",
         },
+        optional={"readiness_timeout_seconds"},
         label="host",
     )
     user = _string(host_wire["user"], "host.user")
@@ -221,6 +228,12 @@ def load_config(path: Path) -> OperationsConfig:
         maximum=120,
     )
     remote_uv = _absolute_remote_path(host_wire["remote_uv"], "host.remote_uv")
+    readiness = _integer(
+        host_wire.get("readiness_timeout_seconds", 240),
+        "host.readiness_timeout_seconds",
+        minimum=30,
+        maximum=1800,
+    )
 
     workspace_wire = _mapping(document["workspace"], "workspace")
     _require_keys(
@@ -333,6 +346,7 @@ def load_config(path: Path) -> OperationsConfig:
             ),
             connect_timeout_seconds=timeout,
             remote_uv=remote_uv,
+            readiness_timeout_seconds=readiness,
         ),
         workspace=workspace,
         sources=MappingProxyType(sources),

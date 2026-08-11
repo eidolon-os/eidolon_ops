@@ -76,6 +76,12 @@ _RELEASE_TOOL_CONTRACT = {
 #: Component-neutral operator entries published inside every sealed release.
 _RELEASE_ACTIVATOR = ".release/bin/eidolon-release"
 _RELEASE_INTERPRETER = ".release/bin/python"
+#: Which port each component binds. Ops owns this file — Admin builds its
+#: service catalog from it and interpolates the EIDOLON_* variables its
+#: services.yaml names — so a Host is sent this one rather than carrying a
+#: restatement of it that could drift.
+_PORT_REGISTRY = Path(__file__).resolve().parents[2] / "config" / "ports.yaml"
+
 #: Dependencies this workstation has already fetched, kept between builds so a
 #: release costs the network only what actually changed. It sits beside the
 #: bundles rather than inside a build, because uv binds a cache to the path it
@@ -93,30 +99,58 @@ class OperationsError(RuntimeError):
     """An orchestration invariant or phase failed."""
 
 
-def _degraded_detail(app: dict[str, object]) -> str:
-    """Name what the App gate found, not merely that it was unhappy.
+#: How a readiness report spells a verdict. Probes answer ``healthy``, check
+#: lists answer ``ok``, and individual entries answer with a bare boolean.
+_VERDICT_KEYS = ("healthy", "ok")
+
+
+def _degraded_detail(report: object, path: str = "") -> str:
+    """Name what a readiness report found, not merely that it was unhappy.
 
     A gate failure rolls the release back and the collected phases go with it,
     so "degraded" was the entire report an operator received for a decision
     that had just undone an install.
+
+    This walks the report rather than naming the sections it expects, because
+    a section added later would otherwise go unmentioned in exactly the report
+    someone reads when they cannot see the Host.
     """
 
+    reasons = _failures(report, path)
+    if reasons:
+        return "; ".join(reasons)
+    status = report.get("status") if isinstance(report, dict) else None
+    return f"status={status!r}"
+
+
+def _failures(report: object, path: str) -> list[str]:
+    if isinstance(report, list):
+        return [
+            reason
+            for index, item in enumerate(report)
+            for reason in _failures(item, f"{path}[{index}]")
+        ]
+    if not isinstance(report, dict):
+        return []
+    if any(report.get(key) is False for key in _VERDICT_KEYS):
+        # The section already said it is unhealthy; anything below is why.
+        below = [
+            reason
+            for key, value in report.items()
+            if key not in _VERDICT_KEYS
+            for reason in _failures(value, f"{path}.{key}" if path else str(key))
+        ]
+        return below or [path or "report"]
     reasons: list[str] = []
-    for name in ("local_api", "mdns", "preflight"):
-        section = app.get(name)
-        # Two spellings across the sections: a probe reports healthy, a
-        # checklist reports ok.
-        if isinstance(section, dict) and False in (section.get("healthy"), section.get("ok")):
-            reasons.append(name)
-    binding = app.get("host_application")
-    if isinstance(binding, dict):
-        checks = binding.get("checks")
-        if isinstance(checks, dict):
-            reasons.extend(f"host_application.{key}" for key, ok in checks.items() if not ok)
-        health = binding.get("hub_health")
-        if isinstance(health, dict) and health.get("error"):
-            reasons.append(str(health["error"]))
-    return "; ".join(reasons) or f"status={app.get('status')!r}"
+    for key, value in report.items():
+        below = f"{path}.{key}" if path else str(key)
+        if value is False:
+            reasons.append(below)
+        elif key == "error" and value:
+            reasons.append(str(value))
+        else:
+            reasons.extend(_failures(value, below))
+    return reasons
 
 
 class EidolonPiController:
@@ -1100,8 +1134,16 @@ class EidolonPiController:
         return document
 
     def _target_payload(self) -> dict[str, object]:
+        try:
+            port_registry = _PORT_REGISTRY.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise OperationsError(
+                f"Ops-owned port registry is unreadable: {_PORT_REGISTRY}"
+            ) from exc
         payload: dict[str, object] = {
             "units": list(self.config.units),
+            "port_registry": port_registry,
+            "readiness_timeout_seconds": self.config.host.readiness_timeout_seconds,
             "data": {
                 "system_database": str(self.config.data.system_database),
                 "object_store": str(self.config.data.object_store),

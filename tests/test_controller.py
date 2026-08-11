@@ -1211,6 +1211,7 @@ def test_a_degraded_app_gate_names_what_it_found() -> None:
             "mdns": {"healthy": False},
             "preflight": {"ok": True},
             "host_application": {
+                "healthy": False,
                 "checks": {"certificate": True, "hub_lan_health": False},
                 "hub_health": {"error": "Hub LAN ingress self-check failed: refused"},
             },
@@ -1218,10 +1219,31 @@ def test_a_degraded_app_gate_names_what_it_found() -> None:
     )
 
     assert "mdns" in detail
-    assert "host_application.hub_lan_health" in detail
+    assert "host_application.checks.hub_lan_health" in detail
     assert "refused" in detail
     assert "certificate" not in detail
     assert "local_api" not in detail
+
+
+def test_a_section_nobody_anticipated_is_still_reported() -> None:
+    """Naming the expected sections meant a later one would go unmentioned in
+    exactly the report someone reads when they cannot see the Host."""
+
+    from eidolon_ops.controller import _degraded_detail
+
+    detail = _degraded_detail(
+        {"status": "degraded", "some_future_subsystem": {"healthy": False}}
+    )
+
+    assert "some_future_subsystem" in detail
+
+
+def test_an_unhealthy_section_that_says_why_reports_the_reason_not_itself() -> None:
+    from eidolon_ops.controller import _degraded_detail
+
+    detail = _degraded_detail({"status": "degraded", "mdns": {"healthy": False}})
+
+    assert detail == "mdns"
 
 
 def test_a_gate_that_fails_for_no_stated_reason_still_says_something() -> None:

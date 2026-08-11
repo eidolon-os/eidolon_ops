@@ -266,3 +266,23 @@ def test_the_build_tool_is_declared_not_derived_from_the_activator(config_path: 
     )
     with pytest.raises(ConfigurationError, match="uv"):
         load_config(config_path)
+
+
+def test_a_host_may_state_how_long_its_services_need(config_path: Path) -> None:
+    """Platform property, not a constant compiled into the deployer: the
+    default suits a Pi 5, and a slower board says so in its own profile."""
+
+    assert load_config(config_path).host.readiness_timeout_seconds == 240
+
+    _replace(config_path, "connect_timeout_seconds = 7",
+             "connect_timeout_seconds = 7\nreadiness_timeout_seconds = 600")
+
+    assert load_config(config_path).host.readiness_timeout_seconds == 600
+
+
+def test_a_readiness_deadline_outside_reason_is_refused(config_path: Path) -> None:
+    _replace(config_path, "connect_timeout_seconds = 7",
+             "connect_timeout_seconds = 7\nreadiness_timeout_seconds = 5")
+
+    with pytest.raises(ConfigurationError, match="readiness_timeout_seconds"):
+        load_config(config_path)

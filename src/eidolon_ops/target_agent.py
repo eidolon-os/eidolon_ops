@@ -87,14 +87,23 @@ DIRECT_ENABLE_UNITS = (
 #: so the Hub declares Wants= on it and nothing here starts it by hand.
 HOST_APPLICATION_UNIT = "eidolon-hub-ingress.service"
 HOST_APPLICATION_READY_SECONDS = 30.0
-#: How long the release's own components get to answer after an activation.
-#: Sized on the board rather than on a laptop: the Channel worker alone spends
-#: 45s in TimeoutStopSec on the way down and then loads its ONNX turn-detector
-#: on the way up, and the manager reconciles it only after it has started
-#: itself. At 90s a rollback reported "readiness timeout: agent, channel" for
-#: services that were healthy moments later — and a spurious rollback is a far
-#: worse failure than a slow one.
-RELEASE_READINESS_SECONDS = 240
+#: How long a release's components may take to answer, when the operator's
+#: Host profile does not say. Sized on the board rather than on a laptop: the
+#: Channel worker alone spends 45s in TimeoutStopSec on the way down and then
+#: loads its ONNX turn-detector on the way up, and the manager reconciles it
+#: only after starting itself. At 90s a rollback reported "readiness timeout:
+#: agent, channel" for services that were healthy moments later, and a
+#: spurious rollback is a far worse failure than a slow one.
+DEFAULT_RELEASE_READINESS_SECONDS = 240
+
+
+def _release_readiness_seconds(payload: Mapping[str, object]) -> int:
+    """How long this Host says its own services need. A platform property."""
+
+    value = payload.get("readiness_timeout_seconds", DEFAULT_RELEASE_READINESS_SECONDS)
+    if not isinstance(value, int) or isinstance(value, bool) or not 30 <= value <= 1800:
+        raise TargetError("Host readiness timeout is invalid")
+    return value
 CURRENT_LINKS = {
     "eidolon_kernel": Path("/opt/eidolon/current/eidolon_kernel"),
     "eidolon_data": Path("/opt/eidolon/current/eidolon_data"),
@@ -201,80 +210,6 @@ RELEASE_INTERPRETER = ".release/bin/python"
 _CURRENT_KERNEL = Path("/opt/eidolon/current/eidolon_kernel")
 HOST_ENV_PATH = Path("/etc/eidolon/host.env")
 HOST_PORTS_PATH = Path("/etc/eidolon/generated/ports.yaml")
-#: Which port every component binds. Admin reads this to build the service
-#: catalog and to export the ``EIDOLON_*`` variables its ``services.yaml``
-#: interpolates; without it Admin looks for an ``eidolon_ops`` checkout beside
-#: its own source, finds none, and dies before it can serve ``/healthz``.
-#:
-#: This is Host topology, so the Host authority states it. It must stay equal
-#: to the operator-side ``config/ports.yaml``; ``tests/test_target_agent.py``
-#: fails if the two ever disagree.
-HOST_PORTS_VALUE = """\
-# Eidolon Host port registry, written by Ops. Read-only to the services.
-#
-# Ports are fixed by the deployment contract, not by the board, so this file
-# is the same on every Host. Edit config/ports.yaml in eidolon_ops instead;
-# a test keeps the two in agreement.
-
-admin:
-  api:
-    host: 127.0.0.1
-    port: 9000
-  web:
-    port: 9001
-hub:
-  api:
-    host: 0.0.0.0
-    port: 8082
-data:
-  api:
-    host: 127.0.0.1
-    port: 8084
-  workspace_api:
-    host: 127.0.0.1
-    port: 8085
-kernel:
-  api:
-    host: 127.0.0.1
-    port: 8083
-eidolond:
-  api:
-    host: 127.0.0.1
-    port: 8090
-agent:
-  http:
-    port: 8180
-  admin:
-    port: 8081
-  grpc:
-    port: 45051
-memory:
-  discovery:
-    host: 127.0.0.1
-    port: 8020
-  mcp:
-    port: 10030
-  supervisor_http:
-    host: 127.0.0.1
-    port: 8019
-channel:
-  worker:
-    port: 8766
-client_web:
-  port: 3001
-nats:
-  port: 4222
-  http_port: 8222
-livekit:
-  port: 7880
-  turn_udp_port: 3478
-  rtc_port_start: 50000
-  rtc_port_end: 60000
-mementos:
-  sidecar:
-    host: 127.0.0.1
-    port: 18765
-"""
 HOST_ENV_VALUE = (
     "EIDOLON_INSTALL_ROOT=/opt/eidolon\n"
     "EIDOLON_WORKSPACE_ROOT=/opt/eidolon/current\n"
@@ -538,6 +473,7 @@ def _atomic_symlink(target: Path, link: Path) -> None:
 def _ensure_host_path_contract(
     root: Path,
     chown: Callable[[Path, str, str], None],
+    port_registry: str,
 ) -> None:
     """Materialize the host-profile roots without adopting mutable contents."""
 
@@ -548,12 +484,14 @@ def _ensure_host_path_contract(
         path.mkdir(parents=True, exist_ok=True)
         os.chmod(path, mode)
         chown(path, user, group)
-    # Derived from this contract rather than supplied by anyone, so rewriting
-    # it is how it stays true; only the credentials are write-once.
+    # Sent by the operator rather than restated here: the registry has one
+    # author, and a second copy of it inside this file could only ever drift
+    # from that one. Derived rather than supplied, so rewriting it is how it
+    # stays true; only the credentials are write-once.
     ports = _host_path(root, HOST_PORTS_PATH)
     if ports.is_symlink():
         raise TargetError("existing /etc/eidolon/generated/ports.yaml is not a regular file")
-    _atomic_text(ports, HOST_PORTS_VALUE, mode=0o640)
+    _atomic_text(ports, port_registry, mode=0o640)
     chown(ports, "root", "eidolon")
     host_env = _host_path(root, HOST_ENV_PATH)
     if host_env.exists() or host_env.is_symlink():
@@ -681,6 +619,20 @@ def _fixed_app(payload: Mapping[str, object]) -> dict[str, object]:
     return {**value, "lan_ipv4": str(address)}
 
 
+def _fixed_port_registry(payload: Mapping[str, object]) -> str:
+    """The port registry the operator sent, refused rather than invented.
+
+    Which port each component binds is Host topology, and it has one author on
+    the operator side. Restating it here would give it a second, and the copy
+    a Host wrote itself is precisely the one nobody would think to update.
+    """
+
+    value = payload.get("port_registry")
+    if not isinstance(value, str) or not value.strip():
+        raise TargetError("Host port registry is missing from the operation payload")
+    return value
+
+
 def _optional_app(payload: Mapping[str, object]) -> dict[str, object] | None:
     if "app" not in payload:
         return None
@@ -793,7 +745,7 @@ def doctor_host(payload: Mapping[str, object]) -> dict[str, object]:
         "host_path_contract": host_env.is_file()
         and host_env.read_text(encoding="utf-8") == HOST_ENV_VALUE,
         "port_registry": HOST_PORTS_PATH.is_file()
-        and HOST_PORTS_PATH.read_text(encoding="utf-8") == HOST_PORTS_VALUE,
+        and HOST_PORTS_PATH.read_text(encoding="utf-8") == _fixed_port_registry(payload),
     }
     release_id = _release_id(payload, required=False)
     release_doctor: object = None
@@ -1781,7 +1733,9 @@ class TargetInstaller:
         command: Callable[..., subprocess.CompletedProcess[str]] = _run,
         manage_ownership: bool = True,
         app_check: Callable[[], dict[str, object]] | None = None,
+        port_registry: str = "",
     ) -> None:
+        self.port_registry = port_registry
         self.release = release
         self.secret_stage = secret_stage
         self.data = data
@@ -1979,7 +1933,7 @@ class TargetInstaller:
         if self.root == Path("/"):
             self._ensure_service_identity("eidolon")
             self._ensure_service_identity("eidolon-bootstrap")
-        _ensure_host_path_contract(self.root, self._chown)
+        _ensure_host_path_contract(self.root, self._chown, self.port_registry)
 
     def _ensure_service_identity(self, name: str) -> None:
         group = self.command(("/usr/bin/getent", "group", name), timeout=30)
@@ -2110,7 +2064,7 @@ def install(payload: Mapping[str, object]) -> dict[str, object]:
         raise TargetError("prepared release identity mismatch")
     host = LinuxDeploymentHost(
         runner=_DeploymentRunner(CommandResult),
-        readiness_timeout_seconds=RELEASE_READINESS_SECONDS,
+        readiness_timeout_seconds=_release_readiness_seconds(payload),
     )
     return TargetInstaller(
         release=release,
@@ -2118,6 +2072,7 @@ def install(payload: Mapping[str, object]) -> dict[str, object]:
         data=data,
         host=host,
         app_check=lambda: app_ready(payload),
+        port_registry=_fixed_port_registry(payload),
     ).install()
 
 
@@ -2362,7 +2317,7 @@ def lifecycle(action: str, payload: Mapping[str, object]) -> dict[str, object]:
     active_kernel = _CURRENT_KERNEL.resolve()
     descriptor = active_kernel.parent / "release.json"
     release = load_release_descriptor(descriptor)
-    host = LinuxDeploymentHost(readiness_timeout_seconds=RELEASE_READINESS_SECONDS)
+    host = LinuxDeploymentHost(readiness_timeout_seconds=_release_readiness_seconds(payload))
     with host.exclusive_activation():
         host.preflight(release)
         if action in {"stop", "restart"}:
