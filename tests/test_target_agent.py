@@ -71,6 +71,9 @@ class FakeCommand:
     def __call__(self, command, **kwargs):
         command = tuple(command)
         self.calls.append(command)
+        if len(command) > 1 and command[1] == "is-active":
+            # Real systemd answers "inactive" for a stopped unit, not silence.
+            return subprocess.CompletedProcess(command, 3, "inactive\n", "")
         if command[0].endswith("alembic"):
             if self.fail_baseline:
                 return subprocess.CompletedProcess(command, 1, "", "baseline failed")
@@ -355,41 +358,46 @@ def test_reset_can_explicitly_wipe_all_authority_data_for_clean_install(tmp_path
         assert not (tmp_path / value.relative_to("/")).exists()
 
 
-def test_reset_stops_and_disables_fixed_units_before_deletion(tmp_path: Path) -> None:
+def test_reset_stops_every_product_unit_in_one_transaction(tmp_path: Path) -> None:
+    """One systemd transaction, not one call per unit.
+
+    A unit still inside its restart loop re-enqueues start jobs for whatever it
+    depends on, which cancels a pending stop job for a unit already handled.
+    """
+
     _materialize_reset_fixture(tmp_path)
     command = FakeCommand()
 
     target_agent.reset_host(_reset_payload(), root=tmp_path, command=command)
 
-    stop_units = [call[2] for call in command.calls if call[1] == "stop"]
-    disable_units = [call[2] for call in command.calls if call[1] == "disable"]
     assert set(target_agent.RESET_STOP_UNITS) == {
         *target_agent.PRODUCT_UNITS,
         "eidolon-hub-ingress.service",
     }
-    assert stop_units == list(target_agent.RESET_STOP_UNITS)
-    assert disable_units == list(target_agent.RESET_STOP_UNITS)
+    disables = [call for call in command.calls if call[1:3] == ("disable", "--now")]
+    assert len(disables) == 1
+    assert disables[0][3:] == tuple(target_agent.RESET_STOP_UNITS)
+    assert not [call for call in command.calls if call[1] == "stop"]
     assert ("/usr/bin/systemctl", "daemon-reload") in command.calls
 
 
-def test_reset_stops_reconciler_before_kernel(tmp_path: Path) -> None:
-    _materialize_reset_fixture(tmp_path)
-    stopped: set[str] = set()
+def test_reset_refuses_to_delete_while_a_unit_is_still_active(tmp_path: Path) -> None:
+    """Deleting the tree under a live unit would leave the Host half-removed."""
 
-    def reconciler_sensitive(command, **_kwargs):
+    _materialize_reset_fixture(tmp_path)
+
+    def kernel_survives(command, **_kwargs):
         command = tuple(command)
-        if command[1] == "stop":
-            unit = command[2]
-            if unit == "eidolon-kernel.service" and "eidolond.service" not in stopped:
-                return subprocess.CompletedProcess(command, 1, "", "Job canceled")
-            stopped.add(unit)
+        if command[1] == "is-active" and command[2] == "eidolon-kernel.service":
+            return subprocess.CompletedProcess(command, 0, "active", "")
+        if command[1] == "is-active":
+            return subprocess.CompletedProcess(command, 0, "inactive", "")
+        if command[1:3] == ("disable", "--now"):
+            return subprocess.CompletedProcess(command, 1, "", "Job canceled")
         return subprocess.CompletedProcess(command, 0, "", "")
 
-    result = target_agent.reset_host(_reset_payload(), root=tmp_path, command=reconciler_sensitive)
-
-    assert result["status"] == "reset"
-    assert "eidolond.service" in stopped
-    assert "eidolon-kernel.service" in stopped
+    with pytest.raises(TargetError, match="could not stop product unit"):
+        target_agent.reset_host(_reset_payload(), root=tmp_path, command=kernel_survives)
 
 
 def test_reset_treats_missing_units_as_already_clean(tmp_path: Path) -> None:

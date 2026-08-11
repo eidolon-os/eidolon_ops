@@ -2065,6 +2065,7 @@ def reset_host(
     lock_path = _host_path(root, Path("/run/lock/eidolon-install.lock"))
     with _exclusive(lock_path):
         if manage_services:
+            present: list[str] = []
             for unit in RESET_STOP_UNITS:
                 observed = command(
                     (
@@ -2083,19 +2084,27 @@ def reset_host(
                 if observed.stdout.strip() == "not-found":
                     service_results.append({"unit": unit, "state": "absent"})
                     continue
-                stopped = command(("/usr/bin/systemctl", "stop", unit), timeout=120)
-                if stopped.returncode != 0:
-                    state = command(("/usr/bin/systemctl", "is-active", unit), timeout=20)
-                    if state.stdout.strip() not in {"inactive", "failed", "unknown"}:
-                        detail = stopped.stderr.strip() or stopped.stdout.strip() or unit
-                        raise TargetError(f"reset could not stop product unit: {detail}")
-                disabled = command(("/usr/bin/systemctl", "disable", unit), timeout=120)
-                service_results.append(
-                    {
-                        "unit": unit,
-                        "stop_returncode": stopped.returncode,
-                        "disable_returncode": disabled.returncode,
-                    }
+                present.append(unit)
+            if present:
+                # One transaction, not one call per unit: a unit still in its
+                # restart loop re-enqueues start jobs for what it depends on,
+                # which cancels a pending stop job for a unit already handled.
+                stopped = command(
+                    ("/usr/bin/systemctl", "disable", "--now", *present), timeout=300
+                )
+                lingering = [
+                    unit
+                    for unit in present
+                    if command(("/usr/bin/systemctl", "is-active", unit), timeout=20)
+                    .stdout.strip()
+                    not in {"inactive", "failed", "unknown"}
+                ]
+                if lingering:
+                    detail = stopped.stderr.strip() or ", ".join(lingering)
+                    raise TargetError(f"reset could not stop product unit: {detail}")
+                service_results.extend(
+                    {"unit": unit, "state": "stopped", "returncode": stopped.returncode}
+                    for unit in present
                 )
         for value in _reset_paths(wipe_authority_data=wipe_authority_data):
             if _remove_reset_path(_host_path(root, value), display=value):
