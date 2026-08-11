@@ -148,7 +148,12 @@ def test_initializer_creates_one_private_consistent_input_set(config, tmp_path: 
     assert "~/eidolon" not in (target / "agent.yaml").read_text(encoding="utf-8")
     assert (target / "agent.yaml").read_text(encoding="utf-8").startswith("env: prod\n")
     assert "avatar:\n  enabled: false" in (target / "channel.yaml").read_text(encoding="utf-8")
-    assert "model: bge-base-zh" in (target / "memory.yaml").read_text(encoding="utf-8")
+    # Memory's settings ship unmodified: the Host expresses its encoder through
+    # the environment, so improving that file cannot break an install.
+    memory_settings = (target / "memory.yaml").read_text(encoding="utf-8")
+    assert memory_settings == _settings_reader("eidolon_memory", "", "config/settings.yaml")
+    memory_env = _env(target / "memory.env")
+    assert memory_env["EIDOLON_MEMORY_EMBEDDING_MODEL"] == "bge-base-zh"
 
     repeated = initialize_install_inputs(configured, lambda *_args: "should not read")
     assert repeated["status"] == "already_initialized"

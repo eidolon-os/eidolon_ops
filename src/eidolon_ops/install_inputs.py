@@ -144,6 +144,10 @@ def initialize_install_inputs(
             "EIDOLON_DATA_MEMORY_RUNTIME_ROSTER_TOKEN": memory_roster_token,
             "EIDOLON_MEMORY_LLM_API_KEY": providers["eidolon_memory"]["EIDOLON_MEMORY_LLM_API_KEY"],
             "EIDOLON_MEMORY_MCP_TOKEN": memory_token,
+            # The board cannot pay for the encoder a laptop runs: measured on a
+            # Pi 5, bge-large costs 626 MB and 104 ms/doc against base's 198 MB
+            # and 32 ms, for MRR 0.813 against 0.787.
+            "EIDOLON_MEMORY_EMBEDDING_MODEL": PRODUCT_EMBEDDING_MODEL,
         },
         "livekit.env": {
             "LIVEKIT_API_KEY": livekit_key,
@@ -236,6 +240,7 @@ def validate_install_input_contract(
             "EIDOLON_DATA_MEMORY_RUNTIME_ROSTER_TOKEN",
             "EIDOLON_MEMORY_LLM_API_KEY",
             "EIDOLON_MEMORY_MCP_TOKEN",
+            "EIDOLON_MEMORY_EMBEDDING_MODEL",
         },
         "livekit.env": {"LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"},
     }
@@ -473,6 +478,11 @@ def _serialize_env(values: Mapping[str, str]) -> bytes:
     return text.encode("utf-8")
 
 
+#: The encoder a product Host runs, expressed as Host configuration rather
+#: than as a rewrite of the component's shipped settings file.
+PRODUCT_EMBEDDING_MODEL = "bge-base-zh"
+
+
 def _product_settings(
     config: OperationsConfig,
     read_exact_file: Callable[[str, str, str], str],
@@ -531,18 +541,14 @@ def _product_settings(
         expected=1,
     )
 
+    # Memory needs no overlay: its settings resolve paths from the Host path
+    # contract this deployer already exports, and the Host's encoder is chosen
+    # through EIDOLON_MEMORY_EMBEDDING_MODEL in memory.env. Rewriting a
+    # component's shipped settings by string substitution breaks the moment
+    # that component improves the line being matched.
     memory = read_exact_file(
         "eidolon_memory", config.sources["eidolon_memory"].revision, "config/settings.yaml"
     )
-    memory = _replace(
-        memory,
-        "palaces_root: ~/eidolon/memory/mempalaces",
-        "palaces_root: /var/lib/eidolon/memory/mempalaces",
-        expected=1,
-    )
-    memory = _replace(memory, "log_dir: ''", "log_dir: /var/log/eidolon/memory", expected=1)
-    memory = _replace(memory, "run_dir: ''", "run_dir: /run/eidolon/memory", expected=1)
-    memory = _replace(memory, "model: bge-large-zh", "model: bge-base-zh", expected=1)
     return {"agent.yaml": agent, "channel.yaml": channel, "memory.yaml": memory}
 
 
