@@ -93,6 +93,9 @@ class HostConfig:
 class WorkspaceConfig:
     bundle_root: Path
     release_cli: Path
+    #: Workstation build tool. It is not part of the release contract, so it is
+    #: declared rather than derived from wherever the activator happens to live.
+    uv: Path
     python_index_url: str
     python_http_timeout_seconds: int
     python_http_retries: int
@@ -220,6 +223,7 @@ def load_config(path: Path) -> OperationsConfig:
         required={
             "bundle_root",
             "release_cli",
+            "uv",
             "python_index_url",
             "python_http_timeout_seconds",
             "python_http_retries",
@@ -230,6 +234,7 @@ def load_config(path: Path) -> OperationsConfig:
     workspace = WorkspaceConfig(
         bundle_root=_local_path(workspace_wire["bundle_root"], base, "workspace.bundle_root"),
         release_cli=_local_path(workspace_wire["release_cli"], base, "workspace.release_cli"),
+        uv=_local_path(workspace_wire["uv"], base, "workspace.uv"),
         python_index_url=_https_index_url(
             workspace_wire["python_index_url"], "workspace.python_index_url"
         ),

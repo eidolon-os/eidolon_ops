@@ -15,6 +15,7 @@ remote_uv = "/usr/local/bin/uv"
 [workspace]
 bundle_root = "/private/tmp/eidolon-release-bundles"
 release_cli = "../../eidolon_kernel/.venv/bin/eidolon-release"
+uv = "/private/tmp/eidolon-kernel-pi-product-20260809/.venv/bin/uv"
 # The target still installs only locked artifacts. An alternate HTTPS index can
 # improve availability without relaxing the exact uv.lock resolution.
 python_index_url = "https://pypi.org/simple"

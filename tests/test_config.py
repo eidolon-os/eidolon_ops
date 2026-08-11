@@ -249,3 +249,20 @@ def _replace(path: Path, old: str, new: str) -> None:
     text = path.read_text(encoding="utf-8")
     assert old in text
     path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+
+def test_the_build_tool_is_declared_not_derived_from_the_activator(config_path: Path):
+    """uv is a workstation build tool; it must not be assumed to sit beside
+    whatever release CLI the operator happens to have configured."""
+
+    config = load_config(config_path)
+    assert config.workspace.uv.name == "uv"
+
+    # Dropping the key is a configuration error, not a silent fallback to the
+    # activator's directory.
+    text = config_path.read_text(encoding="utf-8")
+    config_path.write_text(
+        text.replace(f'uv = "{config.workspace.uv}"\n', "", 1), encoding="utf-8"
+    )
+    with pytest.raises(ConfigurationError, match="uv"):
+        load_config(config_path)

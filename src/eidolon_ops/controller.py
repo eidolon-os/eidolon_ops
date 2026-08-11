@@ -253,7 +253,7 @@ class EidolonPiController:
             raise OperationsError(
                 f"eidolon-release CLI is missing or not executable: {release_cli}"
             )
-        local_uv = release_cli.with_name("uv")
+        local_uv = self.config.workspace.uv
         if not local_uv.is_file() or not os.access(local_uv, os.X_OK):
             raise OperationsError(f"pinned local uv executable is missing: {local_uv}")
         local_uv_version = checked(
@@ -787,7 +787,7 @@ class EidolonPiController:
             for source_id in SOURCE_IDS:
                 flag = source_id.removeprefix("eidolon_").replace("eidolon-", "")
                 command.extend((f"--{flag}-revision", self.config.sources[source_id].revision))
-            command.extend(("--uv", str(self.config.workspace.release_cli.with_name("uv"))))
+            command.extend(("--uv", str(self.config.workspace.uv)))
             environment = os.environ.copy()
             environment.update(
                 {
