@@ -152,8 +152,9 @@ def test_initializer_creates_one_private_consistent_input_set(config, tmp_path: 
     # the environment, so improving that file cannot break an install.
     memory_settings = (target / "memory.yaml").read_text(encoding="utf-8")
     assert memory_settings == _settings_reader("eidolon_memory", "", "config/settings.yaml")
-    memory_env = _env(target / "memory.env")
-    assert memory_env["EIDOLON_MEMORY_EMBEDDING_MODEL"] == "bge-base-zh"
+    # The encoder is Host configuration, not a credential: it belongs in
+    # host.env, where changing it does not mean reissuing every secret.
+    assert "EIDOLON_MEMORY_EMBEDDING_MODEL" not in _env(target / "memory.env")
 
     repeated = initialize_install_inputs(configured, lambda *_args: "should not read")
     assert repeated["status"] == "already_initialized"

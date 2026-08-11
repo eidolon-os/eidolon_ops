@@ -1204,3 +1204,13 @@ def test_a_loopback_default_route_is_refused(monkeypatch) -> None:
 
     with pytest.raises(TargetError, match="must be private IPv4"):
         target_agent._observed_lan_address()
+
+
+def test_host_env_carries_configuration_that_is_not_a_secret() -> None:
+    """A product Host runs a smaller encoder than a laptop, and that is not a
+    credential — putting it in the private input set would mean reissuing every
+    token to change it, since those inputs are never overwritten."""
+
+    assert "EIDOLON_MEMORY_EMBEDDING_MODEL=bge-base-zh" in target_agent.HOST_ENV_VALUE
+    assert "TOKEN" not in target_agent.HOST_ENV_VALUE
+    assert "KEY" not in target_agent.HOST_ENV_VALUE

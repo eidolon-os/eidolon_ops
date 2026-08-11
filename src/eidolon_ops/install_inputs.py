@@ -144,10 +144,6 @@ def initialize_install_inputs(
             "EIDOLON_DATA_MEMORY_RUNTIME_ROSTER_TOKEN": memory_roster_token,
             "EIDOLON_MEMORY_LLM_API_KEY": providers["eidolon_memory"]["EIDOLON_MEMORY_LLM_API_KEY"],
             "EIDOLON_MEMORY_MCP_TOKEN": memory_token,
-            # The board cannot pay for the encoder a laptop runs: measured on a
-            # Pi 5, bge-large costs 626 MB and 104 ms/doc against base's 198 MB
-            # and 32 ms, for MRR 0.813 against 0.787.
-            "EIDOLON_MEMORY_EMBEDDING_MODEL": PRODUCT_EMBEDDING_MODEL,
         },
         "livekit.env": {
             "LIVEKIT_API_KEY": livekit_key,
@@ -240,7 +236,6 @@ def validate_install_input_contract(
             "EIDOLON_DATA_MEMORY_RUNTIME_ROSTER_TOKEN",
             "EIDOLON_MEMORY_LLM_API_KEY",
             "EIDOLON_MEMORY_MCP_TOKEN",
-            "EIDOLON_MEMORY_EMBEDDING_MODEL",
         },
         "livekit.env": {"LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"},
     }
@@ -476,11 +471,6 @@ def _serialize_env(values: Mapping[str, str]) -> bytes:
             raise InstallInputError(f"generated env entry is unsafe: {key}")
     text = "".join(f"{key}={values[key]}\n" for key in sorted(values))
     return text.encode("utf-8")
-
-
-#: The encoder a product Host runs, expressed as Host configuration rather
-#: than as a rewrite of the component's shipped settings file.
-PRODUCT_EMBEDDING_MODEL = "bge-base-zh"
 
 
 def _product_settings(

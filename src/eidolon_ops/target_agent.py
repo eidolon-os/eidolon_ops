@@ -194,6 +194,10 @@ HOST_ENV_VALUE = (
     "EIDOLON_BOOTSTRAP_RUNTIME_ROOT=/run/eidolon-bootstrap\n"
     "EIDOLON_BOOTSTRAP_STATE_DIR=/var/lib/eidolon-bootstrap\n"
     "EIDOLON_BOOTSTRAP_RUNTIME_DIR=/run/eidolon-bootstrap\n"
+    # Host configuration, not a secret: the board cannot pay for the encoder a
+    # laptop runs. Measured on a Pi 5, bge-large costs 626 MB and 104 ms/doc
+    # against base's 198 MB and 32 ms, for MRR 0.813 against 0.787.
+    "EIDOLON_MEMORY_EMBEDDING_MODEL=bge-base-zh\n"
 )
 HOST_DIRECTORIES = (
     (Path("/opt/eidolon"), 0o755, "root", "root"),
