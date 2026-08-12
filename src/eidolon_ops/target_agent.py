@@ -670,7 +670,13 @@ def _fixed_app(payload: Mapping[str, object]) -> dict[str, object]:
         or parsed.fragment
         or not isinstance(allow_insecure, bool)
         or (parsed.scheme == "ws" and not allow_insecure)
-        or (parsed.scheme == "ws" and parsed.hostname != str(address))
+        # A plaintext origin has to name this Host and no other. Both its
+        # current address and its Host-bound name do that; the name is the
+        # better answer because it does not go stale when the address moves,
+        # which is why the operator side asks for it. Accepting only the
+        # literal left no value that satisfied both ends, and the placeholder
+        # that shipped to devices was the residue of that.
+        or (parsed.scheme == "ws" and parsed.hostname not in {str(address), hub_hostname})
     ):
         raise TargetError("Host application LiveKit origin is invalid")
     # The resolved address travels with the contract. Discovery ran here, so a

@@ -1618,3 +1618,33 @@ def test_a_backup_missing_an_authority_is_refused(tmp_path, monkeypatch) -> None
 
     with pytest.raises(TargetError, match="every authority"):
         target_agent.restore({**payload, "manifest": manifest})
+
+
+def test_a_plaintext_livekit_origin_may_name_the_host_it_belongs_to(monkeypatch) -> None:
+    """The operator side forbids a literal address once the address is
+    discovered, and this side used to demand one. No value satisfied both, and
+    what shipped to devices instead was wss://placeholder.invalid — which
+    passed only because the check ignored every scheme but ws.
+    """
+
+    monkeypatch.setattr(target_agent, "_observed_lan_address", lambda: IPv4Address("192.168.1.26"))
+    host_id = "ehost-0123456789abcdefabcd"
+    hub_hostname = f"eidolon-hub-{host_id.removeprefix('ehost-')}.local"
+
+    for origin in (f"ws://{hub_hostname}:7880", "ws://192.168.1.26:7880"):
+        result = target_agent._fixed_app({"app": _app_contract(livekit_client_url=origin)})
+        assert result["livekit_client_url"] == origin
+
+
+def test_a_plaintext_livekit_origin_naming_somewhere_else_is_refused(monkeypatch) -> None:
+    """A device sent this would open its microphone to another machine."""
+
+    monkeypatch.setattr(target_agent, "_observed_lan_address", lambda: IPv4Address("192.168.1.26"))
+
+    for origin in (
+        "ws://192.168.1.99:7880",
+        "ws://eidolon-hub-ffffffffffffffffffff.local:7880",
+        "ws://placeholder.invalid:7880",
+    ):
+        with pytest.raises(TargetError, match="LiveKit origin is invalid"):
+            target_agent._fixed_app({"app": _app_contract(livekit_client_url=origin)})
