@@ -11,6 +11,8 @@ from pathlib import Path
 
 from eidolon_ops.config import HostConfig
 from eidolon_ops.endpoints import HostEndpoint, first_reachable, resolve_endpoints
+from eidolon_ops.hostagent_delivery import injected_script
+from eidolon_ops.ports import TransportKind
 from eidolon_ops.process import ProcessResult, ProcessRunner, checked
 
 _REMOTE_TOKEN = re.compile(r"^[A-Za-z0-9_./:=+@,-]+$")
@@ -21,6 +23,8 @@ class TransportError(RuntimeError):
 
 
 class SSHTransport:
+    kind = TransportKind.SSH
+
     def __init__(
         self,
         host: HostConfig,
@@ -58,19 +62,35 @@ class SSHTransport:
         starts over the wire should not silently finish over Wi-Fi.
         """
 
-        if not self._resolved:
-            self._resolved = True
-            self._endpoint = first_reachable(
-                self._endpoints(self.host.hostname, self.host.port),
-                self.host.port,
-                timeout=self.host.connect_timeout_seconds,
-                probe=self._probe,
-            )
+        self._resolve()
         if self._endpoint is None:
             # Nothing answered, or the name resolves to something we do not
             # rank. Hand the name to SSH and let its own error be the report.
             return self.host.target
         return f"{self.host.user}@{self._endpoint.address}"
+
+    def describe(self) -> str:
+        """Which link this session settled on.
+
+        It decides whether the next release takes two seconds or three
+        minutes, so the operator is told rather than left to infer it from how
+        long they waited.
+        """
+
+        self._resolve()
+        endpoint = self._endpoint
+        return endpoint.describe() if endpoint else self.host.hostname
+
+    def _resolve(self) -> None:
+        if self._resolved:
+            return
+        self._resolved = True
+        self._endpoint = first_reachable(
+            self._endpoints(self.host.hostname, self.host.port),
+            self.host.port,
+            timeout=self.host.connect_timeout_seconds,
+            probe=self._probe,
+        )
 
     def run(
         self,
@@ -107,7 +127,7 @@ class SSHTransport:
         encoded = base64.urlsafe_b64encode(
             json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
         ).decode("ascii")
-        script = Path(__file__).with_name("target_agent.py").read_bytes()
+        script = injected_script()
         result = self.run(
             (python, "-", action, encoded),
             input_bytes=script,

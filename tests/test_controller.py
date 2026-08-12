@@ -171,11 +171,15 @@ class FakeTransport:
     #: configured name the way the real transport does when nothing answers.
     endpoint = None
 
+    def describe(self) -> str:
+        return self.endpoint.describe() if self.endpoint else "pi.example"
+
     def __init__(self) -> None:
         self.agent_calls: list[tuple[str, dict[str, object], str, bool]] = []
         self.remote_calls: list[tuple[tuple[str, ...], bool]] = []
         self.remote_timeouts: list[float] = []
         self.uploads: list[tuple[Path, str, bool]] = []
+        self.downloads: list[tuple[str, Path, bool]] = []
         self.resumable_uploads: list[tuple[Path, str]] = []
         self.fail_actions: dict[str, Exception] = {}
         self.fail_remote_match: str | None = None
@@ -237,6 +241,17 @@ class FakeTransport:
             },
             "logs": {"status": "collected", "entries": {}},
             "diagnose": {"status": "diagnosed", "redaction": "yes"},
+            "backup": {
+                "status": "captured",
+                "release_id": payload.get("release_id"),
+                "host_id": "ehost-0123456789abcdefabcd",
+                "directory": "/var/tmp/eidolon-backup-r1",
+                "authorities": [{"authority": "system", "file": "system.sqlite3"}],
+                "not_covered": [{"state": "memory", "path": "/var/lib/eidolon/memory"}],
+            },
+            "restore": {"status": "restored", "restored": ["system"]},
+            "commissioning-code": {"status": "issued", "setup_code": "123456"},
+            "refresh-host-application": {"status": "refreshed", "changed": []},
         }
         return values[action]
 
@@ -268,12 +283,16 @@ class FakeTransport:
     def upload(self, source, destination, *, recursive=False):
         self.uploads.append((Path(source), destination, recursive))
 
+    def download(self, source, destination, *, recursive=False):
+        self.downloads.append((source, Path(destination), recursive))
+        Path(destination).mkdir(parents=True, exist_ok=True)
+
     def upload_directory_resumable(self, source, destination):
         self.resumable_uploads.append((Path(source), destination))
 
 
 def _stub_input_contract(controller: EidolonPiController) -> None:
-    controller._validate_install_inputs = lambda _names: {  # type: ignore[method-assign]
+    controller.preflight._validate_install_inputs = lambda: {  # type: ignore[method-assign]
         "status": "compatible"
     }
 
@@ -851,8 +870,8 @@ def test_unified_pi_stage_renders_host_bound_application_assets(config) -> None:
     controller = EidolonPiController(config, Runner(config), transport=transport, app=_app())
     stage = "/var/tmp/eidolon-secrets-host-bound"
 
-    controller._stage_install_files("host-bound", stage)
-    payload = controller._target_payload()
+    controller.host_layer.stage_install_files("host-bound", stage)
+    payload = controller.host_layer.target_payload()
 
     assert len(transport.uploaded_bytes) == len(config.install_files) + 6
     app = payload["app"]
@@ -1203,7 +1222,7 @@ def test_a_degraded_app_gate_names_what_it_found() -> None:
     """A gate failure rolls the release back and the phases go with it, so
     "degraded" was the whole report an operator got for an undone install."""
 
-    from eidolon_ops.controller import _degraded_detail
+    from eidolon_ops.readiness import describe_failures as _degraded_detail
 
     detail = _degraded_detail(
         {
@@ -1230,7 +1249,7 @@ def test_a_section_nobody_anticipated_is_still_reported() -> None:
     """Naming the expected sections meant a later one would go unmentioned in
     exactly the report someone reads when they cannot see the Host."""
 
-    from eidolon_ops.controller import _degraded_detail
+    from eidolon_ops.readiness import describe_failures as _degraded_detail
 
     detail = _degraded_detail({"status": "degraded", "some_future_subsystem": {"healthy": False}})
 
@@ -1238,7 +1257,7 @@ def test_a_section_nobody_anticipated_is_still_reported() -> None:
 
 
 def test_an_unhealthy_section_that_says_why_reports_the_reason_not_itself() -> None:
-    from eidolon_ops.controller import _degraded_detail
+    from eidolon_ops.readiness import describe_failures as _degraded_detail
 
     detail = _degraded_detail({"status": "degraded", "mdns": {"healthy": False}})
 
@@ -1246,7 +1265,7 @@ def test_an_unhealthy_section_that_says_why_reports_the_reason_not_itself() -> N
 
 
 def test_a_gate_that_fails_for_no_stated_reason_still_says_something() -> None:
-    from eidolon_ops.controller import _degraded_detail
+    from eidolon_ops.readiness import describe_failures as _degraded_detail
 
     assert "degraded" in _degraded_detail({"status": "degraded"})
 
@@ -1262,3 +1281,66 @@ def test_status_names_the_host_when_no_link_was_chosen(setup_controller) -> None
     controller, _runner, _transport = setup_controller
 
     assert controller.status()["endpoint"] == controller.config.host.hostname
+
+
+def test_a_backup_is_taken_on_the_host_and_brought_here(setup_controller, tmp_path: Path) -> None:
+    """Left on the Host it would be lost with the Host."""
+
+    controller, _runner, transport = setup_controller
+    output = tmp_path / "backups"
+
+    result = controller.backup(output=output)
+
+    assert result["status"] == "captured"
+    directory = output / "r1-ehost-0123456789abcdefabcd"
+    assert result["local_directory"] == str(directory)
+    assert transport.downloads == [("/var/tmp/eidolon-backup-r1", directory, True)]
+    manifest = json.loads((directory / "backup.json").read_text(encoding="utf-8"))
+    assert manifest["release_id"] == "r1"
+
+    with pytest.raises(OperationsError, match="already exists"):
+        controller.backup(output=output)
+
+
+def test_a_restore_names_what_it_will_replace_before_it_replaces_it(
+    setup_controller, tmp_path: Path
+) -> None:
+    controller, _runner, transport = setup_controller
+    source = tmp_path / "backup"
+    source.mkdir()
+    with pytest.raises(OperationsError, match="manifest is missing"):
+        controller.restore(source=source, apply=False)
+    (source / "backup.json").write_text("not-json", encoding="utf-8")
+    with pytest.raises(OperationsError, match="one JSON document"):
+        controller.restore(source=source, apply=False)
+    (source / "backup.json").write_text(
+        json.dumps(
+            {
+                "release_id": "r1",
+                "host_id": "ehost-0123456789abcdefabcd",
+                "authorities": [{"authority": "system"}],
+                "not_covered": [{"state": "memory"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    planned = controller.restore(source=source, apply=False)
+    assert planned["status"] == "planned"
+    assert planned["authorities"] == ["system"]
+    assert planned["not_restored"] == ["memory"]
+
+    applied = controller.restore(source=source, apply=True)
+    assert applied["status"] == "restored"
+    assert (source, "/var/tmp/eidolon-backup-r1", True) in transport.uploads
+    assert any("eidolon-backup-r1" in " ".join(call[0]) for call in transport.remote_calls)
+
+
+def test_a_setup_code_and_a_boundary_action_reach_the_host(setup_controller) -> None:
+    controller, _runner, _transport = setup_controller
+
+    assert controller.commissioning_code(ttl_seconds=600)["status"] == "issued"
+    assert controller.lifecycle("restart", dry_run=True)["status"] == "planned"
+    assert controller.lifecycle("start", dry_run=False)["status"] == "started"
+    with pytest.raises(OperationsError, match="unknown lifecycle action"):
+        controller.lifecycle("reboot", dry_run=False)

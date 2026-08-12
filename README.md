@@ -63,6 +63,27 @@ Git commit；7 个运行 component 一起切换，SDK 只作构建输入。
 `app-ready` 是 Host 侧门禁，不是假装跑过真实手机。`client-web`、Audit worker、Vision 和手机安装包本身
 不是 Pi 产品 unit；它们不属于“手机 App 可管理 Host”所需的后端范围。
 
+### `app-ready` 是一份 capability 清单，不是两套检查
+
+`src/eidolon_ops/readiness.py` 里的 `READINESS_CONTRACT` 是**唯一**的检查集定义：一组具名事实，加上
+“哪种 Host 负责作证哪一条”的表。Mac source-run 在本机求值，Pi 由下发的 agent 求值——探针必须在各自能
+跑的地方，契约不必。事实集随 payload 下发（与 `port_registry` 同一模式）；agent 只允许作证它收到的那
+一组，多一条少一条都 fail closed，因为“门禁悄悄少查了一项”比“门禁报红”更危险：它正是 release 回滚
+所依据的那份报告。
+
+其中三条 Channel 事实的存在是因为端口探活、unit `active` 与旧 `app-ready` 曾同时全绿，而 worker 对
+LiveKit 已经不可接活：
+
+| 事实 | 读的是什么 |
+|---|---|
+| `channel_worker_healthy` | worker 自己发布的 `/`：inference 进程在、且它没有放弃 LiveKit 连接。它与 LiveKit 的 job 请求走同一个事件循环，所以事件循环卡死时这一条会红，而监听 socket 仍然 accept |
+| `channel_worker_dispatch_identity` | worker 自己发布的 `/worker`：它注册的 agent 名就是产品 dispatch 的那个名字 |
+| `channel_worker_livekit_link` | 这台机器自己的进程与 socket 表：`eidolon-channel.service` cgroup 里确有进程持有到 LiveKit 信令端口的连接——即 worker 注册所依托的那条链路 |
+
+Ops 只消费组件自报的健康事实和本机可观测状态，不去重建 `livekit-agents` 的内部状态。**LiveKit 自己
+对该注册的看法目前没有任何组件发布**，那一条应当由 Channel 的 Component Ops Contract（`[[units]].ready`）
+补齐，而不是在 Ops 里猜。
+
 当前矩阵已纳入正式 `eidolon-channel-provider`（8767）以及 Admin 的 Mobile onboarding target/admission
 契约。Ops 从 Bootstrap 使用的 Ed25519 Host identity 按与 Admin 完全相同的算法派生唯一 `ehost-*`，
 再生成 `eidolon-hub-<Host suffix>` 与对应 `.local` 名称。Mac 与 Pi 使用同一规则，不再共享
@@ -151,6 +172,12 @@ Python 依赖仍由各仓库的 frozen `uv.lock` 精确
 Owner 变更的权限边界；它的 state/runtime 目录均不与产品主进程共享 ownership。
 
 ## 唯一入口与操作
+
+每个操作先产出一份 `Plan`（`operation`/`steps`/`destructive`/`requires_flags`/`touches`），再返回
+`Evidence`：Host 报告原样保留在顶层，旁边多出 `plan`、`outcome` 与 `steps`。退出码取自 `Outcome` 枚举，
+不再取自 CLI 里的一张“成功词”白名单——那张表让 `commissioning-code` 与 `backup` 在 Host 上成功、在这里
+退出非零。`doctor` 会列出该 Host 的 capability 集合（由 platform + transport/supervisor/packages 三个
+port 的组合推导），所以“这台 Host 能做什么”是问出来的，不是从源码里读出来的。
 
 ```text
 eidolon-ops --config HOST.toml status|doctor

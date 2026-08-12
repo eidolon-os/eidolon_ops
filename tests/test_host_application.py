@@ -5,8 +5,10 @@ from ipaddress import IPv4Address
 
 import pytest
 
+from eidolon_ops.environment import EnvironmentFileError
 from eidolon_ops.host_application import HostApplicationError, HostApplicationMaterializer
 from eidolon_ops.host_identity import validate_hub_tls_identity
+from eidolon_ops.hub_assets import HubAssetError
 from eidolon_ops.paths import AppAccess
 
 HUB_TEMPLATE = """\
@@ -99,14 +101,14 @@ def test_host_application_rejects_unsafe_or_drifting_material(config) -> None:
     identity_path.chmod(0o600)
     materializer = HostApplicationMaterializer(config, _app("192.168.100.15"), b"runtime")
     assert materializer.render_environment("data.env", "KEY=value\n") == "KEY=value\n"
-    with pytest.raises(HostApplicationError, match="environment seed"):
+    with pytest.raises(EnvironmentFileError, match="Host application environment is invalid"):
         materializer.render_environment("local-api.env", "invalid")
-    with pytest.raises(HostApplicationError, match="template drifted"):
+    with pytest.raises(HubAssetError, match="template drifted"):
         materializer.prepare(HUB_TEMPLATE.replace("hub_id: eidolon-hub-local", "hub_id: bad"))
 
     materializer.prepare(HUB_TEMPLATE)
     identity_path.write_bytes(b"b" * 32)
-    with pytest.raises(HostApplicationError, match="does not match"):
+    with pytest.raises(HubAssetError, match="does not match"):
         materializer.prepare(HUB_TEMPLATE)
 
 
@@ -118,7 +120,7 @@ def test_host_application_rejects_incomplete_and_unsafe_paths(config) -> None:
     root = materializer.material_root
     root.mkdir(mode=0o700)
     (root / "hub.crt").write_text("partial", encoding="utf-8")
-    with pytest.raises(HostApplicationError, match="incomplete"):
+    with pytest.raises(HubAssetError, match="incomplete"):
         materializer.prepare(HUB_TEMPLATE)
 
     (root / "hub.crt").unlink()

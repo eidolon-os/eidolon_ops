@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from eidolon_ops.target_agent import (
+from eidolon_ops.hostagent.contract import (
     HOST_APPLICATION_INPUTS,
     MANAGED_SYSTEM_ASSETS,
     PRODUCT_UNITS,

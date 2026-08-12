@@ -2,19 +2,18 @@
 
 from __future__ import annotations
 
-import os
 import stat
 from dataclasses import dataclass
 from pathlib import Path
 
+from eidolon_ops import environment
 from eidolon_ops.config import OperationsConfig
 from eidolon_ops.host_identity import (
     HostIdentityError,
     HostLanIdentity,
     derive_host_lan_identity,
-    generate_hub_tls_identity,
-    validate_hub_tls_identity,
 )
+from eidolon_ops.hub_assets import ensure_hub_tls_identity, render_hub_settings
 from eidolon_ops.paths import AppAccess
 
 
@@ -100,7 +99,7 @@ class HostApplicationMaterializer:
             }
         else:
             return value
-        return _merge_environment(value, replacements)
+        return environment.merge(value, replacements, label="Host application environment")
 
     def public_contract(self) -> dict[str, object]:
         identity = self.identity()
@@ -128,51 +127,18 @@ class HostApplicationMaterializer:
                 raise HostApplicationError("Host application material directory has extra files")
         else:
             root.mkdir(mode=0o700, parents=False)
-        certificate_path = root / "hub.crt"
-        private_key_path = root / "hub.key"
-        existing = (certificate_path.exists(), private_key_path.exists())
-        if any(existing) and not all(existing):
-            raise HostApplicationError("Host application TLS identity is incomplete")
-        if all(existing):
-            for path in (certificate_path, private_key_path):
-                if (
-                    path.is_symlink()
-                    or not path.is_file()
-                    or stat.S_IMODE(path.stat().st_mode) != 0o600
-                ):
-                    raise HostApplicationError("Host application TLS identity is unsafe")
-            certificate = certificate_path.read_bytes()
-            private_key = private_key_path.read_bytes()
-            try:
-                validate_hub_tls_identity(certificate, private_key, identity)
-            except HostIdentityError as exc:
-                raise HostApplicationError(
-                    "existing Host application TLS identity does not match the Host identity"
-                ) from exc
-            return certificate, private_key
-        certificate, private_key = generate_hub_tls_identity(identity)
-        _atomic_private_file(certificate_path, certificate)
-        try:
-            _atomic_private_file(private_key_path, private_key)
-        except Exception:
-            certificate_path.unlink(missing_ok=True)
-            raise
-        return certificate, private_key
+        # A product Host refuses a mismatch rather than rotating: material is
+        # written once, and a pair that stopped matching means something
+        # replaced it, which is an operator's decision and not this code's.
+        return ensure_hub_tls_identity(
+            root / "hub.crt",
+            root / "hub.key",
+            identity,
+            rotate_on_mismatch=False,
+        )
 
     def _render_hub_settings(self, template: str, identity: HostLanIdentity) -> str:
-        rendered = _replace_once(
-            template,
-            "hub_id: eidolon-hub-local",
-            f"hub_id: {identity.hub_id}",
-            "Hub ID",
-        )
-        rendered = _replace_once(
-            rendered,
-            "public_base_url: https://eidolon-hub.local",
-            f"public_base_url: {identity.hub_origin(self.app.hub_https_port)}",
-            "Hub public base URL",
-        )
-        return rendered
+        return render_hub_settings(template, identity, self.app.hub_https_port)
 
     def _ingress_service(self) -> str:
         return f"""\
@@ -222,37 +188,3 @@ Environment=EIDOLON_HUB_SETTINGS_YAML=/etc/eidolon/generated/hub.yaml
 """
 
 
-def _replace_once(value: str, old: str, new: str, label: str) -> str:
-    if value.count(old) != 1:
-        raise HostApplicationError(f"{label} template drifted")
-    return value.replace(old, new)
-
-
-def _merge_environment(value: str, replacements: dict[str, str]) -> str:
-    parsed: dict[str, str] = {}
-    for raw in value.splitlines():
-        if not raw:
-            continue
-        key, separator, current = raw.partition("=")
-        if not separator or not key or key in parsed or not current:
-            raise HostApplicationError("Host application environment seed is invalid")
-        parsed[key] = current
-    for key, replacement in replacements.items():
-        if not replacement or any(character in replacement for character in "\n\r\0"):
-            raise HostApplicationError("Host application environment value is unsafe")
-        parsed[key] = replacement
-    return "".join(f"{key}={parsed[key]}\n" for key in sorted(parsed))
-
-
-def _atomic_private_file(path: Path, content: bytes) -> None:
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    try:
-        with os.fdopen(descriptor, "wb") as stream:
-            stream.write(content)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary, path)
-        os.chmod(path, 0o600)
-    finally:
-        temporary.unlink(missing_ok=True)

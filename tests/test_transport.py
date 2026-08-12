@@ -77,7 +77,10 @@ def test_run_agent_sends_script_and_base64_payload(config) -> None:
     assert result == {"status": "ok"}
     call = runner.calls[0]
     assert isinstance(call["input_bytes"], bytes)
-    assert b"Standalone target-side operations" in call["input_bytes"]
+    # One payload, no file written on the Host: the agent is a package now, and
+    # the delivered script carries it whole.
+    assert b"Injected Eidolon host agent" in call["input_bytes"]
+    assert b"eidolon_hostagent.__main__" in call["input_bytes"]
     command = call["command"]
     assert command[-4:-2] == ("/usr/bin/python3", "-")
     assert command[-2] == "status"

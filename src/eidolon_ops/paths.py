@@ -13,10 +13,11 @@ import re
 import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from enum import StrEnum
 from ipaddress import IPv4Address, ip_address
 from pathlib import Path
 from types import MappingProxyType
-from typing import Literal
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 from eidolon_ops.config import SOURCE_IDS, SourceConfig
@@ -26,9 +27,32 @@ class HostProfileError(ValueError):
     """A host profile is incomplete, ambiguous, or unsafe."""
 
 
+class HostPlatform(StrEnum):
+    """The machine a Host profile describes."""
+
+    MACOS = "macos"
+    RASPBERRY_PI = "raspberry-pi"
+
+
+class HostDriver(StrEnum):
+    """How Ops reaches a Host and drives its services.
+
+    A closed enumeration rather than a string, because this value used to be
+    compared literally in nine places to decide what an operation was allowed
+    to do. What a Host can do is now derived from the adapter this selects.
+    """
+
+    LOCAL_SUPERVISORD = "local-supervisord"
+    SSH_SYSTEMD = "ssh-systemd"
+
+
 _HOST_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
-_PLATFORMS = {"macos", "raspberry-pi"}
-_DRIVERS = {"local-supervisord", "ssh-systemd"}
+#: Which driver each platform is reachable through. One entry per real Host;
+#: a pair that is not in this table is not a Host this tool has an adapter for.
+_PLATFORM_DRIVERS = {
+    HostPlatform.MACOS: HostDriver.LOCAL_SUPERVISORD,
+    HostPlatform.RASPBERRY_PI: HostDriver.SSH_SYSTEMD,
+}
 _FOUNDATION_MODES = {"external"}
 _IPV4_LITERAL = re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}$")
 _PATH_FIELDS = (
@@ -101,8 +125,8 @@ class AppAccess:
 class HostProfile:
     path: Path
     host_id: str
-    platform: Literal["macos", "raspberry-pi"]
-    driver: Literal["local-supervisord", "ssh-systemd"]
+    platform: HostPlatform
+    driver: HostDriver
     paths: HostPaths
     lifecycle_script: Path | None
     operations_config: Path | None
@@ -118,8 +142,8 @@ class HostProfile:
         values.update(
             {
                 "EIDOLON_HOST_ID": self.host_id,
-                "EIDOLON_HOST_PLATFORM": self.platform,
-                "EIDOLON_HOST_DRIVER": self.driver,
+                "EIDOLON_HOST_PLATFORM": str(self.platform),
+                "EIDOLON_HOST_DRIVER": str(self.driver),
             }
         )
         if self.foundation_mode is not None:
@@ -148,18 +172,11 @@ def load_host_profile(path: Path) -> HostProfile:
     if set(host) != {"id", "platform", "driver"}:
         raise HostProfileError("host must contain exactly id, platform and driver")
     host_id = _text(host["id"], "host.id")
-    platform = _text(host["platform"], "host.platform")
-    driver = _text(host["driver"], "host.driver")
     if _HOST_ID.fullmatch(host_id) is None:
         raise HostProfileError("host.id is invalid")
-    if platform not in _PLATFORMS:
-        raise HostProfileError(f"host.platform must be one of {sorted(_PLATFORMS)}")
-    if driver not in _DRIVERS:
-        raise HostProfileError(f"host.driver must be one of {sorted(_DRIVERS)}")
-    if (platform, driver) not in {
-        ("macos", "local-supervisord"),
-        ("raspberry-pi", "ssh-systemd"),
-    }:
+    platform = _member(HostPlatform, host["platform"], "host.platform")
+    driver = _member(HostDriver, host["driver"], "host.driver")
+    if _PLATFORM_DRIVERS[platform] is not driver:
         raise HostProfileError("host platform and driver are incompatible")
 
     paths_wire = _table(document["paths"], "paths")
@@ -176,7 +193,7 @@ def load_host_profile(path: Path) -> HostProfile:
     operations_config: Path | None = None
     foundation_mode: Literal["external"] | None = None
     external_livekit_config: Path | None = None
-    if driver == "local-supervisord":
+    if driver is HostDriver.LOCAL_SUPERVISORD:
         if set(adapter) != {
             "lifecycle_script",
             "operations_config",
@@ -209,14 +226,14 @@ def load_host_profile(path: Path) -> HostProfile:
         )
 
     source_overrides = _source_overrides(document.get("source_overrides"), base=base)
-    if source_overrides and driver != "local-supervisord":
+    if source_overrides and driver is not HostDriver.LOCAL_SUPERVISORD:
         raise HostProfileError("source_overrides are available only for local-supervisord hosts")
     app = _app_access(document.get("app"))
     return HostProfile(
         path=resolved,
         host_id=host_id,
-        platform=platform,  # type: ignore[arg-type]
-        driver=driver,  # type: ignore[arg-type]
+        platform=platform,
+        driver=driver,
         paths=paths,
         lifecycle_script=lifecycle_script,
         operations_config=operations_config,
@@ -233,9 +250,9 @@ def merged_environment(profile: HostProfile) -> dict[str, str]:
     return environment
 
 
-def _validate_paths(paths: HostPaths, *, platform: str) -> None:
+def _validate_paths(paths: HostPaths, *, platform: HostPlatform) -> None:
     if paths.current_root == paths.install_root:
-        if platform != "macos":
+        if platform is not HostPlatform.MACOS:
             raise HostProfileError("Pi current_root must be a link below install_root")
     elif paths.install_root not in paths.current_root.parents:
         raise HostProfileError("current_root must equal or be below install_root")
@@ -253,7 +270,7 @@ def _validate_paths(paths: HostPaths, *, platform: str) -> None:
         raise HostProfileError("Bootstrap state must remain a distinct ownership boundary")
     if paths.bootstrap_runtime_root == paths.runtime_root:
         raise HostProfileError("Bootstrap runtime must remain a distinct ownership boundary")
-    if platform == "raspberry-pi":
+    if platform is HostPlatform.RASPBERRY_PI:
         expected = {
             "install_root": Path("/opt/eidolon"),
             "current_root": Path("/opt/eidolon/current"),
@@ -280,6 +297,14 @@ def _text(value: object, label: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise HostProfileError(f"{label} must be a non-empty string")
     return value.strip()
+
+
+def _member(enumeration: type[Any], value: object, label: str) -> Any:
+    try:
+        return enumeration(_text(value, label))
+    except ValueError as exc:
+        allowed = ", ".join(sorted(str(member) for member in enumeration))
+        raise HostProfileError(f"{label} must be one of {allowed}") from exc
 
 
 def _app_access(value: object | None) -> AppAccess | None:

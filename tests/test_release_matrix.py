@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import pytest
 
+from eidolon_ops.hostagent.contract import PRODUCT_UNITS
 from eidolon_ops.release_matrix import (
     SYSTEMD_ASSET_CONTRACTS,
     ReleaseMatrixError,
     validate_release_systemd_matrix,
 )
-from eidolon_ops.target_agent import PRODUCT_UNITS
 
 
 def _revisions() -> dict[str, str]:

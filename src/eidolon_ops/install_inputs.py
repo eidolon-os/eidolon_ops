@@ -2,50 +2,36 @@
 
 from __future__ import annotations
 
-import os
-import re
 import secrets
-import shutil
-import stat
-import tempfile
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from eidolon_ops.config import INSTALL_FILE_NAMES, OperationsConfig
+from eidolon_ops.errors import InstallInputError
+from eidolon_ops.private_inputs import (
+    INSTALL_DESTINATION_NAMES,
+    refresh_derived_settings,
+    require_safe_input_directory,
+    write_private_directory,
+)
+from eidolon_ops.product_settings import product_settings
+from eidolon_ops.provider_inputs import (
+    EXTERNAL_KEYS as _EXTERNAL_KEYS,
+)
+from eidolon_ops.provider_inputs import (
+    OPTIONAL_CHANNEL_KEYS as _OPTIONAL_CHANNEL_KEYS,
+)
+from eidolon_ops.provider_inputs import (
+    parse_provider_env,
+    serialize_env,
+    usable_secret,
+)
 
-
-class InstallInputError(ValueError):
-    """Install inputs cannot be created without ambiguity or overwrite."""
-
-
-INSTALL_DESTINATION_NAMES = {
-    "data_env": "data.env",
-    "hub_env": "hub.env",
-    "kernel_env": "kernel.env",
-    "admin_env": "admin.env",
-    "local_api_env": "local-api.env",
-    "bootstrap_env": "bootstrap.env",
-    "host_identity": "host_identity.ed25519",
-    "agent_env": "agent.env",
-    "channel_env": "channel.env",
-    "memory_env": "memory.env",
-    "livekit_env": "livekit.env",
-    "agent_settings": "agent.yaml",
-    "channel_settings": "channel.yaml",
-    "memory_settings": "memory.yaml",
-}
-
-_ENV_KEY = re.compile(r"^[A-Z][A-Z0-9_]*$")
-_EXTERNAL_KEYS = {
-    "eidolon_agent": ("EIDOLON_AGENT_LLM_API_KEY",),
-    "eidolon_channel": (
-        "OPENAI_LLM_API_KEY",
-        "BAILIAN_STT_API_KEY",
-        "BAILIAN_TTS_API_KEY",
-    ),
-    "eidolon_memory": ("EIDOLON_MEMORY_LLM_API_KEY",),
-}
-_OPTIONAL_CHANNEL_KEYS = ("SENSETIME_STT_API_KEY", "SENSETIME_TTS_API_KEY")
+__all__ = [
+    "INSTALL_DESTINATION_NAMES",
+    "initialize_install_inputs",
+    "validate_install_input_contract",
+]
 
 
 def initialize_install_inputs(
@@ -59,14 +45,14 @@ def initialize_install_inputs(
         return _validate_existing(target, config, read_exact_file)
 
     providers = {
-        source_id: _parse_provider_env(config.sources[source_id].path / "config/.env")
+        source_id: parse_provider_env(config.sources[source_id].path / "config/.env")
         for source_id in _EXTERNAL_KEYS
     }
     missing = [
         f"{source_id}:{key}"
         for source_id, keys in _EXTERNAL_KEYS.items()
         for key in keys
-        if not _usable_secret(providers[source_id].get(key), key=key)
+        if not usable_secret(providers[source_id].get(key), key=key)
     ]
     if missing:
         raise InstallInputError(
@@ -88,7 +74,7 @@ def initialize_install_inputs(
     channel_external = {
         key: value
         for key in (*_EXTERNAL_KEYS["eidolon_channel"], *_OPTIONAL_CHANNEL_KEYS)
-        if _usable_secret(
+        if usable_secret(
             value := providers["eidolon_channel"].get(key),
             key=key,
         )
@@ -150,15 +136,15 @@ def initialize_install_inputs(
             "LIVEKIT_API_SECRET": livekit_secret,
         },
     }
-    settings = _product_settings(config, read_exact_file)
+    settings = product_settings(config, read_exact_file)
     files: dict[str, bytes] = {
-        **{name: _serialize_env(values) for name, values in env_documents.items()},
+        **{name: serialize_env(values) for name, values in env_documents.items()},
         "host_identity.ed25519": secrets.token_bytes(32),
         **{name: value.encode("utf-8") for name, value in settings.items()},
     }
     if set(files) != set(INSTALL_DESTINATION_NAMES.values()):
         raise InstallInputError("generated install input set is incomplete")
-    _write_private_directory(target, files)
+    write_private_directory(target, files)
     return {
         "status": "initialized",
         "directory": str(target),
@@ -180,9 +166,9 @@ def validate_install_input_contract(
     """Re-prove identities, token relationships and exact product settings."""
 
     target = _target_directory(config)
-    _require_safe_input_directory(target)
+    require_safe_input_directory(target)
     envs = {
-        name: _parse_provider_env(target / name)
+        name: parse_provider_env(target / name)
         for name in (
             "data.env",
             "hub.env",
@@ -266,14 +252,14 @@ def validate_install_input_contract(
             "eidolon_memory": "memory.env",
         }
         current_providers = {
-            source_id: _parse_provider_env(config.sources[source_id].path / "config/.env")
+            source_id: parse_provider_env(config.sources[source_id].path / "config/.env")
             for source_id in _EXTERNAL_KEYS
         }
         for source_id, keys in _EXTERNAL_KEYS.items():
             destination = envs[provider_destinations[source_id]]
             for key in keys:
                 current = current_providers[source_id].get(key)
-                if not _usable_secret(current, key=key):
+                if not usable_secret(current, key=key):
                     raise InstallInputError(
                         "current Mac provider credential is missing or a placeholder: "
                         f"{source_id}:{key}"
@@ -285,7 +271,7 @@ def validate_install_input_contract(
         for key in _OPTIONAL_CHANNEL_KEYS:
             current = current_providers["eidolon_channel"].get(key)
             installed = envs["channel.env"].get(key)
-            if _usable_secret(current, key=key):
+            if usable_secret(current, key=key):
                 if installed != current:
                     raise InstallInputError(
                         f"install input provider credential drifted from Mac: eidolon_channel:{key}"
@@ -392,14 +378,14 @@ def validate_install_input_contract(
         ("channel.env", "BAILIAN_TTS_API_KEY"),
         ("memory.env", "EIDOLON_MEMORY_LLM_API_KEY"),
     ):
-        if not _usable_secret(envs[name].get(key), key=key):
+        if not usable_secret(envs[name].get(key), key=key):
             raise InstallInputError(
                 f"provider credential is missing or a placeholder: {name}:{key}"
             )
     identity = target / "host_identity.ed25519"
     if identity.stat().st_size != 32:
         raise InstallInputError("Host identity must contain exactly 32 raw Ed25519 private bytes")
-    expected_settings = _product_settings(config, read_exact_file)
+    expected_settings = product_settings(config, read_exact_file)
     for name, expected in expected_settings.items():
         try:
             actual = (target / name).read_text(encoding="utf-8")
@@ -430,169 +416,6 @@ def _target_directory(config: OperationsConfig) -> Path:
     return target
 
 
-def _parse_provider_env(path: Path) -> dict[str, str]:
-    if not path.is_file() or path.is_symlink():
-        raise InstallInputError(f"provider env source is missing or unsafe: {path}")
-    values: dict[str, str] = {}
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except (OSError, UnicodeDecodeError) as exc:
-        raise InstallInputError(f"provider env source is unreadable: {path}") from exc
-    for line_number, raw in enumerate(lines, start=1):
-        stripped = raw.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        key, separator, value = stripped.partition("=")
-        if not separator or _ENV_KEY.fullmatch(key) is None or key in values:
-            raise InstallInputError(f"provider env syntax is invalid: {path}:{line_number}")
-        value = value.strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
-            value = value[1:-1]
-        if any(character.isspace() or ord(character) < 32 for character in value):
-            raise InstallInputError(f"provider env value has unsupported whitespace: {path}:{key}")
-        values[key] = value
-    return values
-
-
-def _usable_secret(value: str | None, *, key: str) -> bool:
-    if value is None or len(value) < 8:
-        return False
-    lowered = value.lower()
-    return value != key and not lowered.startswith("your-") and "placeholder" not in lowered
-
-
-def _serialize_env(values: Mapping[str, str]) -> bytes:
-    for key, value in values.items():
-        if (
-            _ENV_KEY.fullmatch(key) is None
-            or not value
-            or any(character.isspace() or ord(character) < 32 for character in value)
-        ):
-            raise InstallInputError(f"generated env entry is unsafe: {key}")
-    text = "".join(f"{key}={values[key]}\n" for key in sorted(values))
-    return text.encode("utf-8")
-
-
-def _product_settings(
-    config: OperationsConfig,
-    read_exact_file: Callable[[str, str, str], str],
-) -> dict[str, str]:
-    agent = read_exact_file(
-        "eidolon_agent", config.sources["eidolon_agent"].revision, "config/settings.yaml"
-    )
-    agent = _replace(agent, "env: dev", "env: prod", expected=1)
-    agent = _replace(
-        agent,
-        "uds_path: ~/eidolon/run/eidolon-agent.sock",
-        "uds_path: /run/eidolon/agent/eidolon-agent.sock",
-        expected=1,
-    )
-    agent = _replace(agent, "~/eidolon/logs/agent", "/var/log/eidolon/agent", expected=2)
-    agent = _replace(agent, "run_dir: ~/eidolon/run", "run_dir: /run/eidolon/agent", expected=1)
-    agent = _replace(
-        agent,
-        "debug_dir: ~/eidolon/debug",
-        "debug_dir: /var/cache/eidolon/agent/debug",
-        expected=1,
-    )
-    agent = _replace(
-        agent,
-        "sqlite_path: ~/eidolon/data/eidolon-agent.sqlite3",
-        "sqlite_path: /var/lib/eidolon/agent/eidolon-agent.sqlite3",
-        expected=1,
-    )
-    agent = _replace(agent, "http://127.0.0.1:8030/mcp", "http://127.0.0.1:10030/mcp", expected=1)
-    agent = _replace(
-        agent,
-        "discovery_token_env: ''",
-        "discovery_token_env: EIDOLON_MEMORY_MCP_TOKEN",
-        expected=1,
-    )
-
-    channel = read_exact_file(
-        "eidolon_channel",
-        config.sources["eidolon_channel"].revision,
-        "config/settings.yaml",
-    )
-    channel = _replace(channel, "avatar:\n  enabled: true", "avatar:\n  enabled: false", expected=1)
-    channel = _replace(
-        channel, "root: ~/eidolon/voiceprints", "root: /var/lib/eidolon/voiceprints", expected=1
-    )
-    channel = _replace(
-        channel,
-        'timeline_debug_path: "~/eidolon/logs/channel/turn-timeline.jsonl"',
-        'timeline_debug_path: "/var/log/eidolon/channel/turn-timeline.jsonl"',
-        expected=1,
-    )
-    channel = _replace(
-        channel,
-        'dump_dir: "~/eidolon/debug"',
-        'dump_dir: "/var/cache/eidolon/channel/debug"',
-        expected=1,
-    )
-
-    # Memory needs no overlay: its settings resolve paths from the Host path
-    # contract this deployer already exports, and the Host's encoder is chosen
-    # through EIDOLON_MEMORY_EMBEDDING_MODEL in memory.env. Rewriting a
-    # component's shipped settings by string substitution breaks the moment
-    # that component improves the line being matched.
-    memory = read_exact_file(
-        "eidolon_memory", config.sources["eidolon_memory"].revision, "config/settings.yaml"
-    )
-    return {"agent.yaml": agent, "channel.yaml": channel, "memory.yaml": memory}
-
-
-def _replace(value: str, old: str, new: str, *, expected: int) -> str:
-    if value.count(old) != expected:
-        raise InstallInputError(f"pinned settings template drifted at product overlay: {old}")
-    return value.replace(old, new)
-
-
-def _write_private_directory(target: Path, files: Mapping[str, bytes]) -> None:
-    _ensure_private_parent(target.parent)
-    temporary = Path(tempfile.mkdtemp(prefix=f".{target.name}.", dir=target.parent))
-    os.chmod(temporary, 0o700)
-    try:
-        for name, value in files.items():
-            path = temporary / name
-            descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            with os.fdopen(descriptor, "wb") as stream:
-                stream.write(value)
-                stream.flush()
-                os.fsync(stream.fileno())
-        os.rename(temporary, target)
-    finally:
-        if temporary.exists():
-            shutil.rmtree(temporary)
-
-
-def _ensure_private_parent(parent: Path) -> None:
-    missing: list[Path] = []
-    current = parent
-    while not current.exists():
-        missing.append(current)
-        current = current.parent
-    if current.is_symlink() or not current.is_dir():
-        raise InstallInputError(f"install input parent is unsafe: {current}")
-    for directory in reversed(missing):
-        directory.mkdir(mode=0o700)
-    if parent.is_symlink() or not parent.is_dir() or stat.S_IMODE(parent.stat().st_mode) & 0o077:
-        raise InstallInputError(f"install input parent must be a private directory: {parent}")
-
-
-def _require_safe_input_directory(target: Path) -> set[str]:
-    """Prove the private input set is complete and private. Reads no value."""
-
-    if target.is_symlink() or not target.is_dir() or stat.S_IMODE(target.stat().st_mode) != 0o700:
-        raise InstallInputError(f"install input directory is unsafe: {target}")
-    expected = set(INSTALL_DESTINATION_NAMES.values())
-    actual = {path.name for path in target.iterdir()}
-    if actual != expected:
-        raise InstallInputError("existing install input directory is partial or has extra files")
-    for path in target.iterdir():
-        if path.is_symlink() or not path.is_file() or stat.S_IMODE(path.stat().st_mode) != 0o600:
-            raise InstallInputError(f"existing install input is unsafe: {path.name}")
-    return actual
 
 
 def _validate_existing(
@@ -600,12 +423,12 @@ def _validate_existing(
     config: OperationsConfig,
     read_exact_file: Callable[[str, str, str], str],
 ) -> dict[str, object]:
-    actual = _require_safe_input_directory(target)
+    actual = require_safe_input_directory(target)
     # Settings are derived from the pinned commits, not generated here: they
     # carry no secret and are simply what those commits say. Refreshing them is
     # safe, and not refreshing them would mean a component cannot change a
     # default without an operator reissuing every credential on the Host.
-    refreshed = _refresh_derived_settings(target, config, read_exact_file)
+    refreshed = refresh_derived_settings(target, config, read_exact_file)
     return {
         "status": "already_initialized",
         "directory": str(target),
@@ -615,28 +438,3 @@ def _validate_existing(
     }
 
 
-def _refresh_derived_settings(
-    target: Path,
-    config: OperationsConfig,
-    read_exact_file: Callable[[str, str, str], str],
-) -> list[str]:
-    """Rewrite the settings that follow the pinned commits; never a credential."""
-
-    refreshed: list[str] = []
-    for name, value in _product_settings(config, read_exact_file).items():
-        path = target / name
-        payload = value.encode("utf-8")
-        if path.read_bytes() == payload:
-            continue
-        temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        try:
-            with os.fdopen(descriptor, "wb") as stream:
-                stream.write(payload)
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.replace(temporary, path)
-        finally:
-            temporary.unlink(missing_ok=True)
-        refreshed.append(name)
-    return refreshed

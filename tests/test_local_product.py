@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ssl
 from ipaddress import IPv4Address
 from pathlib import Path
 from types import SimpleNamespace
@@ -8,19 +9,17 @@ from urllib.parse import urlsplit
 
 import pytest
 
+from eidolon_ops import environment as environment_module
 from eidolon_ops import local_product as local_product_module
-from eidolon_ops.controller import OperationsError
-from eidolon_ops.local_product import (
-    LocalProductSource,
-    _http_health,
-    _read_environment_file,
-    _read_service_environment_file,
-    _replace_environment_values,
-    _serialize_plain_environment,
-    _unix_http_health,
-)
-from eidolon_ops.paths import AppAccess, HostPaths, HostProfile
+from eidolon_ops import probes, source_assets
+from eidolon_ops.environment import EnvironmentFileError
+from eidolon_ops.errors import OperationsError
+from eidolon_ops.local_product import LocalProductSource
+from eidolon_ops.paths import AppAccess, HostDriver, HostPaths, HostPlatform, HostProfile
+from eidolon_ops.probes import http_health as _http_health
+from eidolon_ops.probes import unix_http_health as _unix_http_health
 from eidolon_ops.process import ProcessResult, SubprocessRunner
+from eidolon_ops.source_schema import migrate_data_schema
 
 
 def _product(tmp_path: Path, *, foundation_mode: str) -> LocalProductSource:
@@ -28,8 +27,8 @@ def _product(tmp_path: Path, *, foundation_mode: str) -> LocalProductSource:
     profile = HostProfile(
         path=tmp_path / "mac.toml",
         host_id="mac-test",
-        platform="macos",
-        driver="local-supervisord",
+        platform=HostPlatform.MACOS,
+        driver=HostDriver.LOCAL_SUPERVISORD,
         paths=HostPaths(
             install_root=tmp_path / "workspace",
             current_root=tmp_path / "workspace",
@@ -59,10 +58,8 @@ def _product(tmp_path: Path, *, foundation_mode: str) -> LocalProductSource:
     return LocalProductSource(profile, cast(Any, None), cast(Any, None))
 
 
-def test_external_foundation_keeps_existing_nats_and_livekit_ports(tmp_path: Path) -> None:
-    product = _product(tmp_path, foundation_mode="external")
-
-    rendered = product._translate_ports(
+def test_external_foundation_keeps_existing_nats_and_livekit_ports() -> None:
+    rendered = source_assets.translate_ports(
         "nats://127.0.0.1:4222\n"
         "ws://127.0.0.1:7880\n"
         "port: 4222\n"
@@ -84,7 +81,7 @@ def test_external_livekit_credential_import_requires_one_pair(tmp_path: Path) ->
     livekit = cast(Path, product.profile.external_livekit_config)
     livekit.write_text("port: 7880\nkeys:\n  product-key: product-secret\n", encoding="utf-8")
 
-    assert product._external_livekit_credentials() == {
+    assert source_assets.external_livekit_credentials(product.profile.external_livekit_config) == {
         "LIVEKIT_API_KEY": "product-key",
         "LIVEKIT_API_SECRET": "product-secret",
     }
@@ -114,7 +111,7 @@ def test_eidolond_health_uses_unix_socket(monkeypatch, tmp_path: Path) -> None:
             calls.append(("recv", size))
             return b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}"
 
-    monkeypatch.setattr("eidolon_ops.local_product.socket.socket", lambda *_args: Client())
+    monkeypatch.setattr(probes.socket, "socket", lambda *_args: Client())
 
     assert _unix_http_health(path) == {"healthy": True, "http_status": 200}
     assert ("connect", str(path)) in calls
@@ -269,7 +266,7 @@ def test_hub_tls_identity_is_generated_validated_and_reused(tmp_path: Path) -> N
     assert private_key.is_file()
     assert certificate.stat().st_mode & 0o777 == 0o600
     assert private_key.stat().st_mode & 0o777 == 0o600
-    decoded = local_product_module.ssl._ssl._test_decode_cert(str(certificate))
+    decoded = ssl._ssl._test_decode_cert(str(certificate))
     assert ("DNS", product._host_lan_identity().hub_hostname) in decoded["subjectAltName"]
     original = certificate.read_bytes(), private_key.read_bytes()
 
@@ -289,7 +286,7 @@ def test_hub_tls_identity_fails_closed_for_partial_or_invalid_files(tmp_path: Pa
 
     private_key.write_text("invalid", encoding="utf-8")
     product._ensure_hub_tls_identity()
-    decoded = local_product_module.ssl._ssl._test_decode_cert(str(certificate))
+    decoded = ssl._ssl._test_decode_cert(str(certificate))
     assert ("DNS", product._host_lan_identity().hub_hostname) in decoded["subjectAltName"]
 
 
@@ -301,10 +298,10 @@ def test_product_health_uses_canonical_endpoints(monkeypatch, tmp_path: Path) ->
         urls.append(url)
         return {"healthy": True, "http_status": 200}
 
-    monkeypatch.setattr(local_product_module, "_http_health", healthy)
+    monkeypatch.setattr(probes, "http_health", healthy)
     monkeypatch.setattr(
-        local_product_module,
-        "_unix_http_health",
+        probes,
+        "unix_http_health",
         lambda _path: {"healthy": True, "http_status": 200},
     )
 
@@ -366,11 +363,23 @@ def test_app_ready_requires_device_reachable_contract(monkeypatch, tmp_path: Pat
     )
     monkeypatch.setattr(product, "health", lambda: {"status": "healthy"})
     monkeypatch.setattr(
-        local_product_module,
-        "_http_health",
+        probes,
+        "http_health",
         lambda _url: {"healthy": True, "http_status": 200},
     )
-    monkeypatch.setattr(local_product_module, "_tcp_health", lambda *_a: {"healthy": True})
+    monkeypatch.setattr(probes, "tcp_health", lambda *_a: {"healthy": True})
+    monkeypatch.setattr(
+        probes,
+        "channel_worker_report",
+        lambda _port, *, agent_name: {
+            "healthy": True,
+            "http_status": 200,
+            "agent_name": agent_name,
+            "worker_type": "JT_PUBLISHER",
+            "dispatch_identity": True,
+            "expected_agent_name": agent_name,
+        },
+    )
 
     result = product.app_ready()
 
@@ -382,50 +391,53 @@ def test_app_ready_requires_device_reachable_contract(monkeypatch, tmp_path: Pat
     )
     degraded = product.app_ready()
     assert degraded["status"] == "degraded"
-    assert degraded["checks"]["lan_address_present"] is False
+    assert degraded["checks"]["lan_address_observed"] is False
 
 
-def test_generated_environment_helpers_reject_ambiguous_inputs(tmp_path: Path) -> None:
-    assert _serialize_plain_environment({"EIDOLON_OK": "value"}) == "EIDOLON_OK=value\n"
-    with pytest.raises(OperationsError, match="profile key"):
-        _serialize_plain_environment({"NOT_PRODUCT": "value"})
-    with pytest.raises(OperationsError, match="profile value"):
-        _serialize_plain_environment({"EIDOLON_BAD": "line\nbreak"})
+def test_generated_environment_helpers_reject_ambiguous_inputs() -> None:
+    assert environment_module.serialize_ops({"EIDOLON_OK": "value"}) == "EIDOLON_OK=value\n"
+    with pytest.raises(EnvironmentFileError, match="profile key"):
+        environment_module.serialize_ops({"NOT_PRODUCT": "value"})
+    with pytest.raises(EnvironmentFileError, match="value is unsafe"):
+        environment_module.serialize_ops({"EIDOLON_BAD": "line\nbreak"})
 
-    environment = tmp_path / "service.env"
-    environment.write_text("\nEIDOLON_ONE=1\nEIDOLON_TWO=2\n", encoding="utf-8")
-    assert _read_environment_file(environment) == {"EIDOLON_ONE": "1", "EIDOLON_TWO": "2"}
-    environment.write_text("EIDOLON_ONE=1\nEIDOLON_ONE=2\n", encoding="utf-8")
-    with pytest.raises(OperationsError, match="env file"):
-        _read_environment_file(environment)
-
-    environment.write_text("LIVEKIT_API_KEY=key\nEIDOLON_ONE=1\n", encoding="utf-8")
-    assert _read_service_environment_file(environment) == {
-        "LIVEKIT_API_KEY": "key",
+    ops_key = environment_module.OPS_KEY
+    assert environment_module.parse("\nEIDOLON_ONE=1\nEIDOLON_TWO=2\n", key=ops_key) == {
         "EIDOLON_ONE": "1",
+        "EIDOLON_TWO": "2",
     }
-    environment.write_text("lowercase=value\n", encoding="utf-8")
-    with pytest.raises(OperationsError, match="service env file"):
-        _read_service_environment_file(environment)
+    with pytest.raises(EnvironmentFileError, match="env file"):
+        environment_module.parse(
+            "EIDOLON_ONE=1\nEIDOLON_ONE=2\n", label="generated env file", key=ops_key
+        )
 
-    assert _replace_environment_values("A=old\nB=kept\n", {"A": "new"}) == ("A=new\nB=kept\n")
-    with pytest.raises(OperationsError, match="environment is invalid"):
-        _replace_environment_values("A=one\nA=two\n", {})
-    with pytest.raises(OperationsError, match="lacks MISSING"):
-        _replace_environment_values("A=one\n", {"MISSING": "value"})
+    service_key = environment_module.SERVICE_KEY
+    assert environment_module.parse(
+        "LIVEKIT_API_KEY=key\nEIDOLON_ONE=1\n", key=service_key
+    ) == {"LIVEKIT_API_KEY": "key", "EIDOLON_ONE": "1"}
+    with pytest.raises(EnvironmentFileError, match="service env file"):
+        environment_module.parse(
+            "lowercase=value\n", label="generated service env file", key=service_key
+        )
+
+    assert environment_module.replace("A=old\nB=kept\n", {"A": "new"}) == "A=new\nB=kept\n"
+    with pytest.raises(EnvironmentFileError, match="environment is invalid"):
+        environment_module.replace("A=one\nA=two\n", {})
+    with pytest.raises(EnvironmentFileError, match="lacks MISSING"):
+        environment_module.replace("A=one\n", {"MISSING": "value"})
 
 
 def test_external_livekit_and_migration_fail_closed(tmp_path: Path) -> None:
     product = _product(tmp_path, foundation_mode="external")
     livekit = cast(Path, product.profile.external_livekit_config)
     with pytest.raises(OperationsError, match="missing or unsafe"):
-        product._external_livekit_credentials()
+        source_assets.external_livekit_credentials(product.profile.external_livekit_config)
     livekit.write_text("keys:\n  one: secret-one\n  two: secret-two\n", encoding="utf-8")
     with pytest.raises(OperationsError, match="exactly one"):
-        product._external_livekit_credentials()
+        source_assets.external_livekit_credentials(product.profile.external_livekit_config)
     livekit.write_text("keys:\n  ok: short\n", encoding="utf-8")
     with pytest.raises(OperationsError, match="shape"):
-        product._external_livekit_credentials()
+        source_assets.external_livekit_credentials(product.profile.external_livekit_config)
 
     data = tmp_path / "data"
     data.mkdir()
@@ -433,7 +445,7 @@ def test_external_livekit_and_migration_fail_closed(tmp_path: Path) -> None:
         Any, SimpleNamespace(sources={"eidolon_data": SimpleNamespace(path=data)})
     )
     with pytest.raises(OperationsError, match="migration entrypoint"):
-        product._migrate_data_schema()
+        migrate_data_schema(product.profile, product.config, product.runner)
 
 
 def test_http_health_reports_success_and_transport_failure(monkeypatch) -> None:
@@ -456,13 +468,13 @@ def test_http_health_reports_success_and_transport_failure(monkeypatch) -> None:
                 raise OSError("unreachable")
             return Response()
 
-    monkeypatch.setattr(local_product_module.urllib.request, "build_opener", lambda *_a: Opener())
+    monkeypatch.setattr(probes.urllib.request, "build_opener", lambda *_a: Opener())
     assert _http_health("https://127.0.0.1/health") == {
         "healthy": False,
         "http_status": 204,
     }
     monkeypatch.setattr(
-        local_product_module.urllib.request,
+        probes.urllib.request,
         "build_opener",
         lambda *_a: Opener(fail=True),
     )
@@ -492,7 +504,7 @@ def test_unix_health_rejects_transport_and_malformed_response(monkeypatch, tmp_p
         def recv(self, _size):
             return b"not-http"
 
-    monkeypatch.setattr(local_product_module.socket, "socket", lambda *_a: Client())
+    monkeypatch.setattr(probes.socket, "socket", lambda *_a: Client())
     assert _unix_http_health(tmp_path / "socket") == {
         "healthy": False,
         "http_status": None,
@@ -502,7 +514,7 @@ def test_unix_health_rejects_transport_and_malformed_response(monkeypatch, tmp_p
         def connect(self, _target):
             raise OSError("missing")
 
-    monkeypatch.setattr(local_product_module.socket, "socket", lambda *_a: FailingClient())
+    monkeypatch.setattr(probes.socket, "socket", lambda *_a: FailingClient())
     assert _unix_http_health(tmp_path / "missing") == {
         "healthy": False,
         "http_status": None,

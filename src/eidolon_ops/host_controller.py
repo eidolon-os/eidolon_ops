@@ -1,14 +1,25 @@
-"""One lifecycle interface backed by host-specific process adapters."""
+"""One lifecycle interface over a composed Host adapter.
+
+Every operation declares a ``Plan`` and returns ``Evidence``. Nothing here asks
+what driver a Host has: it asks the adapter whether it holds the capability,
+and the adapter answers from what it is composed of.
+"""
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
-from eidolon_ops.config import load_config
-from eidolon_ops.controller import EidolonPiController, OperationsError
-from eidolon_ops.paths import HostProfile, merged_environment
-from eidolon_ops.process import ProcessRunner, checked
+from eidolon_ops import plans
+from eidolon_ops.errors import OperationsError
+from eidolon_ops.host import HostAdapter, build_adapter
+from eidolon_ops.model import Capability, Evidence, Outcome, Plan, steps_from_phases
+from eidolon_ops.paths import HostProfile
+from eidolon_ops.process import ProcessRunner
+
+_LIFECYCLE_ACTIONS = frozenset({"start", "stop", "restart"})
+#: Flags that survived from a lifecycle model this tool no longer has. Every
+#: adapter refused them, so they are refused once here instead of twice.
+_RETIRED_LIFECYCLE_FLAGS = ("--force-cleanup", "--strict", "--no-wait-ready")
 
 
 class HostController:
@@ -22,41 +33,122 @@ class HostController:
         self.profile = profile
         self.runner = runner
         self.revision_overrides = revision_overrides
+        self._adapter: HostAdapter | None = None
 
-    def status(self) -> dict[str, object]:
-        if self.profile.driver == "local-supervisord":
-            return self.local_profile("product-source", "status")
-        return self._pi().status()
+    @property
+    def adapter(self) -> HostAdapter:
+        if self._adapter is None:
+            self._adapter = build_adapter(
+                self.profile, self.runner, revision_overrides=self.revision_overrides
+            )
+        return self._adapter
 
-    def app_ready(self) -> dict[str, object]:
-        if self.profile.driver == "local-supervisord":
-            return self._local_product().app_ready()
-        return self._require_pi("app-ready").app_ready()
+    # -- read-only -----------------------------------------------------------
 
-    def provision(self, *, apply: bool) -> dict[str, object]:
-        return self._require_pi("provision").provision(apply=apply)
+    def status(self) -> Evidence:
+        plan = plans.status(self.profile.host_id)
+        self.adapter.require(Capability.STATUS)
+        report = self.adapter.supervisor.status()
+        return self._observed(plan, report, healthy=report.get("status") != "degraded")
 
-    def initialize_inputs(self) -> dict[str, object]:
-        return self._require_pi("init-inputs").initialize_inputs()
+    def app_ready(self) -> Evidence:
+        plan = plans.app_ready(self.profile.host_id)
+        self.adapter.require(Capability.APP_READY)
+        report = self.adapter.supervisor.app_ready()
+        return self._observed(plan, report, healthy=report.get("status") == "app_ready")
 
-    def commissioning_code(self, *, ttl_seconds: int) -> dict[str, object]:
-        """Issue the Setup code a phone types, on whichever Host this profile is.
+    def doctor(self, *, release_id: str | None = None) -> Evidence:
+        plan = plans.doctor(self.profile.host_id)
+        adapter = self.adapter
+        adapter.require(Capability.DOCTOR)
+        paths = self._path_report()
+        foundation = adapter.packages.doctor()
+        host = adapter.supervisor.doctor(release_id=release_id)
+        healthy = host.get("status") == "healthy" and foundation.get("status") in {
+            "healthy",
+            "unmanaged",
+        }
+        report = {
+            "status": "healthy" if healthy else "degraded",
+            "host_id": self.profile.host_id,
+            "platform": str(self.profile.platform),
+            "driver": str(self.profile.driver),
+            "adapter": adapter.describe(),
+            "paths": paths,
+            "foundation": foundation,
+            "host": host,
+        }
+        return self._observed(plan, report, healthy=healthy)
 
-        This was refused anywhere but the Mac, and nothing else could create a
-        commissioning session, so a product Host could not be claimed at all.
-        """
+    def logs(self, *, service: str | None, lines: int, since: str | None) -> Evidence:
+        plan = plans.logs(self.profile.host_id)
+        adapter = self.adapter
+        adapter.require(Capability.LOGS)
+        if since is not None:
+            adapter.require(Capability.LOG_HISTORY)
+        report = adapter.supervisor.logs(service=service, lines=lines, since=since)
+        return self._observed(plan, report, healthy=True)
+
+    # -- boundary actions ----------------------------------------------------
+
+    def lifecycle(
+        self,
+        operation: str,
+        *,
+        dry_run: bool = False,
+        force_cleanup: bool = False,
+        strict: bool = False,
+        wait_ready: bool = True,
+    ) -> Evidence:
+        if operation not in _LIFECYCLE_ACTIONS:
+            raise OperationsError(f"unsupported lifecycle operation: {operation}")
+        if force_cleanup or strict or not wait_ready:
+            raise OperationsError(
+                "legacy Mac lifecycle flags are not valid for any adapter: "
+                + ", ".join(_RETIRED_LIFECYCLE_FLAGS)
+            )
+        plan = plans.lifecycle(self.profile.host_id, operation, dry_run=dry_run)
+        self.adapter.require(Capability.LIFECYCLE)
+        report = self.adapter.supervisor.lifecycle(operation, dry_run=dry_run)
+        if dry_run:
+            return Evidence(plan=plan, outcome=Outcome.PLANNED, report=report)
+        return self._applied(plan, report)
+
+    def commissioning_code(self, *, ttl_seconds: int) -> Evidence:
+        """Issue the Setup code a phone types, on whichever Host this profile is."""
 
         if not 60 <= ttl_seconds <= 86400:
             raise OperationsError("commissioning-code TTL must be between 60 and 86400 seconds")
-        if self.profile.driver == "local-supervisord":
-            return self.local_profile(
-                "product-source",
-                "commissioning-code",
-                arguments=("--ttl", str(ttl_seconds)),
-            )
-        return self._require_pi("commissioning-code").commissioning_code(
-            ttl_seconds=ttl_seconds
-        )
+        plan = plans.commissioning_code(self.profile.host_id)
+        self.adapter.require(Capability.COMMISSIONING_CODE)
+        report = self.adapter.supervisor.commissioning_code(ttl_seconds=ttl_seconds)
+        return self._applied(plan, report)
+
+    def local_profile(
+        self, profile_name: str, operation: str, *, arguments: tuple[str, ...] = ()
+    ) -> Evidence:
+        from eidolon_ops.adapters.supervisord import PROFILE
+
+        plan = plans.source_profile(self.profile.host_id, operation)
+        adapter = self.adapter
+        adapter.require(Capability.SOURCE_PROFILE)
+        if profile_name != PROFILE:
+            raise OperationsError(f"unsupported local profile: {profile_name}")
+        report = adapter.supervisor.profile_operation(operation, arguments=arguments)
+        return self._applied(plan, report)
+
+    # -- release and authority operations ------------------------------------
+
+    def provision(self, *, apply: bool) -> Evidence:
+        plan = plans.provision(self.profile.host_id, apply=apply)
+        release = self.adapter.require_release(Capability.PROVISION)
+        report = release.provision(apply=apply)
+        return self._planned_or_applied(plan, report, applied=apply)
+
+    def initialize_inputs(self) -> Evidence:
+        plan = plans.initialize_inputs(self.profile.host_id)
+        release = self.adapter.require_release(Capability.INIT_INPUTS)
+        return self._applied(plan, release.initialize_inputs())
 
     def install(
         self,
@@ -66,46 +158,70 @@ class HostController:
         apply: bool,
         reset_existing: bool = False,
         wipe_authority_data: bool = False,
-    ) -> dict[str, object]:
-        return self._require_pi("install").install(
+    ) -> Evidence:
+        plan = plans.install(
+            self.profile.host_id,
+            apply=apply,
+            reset_existing=reset_existing,
+            wipe_authority_data=wipe_authority_data,
+        )
+        release = self.adapter.require_release(Capability.INSTALL)
+        report = release.install(
             release_id=release_id,
             resume=resume,
             apply=apply,
             reset_existing=reset_existing,
             wipe_authority_data=wipe_authority_data,
         )
+        return self._planned_or_applied(plan, report, applied=apply)
 
-    def backup(self, *, output: Path) -> dict[str, object]:
-        return self._require_pi("backup").backup(output=output)
+    def deploy(self, *, release_id: str, resume: bool, activate: bool) -> Evidence:
+        plan = plans.deploy(self.profile.host_id, activate=activate)
+        release = self.adapter.require_release(Capability.DEPLOY)
+        report = release.deploy(release_id=release_id, resume=resume, activate=activate)
+        return self._planned_or_applied(plan, report, applied=activate)
 
-    def restore(self, *, source: Path, apply: bool) -> dict[str, object]:
-        return self._require_pi("restore").restore(source=source, apply=apply)
+    def rollback(self, *, release_id: str, snapshot: Path, apply: bool) -> Evidence:
+        plan = plans.rollback(self.profile.host_id, apply=apply)
+        release = self.adapter.require_release(Capability.ROLLBACK)
+        report = release.rollback(release_id=release_id, snapshot=snapshot, apply=apply)
+        return self._planned_or_applied(plan, report, applied=apply)
 
-    def controller_reset(self, *, apply: bool) -> dict[str, object]:
-        return self._require_pi("controller-reset").controller_reset(apply=apply)
+    def backup(self, *, output: Path) -> Evidence:
+        plan = plans.backup(self.profile.host_id)
+        release = self.adapter.require_release(Capability.BACKUP)
+        return self._applied(plan, release.backup(output=output))
 
-    def reset(self, *, wipe_authority_data: bool, apply: bool) -> dict[str, object]:
-        return self._require_pi("reset").reset(
-            wipe_authority_data=wipe_authority_data,
-            apply=apply,
+    def restore(self, *, source: Path, apply: bool) -> Evidence:
+        plan = plans.restore(self.profile.host_id, apply=apply)
+        release = self.adapter.require_release(Capability.RESTORE)
+        report = release.restore(source=source, apply=apply)
+        return self._planned_or_applied(plan, report, applied=apply)
+
+    def reset(self, *, wipe_authority_data: bool, apply: bool) -> Evidence:
+        plan = plans.reset(
+            self.profile.host_id, apply=apply, wipe_authority_data=wipe_authority_data
         )
+        release = self.adapter.require_release(Capability.RESET)
+        report = release.reset(wipe_authority_data=wipe_authority_data, apply=apply)
+        return self._planned_or_applied(plan, report, applied=apply)
 
-    def deploy(self, *, release_id: str, resume: bool, activate: bool) -> dict[str, object]:
-        return self._require_pi("deploy").deploy(
-            release_id=release_id, resume=resume, activate=activate
-        )
+    def controller_reset(self, *, apply: bool) -> Evidence:
+        plan = plans.controller_reset(self.profile.host_id, apply=apply)
+        release = self.adapter.require_release(Capability.CONTROLLER_RESET)
+        report = release.controller_reset(apply=apply)
+        return self._planned_or_applied(plan, report, applied=apply)
 
-    def rollback(self, *, release_id: str, snapshot: Path, apply: bool) -> dict[str, object]:
-        return self._require_pi("rollback").rollback(
-            release_id=release_id, snapshot=snapshot, apply=apply
-        )
+    def diagnose(self, *, output: Path) -> Evidence:
+        plan = plans.diagnose(self.profile.host_id)
+        release = self.adapter.require_release(Capability.DIAGNOSE)
+        return self._applied(plan, release.diagnose(output=output))
 
-    def diagnose(self, *, output: Path) -> dict[str, object]:
-        return self._require_pi("diagnose").diagnose(output=output)
+    # -- evidence ------------------------------------------------------------
 
-    def doctor(self, *, release_id: str | None = None) -> dict[str, object]:
+    def _path_report(self) -> dict[str, object]:
         paths = self.profile.paths
-        path_items = (
+        items = (
             ("install", paths.install_root),
             ("current", paths.current_root),
             ("config", paths.config_root),
@@ -116,174 +232,41 @@ class HostController:
             ("bootstrap_state", paths.bootstrap_state_root),
             ("bootstrap_runtime", paths.bootstrap_runtime_root),
         )
-        if self.profile.driver == "local-supervisord":
-            path_report = {
-                name: {"path": str(value), "exists": value.exists()} for name, value in path_items
-            }
-            script = self._local_script()
-            healthy = paths.current_root.is_dir() and os.access(script, os.X_OK)
-            return {
-                "status": "healthy" if healthy else "degraded",
-                "host_id": self.profile.host_id,
-                "platform": self.profile.platform,
-                "driver": self.profile.driver,
-                "paths": path_report,
-                "lifecycle_script": str(script),
-            }
-        remote = self._pi().doctor(release_id=release_id)
+        # A path on this machine can be looked at; one on a remote Host cannot,
+        # and reporting a workstation's answer for it would be a lie.
+        local = self.adapter.release is None
         return {
-            "status": remote.get("status", "degraded"),
-            "host_id": self.profile.host_id,
-            "platform": self.profile.platform,
-            "driver": self.profile.driver,
-            "paths": {name: str(value) for name, value in path_items},
-            "remote": remote,
-        }
-
-    def lifecycle(
-        self,
-        operation: str,
-        *,
-        dry_run: bool = False,
-        force_cleanup: bool = False,
-        strict: bool = False,
-        wait_ready: bool = True,
-    ) -> dict[str, object]:
-        if operation not in {"start", "stop", "restart"}:
-            raise OperationsError(f"unsupported lifecycle operation: {operation}")
-        if self.profile.driver == "local-supervisord":
-            if force_cleanup or strict or not wait_ready:
-                raise OperationsError(
-                    "legacy Mac lifecycle flags are not valid for the canonical product-source stack"
-                )
-            if dry_run:
-                return {
-                    "status": "dry_run",
-                    "driver": self.profile.driver,
-                    "command": [str(self._local_script()), "product-source", operation],
-                    "environment": self.profile.environment(),
-                }
-            return self.local_profile("product-source", operation)
-        if force_cleanup or strict or not wait_ready:
-            raise OperationsError("Mac lifecycle flags are not valid for the systemd adapter")
-        return self._pi().lifecycle(operation, dry_run=dry_run)
-
-    def local_profile(
-        self, profile_name: str, operation: str, *, arguments: tuple[str, ...] = ()
-    ) -> dict[str, object]:
-        if self.profile.driver != "local-supervisord":
-            raise OperationsError("Supervisor profiles are available on the macOS adapter only")
-        if profile_name != "product-source":
-            raise OperationsError(f"unsupported local profile: {profile_name}")
-        if profile_name == "product-source":
-            product = self._local_product()
-            if operation == "prepare":
-                return product.prepare()
-            if operation == "validate":
-                return product.validate()
-            if operation in {"start", "restart", "web-start", "web-restart"}:
-                product.prepare()
-        script = self._local_script()
-        result = checked(
-            f"local {profile_name} {operation}",
-            self.runner.run(
-                (str(script), profile_name, operation, *arguments),
-                cwd=script.parents[2],
-                env=merged_environment(self.profile),
-                timeout=300,
-            ),
-        )
-        response = {
-            "status": "ok",
-            "host_id": self.profile.host_id,
-            "profile": profile_name,
-            "operation": operation,
-            "output": result.stdout.strip(),
-        }
-        if profile_name == "product-source" and operation in {"start", "restart", "status"}:
-            health = product.health(wait_seconds=120 if operation in {"start", "restart"} else 0)
-            unhealthy_process = any(
-                marker in result.stdout for marker in (" FATAL ", " BACKOFF ", " EXITED ")
+            name: (
+                {"path": str(value), "exists": value.exists()} if local else {"path": str(value)}
             )
-            response["health"] = health
-            response["status"] = (
-                "healthy" if health["status"] == "healthy" and not unhealthy_process else "degraded"
-            )
-        return response
-
-    def _local_product(self):
-        from eidolon_ops.local_product import LocalProductSource
-
-        config_path = self.profile.operations_config
-        if config_path is None:
-            raise OperationsError("Mac product-source profile has no operations config")
-        config = (
-            load_config(config_path)
-            .with_source_overrides(self.profile.source_overrides)
-            .with_revision_overrides(self.revision_overrides)
-        )
-        return LocalProductSource(self.profile, config, self.runner)
-
-    def logs(self, *, service: str | None, lines: int, since: str | None) -> dict[str, object]:
-        if self.profile.driver == "ssh-systemd":
-            unit = service
-            if unit is not None and not unit.endswith(".service"):
-                if not unit.startswith("eidolon-") and unit != "eidolond":
-                    unit = f"eidolon-{unit}"
-                unit = f"{unit}.service"
-            return self._pi().logs(unit=unit, lines=lines, since=since)
-        if since is not None:
-            raise OperationsError("--since is supported by the systemd adapter only")
-        if lines < 1 or lines > 5000:
-            raise OperationsError("lines must be between 1 and 5000")
-        root = self.profile.paths.log_root
-        target = root / service if service else root
-        if root not in target.resolve(strict=False).parents and target != root:
-            raise OperationsError("service log selector escapes the log root")
-        files = [target] if target.is_file() else sorted(target.rglob("*.log"))
-        output: dict[str, list[str]] = {}
-        for path in files:
-            if not path.is_file():
-                continue
-            content = path.read_text(encoding="utf-8", errors="replace").splitlines()
-            output[str(path.relative_to(root))] = content[-lines:]
-        return {"status": "ok", "host_id": self.profile.host_id, "logs": output}
-
-    def _local_lifecycle(self, arguments: tuple[str, ...] | str) -> dict[str, object]:
-        if isinstance(arguments, str):
-            arguments = (arguments,)
-        script = self._local_script()
-        result = checked(
-            f"local host {arguments[0]}",
-            self.runner.run(
-                (str(script), *arguments),
-                cwd=script.parents[2],
-                env=merged_environment(self.profile),
-                timeout=300,
-            ),
-        )
-        return {
-            "status": "ok",
-            "host_id": self.profile.host_id,
-            "platform": self.profile.platform,
-            "driver": self.profile.driver,
-            "output": result.stdout.strip(),
+            for name, value in items
         }
 
-    def _local_script(self) -> Path:
-        script = self.profile.lifecycle_script
-        if script is None or not script.is_file() or not os.access(script, os.X_OK):
-            raise OperationsError(f"local lifecycle script is missing or not executable: {script}")
-        return script
+    @staticmethod
+    def _observed(plan: Plan, report: dict[str, object], *, healthy: bool) -> Evidence:
+        return Evidence(
+            plan=plan,
+            outcome=Outcome.OBSERVED if healthy else Outcome.DEGRADED,
+            steps=steps_from_phases(plan, report),
+            report=report,
+        )
 
-    def _pi(self) -> EidolonPiController:
-        config_path = self.profile.operations_config
-        if config_path is None:
-            raise OperationsError("Pi host profile does not reference an operations config")
-        config = load_config(config_path).with_revision_overrides(self.revision_overrides)
-        return EidolonPiController(config, self.runner, app=self.profile.app)
+    @staticmethod
+    def _applied(plan: Plan, report: dict[str, object]) -> Evidence:
+        return Evidence(
+            plan=plan,
+            outcome=Outcome.APPLIED,
+            steps=steps_from_phases(plan, report),
+            report=report,
+        )
 
-    def _require_pi(self, operation: str) -> EidolonPiController:
-        if self.profile.driver != "ssh-systemd":
-            raise OperationsError(f"{operation} is available on the Pi adapter only")
-        return self._pi()
+    @staticmethod
+    def _planned_or_applied(
+        plan: Plan, report: dict[str, object], *, applied: bool
+    ) -> Evidence:
+        return Evidence(
+            plan=plan,
+            outcome=Outcome.APPLIED if applied else Outcome.PLANNED,
+            steps=steps_from_phases(plan, report),
+            report=report,
+        )

@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from eidolon_ops import host_cli
+from eidolon_ops.model import Evidence, Outcome, Plan
 from eidolon_ops.paths import HostProfileError
 
 
@@ -19,14 +20,14 @@ class FakeHostController:
 
     def _result(self, name: str, **values):
         self.calls.append((name, values))
-        return {"status": "healthy" if name == "doctor" else "ok"}
+        return _evidence(name, Outcome.OBSERVED if name == "doctor" else Outcome.APPLIED)
 
     def status(self):
         return self._result("status")
 
     def app_ready(self):
         self.calls.append(("app-ready", {}))
-        return {"status": "app_ready"}
+        return _evidence("app-ready", Outcome.OBSERVED)
 
     def doctor(self, **kwargs):
         return self._result("doctor", **kwargs)
@@ -63,6 +64,14 @@ class FakeHostController:
 
     def logs(self, **kwargs):
         return self._result("logs", **kwargs)
+
+
+def _evidence(name: str, outcome: Outcome) -> Evidence:
+    return Evidence(
+        plan=Plan(operation=name, host_id="host", steps=()),
+        outcome=outcome,
+        report={"status": "ok"},
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -114,7 +123,9 @@ def test_unified_cli_routes_host_capabilities(capsys, arguments: list[str], expe
     result = host_cli.main(["--config", "/tmp/host.toml", *arguments])
 
     assert result == 0
-    assert json.loads(capsys.readouterr().out)["status"] in {"ok", "healthy", "app_ready"}
+    document = json.loads(capsys.readouterr().out)
+    assert document["outcome"] in {"observed", "applied"}
+    assert document["plan"]["host_id"] == "host"
     assert FakeHostController.instance.calls[-1][0] == expected
 
 
@@ -146,5 +157,44 @@ def test_unified_cli_reports_profile_errors(monkeypatch, capsys) -> None:
     assert host_cli.main(["--config", "/tmp/host.toml", "status"]) == 1
     assert json.loads(capsys.readouterr().err) == {
         "status": "failed",
+        "outcome": "failed",
         "error": "invalid host profile",
     }
+
+
+def test_the_exit_code_is_the_operations_own_verdict(capsys, monkeypatch) -> None:
+    """A word nobody added to a whitelist is no longer a failure.
+
+    ``commissioning-code`` answered ``issued`` and ``backup`` answered
+    ``captured``; neither was in the set of success words this file used to
+    keep, so both succeeded on the Host and exited non-zero here.
+    """
+
+    class Controller(FakeHostController):
+        def commissioning_code(self, **values):
+            self.calls.append(("commissioning-code", values))
+            return Evidence(
+                plan=Plan(operation="commissioning-code", host_id="host", steps=()),
+                outcome=Outcome.APPLIED,
+                report={"status": "issued", "setup_code": "123456"},
+            )
+
+        def app_ready(self):
+            self.calls.append(("app-ready", {}))
+            return Evidence(
+                plan=Plan(operation="app-ready", host_id="host", steps=()),
+                outcome=Outcome.DEGRADED,
+                report={"status": "degraded", "checks": {"channel_worker_healthy": False}},
+            )
+
+    monkeypatch.setattr(host_cli, "HostController", Controller)
+
+    assert host_cli.main(["--config", "/tmp/host.toml", "commissioning-code"]) == 0
+    assert json.loads(capsys.readouterr().out)["outcome"] == "applied"
+
+    # A readiness report that says the Host cannot serve is a failure, and the
+    # exit code says so without this file knowing what "degraded" means.
+    assert host_cli.main(["--config", "/tmp/host.toml", "app-ready"]) == 1
+    document = json.loads(capsys.readouterr().out)
+    assert document["outcome"] == "degraded"
+    assert document["checks"] == {"channel_worker_healthy": False}

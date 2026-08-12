@@ -1,0 +1,297 @@
+"""The one definition of what "this Host can serve the App" means.
+
+``app-ready`` used to be two independent check lists — one the workstation ran
+against a macOS source run, one the injected agent ran on the product Host —
+that had drifted into asserting different things under the same verdict. This
+module holds the check set itself: a closed vocabulary of facts, and a table of
+which kind of Host is expected to attest each one. The probes stay where they
+have to run; the contract does not.
+
+Fail closed is the point. An evaluator that produces a fact the contract does
+not name, or omits one it is expected to attest, is refused rather than scored
+— a readiness gate that silently drops a check is worse than one that fails,
+because it is the gate a release rollback is decided by.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass
+from enum import StrEnum
+
+
+class ReadinessError(ValueError):
+    """A readiness report does not match the declared check set."""
+
+
+#: The agent name the Channel worker registers under and the product dispatches
+#: to. A component fact Ops should be reading from the Channel contract rather
+#: than holding; until that section exists this is the one place it is, and
+#: the readiness payload carries it to the Host instead of the Host guessing.
+CHANNEL_AGENT_NAME = "eidolon"
+#: Two entries from the Ops-owned port registry. The registry travels to a Host
+#: as text and the Host cannot parse YAML, so the readiness payload carries
+#: these as values; a drift test pins them to ``config/ports.yaml``.
+CHANNEL_WORKER_PORT = 8766
+LIVEKIT_SIGNALLING_PORT = 7880
+#: How long a Channel probe is given to settle. Sized on a worker reconnecting
+#: to LiveKit, because this report decides whether a release is rolled back.
+CHANNEL_SETTLE_SECONDS = 20
+
+
+class HostKind(StrEnum):
+    """Which kind of Host is attesting."""
+
+    #: A macOS workstation running the pinned sources under supervisord.
+    SOURCE = "source"
+    #: A product Host running the sealed release under systemd.
+    PRODUCT = "product"
+
+
+class ReadinessFact(StrEnum):
+    """A fact a device's first conversation depends on."""
+
+    BACKEND_HEALTHY = "backend_healthy"
+    LAN_ADDRESS_OBSERVED = "lan_address_observed"
+    LAN_NAME_RESOLVES = "lan_name_resolves"
+    HOST_IDENTITY_MATERIAL = "host_identity_material"
+    BOOTSTRAP_PREFLIGHT = "bootstrap_preflight"
+    BOOTSTRAP_CONTROL_SOCKET = "bootstrap_control_socket"
+    FOUNDATION_SERVICES = "foundation_services"
+    HUB_TLS_IDENTITY = "hub_tls_identity"
+    HUB_SETTINGS_BOUND = "hub_settings_bound"
+    HUB_LAN_REACHABLE = "hub_lan_reachable"
+    HUB_DESCRIPTOR_PUBLISHED = "hub_descriptor_published"
+    HUB_MDNS_SERVICE = "hub_mdns_service"
+    LOCAL_API_REACHABLE = "local_api_reachable"
+    LOCAL_API_TARGETS_HUB = "local_api_targets_hub"
+    LOCAL_API_MDNS_SERVICE = "local_api_mdns_service"
+    LIVEKIT_CLIENT_ORIGIN = "livekit_client_origin"
+    LIVEKIT_LAN_REACHABLE = "livekit_lan_reachable"
+    LIVEKIT_RTC_ADVERTISED = "livekit_rtc_advertised"
+    CHANNEL_WORKER_HEALTHY = "channel_worker_healthy"
+    CHANNEL_WORKER_DISPATCH_IDENTITY = "channel_worker_dispatch_identity"
+    CHANNEL_WORKER_LIVEKIT_LINK = "channel_worker_livekit_link"
+
+
+@dataclass(frozen=True, slots=True)
+class ReadinessCheck:
+    fact: ReadinessFact
+    description: str
+    attested_by: frozenset[HostKind]
+
+
+def _both(fact: ReadinessFact, description: str) -> ReadinessCheck:
+    return ReadinessCheck(fact, description, frozenset(HostKind))
+
+
+def _only(kind: HostKind, fact: ReadinessFact, description: str) -> ReadinessCheck:
+    return ReadinessCheck(fact, description, frozenset({kind}))
+
+
+#: Ports and endpoints answer whether a process is listening. These are the
+#: facts a device actually needs, which is a different question — the Channel
+#: entries exist because a worker with an open port, an active unit and a green
+#: gate had already stopped being able to accept a job.
+READINESS_CONTRACT: tuple[ReadinessCheck, ...] = (
+    _both(
+        ReadinessFact.BACKEND_HEALTHY,
+        "every product service answers its own health surface",
+    ),
+    _both(
+        ReadinessFact.LAN_ADDRESS_OBSERVED,
+        "the Host holds the LAN address it publishes",
+    ),
+    _both(
+        ReadinessFact.LAN_NAME_RESOLVES,
+        "the Host-bound name resolves to that address in a live mDNS query",
+    ),
+    _both(
+        ReadinessFact.HOST_IDENTITY_MATERIAL,
+        "the Host identity material is present and private",
+    ),
+    _both(
+        ReadinessFact.HUB_TLS_IDENTITY,
+        "the Hub TLS pair matches the Host identity and is in date",
+    ),
+    _both(
+        ReadinessFact.HUB_SETTINGS_BOUND,
+        "the rendered Hub settings name this Host's Hub id and origin",
+    ),
+    _both(
+        ReadinessFact.HUB_LAN_REACHABLE,
+        "the Hub answers over the LAN on its published TLS port",
+    ),
+    _both(
+        ReadinessFact.LOCAL_API_REACHABLE,
+        "the Local API answers its health surface and publishes its descriptor",
+    ),
+    _both(
+        ReadinessFact.LOCAL_API_TARGETS_HUB,
+        "the Local API is pointed at this Host's Hub and its certificate",
+    ),
+    _both(
+        ReadinessFact.LIVEKIT_CLIENT_ORIGIN,
+        "Channel is configured with the LiveKit origin devices are given",
+    ),
+    _both(
+        ReadinessFact.LIVEKIT_LAN_REACHABLE,
+        "the LiveKit signalling port answers over the LAN",
+    ),
+    _both(
+        ReadinessFact.CHANNEL_WORKER_HEALTHY,
+        "the Channel worker's own health surface reports it able to take jobs",
+    ),
+    _both(
+        ReadinessFact.CHANNEL_WORKER_DISPATCH_IDENTITY,
+        "that worker serves the agent name the product dispatches to",
+    ),
+    _only(
+        HostKind.PRODUCT,
+        ReadinessFact.CHANNEL_WORKER_LIVEKIT_LINK,
+        "the worker holds a live registration link to LiveKit",
+    ),
+    _only(
+        HostKind.PRODUCT,
+        ReadinessFact.BOOTSTRAP_PREFLIGHT,
+        "Bootstrap's own commissioning preflight passes",
+    ),
+    _only(
+        HostKind.PRODUCT,
+        ReadinessFact.BOOTSTRAP_CONTROL_SOCKET,
+        "the Bootstrap control socket is present",
+    ),
+    _only(
+        HostKind.PRODUCT,
+        ReadinessFact.FOUNDATION_SERVICES,
+        "Bluetooth, NetworkManager and Avahi are active",
+    ),
+    _only(
+        HostKind.PRODUCT,
+        ReadinessFact.HUB_DESCRIPTOR_PUBLISHED,
+        "the Hub publishes the onboarding descriptor devices fetch",
+    ),
+    _only(
+        HostKind.PRODUCT,
+        ReadinessFact.HUB_MDNS_SERVICE,
+        "the Hub service record advertises this Host's name, address and port",
+    ),
+    _only(
+        HostKind.PRODUCT,
+        ReadinessFact.LOCAL_API_MDNS_SERVICE,
+        "the Local API service record is published",
+    ),
+    _only(
+        HostKind.SOURCE,
+        ReadinessFact.LIVEKIT_RTC_ADVERTISED,
+        "LiveKit advertises the address its media will be answered on",
+    ),
+)
+
+
+def expected_facts(kind: HostKind) -> tuple[str, ...]:
+    """The fact names one kind of Host must attest, in contract order."""
+
+    return tuple(
+        str(check.fact) for check in READINESS_CONTRACT if kind in check.attested_by
+    )
+
+
+def product_payload() -> dict[str, object]:
+    """What a product Host is told to attest, and what it needs to attest it.
+
+    Sent rather than compiled into the injected agent, for the same reason the
+    port registry is: this contract has one author, and a copy on the Host is
+    precisely the one nobody would think to update.
+    """
+
+    return {
+        "facts": list(expected_facts(HostKind.PRODUCT)),
+        "channel_worker": {
+            "port": CHANNEL_WORKER_PORT,
+            "agent_name": CHANNEL_AGENT_NAME,
+            "livekit_port": LIVEKIT_SIGNALLING_PORT,
+            "settle_seconds": CHANNEL_SETTLE_SECONDS,
+        },
+    }
+
+
+def describe(kind: HostKind) -> dict[str, str]:
+    return {
+        str(check.fact): check.description
+        for check in READINESS_CONTRACT
+        if kind in check.attested_by
+    }
+
+
+def require_complete(kind: HostKind, checks: Mapping[str, object]) -> None:
+    """Refuse a readiness report that is not the declared check set."""
+
+    expected = set(expected_facts(kind))
+    actual = set(checks)
+    missing = sorted(expected - actual)
+    extra = sorted(actual - expected)
+    if missing or extra:
+        raise ReadinessError(
+            "readiness report does not match the declared check set; "
+            f"missing={missing or 'none'}, unexpected={extra or 'none'}"
+        )
+
+
+def is_ready(kind: HostKind, checks: Mapping[str, object]) -> bool:
+    require_complete(kind, checks)
+    return all(bool(value) for value in checks.values())
+
+
+#: How a readiness report spells a verdict. Probes answer ``healthy``, check
+#: lists answer ``ok``, and individual entries answer with a bare boolean.
+_VERDICT_KEYS = ("healthy", "ok")
+
+
+def describe_failures(report: object, path: str = "") -> str:
+    """Name what a readiness report found, not merely that it was unhappy.
+
+    A gate failure rolls the release back and the collected phases go with it,
+    so "degraded" was the entire report an operator received for a decision
+    that had just undone an install.
+
+    This walks the report rather than naming the sections it expects, because
+    a section added later would otherwise go unmentioned in exactly the report
+    someone reads when they cannot see the Host.
+    """
+
+    reasons = _failures(report, path)
+    if reasons:
+        return "; ".join(reasons)
+    status = report.get("status") if isinstance(report, dict) else None
+    return f"status={status!r}"
+
+
+def _failures(report: object, path: str) -> list[str]:
+    if isinstance(report, list):
+        return [
+            reason
+            for index, item in enumerate(report)
+            for reason in _failures(item, f"{path}[{index}]")
+        ]
+    if not isinstance(report, dict):
+        return []
+    if any(report.get(key) is False for key in _VERDICT_KEYS):
+        # The section already said it is unhealthy; anything below is why.
+        below = [
+            reason
+            for key, value in report.items()
+            if key not in _VERDICT_KEYS
+            for reason in _failures(value, f"{path}.{key}" if path else str(key))
+        ]
+        return below or [path or "report"]
+    reasons: list[str] = []
+    for key, value in report.items():
+        below = f"{path}.{key}" if path else str(key)
+        if value is False:
+            reasons.append(below)
+        elif key == "error" and value:
+            reasons.append(str(value))
+        else:
+            reasons.extend(_failures(value, below))
+    return reasons

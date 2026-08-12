@@ -1,0 +1,398 @@
+"""The fixed Host facts, and the refusal of any payload that differs.
+
+Every table here is a reviewed property of the product topology, and every
+validator refuses rather than defaults. What the operator sends is compared
+against these; nothing is invented on the Host.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+from collections.abc import Callable, Mapping
+from pathlib import Path
+
+from . import primitives
+from .primitives import TargetError
+
+PRODUCT_UNITS = (
+    "eidolon-bootstrapd.service",
+    "eidolond.service",
+    "eidolon-data.service",
+    "eidolon-data-workspace.service",
+    "eidolon-hub.service",
+    "eidolon-kernel.service",
+    "eidolon-local-api.service",
+    "eidolon-admin.service",
+    "eidolon-nats.service",
+    "eidolon-livekit.service",
+    "eidolon-memory-supervisor.service",
+    "eidolon-memory-discovery.service",
+    "eidolon-agent.service",
+    "eidolon-channel-provider.service",
+    "eidolon-channel.service",
+)
+
+#: Units that bring other units up. They have to be stopped in a transaction
+#: of their own, before the workers they manage: systemd orders a transaction
+#: by unit dependencies rather than by the order of the arguments, so naming
+#: the manager first in one long call never reached it. Its own stop job was
+#: cancelled, it outlived the sweep, and it reconciled every worker back up
+#: while the reset was still running.
+RESET_RECONCILER_UNITS = ("eidolond.service",)
+
+# Stop control/reconciliation entry points before their managed workers.  In
+# particular, an active legacy eidolond can race a later Kernel stop with a
+# start transaction and make systemd cancel the reset job.
+RESET_STOP_UNITS = (
+    "eidolon-admin.service",
+    "eidolon-local-api.service",
+    "eidolond.service",
+    "eidolon-bootstrapd.service",
+    "eidolon-channel-provider.service",
+    "eidolon-channel.service",
+    "eidolon-agent.service",
+    "eidolon-memory-discovery.service",
+    "eidolon-memory-supervisor.service",
+    "eidolon-livekit.service",
+    "eidolon-nats.service",
+    "eidolon-kernel.service",
+    "eidolon-hub-ingress.service",
+    "eidolon-hub.service",
+    "eidolon-data-workspace.service",
+    "eidolon-data.service",
+)
+
+DIRECT_ENABLE_UNITS = (
+    "eidolon-bootstrapd.service",
+    "eidolond.service",
+    "eidolon-local-api.service",
+    "eidolon-admin.service",
+)
+
+#: How long a release's components may take to answer, when the operator's
+#: Host profile does not say. Sized on the board rather than on a laptop: the
+#: Channel worker alone spends 45s in TimeoutStopSec on the way down and then
+#: loads its ONNX turn-detector on the way up, and the manager reconciles it
+#: only after starting itself. At 90s a rollback reported "readiness timeout:
+#: agent, channel" for services that were healthy moments later, and a
+#: spurious rollback is a far worse failure than a slow one.
+DEFAULT_RELEASE_READINESS_SECONDS = 240
+
+def release_readiness_seconds(payload: Mapping[str, object]) -> int:
+    """How long this Host says its own services need. A platform property."""
+
+    value = payload.get("readiness_timeout_seconds", DEFAULT_RELEASE_READINESS_SECONDS)
+    if not isinstance(value, int) or isinstance(value, bool) or not 30 <= value <= 1800:
+        raise TargetError("Host readiness timeout is invalid")
+    return value
+
+CURRENT_LINKS = {
+    "eidolon_kernel": Path("/opt/eidolon/current/eidolon_kernel"),
+    "eidolon_data": Path("/opt/eidolon/current/eidolon_data"),
+    "eidolon_hub": Path("/opt/eidolon/current/eidolon_hub"),
+    "eidolon_admin": Path("/opt/eidolon/current/eidolon_admin"),
+    "eidolon_agent": Path("/opt/eidolon/current/eidolon_agent"),
+    "eidolon_channel": Path("/opt/eidolon/current/eidolon_channel"),
+    "eidolon_memory": Path("/opt/eidolon/current/eidolon_memory"),
+}
+
+SECRET_INPUTS = {
+    "data.env": (Path("/etc/eidolon/data.env"), "root", "root", 0o600),
+    "hub.env": (Path("/etc/eidolon/hub.env"), "root", "root", 0o600),
+    "kernel.env": (Path("/etc/eidolon/kernel.env"), "root", "root", 0o600),
+    "admin.env": (Path("/etc/eidolon/admin.env"), "root", "root", 0o600),
+    "local-api.env": (Path("/etc/eidolon/local-api.env"), "root", "root", 0o600),
+    "bootstrap.env": (Path("/etc/eidolon/bootstrap.env"), "root", "root", 0o600),
+    "host_identity.ed25519": (
+        Path("/var/lib/eidolon-bootstrap/host_identity.ed25519"),
+        "eidolon-bootstrap",
+        "eidolon-bootstrap",
+        0o600,
+    ),
+    "agent.env": (Path("/etc/eidolon/agent.env"), "root", "root", 0o600),
+    "channel.env": (Path("/etc/eidolon/channel.env"), "root", "root", 0o600),
+    "memory.env": (Path("/etc/eidolon/memory.env"), "root", "root", 0o600),
+    "livekit.env": (Path("/etc/eidolon/livekit.env"), "root", "root", 0o600),
+    "agent.yaml": (Path("/etc/eidolon/agent.yaml"), "root", "eidolon", 0o640),
+    "channel.yaml": (Path("/etc/eidolon/channel.yaml"), "root", "eidolon", 0o640),
+    "memory.yaml": (Path("/etc/eidolon/memory.yaml"), "root", "eidolon", 0o640),
+}
+
+HOST_APPLICATION_INPUTS = {
+    "hub.generated.yaml": (
+        Path("/etc/eidolon/generated/hub.yaml"),
+        "root",
+        "eidolon",
+        0o640,
+    ),
+    "hub.crt": (Path("/etc/eidolon/tls/hub.crt"), "root", "eidolon", 0o640),
+    "hub.key": (Path("/etc/eidolon/tls/hub.key"), "root", "eidolon", 0o640),
+    "hub-ingress.py": (
+        Path("/usr/local/libexec/eidolon-hub-lan-ingress"),
+        "root",
+        "root",
+        0o755,
+    ),
+    "hub-ingress.service": (
+        Path("/etc/systemd/system/eidolon-hub-ingress.service"),
+        "root",
+        "root",
+        0o644,
+    ),
+    "hub-service-override.conf": (
+        Path("/etc/systemd/system/eidolon-hub.service.d/20-eidolon-ops-host.conf"),
+        "root",
+        "root",
+        0o644,
+    ),
+}
+
+INSTALL_INPUTS = {**SECRET_INPUTS, **HOST_APPLICATION_INPUTS}
+
+#: The Host layer Ops derives rather than keeps: settings rendered from the
+#: Host identity, the ingress program, and the two units that run it. Unlike a
+#: credential these are a function of the operator's own source, so a Host that
+#: is never allowed to receive a newer one can only be corrected by reinstalling
+#: it — which is how a fix for the ingress unit sat undelivered while updates
+#: kept succeeding.
+#:
+#: The TLS pair is deliberately absent. That is material, not a rendering of
+#: it, and material is written once.
+REFRESHABLE_HOST_APPLICATION_INPUTS = (
+    "hub.generated.yaml",
+    "hub-ingress.py",
+    "hub-ingress.service",
+    "hub-service-override.conf",
+)
+
+CORE_COMPONENTS = (
+    "eidolon_kernel",
+    "eidolon_data",
+    "eidolon_hub",
+    "eidolon_admin",
+)
+
+FIXED_DATA = {
+    "system_database": Path("/var/lib/eidolon/eidolon-system.sqlite3"),
+    "object_store": Path("/var/lib/eidolon/objects"),
+    "bootstrap_database": Path("/var/lib/eidolon-bootstrap/bootstrap.sqlite3"),
+    "deployment_evidence": Path("/var/lib/eidolon/deployments"),
+}
+
+#: Every authority a backup copies, and the identity that owns it back.
+#:
+#: A built-in table because no component declares its own operational facts
+#: yet; when they do, this is the first thing that should come from them
+#: rather than from here. Each of these is SQLite, which can be snapshotted
+#: consistently while the service that owns it keeps running.
+BACKED_UP_AUTHORITIES = {
+    "system": (Path("/var/lib/eidolon/eidolon-system.sqlite3"), "eidolon", "eidolon"),
+    "eidolond": (Path("/var/lib/eidolon/eidolond.sqlite3"), "eidolon", "eidolon"),
+    "kernel": (Path("/var/lib/eidolon/eidolon-kernel.sqlite3"), "eidolon", "eidolon"),
+    "hub": (Path("/var/lib/eidolon/hub/eidolon-hub.sqlite3"), "eidolon", "eidolon"),
+    "agent": (Path("/var/lib/eidolon/agent/eidolon-agent.sqlite3"), "eidolon", "eidolon"),
+    "channel": (Path("/var/lib/eidolon/channel/provider.sqlite3"), "eidolon", "eidolon"),
+    "bootstrap": (
+        Path("/var/lib/eidolon-bootstrap/bootstrap.sqlite3"),
+        "eidolon-bootstrap",
+        "eidolon-bootstrap",
+    ),
+}
+
+#: State a backup does not carry, named rather than quietly omitted. Each of
+#: these needs its owning component to say how it is copied and how that copy
+#: is checked; guessing at a vector index or a JetStream directory would
+#: produce a backup that restores into something subtly wrong, which is worse
+#: than one that says what it left out.
+UNCOVERED_STATE = {
+    "memory": (
+        Path("/var/lib/eidolon/memory"),
+        "palace, vector index and knowledge graph have no declared snapshot",
+    ),
+    "nats": (
+        Path("/var/lib/eidolon/nats/jetstream"),
+        "JetStream stores are not a file copy while the server is running",
+    ),
+    "objects": (
+        Path("/var/lib/eidolon/objects"),
+        "normalized media is large and has no declared snapshot",
+    ),
+    "voiceprints": (
+        Path("/var/lib/eidolon/voiceprints"),
+        "voiceprint material has no declared snapshot",
+    ),
+}
+
+MANAGED_SYSTEM_ASSETS = (
+    *(Path("/etc/systemd/system") / unit for unit in PRODUCT_UNITS),
+    Path("/etc/eidolon/eidolond.yaml"),
+    Path("/etc/eidolon/kernel.yaml"),
+    Path("/etc/eidolon/hub.yaml"),
+    Path("/etc/eidolon/system-services.systemd.example.yaml"),
+    Path("/etc/polkit-1/rules.d/60-eidolon-system-manager.rules"),
+    Path("/etc/polkit-1/rules.d/60-eidolon-bootstrap-network.rules"),
+    Path("/etc/avahi/services/eidolon-local-api.service"),
+    Path("/usr/local/libexec/eidolon-livekit-launch"),
+    *(destination for destination, _user, _group, _mode in HOST_APPLICATION_INPUTS.values()),
+)
+
+RESET_DEPLOYMENT_ROOTS = (
+    Path("/opt/eidolon"),
+    Path("/etc/eidolon"),
+    Path("/run/eidolon"),
+    Path("/run/eidolon-bootstrap"),
+    Path("/var/log/eidolon"),
+)
+
+RESET_AUTHORITY_ROOTS = (
+    Path("/var/lib/eidolon"),
+    Path("/var/lib/eidolon-bootstrap"),
+    Path("/var/lib/eidolon-admin"),
+)
+
+RELEASE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+STAGING_NAME = re.compile(r"^eidolon-(?:release|secrets|backup)-[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+SHA256 = re.compile(r"^[0-9a-f]{64}$")
+
+VAR_TMP = Path("/var/tmp")
+
+RELEASES = Path("/opt/eidolon/releases")
+
+#: Component-neutral operator entries published inside every sealed release.
+RELEASE_ACTIVATOR = ".release/bin/eidolon-release"
+
+RELEASE_INTERPRETER = ".release/bin/python"
+
+CURRENT_KERNEL = Path("/opt/eidolon/current/eidolon_kernel")
+
+HOST_ENV_PATH = Path("/etc/eidolon/host.env")
+
+HOST_PORTS_PATH = Path("/etc/eidolon/generated/ports.yaml")
+
+HOST_ENV_VALUE = (
+    "EIDOLON_INSTALL_ROOT=/opt/eidolon\n"
+    "EIDOLON_WORKSPACE_ROOT=/opt/eidolon/current\n"
+    "EIDOLON_ROOT=/opt/eidolon/current\n"
+    "EIDOLON_CONFIG_ROOT=/etc/eidolon\n"
+    "EIDOLON_STATE_ROOT=/var/lib/eidolon\n"
+    "EIDOLON_RUNTIME_ROOT=/run/eidolon\n"
+    "EIDOLON_LOG_ROOT=/var/log/eidolon\n"
+    "EIDOLON_CACHE_ROOT=/var/cache/eidolon\n"
+    "EIDOLON_BOOTSTRAP_STATE_ROOT=/var/lib/eidolon-bootstrap\n"
+    "EIDOLON_BOOTSTRAP_RUNTIME_ROOT=/run/eidolon-bootstrap\n"
+    "EIDOLON_BOOTSTRAP_STATE_DIR=/var/lib/eidolon-bootstrap\n"
+    "EIDOLON_BOOTSTRAP_RUNTIME_DIR=/run/eidolon-bootstrap\n"
+    # Host configuration, not a secret: the board cannot pay for the encoder a
+    # laptop runs. Measured on a Pi 5, bge-large costs 626 MB and 104 ms/doc
+    # against base's 198 MB and 32 ms, for MRR 0.813 against 0.787.
+    "EIDOLON_MEMORY_EMBEDDING_MODEL=bge-base-zh\n"
+    # Admin resolves the port registry relative to an operator's checkout when
+    # nobody names one, which is a Mac-workstation shape. Name the Host copy.
+    f"EIDOLON_PORTS_FILE={HOST_PORTS_PATH}\n"
+)
+
+HOST_DIRECTORIES = (
+    (Path("/opt/eidolon"), 0o755, "root", "root"),
+    (Path("/opt/eidolon/releases"), 0o755, "root", "root"),
+    (Path("/opt/eidolon/current"), 0o755, "root", "root"),
+    (Path("/var/lib/eidolon"), 0o750, "eidolon", "eidolon"),
+    (Path("/var/lib/eidolon/agent"), 0o750, "eidolon", "eidolon"),
+    (Path("/var/lib/eidolon/memory"), 0o750, "eidolon", "eidolon"),
+    (Path("/var/lib/eidolon/nats/jetstream"), 0o750, "eidolon", "eidolon"),
+    (Path("/var/lib/eidolon/voiceprints"), 0o750, "eidolon", "eidolon"),
+    (Path("/var/lib/eidolon/objects"), 0o750, "eidolon", "eidolon"),
+    (Path("/var/lib/eidolon/admin"), 0o750, "eidolon", "eidolon"),
+    (
+        Path("/var/lib/eidolon-bootstrap"),
+        0o710,
+        "eidolon-bootstrap",
+        "eidolon-bootstrap",
+    ),
+    (Path("/var/cache/eidolon"), 0o750, "eidolon", "eidolon"),
+    (Path("/var/log/eidolon"), 0o750, "eidolon", "eidolon"),
+    (Path("/etc/eidolon"), 0o750, "root", "eidolon"),
+)
+
+PHASES = (
+    "validated",
+    "identities",
+    "prerequisites",
+    "data_baseline",
+    "assets",
+    "started",
+    "completed",
+)
+
+def ensure_host_path_contract(
+    root: Path,
+    chown: Callable[[Path, str, str], None],
+    port_registry: str,
+) -> None:
+    """Materialize the host-profile roots without adopting mutable contents."""
+
+    for value, mode, user, group in HOST_DIRECTORIES:
+        path = primitives.host_path(root, value)
+        if path.exists() and (path.is_symlink() or not path.is_dir()):
+            raise TargetError(f"host path is not a safe directory: {value}")
+        path.mkdir(parents=True, exist_ok=True)
+        os.chmod(path, mode)
+        chown(path, user, group)
+    # Sent by the operator rather than restated here: the registry has one
+    # author, and a second copy of it inside this file could only ever drift
+    # from that one. Derived rather than supplied, so rewriting it is how it
+    # stays true; only the credentials are write-once.
+    ports = primitives.host_path(root, HOST_PORTS_PATH)
+    if ports.is_symlink():
+        raise TargetError("existing /etc/eidolon/generated/ports.yaml is not a regular file")
+    primitives.atomic_text(ports, port_registry, mode=0o640)
+    chown(ports, "root", "eidolon")
+    host_env = primitives.host_path(root, HOST_ENV_PATH)
+    if host_env.exists() or host_env.is_symlink():
+        if (
+            host_env.is_symlink()
+            or not host_env.is_file()
+            or host_env.read_text(encoding="utf-8") != HOST_ENV_VALUE
+        ):
+            raise TargetError("existing /etc/eidolon/host.env violates the path contract")
+        return
+    primitives.atomic_text(host_env, HOST_ENV_VALUE, mode=0o644)
+    chown(host_env, "root", "root")
+
+def fixed_units(payload: Mapping[str, object]) -> tuple[str, ...]:
+    value = payload.get("units")
+    if value != list(PRODUCT_UNITS):
+        raise TargetError("unit set differs from the reviewed product topology")
+    return PRODUCT_UNITS
+
+def fixed_data(payload: Mapping[str, object]) -> dict[str, Path]:
+    value = payload.get("data")
+    if not isinstance(value, dict) or set(value) != set(FIXED_DATA):
+        raise TargetError("data path set is invalid")
+    result = {name: Path(item) for name, item in value.items() if isinstance(item, str)}
+    if result != FIXED_DATA:
+        raise TargetError("data paths differ from reviewed system assets")
+    return result
+
+def fixed_port_registry(payload: Mapping[str, object]) -> str:
+    """The port registry the operator sent, refused rather than invented.
+
+    Which port each component binds is Host topology, and it has one author on
+    the operator side. Restating it here would give it a second, and the copy
+    a Host wrote itself is precisely the one nobody would think to update.
+    """
+
+    value = payload.get("port_registry")
+    if not isinstance(value, str) or not value.strip():
+        raise TargetError("Host port registry is missing from the operation payload")
+    return value
+
+def fixed_release_id(payload: Mapping[str, object], *, required: bool = True) -> str | None:
+    value = payload.get("release_id")
+    if value is None and not required:
+        return None
+    if not isinstance(value, str) or RELEASE_ID.fullmatch(value) is None:
+        raise TargetError("release id is invalid")
+    return value

@@ -13,11 +13,20 @@ from types import MappingProxyType, ModuleType, SimpleNamespace
 
 import pytest
 
-from eidolon_ops import target_agent
-from eidolon_ops.target_agent import (
-    TargetError,
-    TargetInstaller,
+from eidolon_ops.hostagent import __main__ as agent_main
+from eidolon_ops.hostagent import (
+    app_contract,
+    authorities,
+    contract,
+    host_application,
+    primitives,
+    staging,
 )
+from eidolon_ops.hostagent import install as host_install
+from eidolon_ops.hostagent import lifecycle as host_lifecycle
+from eidolon_ops.hostagent import reset as host_reset
+from eidolon_ops.hostagent.install import TargetInstaller
+from eidolon_ops.hostagent.primitives import TargetError
 
 pytestmark = pytest.mark.component
 
@@ -92,8 +101,8 @@ def install_fixture(tmp_path: Path):
     components = tuple(
         SimpleNamespace(
             component_id=component_id,
-            release_path=target_agent._RELEASES / release_id / component_id,
-            current_link=target_agent.CURRENT_LINKS[component_id],
+            release_path=contract.RELEASES / release_id / component_id,
+            current_link=contract.CURRENT_LINKS[component_id],
         )
         for component_id in component_ids
     )
@@ -109,9 +118,9 @@ def install_fixture(tmp_path: Path):
     )
     stage = tmp_path / "secret-stage"
     stage.mkdir()
-    for name in target_agent.SECRET_INPUTS:
+    for name in contract.SECRET_INPUTS:
         (stage / name).write_text(f"private-{name}", encoding="utf-8")
-    data = dict(target_agent.FIXED_DATA)
+    data = dict(contract.FIXED_DATA)
     command = FakeCommand()
     host = FakeHost(tmp_path, release)
     installer = TargetInstaller(
@@ -274,7 +283,7 @@ def test_journal_records_hashes_not_secret_values(install_fixture) -> None:
         Path("/var/lib/eidolon-bootstrap/bootstrap.sqlite3"),
         Path("/etc/eidolon/data.env"),
         Path("/etc/systemd/system/eidolond.service"),
-        target_agent.CURRENT_LINKS["eidolon_kernel"],
+        contract.CURRENT_LINKS["eidolon_kernel"],
     ],
 )
 def test_first_install_refuses_unowned_existing_namespace(install_fixture, conflict: Path) -> None:
@@ -292,8 +301,8 @@ def test_first_install_refuses_unowned_existing_namespace(install_fixture, confl
 
 def _reset_payload(*, wipe_authority_data: bool = False) -> dict[str, object]:
     return {
-        "units": list(target_agent.PRODUCT_UNITS),
-        "data": {name: str(path) for name, path in target_agent.FIXED_DATA.items()},
+        "units": list(contract.PRODUCT_UNITS),
+        "data": {name: str(path) for name, path in contract.FIXED_DATA.items()},
         "wipe_authority_data": wipe_authority_data,
     }
 
@@ -318,7 +327,7 @@ def _materialize_reset_fixture(root: Path) -> None:
 def test_reset_plan_is_read_only_and_preserves_authority_data_by_default(tmp_path: Path) -> None:
     _materialize_reset_fixture(tmp_path)
 
-    result = target_agent.reset_plan(_reset_payload(), root=tmp_path)
+    result = host_reset.reset_plan(_reset_payload(), root=tmp_path)
 
     assert result["status"] == "planned"
     assert result["wipe_authority_data"] is False
@@ -331,7 +340,7 @@ def test_reset_plan_is_read_only_and_preserves_authority_data_by_default(tmp_pat
 def test_reset_removes_deployment_but_preserves_data_and_is_idempotent(tmp_path: Path) -> None:
     _materialize_reset_fixture(tmp_path)
 
-    result = target_agent.reset_host(_reset_payload(), root=tmp_path, manage_services=False)
+    result = host_reset.reset_host(_reset_payload(), root=tmp_path, manage_services=False)
 
     assert result["status"] == "reset"
     assert not (tmp_path / "opt/eidolon").exists()
@@ -342,21 +351,21 @@ def test_reset_removes_deployment_but_preserves_data_and_is_idempotent(tmp_path:
     assert (tmp_path / "var/lib/eidolon/eidolon-system.sqlite3").is_file()
     assert (tmp_path / "var/lib/eidolon-bootstrap/bootstrap.sqlite3").is_file()
 
-    repeated = target_agent.reset_host(_reset_payload(), root=tmp_path, manage_services=False)
+    repeated = host_reset.reset_host(_reset_payload(), root=tmp_path, manage_services=False)
     assert repeated["removed"] == []
 
 
 def test_reset_can_explicitly_wipe_all_authority_data_for_clean_install(tmp_path: Path) -> None:
     _materialize_reset_fixture(tmp_path)
 
-    result = target_agent.reset_host(
+    result = host_reset.reset_host(
         _reset_payload(wipe_authority_data=True),
         root=tmp_path,
         manage_services=False,
     )
 
     assert result["wipe_authority_data"] is True
-    for value in target_agent.RESET_AUTHORITY_ROOTS:
+    for value in contract.RESET_AUTHORITY_ROOTS:
         assert not (tmp_path / value.relative_to("/")).exists()
 
 
@@ -374,19 +383,19 @@ def test_reset_stops_the_manager_before_the_workers_it_would_restore(tmp_path: P
     _materialize_reset_fixture(tmp_path)
     command = FakeCommand()
 
-    target_agent.reset_host(_reset_payload(), root=tmp_path, command=command)
+    host_reset.reset_host(_reset_payload(), root=tmp_path, command=command)
 
-    assert set(target_agent.RESET_STOP_UNITS) == {
-        *target_agent.PRODUCT_UNITS,
+    assert set(contract.RESET_STOP_UNITS) == {
+        *contract.PRODUCT_UNITS,
         "eidolon-hub-ingress.service",
     }
     disables = [call for call in command.calls if call[1:3] == ("disable", "--now")]
     assert len(disables) == 2
-    assert disables[0][3:] == target_agent.RESET_RECONCILER_UNITS
+    assert disables[0][3:] == contract.RESET_RECONCILER_UNITS
     assert disables[1][3:] == tuple(
         unit
-        for unit in target_agent.RESET_STOP_UNITS
-        if unit not in target_agent.RESET_RECONCILER_UNITS
+        for unit in contract.RESET_STOP_UNITS
+        if unit not in contract.RESET_RECONCILER_UNITS
     )
     assert not [call for call in command.calls if call[1] == "stop"]
     assert ("/usr/bin/systemctl", "daemon-reload") in command.calls
@@ -396,7 +405,7 @@ def test_every_reconciler_is_a_unit_the_reset_stops(tmp_path: Path) -> None:
     """A reconciler outside the stop set would be named into a phase that
     never runs, and would go on restoring workers unopposed."""
 
-    assert set(target_agent.RESET_RECONCILER_UNITS) <= set(target_agent.RESET_STOP_UNITS)
+    assert set(contract.RESET_RECONCILER_UNITS) <= set(contract.RESET_STOP_UNITS)
 
 
 def test_reset_refuses_to_delete_while_a_unit_is_still_active(tmp_path: Path) -> None:
@@ -415,7 +424,7 @@ def test_reset_refuses_to_delete_while_a_unit_is_still_active(tmp_path: Path) ->
         return subprocess.CompletedProcess(command, 0, "", "")
 
     with pytest.raises(TargetError, match="could not stop product unit"):
-        target_agent.reset_host(_reset_payload(), root=tmp_path, command=kernel_survives)
+        host_reset.reset_host(_reset_payload(), root=tmp_path, command=kernel_survives)
 
 
 def test_reset_treats_missing_units_as_already_clean(tmp_path: Path) -> None:
@@ -428,7 +437,7 @@ def test_reset_treats_missing_units_as_already_clean(tmp_path: Path) -> None:
         output = "not-found\n" if command[1] == "show" else ""
         return subprocess.CompletedProcess(command, 0, output, "")
 
-    result = target_agent.reset_host(_reset_payload(), root=tmp_path, command=missing)
+    result = host_reset.reset_host(_reset_payload(), root=tmp_path, command=missing)
 
     assert all(item["state"] == "absent" for item in result["services"])
     assert not any(call[1] in {"stop", "disable"} for call in calls)
@@ -447,7 +456,7 @@ def test_reset_refuses_to_delete_when_an_active_unit_cannot_stop(tmp_path: Path)
         return subprocess.CompletedProcess(command, 0, "", "")
 
     with pytest.raises(TargetError, match="could not stop"):
-        target_agent.reset_host(_reset_payload(), root=tmp_path, command=fail_stop)
+        host_reset.reset_host(_reset_payload(), root=tmp_path, command=fail_stop)
     assert (tmp_path / "opt/eidolon/releases/old/code.py").is_file()
 
 
@@ -456,14 +465,14 @@ def test_reset_rejects_non_boolean_authority_wipe(tmp_path: Path) -> None:
     payload["wipe_authority_data"] = "yes"
 
     with pytest.raises(TargetError, match="must be a boolean"):
-        target_agent.reset_plan(payload, root=tmp_path)
+        host_reset.reset_plan(payload, root=tmp_path)
 
 
 def test_concurrent_install_lock_fails_fast(install_fixture) -> None:
     installer, _host, _command, _stage, _release, _data = install_fixture
 
     with (
-        target_agent._exclusive(installer.lock_path),
+        primitives.exclusive(installer.lock_path),
         pytest.raises(TargetError, match="another first-install"),
     ):
         installer.install()
@@ -520,9 +529,9 @@ def test_status_parses_systemd_properties(monkeypatch) -> None:
             "",
         )
 
-    monkeypatch.setattr(target_agent, "_run", fake_run)
+    monkeypatch.setattr(primitives, "run", fake_run)
 
-    result = target_agent.status({"units": list(target_agent.PRODUCT_UNITS)})
+    result = host_lifecycle.status({"units": list(contract.PRODUCT_UNITS)})
 
     assert result["units"]["eidolond.service"]["ActiveState"] == "active"
     assert result["units"]["eidolond.service"]["NRestarts"] == 2
@@ -530,21 +539,20 @@ def test_status_parses_systemd_properties(monkeypatch) -> None:
 
 def test_status_records_systemctl_failure(monkeypatch) -> None:
     monkeypatch.setattr(
-        target_agent,
-        "_run",
+        primitives, "run",
         lambda command, **kwargs: subprocess.CompletedProcess(command, 1, "", "not found"),
     )
 
-    result = target_agent.status({"units": list(target_agent.PRODUCT_UNITS)})
+    result = host_lifecycle.status({"units": list(contract.PRODUCT_UNITS)})
 
     assert result["units"]["eidolond.service"] == {"error": "not found"}
 
 
 def test_logs_rejects_unknown_unit() -> None:
     with pytest.raises(TargetError, match="outside"):
-        target_agent.logs(
+        host_lifecycle.logs(
             {
-                "units": list(target_agent.PRODUCT_UNITS),
+                "units": list(contract.PRODUCT_UNITS),
                 "unit": "ssh.service",
                 "lines": 10,
             }
@@ -554,19 +562,18 @@ def test_logs_rejects_unknown_unit() -> None:
 @pytest.mark.parametrize("lines", [0, 5001, "100"])
 def test_logs_rejects_unbounded_line_count(lines) -> None:
     with pytest.raises(TargetError, match="line count"):
-        target_agent.logs({"units": list(target_agent.PRODUCT_UNITS), "lines": lines})
+        host_lifecycle.logs({"units": list(contract.PRODUCT_UNITS), "lines": lines})
 
 
 def test_logs_collects_fixed_units(monkeypatch) -> None:
     monkeypatch.setattr(
-        target_agent,
-        "_run",
+        primitives, "run",
         lambda command, **kwargs: subprocess.CompletedProcess(command, 0, "entry\n", ""),
     )
 
-    result = target_agent.logs(
+    result = host_lifecycle.logs(
         {
-            "units": list(target_agent.PRODUCT_UNITS),
+            "units": list(contract.PRODUCT_UNITS),
             "unit": "eidolond.service",
             "lines": 2,
             "since": "1 hour ago",
@@ -578,9 +585,9 @@ def test_logs_collects_fixed_units(monkeypatch) -> None:
 
 def test_logs_rejects_control_character_in_since() -> None:
     with pytest.raises(TargetError, match="since"):
-        target_agent.logs(
+        host_lifecycle.logs(
             {
-                "units": list(target_agent.PRODUCT_UNITS),
+                "units": list(contract.PRODUCT_UNITS),
                 "lines": 10,
                 "since": "today\nnext",
             }
@@ -589,93 +596,93 @@ def test_logs_rejects_control_character_in_since() -> None:
 
 def test_payload_round_trip_and_rejects_non_object() -> None:
     encoded = base64.urlsafe_b64encode(b'{"release_id":"r1"}').decode("ascii")
-    assert target_agent._payload(encoded) == {"release_id": "r1"}
+    assert primitives.decode_payload(encoded) == {"release_id": "r1"}
 
     encoded_list = base64.urlsafe_b64encode(b"[]").decode("ascii")
     with pytest.raises(TargetError, match="object"):
-        target_agent._payload(encoded_list)
+        primitives.decode_payload(encoded_list)
 
 
 def test_guard_upload_accepts_absent_path(monkeypatch, tmp_path: Path) -> None:
     release_id = "test-guard-upload-ops"
-    monkeypatch.setattr(target_agent, "_VAR_TMP", tmp_path)
+    monkeypatch.setattr(contract, "VAR_TMP", tmp_path)
     path = tmp_path / f"eidolon-release-{release_id}"
 
-    result = target_agent.guard_upload({"release_id": release_id, "transfer_id": "a" * 64})
+    result = staging.guard_upload({"release_id": release_id, "transfer_id": "a" * 64})
     assert result["status"] == "ready_for_upload"
     assert path.stat().st_mode & 0o777 == 0o700
 
 
 def test_guard_upload_rejects_existing_path(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(target_agent, "_VAR_TMP", tmp_path)
+    monkeypatch.setattr(contract, "VAR_TMP", tmp_path)
     path = tmp_path / "eidolon-release-existing"
     path.mkdir()
 
     with pytest.raises(TargetError, match="not resumable"):
-        target_agent.guard_upload({"release_id": "existing", "transfer_id": "a" * 64})
+        staging.guard_upload({"release_id": "existing", "transfer_id": "a" * 64})
 
 
 def test_guard_upload_resumes_only_matching_owned_transfer(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(target_agent, "_VAR_TMP", tmp_path)
+    monkeypatch.setattr(contract, "VAR_TMP", tmp_path)
     payload = {"release_id": "resume", "transfer_id": "b" * 64}
 
-    first = target_agent.guard_upload(payload)
-    second = target_agent.guard_upload(payload)
+    first = staging.guard_upload(payload)
+    second = staging.guard_upload(payload)
 
     assert first["status"] == "ready_for_upload"
     assert second["status"] == "resume_upload"
     with pytest.raises(TargetError, match="drifted"):
-        target_agent.guard_upload({"release_id": "resume", "transfer_id": "c" * 64})
+        staging.guard_upload({"release_id": "resume", "transfer_id": "c" * 64})
 
 
 def test_upload_finalization_hands_one_closed_bundle_to_kernel(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(target_agent, "_VAR_TMP", tmp_path)
+    monkeypatch.setattr(contract, "VAR_TMP", tmp_path)
     release_id = "closed-bundle"
     manifest_bytes = b'{"schema_version":2}\n'
     transfer_id = hashlib.sha256(manifest_bytes).hexdigest()
     payload = {"release_id": release_id, "transfer_id": transfer_id}
-    target_agent.guard_upload(payload)
+    staging.guard_upload(payload)
     bundle = tmp_path / f"eidolon-release-{release_id}"
     (bundle / "bundle.json").write_bytes(manifest_bytes)
     (bundle / "prepare_target.py").write_text("preparer", encoding="utf-8")
     (bundle / "python-dependencies.tar.gz").write_bytes(b"dependencies")
     (bundle / "sources").mkdir()
 
-    result = target_agent.finalize_upload(payload)
+    result = staging.finalize_upload(payload)
 
     assert result["status"] == "finalized"
     assert not (bundle / ".eidolon-upload.json").exists()
-    assert target_agent.finalize_upload(payload)["status"] == "already_finalized"
-    assert target_agent.guard_upload(payload)["status"] == "ready_for_prepare"
+    assert staging.finalize_upload(payload)["status"] == "already_finalized"
+    assert staging.guard_upload(payload)["status"] == "ready_for_prepare"
 
 
 def test_upload_finalization_rejects_missing_or_unowned_staging(
     monkeypatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(target_agent, "_VAR_TMP", tmp_path)
+    monkeypatch.setattr(contract, "VAR_TMP", tmp_path)
     with pytest.raises(TargetError, match="transfer identity"):
-        target_agent.finalize_upload({"release_id": "missing", "transfer_id": "short"})
+        staging.finalize_upload({"release_id": "missing", "transfer_id": "short"})
     payload = {"release_id": "missing", "transfer_id": "a" * 64}
     with pytest.raises(TargetError, match="directory is missing"):
-        target_agent.finalize_upload(payload)
+        staging.finalize_upload(payload)
 
-    staging = tmp_path / "eidolon-release-missing"
-    staging.mkdir(mode=0o755)
+    uploaded = tmp_path / "eidolon-release-missing"
+    uploaded.mkdir(mode=0o755)
     with pytest.raises(TargetError, match="ownership drifted"):
-        target_agent.finalize_upload(payload)
+        staging.finalize_upload(payload)
 
 
 def test_upload_finalization_rejects_marker_shape_and_digest_drift(
     monkeypatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(target_agent, "_VAR_TMP", tmp_path)
+    monkeypatch.setattr(contract, "VAR_TMP", tmp_path)
     payload = {"release_id": "drift", "transfer_id": "b" * 64}
-    target_agent.guard_upload(payload)
+    staging.guard_upload(payload)
     bundle = tmp_path / "eidolon-release-drift"
     marker = bundle / ".eidolon-upload.json"
     marker.write_text("not-json", encoding="utf-8")
     with pytest.raises(TargetError, match="marker is unreadable"):
-        target_agent.finalize_upload(payload)
+        staging.finalize_upload(payload)
 
     marker.write_text(
         json.dumps(
@@ -688,25 +695,25 @@ def test_upload_finalization_rejects_marker_shape_and_digest_drift(
         encoding="utf-8",
     )
     with pytest.raises(TargetError, match="shape or identity drifted"):
-        target_agent.finalize_upload(payload)
+        staging.finalize_upload(payload)
 
     marker.unlink()
     with pytest.raises(TargetError, match="shape or identity drifted"):
-        target_agent.finalize_upload(payload)
+        staging.finalize_upload(payload)
 
     (bundle / "bundle.json").write_text("wrong", encoding="utf-8")
     (bundle / "prepare_target.py").write_text("preparer", encoding="utf-8")
     (bundle / "python-dependencies.tar.gz").write_bytes(b"dependencies")
     (bundle / "sources").mkdir()
     with pytest.raises(TargetError, match="manifest digest drifted"):
-        target_agent.finalize_upload(payload)
+        staging.finalize_upload(payload)
 
 
 def test_guard_upload_rejects_invalid_transfer_identity(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(target_agent, "_VAR_TMP", tmp_path)
+    monkeypatch.setattr(contract, "VAR_TMP", tmp_path)
 
     with pytest.raises(TargetError, match="transfer identity"):
-        target_agent.guard_upload({"release_id": "resume", "transfer_id": "short"})
+        staging.guard_upload({"release_id": "resume", "transfer_id": "short"})
 
 
 def test_guard_upload_reports_exact_prepared_release(monkeypatch, tmp_path: Path) -> None:
@@ -715,10 +722,10 @@ def test_guard_upload_reports_exact_prepared_release(monkeypatch, tmp_path: Path
     prepared.mkdir(parents=True)
     (prepared / "release.json").write_text("{}", encoding="utf-8")
     (prepared / "release.json.sha256").write_text("digest", encoding="utf-8")
-    monkeypatch.setattr(target_agent, "_RELEASES", releases)
-    monkeypatch.setattr(target_agent, "_VAR_TMP", tmp_path / "staging")
+    monkeypatch.setattr(contract, "RELEASES", releases)
+    monkeypatch.setattr(contract, "VAR_TMP", tmp_path / "staging")
 
-    result = target_agent.guard_upload({"release_id": "prepared", "transfer_id": "d" * 64})
+    result = staging.guard_upload({"release_id": "prepared", "transfer_id": "d" * 64})
 
     assert result == {
         "status": "already_prepared",
@@ -728,23 +735,23 @@ def test_guard_upload_reports_exact_prepared_release(monkeypatch, tmp_path: Path
 
 
 def test_guard_upload_rejects_mode_drift(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(target_agent, "_VAR_TMP", tmp_path)
+    monkeypatch.setattr(contract, "VAR_TMP", tmp_path)
     payload = {"release_id": "resume", "transfer_id": "e" * 64}
-    target_agent.guard_upload(payload)
+    staging.guard_upload(payload)
     (tmp_path / "eidolon-release-resume").chmod(0o755)
 
     with pytest.raises(TargetError, match="ownership drifted"):
-        target_agent.guard_upload(payload)
+        staging.guard_upload(payload)
 
 
 def test_cleanup_stage_removes_only_exact_secret_path(monkeypatch, tmp_path: Path) -> None:
     release_id = "test-cleanup-stage-ops"
-    monkeypatch.setattr(target_agent, "_VAR_TMP", tmp_path)
+    monkeypatch.setattr(contract, "VAR_TMP", tmp_path)
     path = tmp_path / f"eidolon-secrets-{release_id}"
     path.mkdir(exist_ok=False)
     (path / "data.env").write_text("private", encoding="utf-8")
 
-    result = target_agent.cleanup_stage({"release_id": release_id})
+    result = staging.cleanup_stage({"release_id": release_id})
 
     assert result["status"] == "cleaned"
     assert not path.exists()
@@ -753,20 +760,20 @@ def test_cleanup_stage_removes_only_exact_secret_path(monkeypatch, tmp_path: Pat
 def test_main_rejects_unknown_action(capsys) -> None:
     encoded = base64.urlsafe_b64encode(b"{}").decode("ascii")
 
-    assert target_agent.main(("unknown", encoded)) == 1
+    assert agent_main.main(("unknown", encoded)) == 1
     assert "unknown target action" in capsys.readouterr().err
 
 
 def test_main_rejects_missing_arguments(capsys) -> None:
-    assert target_agent.main(()) == 2
+    assert agent_main.main(()) == 2
     assert "expected action" in capsys.readouterr().err
 
 
 def test_doctor_host_reports_current_platform_without_mutation() -> None:
-    result = target_agent.doctor_host(
+    result = host_lifecycle.doctor_host(
         {
-            "units": list(target_agent.PRODUCT_UNITS),
-            "data": {name: str(path) for name, path in target_agent.FIXED_DATA.items()},
+            "units": list(contract.PRODUCT_UNITS),
+            "data": {name: str(path) for name, path in contract.FIXED_DATA.items()},
             "remote_uv": "/definitely/missing/uv",
         }
     )
@@ -777,59 +784,56 @@ def test_doctor_host_reports_current_platform_without_mutation() -> None:
 
 def test_fixed_payload_contracts_reject_drift() -> None:
     with pytest.raises(TargetError, match="unit set"):
-        target_agent._fixed_units({"units": []})
+        contract.fixed_units({"units": []})
     with pytest.raises(TargetError, match="data path"):
-        target_agent._fixed_data({"data": {}})
+        contract.fixed_data({"data": {}})
     with pytest.raises(TargetError, match="release id"):
-        target_agent._release_id({"release_id": "../bad"})
-    assert target_agent._release_id({}, required=False) is None
+        contract.fixed_release_id({"release_id": "../bad"})
+    assert contract.fixed_release_id({}, required=False) is None
 
 
 def test_atomic_json_and_file_hash(tmp_path: Path) -> None:
     path = tmp_path / "document.json"
 
-    target_agent._atomic_json(path, {"value": 1})
+    primitives.atomic_json(path, {"value": 1})
 
     assert json.loads(path.read_text(encoding="utf-8")) == {"value": 1}
-    assert len(target_agent._file_sha256(path)) == 64
+    assert len(primitives.file_sha256(path)) == 64
 
 
 def test_checked_command_success_and_failure(monkeypatch) -> None:
     monkeypatch.setattr(
-        target_agent,
-        "_run",
+        primitives, "run",
         lambda command, **kwargs: subprocess.CompletedProcess(command, 0, "ok", ""),
     )
-    assert target_agent._checked("probe", ("true",)).stdout == "ok"
+    assert primitives.checked("probe", ("true",)).stdout == "ok"
 
     monkeypatch.setattr(
-        target_agent,
-        "_run",
+        primitives, "run",
         lambda command, **kwargs: subprocess.CompletedProcess(command, 1, "", "failed"),
     )
     with pytest.raises(TargetError, match="probe failed"):
-        target_agent._checked("probe", ("false",))
+        primitives.checked("probe", ("false",))
 
 
 def test_diagnose_composes_redacted_status(monkeypatch) -> None:
-    monkeypatch.setattr(target_agent, "status", lambda payload: {"status": "observed"})
+    monkeypatch.setattr(host_lifecycle, "status", lambda payload: {"status": "observed"})
     monkeypatch.setattr(
-        target_agent,
-        "logs",
+        host_lifecycle, "logs",
         lambda payload: {"status": "collected", "entries": {"eidolond": "line"}},
     )
 
-    result = target_agent.diagnose({})
+    result = host_lifecycle.diagnose({})
 
     assert result["status"] == "diagnosed"
     assert "private key" in result["redaction"]
 
 
 def test_target_main_dispatches_status(monkeypatch, capsys) -> None:
-    monkeypatch.setattr(target_agent, "status", lambda payload: {"status": "observed"})
+    monkeypatch.setattr(host_lifecycle, "status", lambda payload: {"status": "observed"})
     encoded = base64.urlsafe_b64encode(b"{}").decode("ascii")
 
-    assert target_agent.main(("status", encoded)) == 0
+    assert agent_main.main(("status", encoded)) == 0
     assert json.loads(capsys.readouterr().out) == {"status": "observed"}
 
 
@@ -867,10 +871,10 @@ def test_service_identity_rejects_wrong_primary_group(install_fixture) -> None:
 
 
 def test_real_run_and_host_path_guards(tmp_path: Path) -> None:
-    assert target_agent._run(("/usr/bin/true",)).returncode == 0
-    assert target_agent._host_path(tmp_path, Path("/etc/test")) == tmp_path / "etc/test"
+    assert primitives.run(("/usr/bin/true",)).returncode == 0
+    assert primitives.host_path(tmp_path, Path("/etc/test")) == tmp_path / "etc/test"
     with pytest.raises(TargetError, match="absolute"):
-        target_agent._host_path(tmp_path, Path("relative"))
+        primitives.host_path(tmp_path, Path("relative"))
 
 
 def test_run_wraps_subprocess_error(monkeypatch) -> None:
@@ -880,7 +884,7 @@ def test_run_wraps_subprocess_error(monkeypatch) -> None:
     monkeypatch.setattr(subprocess, "run", fail)
 
     with pytest.raises(TargetError, match="cannot exec"):
-        target_agent._run(("missing",))
+        primitives.run(("missing",))
 
 
 def test_status_reads_recent_receipt(monkeypatch, tmp_path: Path) -> None:
@@ -904,14 +908,13 @@ def test_status_reads_recent_receipt(monkeypatch, tmp_path: Path) -> None:
         json.dumps({"release_id": "r1", "status": "completed", "phase": "completed"}),
         encoding="utf-8",
     )
-    monkeypatch.setitem(target_agent.FIXED_DATA, "deployment_evidence", evidence)
+    monkeypatch.setitem(contract.FIXED_DATA, "deployment_evidence", evidence)
     monkeypatch.setattr(
-        target_agent,
-        "_run",
+        primitives, "run",
         lambda command, **kwargs: subprocess.CompletedProcess(command, 0, "", ""),
     )
 
-    result = target_agent.status({"units": list(target_agent.PRODUCT_UNITS)})
+    result = host_lifecycle.status({"units": list(contract.PRODUCT_UNITS)})
 
     assert result["recent_receipts"] == [
         {
@@ -942,19 +945,18 @@ def test_doctor_host_checks_release_result(
     stdout: str,
     healthy: bool,
 ) -> None:
-    monkeypatch.setattr(target_agent, "_RELEASES", tmp_path)
+    monkeypatch.setattr(contract, "RELEASES", tmp_path)
     monkeypatch.setattr(
-        target_agent,
-        "_run",
+        primitives, "run",
         lambda command, **kwargs: subprocess.CompletedProcess(
             command, returncode, stdout, "failed"
         ),
     )
 
-    result = target_agent.doctor_host(
+    result = host_lifecycle.doctor_host(
         {
-            "units": list(target_agent.PRODUCT_UNITS),
-            "data": {name: str(path) for name, path in target_agent.FIXED_DATA.items()},
+            "units": list(contract.PRODUCT_UNITS),
+            "data": {name: str(path) for name, path in contract.FIXED_DATA.items()},
             "remote_uv": "/missing",
             "release_id": "r1",
         }
@@ -971,12 +973,11 @@ def test_deployment_runner_maps_command_result(monkeypatch) -> None:
             self.stderr = stderr
 
     monkeypatch.setattr(
-        target_agent,
-        "_run",
+        primitives, "run",
         lambda command, **kwargs: subprocess.CompletedProcess(command, 3, "out", "err"),
     )
 
-    result = target_agent._DeploymentRunner(Result).run("command")
+    result = host_install.DeploymentRunner(Result).run("command")
 
     assert result.returncode == 3
     assert result.stdout == "out"
@@ -1008,9 +1009,9 @@ def test_lifecycle_uses_kernel_host_adapter(monkeypatch, tmp_path: Path) -> None
     _install_kernel_stubs(monkeypatch, release, host_type=Host)
     active = tmp_path / "release/eidolon_kernel"
     active.mkdir(parents=True)
-    monkeypatch.setattr(target_agent, "_CURRENT_KERNEL", active)
+    monkeypatch.setattr(contract, "CURRENT_KERNEL", active)
 
-    result = target_agent.lifecycle("restart", {"units": list(target_agent.PRODUCT_UNITS)})
+    result = host_lifecycle.lifecycle("restart", {"units": list(contract.PRODUCT_UNITS)})
 
     assert result == {"status": "restarted", "release_id": "active"}
     assert Host.instance.calls == ["preflight", "quiesce", "start", "ready"]
@@ -1024,14 +1025,14 @@ def test_rollback_plan_validates_snapshot(monkeypatch, tmp_path: Path) -> None:
     descriptor = releases / "r1/release.json"
     descriptor.parent.mkdir(parents=True)
     descriptor.write_text("{}", encoding="utf-8")
-    monkeypatch.setitem(target_agent.FIXED_DATA, "deployment_evidence", evidence)
-    monkeypatch.setattr(target_agent, "_RELEASES", releases)
+    monkeypatch.setitem(contract.FIXED_DATA, "deployment_evidence", evidence)
+    monkeypatch.setattr(contract, "RELEASES", releases)
 
-    result = target_agent.rollback_plan({"release_id": "r1", "snapshot": str(snapshot)})
+    result = host_lifecycle.rollback_plan({"release_id": "r1", "snapshot": str(snapshot)})
 
     assert result["status"] == "rollback_planned"
     with pytest.raises(TargetError, match="snapshot path"):
-        target_agent.rollback_plan({"release_id": "r1", "snapshot": 1})
+        host_lifecycle.rollback_plan({"release_id": "r1", "snapshot": 1})
 
 
 def test_install_wrapper_reuses_kernel_descriptor(monkeypatch, tmp_path: Path) -> None:
@@ -1052,14 +1053,14 @@ def test_install_wrapper_reuses_kernel_descriptor(monkeypatch, tmp_path: Path) -
             return {"status": "installed"}
 
     _install_kernel_stubs(monkeypatch, release, host_type=Host)
-    monkeypatch.setattr(target_agent, "TargetInstaller", Installer)
-    monkeypatch.setattr(target_agent, "_RELEASES", tmp_path / "releases")
-    monkeypatch.setattr(target_agent, "_VAR_TMP", tmp_path)
+    monkeypatch.setattr(host_install, "TargetInstaller", Installer)
+    monkeypatch.setattr(contract, "RELEASES", tmp_path / "releases")
+    monkeypatch.setattr(contract, "VAR_TMP", tmp_path)
 
-    result = target_agent.install(
+    result = host_install.install(
         {
             "release_id": "r1",
-            "data": {name: str(path) for name, path in target_agent.FIXED_DATA.items()},
+            "data": {name: str(path) for name, path in contract.FIXED_DATA.items()},
             "port_registry": "admin:\n  api:\n    port: 9000\n",
         }
     )
@@ -1102,7 +1103,7 @@ def test_active_release_reports_component_neutral_operator_entries(tmp_path, mon
 
     releases = tmp_path / "opt/eidolon/releases"
     release_root = releases / "r7"
-    for relative in (target_agent.RELEASE_ACTIVATOR, target_agent.RELEASE_INTERPRETER):
+    for relative in (contract.RELEASE_ACTIVATOR, contract.RELEASE_INTERPRETER):
         entry = release_root / relative
         entry.parent.mkdir(parents=True, exist_ok=True)
         entry.write_text("#!/bin/sh\n", encoding="utf-8")
@@ -1111,21 +1112,21 @@ def test_active_release_reports_component_neutral_operator_entries(tmp_path, mon
     current.parent.mkdir(parents=True, exist_ok=True)
     current.symlink_to(release_root / "eidolon_kernel")
     (release_root / "eidolon_kernel").mkdir()
-    monkeypatch.setattr(target_agent, "_RELEASES", releases)
-    monkeypatch.setattr(target_agent, "_CURRENT_KERNEL", current)
+    monkeypatch.setattr(contract, "RELEASES", releases)
+    monkeypatch.setattr(contract, "CURRENT_KERNEL", current)
 
-    result = target_agent.active_release({"units": list(target_agent.PRODUCT_UNITS)})
+    result = host_lifecycle.active_release({"units": list(contract.PRODUCT_UNITS)})
 
     assert result["release_id"] == "r7"
-    assert result["interpreter"] == str(release_root / target_agent.RELEASE_INTERPRETER)
-    assert result["activator"] == str(release_root / target_agent.RELEASE_ACTIVATOR)
+    assert result["interpreter"] == str(release_root / contract.RELEASE_INTERPRETER)
+    assert result["activator"] == str(release_root / contract.RELEASE_ACTIVATOR)
 
 
 def test_active_release_fails_closed_without_an_activated_release(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(target_agent, "_CURRENT_KERNEL", tmp_path / "missing")
+    monkeypatch.setattr(contract, "CURRENT_KERNEL", tmp_path / "missing")
 
     with pytest.raises(TargetError, match="currently active"):
-        target_agent.active_release({"units": list(target_agent.PRODUCT_UNITS)})
+        host_lifecycle.active_release({"units": list(contract.PRODUCT_UNITS)})
 
 
 def test_active_release_rejects_a_release_missing_its_operator_entries(
@@ -1137,11 +1138,11 @@ def test_active_release_rejects_a_release_missing_its_operator_entries(
     current = tmp_path / "opt/eidolon/current/eidolon_kernel"
     current.parent.mkdir(parents=True, exist_ok=True)
     current.symlink_to(release_root / "eidolon_kernel")
-    monkeypatch.setattr(target_agent, "_RELEASES", releases)
-    monkeypatch.setattr(target_agent, "_CURRENT_KERNEL", current)
+    monkeypatch.setattr(contract, "RELEASES", releases)
+    monkeypatch.setattr(contract, "CURRENT_KERNEL", current)
 
     with pytest.raises(TargetError, match="does not publish its"):
-        target_agent.active_release({"units": list(target_agent.PRODUCT_UNITS)})
+        host_lifecycle.active_release({"units": list(contract.PRODUCT_UNITS)})
 
 
 def test_controller_reset_reports_the_bootstrap_evidence(tmp_path, monkeypatch) -> None:
@@ -1150,27 +1151,26 @@ def test_controller_reset_reports_the_bootstrap_evidence(tmp_path, monkeypatch) 
     ctl = tmp_path / "eidolon-bootstrapctl"
     ctl.write_text("#!/bin/sh\n", encoding="utf-8")
     ctl.chmod(0o755)
-    monkeypatch.setattr(target_agent, "_BOOTSTRAP_CTL", ctl)
+    monkeypatch.setattr(host_lifecycle, "BOOTSTRAP_CTL", ctl)
     document = {"revoked_controllers": ["ectrl-0123456789abcdef0123"], "preserved": ["owner_binding"]}
     monkeypatch.setattr(
-        target_agent,
-        "_run",
+        primitives, "run",
         lambda command, **kwargs: subprocess.CompletedProcess(
             command, 0, json.dumps(document), ""
         ),
     )
 
-    result = target_agent.controller_reset({"units": list(target_agent.PRODUCT_UNITS)})
+    result = host_lifecycle.controller_reset({"units": list(contract.PRODUCT_UNITS)})
 
     assert result["status"] == "reset"
     assert result["controller_reset"] == document
 
 
 def test_controller_reset_requires_the_bootstrap_control_cli(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(target_agent, "_BOOTSTRAP_CTL", tmp_path / "missing")
+    monkeypatch.setattr(host_lifecycle, "BOOTSTRAP_CTL", tmp_path / "missing")
 
     with pytest.raises(TargetError, match="bootstrap control CLI"):
-        target_agent.controller_reset({"units": list(target_agent.PRODUCT_UNITS)})
+        host_lifecycle.controller_reset({"units": list(contract.PRODUCT_UNITS)})
 
 
 def test_controller_reset_rejects_output_that_is_not_bootstrap_evidence(
@@ -1179,53 +1179,49 @@ def test_controller_reset_rejects_output_that_is_not_bootstrap_evidence(
     ctl = tmp_path / "eidolon-bootstrapctl"
     ctl.write_text("#!/bin/sh\n", encoding="utf-8")
     ctl.chmod(0o755)
-    monkeypatch.setattr(target_agent, "_BOOTSTRAP_CTL", ctl)
+    monkeypatch.setattr(host_lifecycle, "BOOTSTRAP_CTL", ctl)
     monkeypatch.setattr(
-        target_agent,
-        "_run",
+        primitives, "run",
         lambda command, **kwargs: subprocess.CompletedProcess(command, 0, "{}", ""),
     )
 
     with pytest.raises(TargetError, match="invalid evidence"):
-        target_agent.controller_reset({"units": list(target_agent.PRODUCT_UNITS)})
+        host_lifecycle.controller_reset({"units": list(contract.PRODUCT_UNITS)})
 
 
 def test_a_host_without_a_declared_address_reports_the_one_it_has(monkeypatch) -> None:
     """An address a Host once had says nothing about reaching it now."""
 
     monkeypatch.setattr(
-        target_agent,
-        "_run",
+        primitives, "run",
         lambda command, **kwargs: subprocess.CompletedProcess(
             command, 0, "1.1.1.1 via 192.168.1.1 dev eth0 src 192.168.1.26 uid 0\n", ""
         ),
     )
 
-    assert str(target_agent._observed_lan_address()) == "192.168.1.26"
+    assert str(app_contract.observed_lan_address()) == "192.168.1.26"
 
 
 def test_a_host_with_no_routable_address_fails_closed(monkeypatch) -> None:
     monkeypatch.setattr(
-        target_agent,
-        "_run",
+        primitives, "run",
         lambda command, **kwargs: subprocess.CompletedProcess(command, 1, "", "unreachable"),
     )
 
     with pytest.raises(TargetError, match="no routable IPv4"):
-        target_agent._observed_lan_address()
+        app_contract.observed_lan_address()
 
 
 def test_a_loopback_default_route_is_refused(monkeypatch) -> None:
     monkeypatch.setattr(
-        target_agent,
-        "_run",
+        primitives, "run",
         lambda command, **kwargs: subprocess.CompletedProcess(
             command, 0, "1.1.1.1 dev lo src 127.0.0.1 uid 0\n", ""
         ),
     )
 
     with pytest.raises(TargetError, match="must be private IPv4"):
-        target_agent._observed_lan_address()
+        app_contract.observed_lan_address()
 
 
 def test_host_env_carries_configuration_that_is_not_a_secret() -> None:
@@ -1233,9 +1229,9 @@ def test_host_env_carries_configuration_that_is_not_a_secret() -> None:
     credential — putting it in the private input set would mean reissuing every
     token to change it, since those inputs are never overwritten."""
 
-    assert "EIDOLON_MEMORY_EMBEDDING_MODEL=bge-base-zh" in target_agent.HOST_ENV_VALUE
-    assert "TOKEN" not in target_agent.HOST_ENV_VALUE
-    assert "KEY" not in target_agent.HOST_ENV_VALUE
+    assert "EIDOLON_MEMORY_EMBEDDING_MODEL=bge-base-zh" in contract.HOST_ENV_VALUE
+    assert "TOKEN" not in contract.HOST_ENV_VALUE
+    assert "KEY" not in contract.HOST_ENV_VALUE
 
 
 def test_the_host_states_where_the_port_registry_is() -> None:
@@ -1247,8 +1243,8 @@ def test_the_host_states_where_the_port_registry_is() -> None:
     """
 
     assert (
-        f"EIDOLON_PORTS_FILE={target_agent.HOST_PORTS_PATH}"
-        in target_agent.HOST_ENV_VALUE
+        f"EIDOLON_PORTS_FILE={contract.HOST_PORTS_PATH}"
+        in contract.HOST_ENV_VALUE
     )
 
 
@@ -1259,12 +1255,12 @@ def test_the_port_registry_is_carried_not_restated(tmp_path: Path) -> None:
     wrote for itself is precisely the one nobody would think to update.
     """
 
-    assert not hasattr(target_agent, "HOST_PORTS_VALUE")
+    assert not hasattr(contract, "HOST_PORTS_VALUE")
 
     registry = "admin:\n  api:\n    port: 9000\n"
-    target_agent._ensure_host_path_contract(tmp_path, lambda *_a: None, registry)
+    contract.ensure_host_path_contract(tmp_path, lambda *_a: None, registry)
 
-    written = tmp_path / target_agent.HOST_PORTS_PATH.relative_to("/")
+    written = tmp_path / contract.HOST_PORTS_PATH.relative_to("/")
     assert written.read_text(encoding="utf-8") == registry
     assert oct(written.stat().st_mode)[-3:] == "640"
 
@@ -1273,10 +1269,10 @@ def test_an_operation_without_a_port_registry_is_refused() -> None:
     """Inventing one would put a Host's own guess where Admin looks."""
 
     with pytest.raises(TargetError, match="port registry is missing"):
-        target_agent._fixed_port_registry({"units": []})
+        contract.fixed_port_registry({"units": []})
 
     with pytest.raises(TargetError, match="port registry is missing"):
-        target_agent._fixed_port_registry({"port_registry": "   "})
+        contract.fixed_port_registry({"port_registry": "   "})
 
 
 def _app_contract(**overrides: object) -> dict[str, object]:
@@ -1302,15 +1298,15 @@ def test_the_resolved_lan_address_travels_with_the_app_contract(monkeypatch) -> 
     ``KeyError: 'lan_ipv4'`` after the release was already activated.
     """
 
-    monkeypatch.setattr(target_agent, "_observed_lan_address", lambda: IPv4Address("192.168.1.26"))
+    monkeypatch.setattr(app_contract, "observed_lan_address", lambda: IPv4Address("192.168.1.26"))
 
-    result = target_agent._fixed_app({"app": _app_contract()})
+    result = app_contract.fixed_app({"app": _app_contract()})
 
     assert result["lan_ipv4"] == "192.168.1.26"
 
 
 def test_a_declared_lan_address_is_still_honoured() -> None:
-    result = target_agent._fixed_app({"app": _app_contract(lan_ipv4="10.0.0.4")})
+    result = app_contract.fixed_app({"app": _app_contract(lan_ipv4="10.0.0.4")})
 
     assert result["lan_ipv4"] == "10.0.0.4"
 
@@ -1318,15 +1314,15 @@ def test_a_declared_lan_address_is_still_honoured() -> None:
 def test_the_readiness_reporter_finds_the_address_the_contract_carries(monkeypatch) -> None:
     """The exact seam that broke: every key the reporter indexes must be there."""
 
-    monkeypatch.setattr(target_agent, "_observed_lan_address", lambda: IPv4Address("192.168.1.26"))
-    app = target_agent._fixed_app({"app": _app_contract()})
+    monkeypatch.setattr(app_contract, "observed_lan_address", lambda: IPv4Address("192.168.1.26"))
+    app = app_contract.fixed_app({"app": _app_contract()})
 
     for key in ("hub_hostname", "hub_id", "lan_ipv4", "hub_https_port", "hub_origin", "host_id"):
         assert key in app
 
 
 def _ingress_installed(root: Path) -> Path:
-    unit = root / target_agent.HOST_APPLICATION_INPUTS["hub-ingress.service"][0].relative_to("/")
+    unit = root / contract.HOST_APPLICATION_INPUTS["hub-ingress.service"][0].relative_to("/")
     unit.parent.mkdir(parents=True, exist_ok=True)
     unit.write_text("[Unit]\n", encoding="utf-8")
     return unit
@@ -1347,9 +1343,9 @@ def test_the_host_layer_is_waited_for_never_started(tmp_path: Path) -> None:
         calls.append(tuple(command))
         return subprocess.CompletedProcess(command, 0, "active\n", "")
 
-    target_agent._await_host_application(run, tmp_path)
+    host_application.await_host_application(run, tmp_path)
 
-    assert calls == [("/usr/bin/systemctl", "is-active", target_agent.HOST_APPLICATION_UNIT)]
+    assert calls == [("/usr/bin/systemctl", "is-active", host_application.HOST_APPLICATION_UNIT)]
     assert not [call for call in calls if "start" in call]
 
 
@@ -1363,21 +1359,21 @@ def test_a_host_without_the_layer_is_not_waited_for(tmp_path: Path) -> None:
         calls.append(tuple(command))
         return subprocess.CompletedProcess(command, 3, "inactive\n", "")
 
-    target_agent._await_host_application(run, tmp_path)
+    host_application.await_host_application(run, tmp_path)
 
     assert calls == []
 
 
 def test_a_host_layer_that_never_opens_fails_the_install(tmp_path: Path, monkeypatch) -> None:
     _ingress_installed(tmp_path)
-    monkeypatch.setattr(target_agent, "HOST_APPLICATION_READY_SECONDS", 0.0)
-    monkeypatch.setattr(target_agent.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(host_application, "HOST_APPLICATION_READY_SECONDS", 0.0)
+    monkeypatch.setattr(host_application.time, "sleep", lambda _seconds: None)
 
     def run(command, **_kwargs):
         return subprocess.CompletedProcess(command, 3, "activating\n", "")
 
     with pytest.raises(TargetError, match="ingress is not active: activating"):
-        target_agent._await_host_application(run, tmp_path)
+        host_application.await_host_application(run, tmp_path)
 
 
 def test_a_host_states_how_long_its_own_services_need() -> None:
@@ -1388,17 +1384,17 @@ def test_a_host_states_how_long_its_own_services_need() -> None:
     services that were healthy moments later, and undid a good release for it.
     """
 
-    assert target_agent._release_readiness_seconds({"readiness_timeout_seconds": 600}) == 600
+    assert contract.release_readiness_seconds({"readiness_timeout_seconds": 600}) == 600
     assert (
-        target_agent._release_readiness_seconds({})
-        == target_agent.DEFAULT_RELEASE_READINESS_SECONDS
+        contract.release_readiness_seconds({})
+        == contract.DEFAULT_RELEASE_READINESS_SECONDS
     )
 
 
 def test_a_readiness_deadline_outside_reason_is_refused() -> None:
     for value in (0, 29, 1801, "240", True, None):
         with pytest.raises(TargetError, match="readiness timeout is invalid"):
-            target_agent._release_readiness_seconds({"readiness_timeout_seconds": value})
+            contract.release_readiness_seconds({"readiness_timeout_seconds": value})
 
 
 def test_a_setup_code_is_issued_through_the_hosts_own_control_socket(monkeypatch, tmp_path) -> None:
@@ -1409,9 +1405,9 @@ def test_a_setup_code_is_issued_through_the_hosts_own_control_socket(monkeypatch
     not be claimed by any phone, ever.
     """
 
-    monkeypatch.setattr(target_agent, "_BOOTSTRAP_CTL", tmp_path / "eidolon-bootstrapctl")
-    target_agent._BOOTSTRAP_CTL.write_text("#!/bin/sh\n", encoding="utf-8")
-    target_agent._BOOTSTRAP_CTL.chmod(0o755)
+    monkeypatch.setattr(host_lifecycle, "BOOTSTRAP_CTL", tmp_path / "eidolon-bootstrapctl")
+    host_lifecycle.BOOTSTRAP_CTL.write_text("#!/bin/sh\n", encoding="utf-8")
+    host_lifecycle.BOOTSTRAP_CTL.chmod(0o755)
     calls: list[tuple[str, ...]] = []
 
     def run(command, **_kwargs):
@@ -1426,10 +1422,10 @@ def test_a_setup_code_is_issued_through_the_hosts_own_control_socket(monkeypatch
             "",
         )
 
-    monkeypatch.setattr(target_agent, "_run", run)
+    monkeypatch.setattr(primitives, "run", run)
 
-    result = target_agent.commissioning_code(
-        {"units": list(target_agent.PRODUCT_UNITS), "ttl_seconds": 600}
+    result = host_lifecycle.commissioning_code(
+        {"units": list(contract.PRODUCT_UNITS), "ttl_seconds": 600}
     )
 
     assert calls[0][1:] == ("commissioning-code", "--ttl", "600")
@@ -1441,11 +1437,11 @@ def test_a_setup_code_is_issued_through_the_hosts_own_control_socket(monkeypatch
 
 
 def test_a_setup_code_request_without_a_sane_lifetime_is_refused(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr(target_agent, "_BOOTSTRAP_CTL", tmp_path / "eidolon-bootstrapctl")
+    monkeypatch.setattr(host_lifecycle, "BOOTSTRAP_CTL", tmp_path / "eidolon-bootstrapctl")
     for ttl in (0, 59, 86401, "600", True, None):
         with pytest.raises(TargetError, match="TTL must be between"):
-            target_agent.commissioning_code(
-                {"units": list(target_agent.PRODUCT_UNITS), "ttl_seconds": ttl}
+            host_lifecycle.commissioning_code(
+                {"units": list(contract.PRODUCT_UNITS), "ttl_seconds": ttl}
             )
 
 
@@ -1457,66 +1453,65 @@ def test_the_derived_host_layer_is_delivered_without_a_reinstall(tmp_path, monke
     succeeding while the fix sat undelivered.
     """
 
-    monkeypatch.setattr(target_agent, "_VAR_TMP", tmp_path / "var-tmp")
+    monkeypatch.setattr(contract, "VAR_TMP", tmp_path / "var-tmp")
     stage = tmp_path / "var-tmp" / "eidolon-secrets-r1"
     stage.mkdir(parents=True)
-    for name in target_agent.REFRESHABLE_HOST_APPLICATION_INPUTS:
+    for name in contract.REFRESHABLE_HOST_APPLICATION_INPUTS:
         (stage / name).write_text(f"new-{name}", encoding="utf-8")
-    monkeypatch.setattr(target_agent, "_chown_path", lambda *_a: None)
+    monkeypatch.setattr(primitives, "chown_path", lambda *_a: None)
     monkeypatch.setattr(
-        target_agent, "_checked", lambda *_a, **_k: subprocess.CompletedProcess((), 0, "", "")
+        primitives, "checked", lambda *_a, **_k: subprocess.CompletedProcess((), 0, "", "")
     )
     placed: dict[str, Path] = {}
-    for name in target_agent.REFRESHABLE_HOST_APPLICATION_INPUTS:
+    for name in contract.REFRESHABLE_HOST_APPLICATION_INPUTS:
         destination = tmp_path / "host" / name
         destination.parent.mkdir(parents=True, exist_ok=True)
         placed[name] = destination
     monkeypatch.setattr(
-        target_agent,
-        "HOST_APPLICATION_INPUTS",
+        contract, "HOST_APPLICATION_INPUTS",
         {
             **{
                 name: (placed[name], "root", "root", 0o644)
-                for name in target_agent.REFRESHABLE_HOST_APPLICATION_INPUTS
+                for name in contract.REFRESHABLE_HOST_APPLICATION_INPUTS
             }
         },
     )
 
-    result = target_agent.refresh_host_application(
-        {"units": list(target_agent.PRODUCT_UNITS), "release_id": "r1"}
+    result = host_application.refresh_host_application(
+        {"units": list(contract.PRODUCT_UNITS), "release_id": "r1"}
     )
 
     assert result["status"] == "refreshed"
-    assert len(result["changed"]) == len(target_agent.REFRESHABLE_HOST_APPLICATION_INPUTS)
+    assert len(result["changed"]) == len(contract.REFRESHABLE_HOST_APPLICATION_INPUTS)
     for name, destination in placed.items():
         assert destination.read_text(encoding="utf-8") == f"new-{name}"
 
     # Second run has nothing to deliver, so systemd is left alone.
-    assert target_agent.refresh_host_application(
-        {"units": list(target_agent.PRODUCT_UNITS), "release_id": "r1"}
+    assert host_application.refresh_host_application(
+        {"units": list(contract.PRODUCT_UNITS), "release_id": "r1"}
     )["changed"] == []
 
 
 def test_the_tls_pair_is_never_among_what_a_refresh_rewrites() -> None:
     """Material is written once; only renderings of it are refreshed."""
 
-    assert "hub.crt" not in target_agent.REFRESHABLE_HOST_APPLICATION_INPUTS
-    assert "hub.key" not in target_agent.REFRESHABLE_HOST_APPLICATION_INPUTS
-    assert set(target_agent.REFRESHABLE_HOST_APPLICATION_INPUTS) <= set(
-        target_agent.HOST_APPLICATION_INPUTS
+    assert "hub.crt" not in contract.REFRESHABLE_HOST_APPLICATION_INPUTS
+    assert "hub.key" not in contract.REFRESHABLE_HOST_APPLICATION_INPUTS
+    assert set(contract.REFRESHABLE_HOST_APPLICATION_INPUTS) <= set(
+        contract.HOST_APPLICATION_INPUTS
     )
-    assert not set(target_agent.REFRESHABLE_HOST_APPLICATION_INPUTS) & set(
-        target_agent.SECRET_INPUTS
+    assert not set(contract.REFRESHABLE_HOST_APPLICATION_INPUTS) & set(
+        contract.SECRET_INPUTS
     )
 
 
 def _authority_fixture(tmp_path: Path, monkeypatch):
     """Give the Host a set of real SQLite authorities to snapshot."""
 
-    monkeypatch.setattr(target_agent, "_VAR_TMP", tmp_path / "var-tmp")
+    monkeypatch.setattr(contract, "VAR_TMP", tmp_path / "var-tmp")
     (tmp_path / "var-tmp").mkdir(parents=True)
     table = {}
-    for name in target_agent.BACKED_UP_AUTHORITIES:
+    for name in contract.BACKED_UP_AUTHORITIES:
         database = tmp_path / "authorities" / f"{name}.sqlite3"
         database.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(database)
@@ -1525,12 +1520,12 @@ def _authority_fixture(tmp_path: Path, monkeypatch):
         connection.commit()
         connection.close()
         table[name] = (database, "root", "root")
-    monkeypatch.setattr(target_agent, "BACKED_UP_AUTHORITIES", table)
-    monkeypatch.setattr(target_agent, "_chown_path", lambda *_a: None)
+    monkeypatch.setattr(contract, "BACKED_UP_AUTHORITIES", table)
+    monkeypatch.setattr(primitives, "chown_path", lambda *_a: None)
     monkeypatch.setattr(
-        target_agent, "_checked", lambda *_a, **_k: subprocess.CompletedProcess((), 0, "", "")
+        primitives, "checked", lambda *_a, **_k: subprocess.CompletedProcess((), 0, "", "")
     )
-    monkeypatch.setattr(target_agent, "_host_id_or_none", lambda: "ehost-0123456789abcdefabcd")
+    monkeypatch.setattr(authorities, "host_id_or_none", lambda: "ehost-0123456789abcdefabcd")
     return table
 
 
@@ -1539,28 +1534,28 @@ def test_a_backup_covers_every_authority_and_names_what_it_cannot(tmp_path, monk
 
     table = _authority_fixture(tmp_path, monkeypatch)
 
-    result = target_agent.backup({"units": list(target_agent.PRODUCT_UNITS), "release_id": "r1"})
+    result = authorities.backup({"units": list(contract.PRODUCT_UNITS), "release_id": "r1"})
 
     assert result["status"] == "captured"
     assert {entry["authority"] for entry in result["authorities"]} == set(table)
-    assert {entry["state"] for entry in result["not_covered"]} == set(target_agent.UNCOVERED_STATE)
+    assert {entry["state"] for entry in result["not_covered"]} == set(contract.UNCOVERED_STATE)
     for entry in result["not_covered"]:
         assert entry["reason"]
     assert "not a point-in-time image" in result["consistency"]
     for entry in result["authorities"]:
         copy = Path(result["directory"]) / entry["file"]
         assert copy.is_file()
-        assert target_agent._file_sha256(copy) == entry["sha256"]
+        assert primitives.file_sha256(copy) == entry["sha256"]
 
 
 def test_a_backup_round_trips_through_a_restore(tmp_path, monkeypatch) -> None:
     """A backup nobody has restored is not known to work."""
 
     table = _authority_fixture(tmp_path, monkeypatch)
-    monkeypatch.setattr(target_agent, "command_stop_units", lambda units: list(units))
-    monkeypatch.setattr(target_agent, "lifecycle", lambda *_a: {"status": "started"})
-    payload = {"units": list(target_agent.PRODUCT_UNITS), "release_id": "r1"}
-    manifest = target_agent.backup(payload)
+    monkeypatch.setattr(host_reset, "command_stop_units", lambda units: list(units))
+    monkeypatch.setattr(host_lifecycle, "lifecycle", lambda *_a: {"status": "started"})
+    payload = {"units": list(contract.PRODUCT_UNITS), "release_id": "r1"}
+    manifest = authorities.backup(payload)
 
     for name, (database, _user, _group) in table.items():
         connection = sqlite3.connect(database)
@@ -1568,7 +1563,7 @@ def test_a_backup_round_trips_through_a_restore(tmp_path, monkeypatch) -> None:
         connection.commit()
         connection.close()
 
-    result = target_agent.restore({**payload, "manifest": manifest})
+    result = authorities.restore({**payload, "manifest": manifest})
 
     assert result["status"] == "restored"
     # The product is running again; an operator should not have to know which
@@ -1588,23 +1583,23 @@ def test_a_backup_from_another_host_is_refused(tmp_path, monkeypatch) -> None:
     identity and TLS names all describe somewhere else."""
 
     _authority_fixture(tmp_path, monkeypatch)
-    payload = {"units": list(target_agent.PRODUCT_UNITS), "release_id": "r1"}
-    manifest = target_agent.backup(payload)
+    payload = {"units": list(contract.PRODUCT_UNITS), "release_id": "r1"}
+    manifest = authorities.backup(payload)
     manifest["host_id"] = "ehost-ffffffffffffffffffff"
 
     with pytest.raises(TargetError, match="different Host"):
-        target_agent.restore({**payload, "manifest": manifest})
+        authorities.restore({**payload, "manifest": manifest})
 
 
 def test_a_backup_that_no_longer_matches_its_digest_is_refused(tmp_path, monkeypatch) -> None:
     _authority_fixture(tmp_path, monkeypatch)
-    payload = {"units": list(target_agent.PRODUCT_UNITS), "release_id": "r1"}
-    manifest = target_agent.backup(payload)
+    payload = {"units": list(contract.PRODUCT_UNITS), "release_id": "r1"}
+    manifest = authorities.backup(payload)
     tampered = Path(manifest["directory"]) / manifest["authorities"][0]["file"]
     tampered.write_bytes(tampered.read_bytes() + b"\x00")
 
     with pytest.raises(TargetError, match="does not match its digest"):
-        target_agent.restore({**payload, "manifest": manifest})
+        authorities.restore({**payload, "manifest": manifest})
 
 
 def test_a_backup_missing_an_authority_is_refused(tmp_path, monkeypatch) -> None:
@@ -1612,12 +1607,12 @@ def test_a_backup_missing_an_authority_is_refused(tmp_path, monkeypatch) -> None
     different pasts at once."""
 
     _authority_fixture(tmp_path, monkeypatch)
-    payload = {"units": list(target_agent.PRODUCT_UNITS), "release_id": "r1"}
-    manifest = target_agent.backup(payload)
+    payload = {"units": list(contract.PRODUCT_UNITS), "release_id": "r1"}
+    manifest = authorities.backup(payload)
     manifest["authorities"] = manifest["authorities"][:-1]
 
     with pytest.raises(TargetError, match="every authority"):
-        target_agent.restore({**payload, "manifest": manifest})
+        authorities.restore({**payload, "manifest": manifest})
 
 
 def test_a_plaintext_livekit_origin_may_name_the_host_it_belongs_to(monkeypatch) -> None:
@@ -1627,19 +1622,19 @@ def test_a_plaintext_livekit_origin_may_name_the_host_it_belongs_to(monkeypatch)
     passed only because the check ignored every scheme but ws.
     """
 
-    monkeypatch.setattr(target_agent, "_observed_lan_address", lambda: IPv4Address("192.168.1.26"))
+    monkeypatch.setattr(app_contract, "observed_lan_address", lambda: IPv4Address("192.168.1.26"))
     host_id = "ehost-0123456789abcdefabcd"
     hub_hostname = f"eidolon-hub-{host_id.removeprefix('ehost-')}.local"
 
     for origin in (f"ws://{hub_hostname}:7880", "ws://192.168.1.26:7880"):
-        result = target_agent._fixed_app({"app": _app_contract(livekit_client_url=origin)})
+        result = app_contract.fixed_app({"app": _app_contract(livekit_client_url=origin)})
         assert result["livekit_client_url"] == origin
 
 
 def test_a_plaintext_livekit_origin_naming_somewhere_else_is_refused(monkeypatch) -> None:
     """A device sent this would open its microphone to another machine."""
 
-    monkeypatch.setattr(target_agent, "_observed_lan_address", lambda: IPv4Address("192.168.1.26"))
+    monkeypatch.setattr(app_contract, "observed_lan_address", lambda: IPv4Address("192.168.1.26"))
 
     for origin in (
         "ws://192.168.1.99:7880",
@@ -1647,4 +1642,4 @@ def test_a_plaintext_livekit_origin_naming_somewhere_else_is_refused(monkeypatch
         "ws://placeholder.invalid:7880",
     ):
         with pytest.raises(TargetError, match="LiveKit origin is invalid"):
-            target_agent._fixed_app({"app": _app_contract(livekit_client_url=origin)})
+            app_contract.fixed_app({"app": _app_contract(livekit_client_url=origin)})

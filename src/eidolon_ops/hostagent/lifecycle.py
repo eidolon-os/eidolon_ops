@@ -1,0 +1,313 @@
+"""Observe the Host, and take the product across a boundary as one action."""
+
+from __future__ import annotations
+
+import json
+import os
+import platform
+import shutil
+from collections.abc import Mapping
+from pathlib import Path
+
+from . import app_contract, contract, host_application, primitives
+from .primitives import TargetError
+
+BOOTSTRAP_CTL = Path("/opt/eidolon/current/eidolon_admin/.venv/bin/eidolon-bootstrapctl")
+
+def status(payload: Mapping[str, object]) -> dict[str, object]:
+    units = contract.fixed_units(payload)
+    links: dict[str, str | None] = {}
+    for component_id, path in contract.CURRENT_LINKS.items():
+        links[component_id] = os.readlink(path) if path.is_symlink() else None
+    evidence = contract.FIXED_DATA["deployment_evidence"]
+    receipts: list[dict[str, object]] = []
+    installations: list[dict[str, object]] = []
+    if evidence.is_dir():
+        for receipt in sorted(
+            evidence.glob("*/receipt.json"), key=lambda item: item.stat().st_mtime
+        )[-10:]:
+            try:
+                document = json.loads(receipt.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if isinstance(document, dict):
+                receipts.append(
+                    {
+                        "path": str(receipt),
+                        "release_id": document.get("release_id"),
+                        "status": document.get("status"),
+                        "transaction_id": document.get("transaction_id"),
+                    }
+                )
+        for journal in sorted(
+            evidence.glob("install-*/install.json"), key=lambda item: item.stat().st_mtime
+        )[-10:]:
+            try:
+                document = json.loads(journal.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if isinstance(document, dict):
+                installations.append(
+                    {
+                        "path": str(journal),
+                        "release_id": document.get("release_id"),
+                        "status": document.get("status"),
+                        "phase": document.get("phase"),
+                    }
+                )
+    return {
+        "status": "observed",
+        "host": platform.node(),
+        "system": platform.system().lower(),
+        "machine": platform.machine().lower(),
+        "units": {
+            **{unit: primitives.unit_status(unit) for unit in units},
+            **(
+                {"eidolon-hub-ingress.service": primitives.unit_status("eidolon-hub-ingress.service")}
+                if app_contract.optional_app(payload) is not None
+                else {}
+            ),
+        },
+        "current_links": links,
+        "recent_receipts": receipts,
+        "installations": installations,
+    }
+
+def doctor_host(payload: Mapping[str, object]) -> dict[str, object]:
+    contract.fixed_units(payload)
+    contract.fixed_data(payload)
+    remote_uv = payload.get("remote_uv")
+    if not isinstance(remote_uv, str) or not Path(remote_uv).is_absolute():
+        raise TargetError("remote uv path is invalid")
+    host_env = contract.HOST_ENV_PATH
+    checks = {
+        "system": platform.system().lower() == "linux",
+        "machine": platform.machine().lower() == "aarch64",
+        "root": os.geteuid() == 0,
+        "systemctl": Path("/usr/bin/systemctl").is_file(),
+        "systemd_analyze": Path("/usr/bin/systemd-analyze").is_file(),
+        "python3": Path("/usr/bin/python3").is_file(),
+        "uv": Path(remote_uv).is_file() and os.access(remote_uv, os.X_OK),
+        "host_path_contract": host_env.is_file()
+        and host_env.read_text(encoding="utf-8") == contract.HOST_ENV_VALUE,
+        "port_registry": contract.HOST_PORTS_PATH.is_file()
+        and contract.HOST_PORTS_PATH.read_text(encoding="utf-8") == contract.fixed_port_registry(payload),
+    }
+    release_id = contract.fixed_release_id(payload, required=False)
+    release_doctor: object = None
+    if release_id is not None:
+        descriptor = contract.RELEASES / release_id / "release.json"
+        cli = contract.RELEASES / release_id / contract.RELEASE_ACTIVATOR
+        result = primitives.run((str(cli), "doctor", str(descriptor)), timeout=180)
+        if result.returncode != 0:
+            release_doctor = {
+                "healthy": False,
+                "error": result.stderr.strip() or result.stdout.strip(),
+            }
+        else:
+            try:
+                release_doctor = {"healthy": True, "result": json.loads(result.stdout)}
+            except json.JSONDecodeError:
+                release_doctor = {"healthy": False, "error": "doctor output is not JSON"}
+    return {
+        "status": "healthy"
+        if all(checks.values())
+        and not (isinstance(release_doctor, dict) and not release_doctor.get("healthy"))
+        else "degraded",
+        "checks": checks,
+        "release": release_doctor,
+    }
+
+def active_release(payload: Mapping[str, object]) -> dict[str, object]:
+    """Resolve the active release's operator entries on the target itself.
+
+    The deployer must not derive these from a component directory name; the
+    target owns its own layout and reports the published, component-neutral
+    entries here.
+    """
+
+    contract.fixed_units(payload)
+    if not contract.CURRENT_KERNEL.is_symlink():
+        raise TargetError("no Eidolon release is currently active")
+    release_root = contract.CURRENT_KERNEL.resolve().parent
+    if release_root.parent != contract.RELEASES:
+        raise TargetError("the active release link points outside the release root")
+    entries = {
+        "activator": release_root / contract.RELEASE_ACTIVATOR,
+        "interpreter": release_root / contract.RELEASE_INTERPRETER,
+    }
+    for name, path in entries.items():
+        if not path.is_file() or not os.access(path, os.X_OK):
+            raise TargetError(f"the active release does not publish its {name}")
+    return {
+        "status": "observed",
+        "release_id": release_root.name,
+        "release_root": str(release_root),
+        **{name: str(path) for name, path in entries.items()},
+    }
+
+def lifecycle(action: str, payload: Mapping[str, object]) -> dict[str, object]:
+    contract.fixed_units(payload)
+    app = app_contract.optional_app(payload)
+    try:
+        from eidolon_deploy.linux import LinuxDeploymentHost
+        from eidolon_deploy.manifest import load_release_descriptor
+    except ImportError as exc:
+        raise TargetError("active release deployment package is unavailable") from exc
+    active_kernel = contract.CURRENT_KERNEL.resolve()
+    descriptor = active_kernel.parent / "release.json"
+    release = load_release_descriptor(descriptor)
+    host = LinuxDeploymentHost(readiness_timeout_seconds=contract.release_readiness_seconds(payload))
+    with host.exclusive_activation():
+        host.preflight(release)
+        if action in {"stop", "restart"}:
+            host.quiesce(release)
+        if action in {"start", "restart"}:
+            host.start_release(release)
+            host.wait_ready(release)
+            if app is not None:
+                host_application.await_host_application(primitives.run)
+    return {
+        "status": action + "ed" if action != "stop" else "stopped",
+        "release_id": release.release_id,
+    }
+
+def rollback_plan(payload: Mapping[str, object]) -> dict[str, object]:
+    release_id = contract.fixed_release_id(payload)
+    snapshot_value = payload.get("snapshot")
+    if not isinstance(snapshot_value, str):
+        raise TargetError("snapshot path is invalid")
+    snapshot = Path(snapshot_value)
+    expected_parent = contract.FIXED_DATA["deployment_evidence"]
+    if not snapshot.is_absolute() or snapshot.parent != expected_parent or not snapshot.is_dir():
+        raise TargetError("snapshot is outside the fixed deployment evidence root or missing")
+    descriptor = contract.RELEASES / release_id / "release.json"
+    if not descriptor.is_file():
+        raise TargetError("release descriptor is missing")
+    return {
+        "status": "rollback_planned",
+        "release_id": release_id,
+        "snapshot": str(snapshot),
+        "descriptor": str(descriptor),
+    }
+
+def logs(payload: Mapping[str, object]) -> dict[str, object]:
+    units = contract.fixed_units(payload)
+    requested = payload.get("unit")
+    selectable_units = (
+        (*units, "eidolon-hub-ingress.service") if app_contract.optional_app(payload) is not None else units
+    )
+    if requested is not None and requested not in selectable_units:
+        raise TargetError("requested log unit is outside the product topology")
+    lines = payload.get("lines", 200)
+    if type(lines) is not int or not 1 <= lines <= 5000:
+        raise TargetError("log line count is invalid")
+    since = payload.get("since")
+    if since is not None and (
+        not isinstance(since, str)
+        or not since
+        or len(since) > 80
+        or any(ord(char) < 32 for char in since)
+    ):
+        raise TargetError("journal since value is invalid")
+    selected = (requested,) if isinstance(requested, str) else selectable_units
+    entries: dict[str, str] = {}
+    for unit in selected:
+        command = [
+            "/usr/bin/journalctl",
+            "--no-pager",
+            "--output=short-iso",
+            f"--lines={lines}",
+            f"--unit={unit}",
+        ]
+        if since is not None:
+            command.append(f"--since={since}")
+        result = primitives.run(command, timeout=60)
+        entries[unit] = (
+            result.stdout
+            if result.returncode == 0
+            else (result.stderr.strip() or "journalctl failed")
+        )
+    return {"status": "collected", "entries": entries}
+
+def diagnose(payload: Mapping[str, object]) -> dict[str, object]:
+    observed = status(payload)
+    root_usage = shutil.disk_usage("/")
+    journal = logs({**payload, "lines": 100, "since": None})
+    return {
+        "status": "diagnosed",
+        "observed": observed,
+        "platform": platform.platform(),
+        "boot_id": primitives.read_text(Path("/proc/sys/kernel/random/boot_id")),
+        "uptime_seconds": primitives.read_uptime(),
+        "disk": {
+            "total_bytes": root_usage.total,
+            "used_bytes": root_usage.used,
+            "free_bytes": root_usage.free,
+        },
+        "journal": journal["entries"],
+        "redaction": "No env content, private key content, database content, or process environment collected.",
+    }
+
+def controller_reset(payload: Mapping[str, object]) -> dict[str, object]:
+    """Revoke every Controller Grant so a new phone can claim this Host again.
+
+    Recovery for an Owner who lost every managing phone. Bootstrap keeps the
+    Host identity, the Owner binding, saved Wi-Fi and all component data; only
+    the authority to manage this Host is withdrawn.
+    """
+
+    contract.fixed_units(payload)
+    if not BOOTSTRAP_CTL.is_file() or not os.access(BOOTSTRAP_CTL, os.X_OK):
+        raise TargetError("bootstrap control CLI is unavailable on this Host")
+    result = primitives.checked("controller reset", (str(BOOTSTRAP_CTL), "controller-reset"), timeout=120)
+    try:
+        document = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise TargetError("controller reset did not return one JSON document") from exc
+    if not isinstance(document, dict) or "revoked_controllers" not in document:
+        raise TargetError("controller reset returned invalid evidence")
+    return {"status": "reset", "controller_reset": document}
+
+def commissioning_code(payload: Mapping[str, object]) -> dict[str, object]:
+    """Mint the one-time Setup code a phone types to claim this Host.
+
+    The authority is the Host's own root-owned control socket, which this
+    reaches by having arrived here at all. Before this, issuance was refused
+    unless the build was a development one, and nothing else could create a
+    commissioning session — so a shipped Host could not be claimed by any
+    phone.
+    """
+
+    contract.fixed_units(payload)
+    ttl = payload.get("ttl_seconds")
+    if not isinstance(ttl, int) or isinstance(ttl, bool) or not 60 <= ttl <= 86400:
+        raise TargetError("commissioning code TTL must be between 60 and 86400 seconds")
+    if not BOOTSTRAP_CTL.is_file() or not os.access(BOOTSTRAP_CTL, os.X_OK):
+        raise TargetError("bootstrap control CLI is unavailable on this Host")
+    result = primitives.checked(
+        "commissioning code",
+        (str(BOOTSTRAP_CTL), "commissioning-code", "--ttl", str(ttl)),
+        timeout=120,
+    )
+    setup_code = ""
+    commissioning_id = ""
+    expires_at = ""
+    for line in result.stdout.splitlines():
+        label, separator, value = line.partition(":")
+        if not separator:
+            continue
+        if label.strip() == "Setup code":
+            setup_code = value.strip()
+        elif label.strip() == "Commissioning":
+            commissioning_id = value.strip()
+        elif label.strip() == "Expires":
+            expires_at = value.strip()
+    if not setup_code:
+        raise TargetError("commissioning code issuance returned no Setup code")
+    return {
+        "status": "issued",
+        "setup_code": setup_code,
+        "expires_at": expires_at,
+        "commissioning_id": commissioning_id,
+    }

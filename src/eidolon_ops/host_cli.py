@@ -9,10 +9,14 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from eidolon_ops.config import ConfigurationError
-from eidolon_ops.controller import OperationsError
+from eidolon_ops.environment import EnvironmentFileError
+from eidolon_ops.errors import OperationsError
 from eidolon_ops.host_controller import HostController
+from eidolon_ops.hub_assets import HubAssetError
+from eidolon_ops.model import Outcome
 from eidolon_ops.paths import HostProfileError, load_host_profile
 from eidolon_ops.process import ProcessError, SubprocessRunner
+from eidolon_ops.readiness import ReadinessError
 from eidolon_ops.transport import TransportError
 
 
@@ -88,43 +92,26 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
     except (
         ConfigurationError,
+        EnvironmentFileError,
         HostProfileError,
+        HubAssetError,
         OperationsError,
         ProcessError,
+        ReadinessError,
         TransportError,
         OSError,
     ) as exc:
-        _print({"status": "failed", "error": str(exc)}, stream=sys.stderr)
+        _print(
+            {"status": "failed", "outcome": str(Outcome.FAILED), "error": str(exc)},
+            stream=sys.stderr,
+        )
         return 1
-    _print(result)
-    success = {
-        "ok",
-        "healthy",
-        "app_ready",
-        "planned",
-        "installed",
-        "dry_run",
-        "activated",
-        "started",
-        "stopped",
-        "restarted",
-        "rolled_back",
-        "written",
-        "observed",
-        "collected",
-        "diagnosed",
-        "restored",
-        "already_full",
-        "migration_required",
-        "clean",
-        "migrated",
-        "reset",
-        "initialized",
-        "already_initialized",
-        "prepared",
-        "compatible",
-    }
-    return 0 if result.get("status") in success else 1
+    _print(result.to_json())
+    # The verdict is the operation's own, not this file's guess at one. A set
+    # of success words lived here and defaulted every new status string to a
+    # failure — ``commissioning-code`` and ``backup`` both succeeded on the
+    # Host and exited non-zero because nobody thought to extend it.
+    return 0 if result.outcome.successful else 1
 
 
 def run() -> None:
