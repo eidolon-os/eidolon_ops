@@ -15,6 +15,7 @@ from test_install_inputs import _settings_reader as _product_settings_reader
 
 from eidolon_ops.config import SOURCE_IDS, ConfigurationError
 from eidolon_ops.controller import EidolonPiController, OperationsError
+from eidolon_ops.endpoints import HostEndpoint
 from eidolon_ops.paths import AppAccess
 from eidolon_ops.process import ProcessResult
 from eidolon_ops.release_matrix import SYSTEMD_ASSET_CONTRACTS
@@ -166,6 +167,10 @@ class ControllerRunner:
 
 
 class FakeTransport:
+    #: No link was chosen: these tests never open one, so status reports the
+    #: configured name the way the real transport does when nothing answers.
+    endpoint = None
+
     def __init__(self) -> None:
         self.agent_calls: list[tuple[str, dict[str, object], str, bool]] = []
         self.remote_calls: list[tuple[tuple[str, ...], bool]] = []
@@ -342,7 +347,9 @@ def test_local_preflight_rejects_unexpected_published_operator_entries(config) -
         config,
         ControllerRunner(
             config,
-            release_contract_overrides={"interpreter_relative_path": "eidolon_kernel/.venv/bin/python"},
+            release_contract_overrides={
+                "interpreter_relative_path": "eidolon_kernel/.venv/bin/python"
+            },
         ),
         transport=FakeTransport(),
     )
@@ -1102,9 +1109,7 @@ def test_preflight_refuses_a_pinned_commit_without_the_deploy_package(config) ->
                 return ProcessResult(0, "", "")
             return super().run(command, **kwargs)
 
-    controller = EidolonPiController(
-        config, EmptyTree(config), transport=FakeTransport()
-    )
+    controller = EidolonPiController(config, EmptyTree(config), transport=FakeTransport())
 
     with pytest.raises(OperationsError, match="ships no eidolon_deploy"):
         controller.local_preflight(require_install_files=False)
@@ -1134,9 +1139,7 @@ def test_an_annotated_tag_must_still_name_the_pinned_commit(config) -> None:
                 return ProcessResult(0, "e" * 40 + "\n", "")
             return super().run(command, **kwargs)
 
-    controller = EidolonPiController(
-        tagged, MovedTag(tagged), transport=FakeTransport()
-    )
+    controller = EidolonPiController(tagged, MovedTag(tagged), transport=FakeTransport())
 
     with pytest.raises(OperationsError, match="tag no longer names the pinned commit"):
         controller.local_preflight(require_install_files=False)
@@ -1161,9 +1164,7 @@ def test_a_tag_that_still_resolves_is_accepted(config) -> None:
                 return ProcessResult(0, revision + "\n", "")
             return super().run(command, **kwargs)
 
-    controller = EidolonPiController(
-        tagged, ResolvingTag(tagged), transport=FakeTransport()
-    )
+    controller = EidolonPiController(tagged, ResolvingTag(tagged), transport=FakeTransport())
 
     assert controller.local_preflight(require_install_files=False)["sources"]
 
@@ -1231,9 +1232,7 @@ def test_a_section_nobody_anticipated_is_still_reported() -> None:
 
     from eidolon_ops.controller import _degraded_detail
 
-    detail = _degraded_detail(
-        {"status": "degraded", "some_future_subsystem": {"healthy": False}}
-    )
+    detail = _degraded_detail({"status": "degraded", "some_future_subsystem": {"healthy": False}})
 
     assert "some_future_subsystem" in detail
 
@@ -1250,3 +1249,16 @@ def test_a_gate_that_fails_for_no_stated_reason_still_says_something() -> None:
     from eidolon_ops.controller import _degraded_detail
 
     assert "degraded" in _degraded_detail({"status": "degraded"})
+
+
+def test_status_reports_which_link_it_ran_over(setup_controller) -> None:
+    controller, _runner, transport = setup_controller
+    transport.endpoint = HostEndpoint(address="169.254.19.7", interface="en7", link="wired")
+
+    assert controller.status()["endpoint"] == "169.254.19.7 (wired via en7)"
+
+
+def test_status_names_the_host_when_no_link_was_chosen(setup_controller) -> None:
+    controller, _runner, _transport = setup_controller
+
+    assert controller.status()["endpoint"] == controller.config.host.hostname

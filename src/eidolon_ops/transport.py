@@ -6,10 +6,11 @@ import base64
 import json
 import re
 import shlex
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 from eidolon_ops.config import HostConfig
+from eidolon_ops.endpoints import HostEndpoint, first_reachable, resolve_endpoints
 from eidolon_ops.process import ProcessResult, ProcessRunner, checked
 
 _REMOTE_TOKEN = re.compile(r"^[A-Za-z0-9_./:=+@,-]+$")
@@ -28,12 +29,48 @@ class SSHTransport:
         ssh: str = "ssh",
         scp: str = "scp",
         rsync: str = "rsync",
+        endpoints: Callable[[str, int], Sequence[HostEndpoint]] | None = None,
+        probe: Callable[[str, int, float], bool] | None = None,
     ) -> None:
         self.host = host
         self.runner = runner
         self.ssh = ssh
         self.scp = scp
         self.rsync = rsync
+        self._endpoints = endpoints or resolve_endpoints
+        self._probe = probe
+        self._endpoint: HostEndpoint | None = None
+        self._resolved = False
+
+    @property
+    def endpoint(self) -> HostEndpoint | None:
+        """The address this session settled on, once one has been chosen."""
+
+        return self._endpoint
+
+    @property
+    def target(self) -> str:
+        """``user@address`` for the best link that answers right now.
+
+        The configured hostname stays the Host's identity — it is what the host
+        key is trusted under, via HostKeyAlias — while the address is whichever
+        of its links is up. Resolution happens once per run: a release that
+        starts over the wire should not silently finish over Wi-Fi.
+        """
+
+        if not self._resolved:
+            self._resolved = True
+            self._endpoint = first_reachable(
+                self._endpoints(self.host.hostname, self.host.port),
+                self.host.port,
+                timeout=self.host.connect_timeout_seconds,
+                probe=self._probe,
+            )
+        if self._endpoint is None:
+            # Nothing answered, or the name resolves to something we do not
+            # rank. Hand the name to SSH and let its own error be the report.
+            return self.host.target
+        return f"{self.host.user}@{self._endpoint.address}"
 
     def run(
         self,
@@ -50,7 +87,7 @@ class SSHTransport:
         if sudo:
             tokens = ("sudo", "--non-interactive", *tokens)
         result = self.runner.run(
-            (*self._ssh_prefix(), self.host.target, *tokens),
+            (*self._ssh_prefix(), self.target, *tokens),
             input_bytes=input_bytes,
             timeout=timeout,
         )
@@ -98,6 +135,10 @@ class SSHTransport:
             "-o",
             "StrictHostKeyChecking=yes",
             "-o",
+            # The Host is one machine whichever of its links answers, so its key
+            # is trusted under its name and not re-approved per address.
+            f"HostKeyAlias={self.host.hostname}",
+            "-o",
             f"UserKnownHostsFile={self.host.known_hosts_file}",
             "-o",
             f"ConnectTimeout={self.host.connect_timeout_seconds}",
@@ -116,7 +157,7 @@ class SSHTransport:
         if recursive:
             options.append("-r")
         result = self.runner.run(
-            (*options, str(source), f"{self.host.target}:{destination}"),
+            (*options, str(source), f"{self.target}:{destination}"),
             timeout=1800,
         )
         checked("SCP upload", result)
@@ -131,7 +172,7 @@ class SSHTransport:
         if recursive:
             options.append("-r")
         result = self.runner.run(
-            (*options, f"{self.host.target}:{source}", str(destination)),
+            (*options, f"{self.target}:{source}", str(destination)),
             timeout=1800,
         )
         checked("SCP download", result)
@@ -158,7 +199,7 @@ class SSHTransport:
                 "-e",
                 remote_shell,
                 f"{source}/",
-                f"{self.host.target}:{destination}/",
+                f"{self.target}:{destination}/",
             ),
             timeout=3600,
         )
@@ -175,6 +216,10 @@ class SSHTransport:
             "BatchMode=yes",
             "-o",
             "StrictHostKeyChecking=yes",
+            "-o",
+            # The Host is one machine whichever of its links answers, so its key
+            # is trusted under its name and not re-approved per address.
+            f"HostKeyAlias={self.host.hostname}",
             "-o",
             f"UserKnownHostsFile={self.host.known_hosts_file}",
             "-o",

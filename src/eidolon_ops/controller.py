@@ -171,7 +171,15 @@ class EidolonPiController:
 
     def status(self) -> dict[str, object]:
         self._validate_ssh_material()
-        return self.transport.run_agent("status", self._target_payload())
+        report = self.transport.run_agent("status", self._target_payload())
+        endpoint = self.transport.endpoint
+        # Which link this ran over decides whether the next release takes two
+        # seconds or three minutes, so the operator gets told rather than
+        # having to infer it from how long they waited.
+        return {
+            **report,
+            "endpoint": endpoint.describe() if endpoint else self.config.host.hostname,
+        }
 
     def initialize_inputs(self) -> dict[str, object]:
         """Create the private local first-install input set without contacting the Pi."""
@@ -444,7 +452,9 @@ class EidolonPiController:
         if not isinstance(document, dict):
             raise OperationsError("eidolon-release contract output is not an object")
         mismatched = sorted(
-            name for name, expected in _RELEASE_TOOL_CONTRACT.items() if document.get(name) != expected
+            name
+            for name, expected in _RELEASE_TOOL_CONTRACT.items()
+            if document.get(name) != expected
         )
         if mismatched:
             raise OperationsError(
@@ -493,9 +503,7 @@ class EidolonPiController:
             if relative.endswith(_DEPLOY_DIGEST_SUFFIXES):
                 entries.append((relative, metadata.split()[2]))
         if not entries:
-            raise OperationsError(
-                "the pinned Kernel commit ships no eidolon_deploy package"
-            )
+            raise OperationsError("the pinned Kernel commit ships no eidolon_deploy package")
         digest = hashlib.sha256()
         for relative, blob in sorted(entries):
             digest.update(f"{relative}:{blob}\n".encode())
@@ -790,9 +798,7 @@ class EidolonPiController:
         destination.parent.mkdir(parents=True, exist_ok=True)
         self.transport.download(directory, destination, recursive=True)
         manifest = destination / "backup.json"
-        manifest.write_text(
-            json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-        )
+        manifest.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         return {**result, "local_directory": str(destination)}
 
     def restore(self, *, source: Path, apply: bool) -> dict[str, object]:
