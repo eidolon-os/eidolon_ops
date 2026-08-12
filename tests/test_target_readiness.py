@@ -120,8 +120,19 @@ def test_the_declared_check_set_is_the_same_on_both_sides() -> None:
         "port": readiness.CHANNEL_WORKER_PORT,
         "agent_name": readiness.CHANNEL_AGENT_NAME,
         "livekit_port": readiness.LIVEKIT_SIGNALLING_PORT,
-        "settle_seconds": readiness.CHANNEL_SETTLE_SECONDS,
+        "settle_seconds": readiness.DEFAULT_CHANNEL_SETTLE_SECONDS,
     }
+
+
+def test_the_worker_window_is_the_host_readiness_budget() -> None:
+    """An activation restarts LiveKit under the worker.
+
+    The Host is given one budget for coming back; a second, smaller one owned
+    here is how a healthy release gets rolled back — which is exactly what it
+    did, twenty seconds being less than this board spends loading models.
+    """
+
+    assert product_payload(settle_seconds=240)["channel_worker"]["settle_seconds"] == 240
 
 
 def test_readiness_payload_fails_closed_on_a_different_check_set() -> None:

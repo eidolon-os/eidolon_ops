@@ -28,7 +28,7 @@ from eidolon_ops.private_files import atomic_private_file
 from eidolon_ops.process import ProcessRunner, checked
 from eidolon_ops.readiness import (
     CHANNEL_AGENT_NAME,
-    CHANNEL_SETTLE_SECONDS,
+    DEFAULT_CHANNEL_SETTLE_SECONDS,
     HostKind,
     ReadinessFact,
     is_ready,
@@ -316,7 +316,7 @@ class LocalProductSource:
                 ports["channel_worker"], agent_name=CHANNEL_AGENT_NAME
             ),
             lambda report: bool(report["healthy"]) and bool(report["dispatch_identity"]),
-            seconds=CHANNEL_SETTLE_SECONDS,
+            seconds=DEFAULT_CHANNEL_SETTLE_SECONDS,
         )
         local_api_values = environment.parse(
             (self.profile.paths.config_root / "env/local-api.env").read_text(encoding="utf-8"),

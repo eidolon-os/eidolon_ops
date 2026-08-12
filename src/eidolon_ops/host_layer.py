@@ -89,7 +89,9 @@ class HostLayer:
             # What this Host is asked to attest, and what it needs to attest
             # it. The check set has one author; a copy compiled into the
             # injected agent would be the one nobody thinks to update.
-            "readiness": product_payload(),
+            "readiness": product_payload(
+                settle_seconds=self.config.host.readiness_timeout_seconds
+            ),
             "readiness_timeout_seconds": self.config.host.readiness_timeout_seconds,
             "data": {
                 "system_database": str(self.config.data.system_database),

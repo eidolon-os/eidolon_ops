@@ -36,7 +36,12 @@ CHANNEL_WORKER_PORT = 8766
 LIVEKIT_SIGNALLING_PORT = 7880
 #: How long a Channel probe is given to settle. Sized on a worker reconnecting
 #: to LiveKit, because this report decides whether a release is rolled back.
-CHANNEL_SETTLE_SECONDS = 20
+#: A worker that is reconnecting to LiveKit is briefly unable to serve, and an
+#: activation restarts LiveKit under it. How long that is allowed to take is the
+#: Host's readiness budget — the same one that exists because this board spends
+#: sixteen seconds loading models before it can answer at all. Owning a second,
+#: smaller number here is how a healthy release gets rolled back.
+DEFAULT_CHANNEL_SETTLE_SECONDS = 240
 
 
 class HostKind(StrEnum):
@@ -197,7 +202,7 @@ def expected_facts(kind: HostKind) -> tuple[str, ...]:
     )
 
 
-def product_payload() -> dict[str, object]:
+def product_payload(*, settle_seconds: int = DEFAULT_CHANNEL_SETTLE_SECONDS) -> dict[str, object]:
     """What a product Host is told to attest, and what it needs to attest it.
 
     Sent rather than compiled into the injected agent, for the same reason the
@@ -211,7 +216,7 @@ def product_payload() -> dict[str, object]:
             "port": CHANNEL_WORKER_PORT,
             "agent_name": CHANNEL_AGENT_NAME,
             "livekit_port": LIVEKIT_SIGNALLING_PORT,
-            "settle_seconds": CHANNEL_SETTLE_SECONDS,
+            "settle_seconds": settle_seconds,
         },
     }
 
