@@ -35,8 +35,8 @@ class FakeHostController:
     def provision(self, **kwargs):
         return self._result("provision", **kwargs)
 
-    def initialize_inputs(self):
-        return self._result("init-inputs")
+    def initialize_inputs(self, **kwargs):
+        return self._result("init-inputs", **kwargs)
 
     def install(self, **kwargs):
         return self._result("install", **kwargs)

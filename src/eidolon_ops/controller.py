@@ -245,12 +245,21 @@ class EidolonPiController:
 
     # -- private inputs ------------------------------------------------------
 
-    def initialize_inputs(self) -> dict[str, object]:
-        """Create the private local first-install input set without contacting the Pi."""
+    def initialize_inputs(self, *, new_identity: bool = False) -> dict[str, object]:
+        """Create the private local first-install input set without contacting the Pi.
+
+        A machine keeps the identity it was given. `new_identity` retires it,
+        which is what a machine changing hands means and what installing onto
+        the same one again does not.
+        """
 
         self.preflight.require_exact_commits(_SETTINGS_SOURCES)
         try:
-            result = initialize_install_inputs(self.config, self.preflight.read_exact_source_file)
+            result = initialize_install_inputs(
+                self.config,
+                self.preflight.read_exact_source_file,
+                new_identity=new_identity,
+            )
             if self.app is None:
                 return result
             self.host_layer.prepare()

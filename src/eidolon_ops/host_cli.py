@@ -38,7 +38,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif arguments.operation == "provision":
             result = controller.provision(apply=arguments.apply)
         elif arguments.operation == "init-inputs":
-            result = controller.initialize_inputs()
+            result = controller.initialize_inputs(new_identity=arguments.new_identity)
         elif arguments.operation == "backup":
             result = controller.backup(output=arguments.output)
         elif arguments.operation == "restore":
@@ -138,7 +138,12 @@ def _parser() -> argparse.ArgumentParser:
     doctor.add_argument("--release-id")
     provision = operations.add_parser("provision")
     provision.add_argument("--apply", action="store_true")
-    operations.add_parser("init-inputs")
+    init_inputs = operations.add_parser("init-inputs")
+    init_inputs.add_argument(
+        "--new-identity",
+        action="store_true",
+        help="retire this machine's Host identity and mint a new one",
+    )
     backup = operations.add_parser(
         "backup",
         help="snapshot every authority that can be snapshotted, and fetch it here",

@@ -18,8 +18,10 @@ from eidolon_ops.install_inputs import (
 pytestmark = pytest.mark.component
 
 
-def _config_for_init(config: OperationsConfig, tmp_path: Path) -> OperationsConfig:
-    target = tmp_path / "operator-private/pi5/install"
+def _config_for_init(
+    config: OperationsConfig, tmp_path: Path, *, directory: str = "install"
+) -> OperationsConfig:
+    target = tmp_path / "operator-private/pi5" / directory
     files = {key: target / name for key, name in INSTALL_DESTINATION_NAMES.items()}
     provider_values = {
         "eidolon_agent": {"EIDOLON_AGENT_LLM_API_KEY": '"agent-provider-key"'},
@@ -33,7 +35,7 @@ def _config_for_init(config: OperationsConfig, tmp_path: Path) -> OperationsConf
     }
     for source_id, values in provider_values.items():
         source = config.sources[source_id].path / "config/.env"
-        source.parent.mkdir(parents=True)
+        source.parent.mkdir(parents=True, exist_ok=True)
         source.write_text(
             "# provider credentials\n\n"
             + "".join(f"{key}={value}\n" for key, value in values.items()),
@@ -365,3 +367,60 @@ def test_initializer_refuses_install_files_spread_across_directories(
 
     with pytest.raises(InstallInputError, match="one directory"):
         initialize_install_inputs(configured, _settings_reader)
+
+
+def test_installing_the_same_machine_again_keeps_the_host_it_already_is(
+    config, tmp_path: Path
+) -> None:
+    """Reinstalling is not a new Host, and must not read as one.
+
+    host_id, hub_id and the Hub's hostname all come from this key. Minting a
+    fresh one every time an input set is created makes each reinstall a
+    different Host, and every phone that claimed the old one keeps an entry
+    that can never answer again — the person owns one machine and is shown
+    several, with nothing in the product able to tell them apart.
+    """
+
+    first = initialize_install_inputs(_config_for_init(config, tmp_path), _settings_reader)
+    identity = (tmp_path / "operator-private/pi5/install/host_identity.ed25519").read_bytes()
+
+    again = initialize_install_inputs(
+        _config_for_init(config, tmp_path, directory="install-v2"),
+        _settings_reader,
+    )
+    adopted = (tmp_path / "operator-private/pi5/install-v2/host_identity.ed25519").read_bytes()
+
+    assert first["host_identity"] == "minted"
+    assert again["host_identity"] == "adopted"
+    assert adopted == identity
+    # Everything else is reissued: the identity is what the machine is, not
+    # what any one delivery contains.
+    assert _env(tmp_path / "operator-private/pi5/install/hub.env") != _env(
+        tmp_path / "operator-private/pi5/install-v2/hub.env"
+    )
+
+
+def test_a_machine_can_be_retired_but_only_by_saying_so(config, tmp_path: Path) -> None:
+    # A machine changing hands does mean a new Host. That is a decision, not
+    # something a reinstall performs on its own.
+    initialize_install_inputs(_config_for_init(config, tmp_path), _settings_reader)
+    identity = (tmp_path / "operator-private/pi5/install/host_identity.ed25519").read_bytes()
+
+    retired = initialize_install_inputs(
+        _config_for_init(config, tmp_path, directory="install-v2"),
+        _settings_reader,
+        new_identity=True,
+    )
+    minted = (tmp_path / "operator-private/pi5/install-v2/host_identity.ed25519").read_bytes()
+
+    assert retired["host_identity"] == "minted"
+    assert minted != identity
+    # And the machine keeps the new one from then on.
+    following = initialize_install_inputs(
+        _config_for_init(config, tmp_path, directory="install-v3"),
+        _settings_reader,
+    )
+    assert following["host_identity"] == "adopted"
+    assert (
+        tmp_path / "operator-private/pi5/install-v3/host_identity.ed25519"
+    ).read_bytes() == minted

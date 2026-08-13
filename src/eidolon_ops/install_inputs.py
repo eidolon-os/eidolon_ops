@@ -13,6 +13,7 @@ from eidolon_ops.private_inputs import (
     refresh_derived_settings,
     require_safe_input_directory,
     write_private_directory,
+    write_private_file,
 )
 from eidolon_ops.product_settings import product_settings
 from eidolon_ops.provider_inputs import (
@@ -37,12 +38,15 @@ __all__ = [
 def initialize_install_inputs(
     config: OperationsConfig,
     read_exact_file: Callable[[str, str, str], str],
+    *,
+    new_identity: bool = False,
 ) -> dict[str, object]:
     """Create one private, internally consistent product input set."""
 
     target = _target_directory(config)
     if target.exists() or target.is_symlink():
         return _validate_existing(target, config, read_exact_file)
+    identity, identity_origin = _host_identity(target, new_identity=new_identity)
 
     providers = {
         source_id: parse_provider_env(config.sources[source_id].path / "config/.env")
@@ -139,15 +143,17 @@ def initialize_install_inputs(
     settings = product_settings(config, read_exact_file)
     files: dict[str, bytes] = {
         **{name: serialize_env(values) for name, values in env_documents.items()},
-        "host_identity.ed25519": secrets.token_bytes(32),
+        "host_identity.ed25519": identity,
         **{name: value.encode("utf-8") for name, value in settings.items()},
     }
     if set(files) != set(INSTALL_DESTINATION_NAMES.values()):
         raise InstallInputError("generated install input set is incomplete")
     write_private_directory(target, files)
+    _anchor_host_identity(target, identity)
     return {
         "status": "initialized",
         "directory": str(target),
+        "host_identity": identity_origin,
         "files": sorted(files),
         "provider_sources": {
             source_id: str(config.sources[source_id].path / "config/.env")
@@ -401,6 +407,45 @@ def validate_install_input_contract(
         "contract": "pi-private-inputs-v1",
         "redaction": "input values and digests are not returned",
     }
+
+
+#: Where this machine's identity lives, beside the input sets rather than
+#: inside any one of them.
+_IDENTITY_ANCHOR = "host_identity.ed25519"
+
+
+def _host_identity(target: Path, *, new_identity: bool) -> tuple[bytes, str]:
+    """The identity of the machine these inputs are for.
+
+    An input set is a delivery, and a machine may be delivered to more than
+    once. Its identity is not part of that delivery: host_id, hub_id and the
+    Hub's hostname are all derived from this key, so minting a fresh one turns
+    a reinstall into a different Host — one that every phone holding the old
+    one keeps forever as an entry that can never answer. The person looking at
+    that list owns one machine and is shown three.
+
+    So the key is kept beside the input sets, adopted by each new one, and only
+    replaced when someone says to. That is not a convenience: a new key is the
+    statement "this is no longer the same Host", which is a thing a factory
+    reset means and a reinstall does not.
+    """
+
+    anchor = target.parent / _IDENTITY_ANCHOR
+    if anchor.is_file() and not new_identity:
+        identity = anchor.read_bytes()
+        if len(identity) != 32:
+            raise InstallInputError(
+                f"anchored Host identity is not 32 raw Ed25519 private bytes: {anchor}"
+            )
+        return identity, "adopted"
+    return secrets.token_bytes(32), "minted"
+
+
+def _anchor_host_identity(target: Path, identity: bytes) -> None:
+    anchor = target.parent / _IDENTITY_ANCHOR
+    if anchor.is_file() and anchor.read_bytes() == identity:
+        return
+    write_private_file(anchor, identity)
 
 
 def _target_directory(config: OperationsConfig) -> Path:

@@ -50,6 +50,24 @@ def write_private_directory(target: Path, files: Mapping[str, bytes]) -> None:
             shutil.rmtree(temporary)
 
 
+def write_private_file(target: Path, value: bytes) -> None:
+    """Place one private file, replacing any previous content atomically."""
+
+    ensure_private_parent(target.parent)
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{target.name}.", dir=target.parent)
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(value)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, target)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
 def ensure_private_parent(parent: Path) -> None:
     missing: list[Path] = []
     current = parent
