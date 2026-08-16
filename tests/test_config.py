@@ -13,6 +13,7 @@ from eidolon_ops.config import (
     validate_release_id,
 )
 from eidolon_ops.foundation import FOUNDATION_PROFILE
+from eidolon_ops.workstation_toolchain import workstation_uv_path
 
 pytestmark = pytest.mark.unit
 
@@ -251,21 +252,33 @@ def _replace(path: Path, old: str, new: str) -> None:
     path.write_text(text.replace(old, new, 1), encoding="utf-8")
 
 
-def test_the_build_tool_is_declared_not_derived_from_the_activator(config_path: Path):
-    """uv is a workstation build tool; it must not be assumed to sit beside
-    whatever release CLI the operator happens to have configured."""
+def test_the_build_tool_is_pinned_not_derived_from_the_activator(config_path: Path):
+    """uv is a workstation build tool, and it is pinned the way the Host's is.
+
+    Naming a path was the old way to say "pinned", and it meant "pinned for as
+    long as that path survives" — the profile pointed into the system temp
+    directory, macOS swept it, and the release line stopped. Absence now means
+    the pinned artifact, which Ops materializes from a version and a digest.
+    What must never happen is either of them being derived from wherever the
+    activator happens to live.
+    """
 
     config = load_config(config_path)
+    assert config.workspace.uv is not None
     assert config.workspace.uv.name == "uv"
 
-    # Dropping the key is a configuration error, not a silent fallback to the
-    # activator's directory.
     text = config_path.read_text(encoding="utf-8")
     config_path.write_text(
         text.replace(f'uv = "{config.workspace.uv}"\n', "", 1), encoding="utf-8"
     )
-    with pytest.raises(ConfigurationError, match="uv"):
-        load_config(config_path)
+    without_override = load_config(config_path)
+
+    # No override means the pinned one, and it lives where Ops keeps its own
+    # tools rather than beside the release CLI.
+    assert without_override.workspace.uv is None
+    toolchain_root = without_override.workspace.toolchain_root
+    assert workstation_uv_path(toolchain_root).name == "uv"
+    assert without_override.workspace.release_cli.parent != toolchain_root
 
 
 def test_a_host_may_state_how_long_its_services_need(config_path: Path) -> None:
@@ -286,3 +299,48 @@ def test_a_readiness_deadline_outside_reason_is_refused(config_path: Path) -> No
 
     with pytest.raises(ConfigurationError, match="readiness_timeout_seconds"):
         load_config(config_path)
+
+
+@pytest.mark.parametrize(
+    ("label", "old", "new"),
+    [
+        ("sources.eidolon_data.path", None, '/private/tmp/eidolon-data'),
+        ("workspace.release_cli", None, '/tmp/eidolon-release'),
+    ],
+)
+def test_a_release_input_may_not_be_pinned_where_the_system_sweeps(
+    config_path: Path, label: str, old: str | None, new: str
+) -> None:
+    """Both of these were real, and both failed days later naming a file.
+
+    A pinned uv sat in /private/tmp until macOS emptied it, and so did a pinned
+    source repository. Neither said anything at the moment it became a lie; the
+    release line simply stopped, and the error named a missing path rather than
+    the reason it was missing.
+    """
+
+    key = label.rsplit(".", 1)[-1] if label.startswith("workspace") else "path"
+    config = load_config(config_path)
+    current = (
+        config.workspace.release_cli
+        if label.startswith("workspace")
+        else config.sources["eidolon_data"].path
+    )
+    _replace(config_path, f'{key} = "{current}"', f'{key} = "{new}"')
+
+    with pytest.raises(ConfigurationError, match="not pinned"):
+        load_config(config_path)
+
+
+def test_an_output_may_live_in_a_temporary_directory(config_path: Path) -> None:
+    # A bundle is rebuilt from its inputs, so losing one costs a build and
+    # nothing else. Only what a release must be able to find again is refused.
+    _replace(
+        config_path,
+        f'bundle_root = "{load_config(config_path).workspace.bundle_root}"',
+        'bundle_root = "/private/tmp/eidolon-release-bundles"',
+    )
+
+    assert load_config(config_path).workspace.bundle_root == Path(
+        "/private/tmp/eidolon-release-bundles"
+    ).resolve()

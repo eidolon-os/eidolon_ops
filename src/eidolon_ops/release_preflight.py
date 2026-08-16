@@ -26,6 +26,7 @@ from eidolon_ops.errors import InstallInputError, OperationsError
 from eidolon_ops.install_inputs import validate_install_input_contract
 from eidolon_ops.process import ProcessRunner, checked
 from eidolon_ops.release_matrix import ReleaseMatrixError, validate_release_systemd_matrix
+from eidolon_ops.workstation_toolchain import ensure_workstation_uv
 
 #: Release formats this deployer speaks. The activator reports its own versions
 #: through `eidolon-release contract`, so interoperability is proven against a
@@ -65,6 +66,20 @@ class ReleasePreflight:
         if stat.S_IMODE(known_hosts.stat().st_mode) & 0o022:
             raise ConfigurationError("host.known_hosts_file must not be group/world writable")
 
+    def workstation_uv(self) -> Path:
+        """The uv this release is sealed with.
+
+        A profile may name its own, for a workstation that has to. Otherwise
+        Ops materializes the pinned one — which is the difference between a pin
+        and a path: the pinned artifact is placed where it was promised, rather
+        than expected to have survived wherever it was last built.
+        """
+
+        override = self.config.workspace.uv
+        if override is not None:
+            return override
+        return ensure_workstation_uv(self.config.workspace.toolchain_root)
+
     def require_commands(self, commands: tuple[str, ...]) -> None:
         missing = [command for command in commands if shutil.which(command) is None]
         if missing:
@@ -80,7 +95,7 @@ class ReleasePreflight:
             raise OperationsError(
                 f"eidolon-release CLI is missing or not executable: {release_cli}"
             )
-        local_uv = self.config.workspace.uv
+        local_uv = self.workstation_uv()
         if not local_uv.is_file() or not os.access(local_uv, os.X_OK):
             raise OperationsError(f"pinned local uv executable is missing: {local_uv}")
         local_uv_version = checked(

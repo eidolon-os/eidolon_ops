@@ -71,6 +71,16 @@ _RELEASE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _PYTHON_INDEX_URL = re.compile(r"^https://[A-Za-z0-9.-]+(?::[0-9]{1,5})?/[A-Za-z0-9_./:=+@,-]*$")
 
 
+#: Directories the operating system empties on its own schedule. Anything a
+#: release must be able to find again cannot be pinned inside one.
+_EPHEMERAL_ROOTS = (
+    Path("/tmp").resolve(),
+    Path("/private/tmp").resolve(),
+    Path("/var/tmp").resolve(),
+    Path("/private/var/tmp").resolve(),
+)
+
+
 class ConfigurationError(ValueError):
     """The operator configuration is ambiguous, incomplete, or unsafe."""
 
@@ -100,9 +110,14 @@ class HostConfig:
 class WorkspaceConfig:
     bundle_root: Path
     release_cli: Path
-    #: Workstation build tool. It is not part of the release contract, so it is
-    #: declared rather than derived from wherever the activator happens to live.
-    uv: Path
+    #: Where Ops keeps the pinned workstation build tools it materializes.
+    #: A version and a digest decide what goes here; nothing outside Ops has to
+    #: have built anything for a release to be sealable.
+    toolchain_root: Path
+    #: An override for the pinned uv, for a workstation that must use its own.
+    #: Absent means the pinned one, which is the case worth defaulting to: a
+    #: path someone has to keep alive is not a pin.
+    uv: Path | None
     python_index_url: str
     python_http_timeout_seconds: int
     python_http_retries: int
@@ -241,18 +256,29 @@ def load_config(path: Path) -> OperationsConfig:
         required={
             "bundle_root",
             "release_cli",
-            "uv",
             "python_index_url",
             "python_http_timeout_seconds",
             "python_http_retries",
             "python_concurrent_downloads",
         },
+        optional={"uv", "toolchain_root"},
         label="workspace",
     )
     workspace = WorkspaceConfig(
         bundle_root=_local_path(workspace_wire["bundle_root"], base, "workspace.bundle_root"),
-        release_cli=_local_path(workspace_wire["release_cli"], base, "workspace.release_cli"),
-        uv=_local_path(workspace_wire["uv"], base, "workspace.uv"),
+        release_cli=_durable_local_path(
+            workspace_wire["release_cli"], base, "workspace.release_cli"
+        ),
+        toolchain_root=_durable_local_path(
+            workspace_wire.get("toolchain_root", "../.eidolon-ops/toolchain"),
+            base,
+            "workspace.toolchain_root",
+        ),
+        uv=(
+            _durable_local_path(workspace_wire["uv"], base, "workspace.uv")
+            if "uv" in workspace_wire
+            else None
+        ),
         python_index_url=_https_index_url(
             workspace_wire["python_index_url"], "workspace.python_index_url"
         ),
@@ -297,7 +323,9 @@ def load_config(path: Path) -> OperationsConfig:
         if tag is not None and _TAG.fullmatch(tag) is None:
             raise ConfigurationError(f"sources.{source_id}.tag is invalid")
         sources[source_id] = SourceConfig(
-            path=_local_path(source_wire["path"], base, f"sources.{source_id}.path"),
+            path=_durable_local_path(
+                source_wire["path"], base, f"sources.{source_id}.path"
+            ),
             revision=revision,
             tag=tag,
         )
@@ -396,6 +424,30 @@ def _integer(value: object, label: str, *, minimum: int, maximum: int) -> int:
     if type(value) is not int or not minimum <= value <= maximum:
         raise ConfigurationError(f"{label} must be between {minimum} and {maximum}")
     return value
+
+
+def _durable_local_path(value: object, base: Path, label: str) -> Path:
+    """A path a release input is allowed to be pinned to.
+
+    The system temp directory is swept without warning, and both a pinned
+    build tool and a pinned source repository were once kept there. Neither
+    announced anything when it went: the release line simply stopped, days
+    later, with an error naming a file rather than the reason it was gone.
+
+    Pinning something to a directory the operating system may empty is not
+    pinning it, so it is refused where it is written rather than where it is
+    eventually missed. Outputs are a different matter — a bundle is rebuilt
+    from its inputs, and temp is the right place for it.
+    """
+
+    path = _local_path(value, base, label)
+    for temporary in _EPHEMERAL_ROOTS:
+        if path == temporary or temporary in path.parents:
+            raise ConfigurationError(
+                f"{label} must not live under {temporary}: the system empties it, "
+                "and a release input that can vanish is not pinned"
+            )
+    return path
 
 
 def _local_path(value: object, base: Path, label: str) -> Path:

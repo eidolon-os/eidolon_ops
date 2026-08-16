@@ -15,6 +15,7 @@ from eidolon_ops.config import SOURCE_IDS, OperationsConfig
 from eidolon_ops.errors import OperationsError
 from eidolon_ops.process import ProcessRunner, checked
 from eidolon_ops.transport import SSHTransport
+from eidolon_ops.workstation_toolchain import ensure_workstation_uv
 
 #: Dependencies this workstation has already fetched, kept between builds so a
 #: release costs the network only what actually changed. It sits beside the
@@ -41,6 +42,12 @@ class BundleTransfer:
         self.config = config
         self.runner = runner
         self.transport = transport
+
+    def _workstation_uv(self) -> Path:
+        override = self.config.workspace.uv
+        if override is not None:
+            return override
+        return ensure_workstation_uv(self.config.workspace.toolchain_root)
 
     def prepare(self, release_id: str, *, reuse: bool = False) -> list[dict[str, object]]:
         output = self.config.workspace.bundle_root / release_id
@@ -107,7 +114,9 @@ class BundleTransfer:
         for source_id in SOURCE_IDS:
             flag = source_id.removeprefix("eidolon_").replace("eidolon-", "")
             command.extend((f"--{flag}-revision", self.config.sources[source_id].revision))
-        command.extend(("--uv", str(self.config.workspace.uv)))
+        # The same uv preflight proved, not a second opinion about which one
+        # this workstation has.
+        command.extend(("--uv", str(self._workstation_uv())))
         environment = os.environ.copy()
         environment.update(
             {
