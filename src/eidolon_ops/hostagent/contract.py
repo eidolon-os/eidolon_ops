@@ -362,15 +362,16 @@ def ensure_host_path_contract(
         raise TargetError("existing /etc/eidolon/generated/ports.yaml is not a regular file")
     primitives.atomic_text(ports, port_registry, mode=0o640)
     chown(ports, "root", "eidolon")
+    # Rewritten when it differs, for the same reason the port registry above
+    # is: this file is derived from the contract in this module, not supplied
+    # by an operator and not a credential. Refusing to update it meant a Host
+    # installed before a path existed could never learn it — which is how a
+    # Host ended up running with an encoder it had been given but could not
+    # find, because the line naming its directory was added here and had
+    # nowhere to land.
     host_env = primitives.host_path(root, HOST_ENV_PATH)
-    if host_env.exists() or host_env.is_symlink():
-        if (
-            host_env.is_symlink()
-            or not host_env.is_file()
-            or host_env.read_text(encoding="utf-8") != HOST_ENV_VALUE
-        ):
-            raise TargetError("existing /etc/eidolon/host.env violates the path contract")
-        return
+    if host_env.is_symlink() or (host_env.exists() and not host_env.is_file()):
+        raise TargetError("existing /etc/eidolon/host.env is not a regular file")
     primitives.atomic_text(host_env, HOST_ENV_VALUE, mode=0o644)
     chown(host_env, "root", "root")
 

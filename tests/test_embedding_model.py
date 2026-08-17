@@ -158,3 +158,26 @@ def test_the_shipped_pin_is_the_encoder_the_host_env_selects() -> None:
     assert f"EIDOLON_MEMORY_EMBEDDING_MODEL_DIR={host_embedding_model_root()}\n" in (
         contract.HOST_ENV_VALUE
     )
+
+
+def test_a_host_learns_a_path_that_did_not_exist_when_it_was_installed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """host.env is derived, so it is rewritten rather than defended.
+
+    It used to be refused when it differed, which reads like safety and is
+    not: a Host installed before a path existed could never be told about it.
+    That is how this Host ended up holding an encoder it had been given and
+    could not find — the line naming the directory was added to the contract
+    and had nowhere to land.
+    """
+
+    root = tmp_path
+    (root / "etc" / "eidolon").mkdir(parents=True)
+    host_env = root / "etc" / "eidolon" / "host.env"
+    host_env.write_text("EIDOLON_STATE_ROOT=/var/lib/eidolon\n", encoding="utf-8")
+
+    contract.ensure_host_path_contract(root, lambda *_a: None, "ports: {}\n")
+
+    assert host_env.read_text(encoding="utf-8") == contract.HOST_ENV_VALUE
+    assert "EIDOLON_MEMORY_EMBEDDING_MODEL_DIR" in host_env.read_text(encoding="utf-8")
