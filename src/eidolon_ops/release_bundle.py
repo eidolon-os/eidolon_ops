@@ -15,6 +15,12 @@ from eidolon_ops.config import SOURCE_IDS, OperationsConfig
 from eidolon_ops.errors import OperationsError
 from eidolon_ops.process import ProcessRunner, checked
 from eidolon_ops.transport import SSHTransport
+from eidolon_ops.embedding_model import (
+    PINNED_EMBEDDING_MODEL,
+    embedding_model_digest,
+    ensure_workstation_embedding_model,
+    host_embedding_model_root,
+)
 from eidolon_ops.workstation_toolchain import ensure_workstation_uv
 
 #: Dependencies this workstation has already fetched, kept between builds so a
@@ -93,13 +99,48 @@ class BundleTransfer:
         )
         if finalized.get("status") not in {"finalized", "already_finalized"}:
             raise OperationsError("remote upload finalization returned invalid evidence")
+        encoder = self._carry_embedding_model()
         prepare = self._build_on_target(remote_bundle)
         return [
             {"phase": "bundle", "result": bundle_result},
             {"phase": "upload_guard", "result": guard},
             {"phase": "upload_finalize", "result": finalized},
+            {"phase": "embedding_model", "result": encoder},
             {"phase": "prepare", "result": prepare},
         ]
+
+    def _carry_embedding_model(self) -> dict[str, object]:
+        """Put the pinned encoder on the Host, once, and leave it there.
+
+        Carried beside a release rather than inside one: the palace built with
+        this encoder outlives any single release, and a hundred megabytes that
+        did not change should not be paid for again on every update. Skipped
+        when the Host already holds this exact pin — which is asked of the
+        digest the Host recorded, not of the directory existing.
+        """
+
+        artifact = PINNED_EMBEDDING_MODEL
+        destination = host_embedding_model_root(artifact)
+        expected = embedding_model_digest(artifact)
+        held = self.transport.run_agent(
+            "embedding-model-state",
+            {"destination": str(destination)},
+            sudo=False,
+        )
+        if held.get("status") == "held" and held.get("digest") == expected:
+            return {"status": "already_held", "model": artifact.model_id}
+
+        source = ensure_workstation_embedding_model(
+            self.config.workspace.toolchain_root, artifact
+        )
+        staging = f"/var/tmp/eidolon-encoder-{expected[:12]}"
+        self.transport.run(("rm", "-rf", staging))
+        self.transport.upload(source, staging, recursive=True)
+        self.transport.run_agent(
+            "install-embedding-model",
+            {"staging": staging, "destination": str(destination)},
+        )
+        return {"status": "carried", "model": artifact.model_id}
 
     def _seal(self, output: Path, release_id: str) -> dict[str, object]:
         command = [

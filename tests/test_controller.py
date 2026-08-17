@@ -252,6 +252,10 @@ class FakeTransport:
             "restore": {"status": "restored", "restored": ["system"]},
             "commissioning-code": {"status": "issued", "setup_code": "123456"},
             "refresh-host-application": {"status": "refreshed", "changed": []},
+            # A Host that has never been given an encoder, so a deploy carries
+            # one. The already-held path is exercised in test_embedding_model.
+            "embedding-model-state": {"status": "absent"},
+            "install-embedding-model": {"status": "installed"},
         }
         return values[action]
 
@@ -545,6 +549,10 @@ def test_deploy_defaults_to_prepare_and_dry_run(setup_controller) -> None:
         "bundle",
         "upload_guard",
         "upload_finalize",
+        # The encoder is carried before the release is prepared: a Host that
+        # gets the code without the weights answers memory queries slowly and
+        # emptily, which reads like an Eidolon that remembers nothing.
+        "embedding_model",
         "prepare",
         "dry_run",
     ]

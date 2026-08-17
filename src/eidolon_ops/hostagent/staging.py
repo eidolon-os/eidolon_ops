@@ -7,6 +7,7 @@ import os
 import shutil
 import stat
 from collections.abc import Mapping
+from pathlib import Path
 
 from . import contract, primitives
 from .primitives import TargetError
@@ -141,3 +142,62 @@ def cleanup_stage(payload: Mapping[str, object]) -> dict[str, object]:
             raise TargetError("secret staging path is not a directory")
         shutil.rmtree(path)
     return {"status": "cleaned", "path": str(path)}
+
+
+def embedding_model_state(payload: Mapping[str, object]) -> dict[str, object]:
+    """What encoder this Host already holds at a destination, if any.
+
+    Asked before carrying a hundred megabytes across, and answered from the
+    digest the Host recorded rather than from the directory existing: a partial
+    copy is not a copy.
+    """
+
+    destination = payload.get("destination")
+    if not isinstance(destination, str):
+        raise TargetError("embedding model destination is required")
+    record = Path(destination) / ".files-sha256"
+    if not record.is_file():
+        return {"status": "absent", "destination": destination}
+    return {
+        "status": "held",
+        "destination": destination,
+        "digest": record.read_text(encoding="utf-8").strip(),
+    }
+
+
+def install_embedding_model(payload: Mapping[str, object]) -> dict[str, object]:
+    """Move a carried encoder into the Host's durable model root.
+
+    Root-owned and read-only afterwards: every service reads this and none of
+    them writes it, and a palace already built against these weights must not
+    find different ones there later. The destination carries the digest of what
+    it holds in its name, so installing a different pin adds a directory rather
+    than replacing the one a palace was built with.
+    """
+
+    staging = payload.get("staging")
+    destination = payload.get("destination")
+    if not isinstance(staging, str) or not isinstance(destination, str):
+        raise TargetError("embedding model staging and destination are required")
+    source = Path(staging)
+    target = Path(destination)
+    if target.parent != contract.HOST_EMBEDDING_MODEL_ROOT:
+        raise TargetError(f"embedding model destination is outside the model root: {target}")
+    if not source.is_dir() or source.is_symlink():
+        raise TargetError("carried embedding model is missing")
+    record = source / ".files-sha256"
+    if not record.is_file():
+        raise TargetError("carried embedding model has no digest record")
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists():
+        shutil.rmtree(target)
+    shutil.move(str(source), str(target))
+    for path in (target, *target.rglob("*")):
+        os.chown(path, 0, 0)
+        os.chmod(path, 0o755 if path.is_dir() else 0o644)
+    return {
+        "status": "installed",
+        "destination": str(target),
+        "digest": record.read_text(encoding="utf-8").strip(),
+    }

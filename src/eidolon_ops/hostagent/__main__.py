@@ -36,6 +36,8 @@ ACTIONS: dict[str, tuple[ModuleType, str]] = {
     "guard-upload": (staging, "guard_upload"),
     "finalize-upload": (staging, "finalize_upload"),
     "cleanup-stage": (staging, "cleanup_stage"),
+    "embedding-model-state": (staging, "embedding_model_state"),
+    "install-embedding-model": (staging, "install_embedding_model"),
     "install": (install, "install"),
     "controller-reset": (lifecycle, "controller_reset"),
     "commissioning-code": (lifecycle, "commissioning_code"),

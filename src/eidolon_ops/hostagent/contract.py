@@ -272,6 +272,11 @@ HOST_ENV_PATH = Path("/etc/eidolon/host.env")
 
 HOST_PORTS_PATH = Path("/etc/eidolon/generated/ports.yaml")
 
+#: Where the Host keeps sentence encoders. Under the state root rather than
+#: inside a release: a palace is built with one encoder and cannot be read with
+#: another, so the weights have to outlive the release that carried them.
+HOST_EMBEDDING_MODEL_ROOT = Path("/var/lib/eidolon/models")
+
 HOST_ENV_VALUE = (
     "EIDOLON_INSTALL_ROOT=/opt/eidolon\n"
     "EIDOLON_WORKSPACE_ROOT=/opt/eidolon/current\n"
@@ -289,6 +294,11 @@ HOST_ENV_VALUE = (
     # laptop runs. Measured on a Pi 5, bge-large costs 626 MB and 104 ms/doc
     # against base's 198 MB and 32 ms, for MRR 0.813 against 0.787.
     "EIDOLON_MEMORY_EMBEDDING_MODEL=bge-base-zh\n"
+    # And where its weights are. Without this the encoder is fetched from the
+    # model hub at first use, which a Host may have no route to — and the
+    # failure is not an error but a slow, empty answer: seventy seconds of
+    # retries, then a search that found nothing because it never ran.
+    f"EIDOLON_MEMORY_EMBEDDING_MODEL_DIR={HOST_EMBEDDING_MODEL_ROOT}/bge-base-zh\n"
     # Admin resolves the port registry relative to an operator's checkout when
     # nobody names one, which is a Mac-workstation shape. Name the Host copy.
     f"EIDOLON_PORTS_FILE={HOST_PORTS_PATH}\n"
@@ -301,6 +311,9 @@ HOST_DIRECTORIES = (
     (Path("/var/lib/eidolon"), 0o750, "eidolon", "eidolon"),
     (Path("/var/lib/eidolon/agent"), 0o750, "eidolon", "eidolon"),
     (Path("/var/lib/eidolon/memory"), 0o750, "eidolon", "eidolon"),
+    # Encoders are read by services and written only by an install, so unlike
+    # the state beside them this is root-owned and world-readable.
+    (HOST_EMBEDDING_MODEL_ROOT, 0o755, "root", "root"),
     (Path("/var/lib/eidolon/nats/jetstream"), 0o750, "eidolon", "eidolon"),
     (Path("/var/lib/eidolon/voiceprints"), 0o750, "eidolon", "eidolon"),
     (Path("/var/lib/eidolon/objects"), 0o750, "eidolon", "eidolon"),
