@@ -122,10 +122,12 @@ class BundleTransfer:
         artifact = PINNED_EMBEDDING_MODEL
         destination = host_embedding_model_root(artifact)
         expected = embedding_model_digest(artifact)
+        # With sudo, like every other question asked of Host state: the model
+        # root sits under /var/lib/eidolon, which the operator account cannot
+        # even traverse.
         held = self.transport.run_agent(
             "embedding-model-state",
             {"destination": str(destination)},
-            sudo=False,
         )
         if held.get("status") == "held" and held.get("digest") == expected:
             return {"status": "already_held", "model": artifact.model_id}
