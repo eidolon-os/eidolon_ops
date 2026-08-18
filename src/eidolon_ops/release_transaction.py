@@ -94,6 +94,17 @@ class ReleaseTransaction:
                 "phases": phases,
                 "next": "rerun with --resume --activate after reviewing previous_targets",
             }
+        if self.host_layer.app is not None:
+            # The Host layer is an input to the new component graph, not a
+            # post-activation decoration. In particular, Hub validates its
+            # strict settings model while importing the ASGI app; starting the
+            # new Hub against the previous settings schema can never become
+            # ready. Prestage atomically while the old processes still hold
+            # their already-loaded configuration, then switch components.
+            phases.begin("host_application")
+            phases.append(
+                {"phase": "host_application", "result": self.host_layer.refresh(release_id)}
+            )
         phases.begin("activate")
         activation = self._remote_json(
             "release activation",
@@ -101,15 +112,6 @@ class ReleaseTransaction:
             timeout=600,
         )
         phases.append({"phase": "activate", "result": activation})
-        if self.host_layer.app is not None:
-            # An activation replaces components and leaves the Host layer Ops
-            # derives — the ingress unit, the rendered Hub settings — exactly
-            # as it found them. A fix to those could otherwise reach a Host no
-            # way but by installing it again.
-            phases.begin("host_application")
-            phases.append(
-                {"phase": "host_application", "result": self.host_layer.refresh(release_id)}
-            )
         transaction_id = activation.get("transaction_id")
         if (
             activation.get("status") != "activated"

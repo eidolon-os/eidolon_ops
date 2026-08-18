@@ -609,6 +609,40 @@ def test_deploy_resume_activate_skips_transfer(setup_controller) -> None:
     assert not any(len(call) > 1 and call[1] == "bundle" for call in runner.calls)
 
 
+def test_deploy_prestages_host_application_before_component_activation(
+    setup_controller, monkeypatch
+) -> None:
+    controller, _runner, _transport = setup_controller
+    controller.host_layer.app = _app()
+    monkeypatch.setattr(controller.releases, "_app_ready", lambda: {"status": "app_ready"})
+    events: list[str] = []
+    original_remote_json = controller.releases._remote_json
+
+    def observed_remote_json(label, command, *, timeout):
+        events.append(label)
+        return original_remote_json(label, command, timeout=timeout)
+
+    monkeypatch.setattr(controller.releases, "_remote_json", observed_remote_json)
+    monkeypatch.setattr(
+        controller.host_layer,
+        "refresh",
+        lambda release_id: events.append(f"host application {release_id}")
+        or {"status": "refreshed"},
+    )
+
+    result = controller.deploy(release_id="r1", resume=True, activate=True)
+
+    assert result["status"] == "activated"
+    assert events.index("host application r1") < events.index("release activation")
+    assert [phase["phase"] for phase in result["phases"]] == [
+        "dry_run",
+        "host_application",
+        "activate",
+        "doctor",
+        "app_ready",
+    ]
+
+
 def test_deploy_resume_revalidates_and_resumes_existing_bundle(setup_controller) -> None:
     controller, runner, transport = setup_controller
     controller.deploy(release_id="r1", resume=False, activate=False)
