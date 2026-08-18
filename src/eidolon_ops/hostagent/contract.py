@@ -175,19 +175,29 @@ INSTALL_INPUTS = {**SECRET_INPUTS, **HOST_APPLICATION_INPUTS}
 #: it — which is how a fix for the ingress unit sat undelivered while updates
 #: kept succeeding.
 #:
-#: The Host TLS pair is deliberately absent. That private Host material is
-#: written once. The Owner root and delegated signing certificates are public
-#: trust material, however: a previously provisioned Host will not have their
-#: shared-context paths, so refresh must create or repair those files together
-#: with the signed directory that refers to them.
+#: The Host TLS pair is stable controller-held material, not Owner signing
+#: authority. Refreshing it is required to migrate a legacy self-signed Host
+#: and to bind a replacement Host identity; byte equality makes ordinary
+#: endpoint changes a no-op. Owner signing private keys are never staged.
 REFRESHABLE_HOST_APPLICATION_INPUTS = (
     "hub.generated.yaml",
+    "hub.crt",
+    "hub.key",
     "owner-domain-descriptor.json",
     "owner-domain-root-ca.pem",
     "authority-signing-certificate.pem",
     "hub-ingress.py",
     "hub-ingress.service",
     "hub-service-override.conf",
+)
+
+#: Install inputs whose non-secret fields are derived from the Host binding.
+#: The controller re-renders the whole authoritative environment file so the
+#: target never edits or infers credentials while updating those fields.
+REFRESHABLE_HOST_BOUND_INPUTS = ("local-api.env", "channel.env")
+REFRESHABLE_HOST_LAYER_INPUTS = (
+    *REFRESHABLE_HOST_APPLICATION_INPUTS,
+    *REFRESHABLE_HOST_BOUND_INPUTS,
 )
 
 CORE_COMPONENTS = (

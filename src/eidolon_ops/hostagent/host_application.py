@@ -46,10 +46,9 @@ def refresh_host_application(payload: Mapping[str, object]) -> dict[str, object]
 
     An activation replaces components and leaves this layer alone, so a fix to
     the ingress unit or the rendered Hub settings could reach a Host no way but
-    by installing it again. The Host TLS pair is not among these: private Host
-    material is written once. Public Owner trust material is refreshed
-    atomically with the signed directory so an existing Host can acquire or
-    repair it.
+    by installing it again. Stable Host TLS material, public Owner trust, and
+    the authoritative Host-bound environment files are refreshed atomically
+    by file. Owner signing private keys are not part of this contract.
     """
 
     contract.fixed_units(payload)
@@ -60,11 +59,11 @@ def refresh_host_application(payload: Mapping[str, object]) -> dict[str, object]
     if not stage.is_dir() or stage.is_symlink():
         raise TargetError("Host application staging directory is missing")
     changed: list[str] = []
-    for name in contract.REFRESHABLE_HOST_APPLICATION_INPUTS:
+    for name in contract.REFRESHABLE_HOST_LAYER_INPUTS:
         source = stage / name
         if not source.is_file():
             raise TargetError(f"Host application asset was not staged: {name}")
-        destination_value, user, group, mode = contract.HOST_APPLICATION_INPUTS[name]
+        destination_value, user, group, mode = contract.INSTALL_INPUTS[name]
         destination = primitives.host_path(Path("/"), destination_value)
         if (
             destination.is_file()

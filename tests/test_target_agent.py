@@ -1463,23 +1463,23 @@ def test_the_derived_host_layer_is_delivered_without_a_reinstall(tmp_path, monke
     monkeypatch.setattr(contract, "VAR_TMP", tmp_path / "var-tmp")
     stage = tmp_path / "var-tmp" / "eidolon-secrets-r1"
     stage.mkdir(parents=True)
-    for name in contract.REFRESHABLE_HOST_APPLICATION_INPUTS:
+    for name in contract.REFRESHABLE_HOST_LAYER_INPUTS:
         (stage / name).write_text(f"new-{name}", encoding="utf-8")
     monkeypatch.setattr(primitives, "chown_path", lambda *_a: None)
     monkeypatch.setattr(
         primitives, "checked", lambda *_a, **_k: subprocess.CompletedProcess((), 0, "", "")
     )
     placed: dict[str, Path] = {}
-    for name in contract.REFRESHABLE_HOST_APPLICATION_INPUTS:
+    for name in contract.REFRESHABLE_HOST_LAYER_INPUTS:
         destination = tmp_path / "host" / name
         destination.parent.mkdir(parents=True, exist_ok=True)
         placed[name] = destination
     monkeypatch.setattr(
-        contract, "HOST_APPLICATION_INPUTS",
+        contract, "INSTALL_INPUTS",
         {
             **{
                 name: (placed[name], "root", "root", 0o644)
-                for name in contract.REFRESHABLE_HOST_APPLICATION_INPUTS
+                for name in contract.REFRESHABLE_HOST_LAYER_INPUTS
             }
         },
     )
@@ -1489,7 +1489,7 @@ def test_the_derived_host_layer_is_delivered_without_a_reinstall(tmp_path, monke
     )
 
     assert result["status"] == "refreshed"
-    assert len(result["changed"]) == len(contract.REFRESHABLE_HOST_APPLICATION_INPUTS)
+    assert len(result["changed"]) == len(contract.REFRESHABLE_HOST_LAYER_INPUTS)
     for name, destination in placed.items():
         assert destination.read_text(encoding="utf-8") == f"new-{name}"
 
@@ -1518,19 +1518,16 @@ def test_a_refresh_takes_away_what_a_release_no_longer_installs(tmp_path, monkey
     assert host_application.remove_legacy_system_assets(tmp_path) == []
 
 
-def test_the_tls_pair_is_never_among_what_a_refresh_rewrites() -> None:
-    """Private Host material is stable; public Owner trust is repairable."""
+def test_refresh_rewrites_host_tls_but_never_owner_signing_authority() -> None:
+    """Host identity is repairable; Owner signing authority never leaves Ops."""
 
-    assert "hub.crt" not in contract.REFRESHABLE_HOST_APPLICATION_INPUTS
-    assert "hub.key" not in contract.REFRESHABLE_HOST_APPLICATION_INPUTS
+    assert "hub.crt" in contract.REFRESHABLE_HOST_APPLICATION_INPUTS
+    assert "hub.key" in contract.REFRESHABLE_HOST_APPLICATION_INPUTS
     assert "owner-domain-root-ca.pem" in contract.REFRESHABLE_HOST_APPLICATION_INPUTS
     assert "authority-signing-certificate.pem" in contract.REFRESHABLE_HOST_APPLICATION_INPUTS
-    assert set(contract.REFRESHABLE_HOST_APPLICATION_INPUTS) <= set(
-        contract.HOST_APPLICATION_INPUTS
-    )
-    assert not set(contract.REFRESHABLE_HOST_APPLICATION_INPUTS) & set(
-        contract.SECRET_INPUTS
-    )
+    assert set(contract.REFRESHABLE_HOST_APPLICATION_INPUTS) <= set(contract.INSTALL_INPUTS)
+    assert set(contract.REFRESHABLE_HOST_BOUND_INPUTS) == {"local-api.env", "channel.env"}
+    assert set(contract.REFRESHABLE_HOST_LAYER_INPUTS) <= set(contract.INSTALL_INPUTS)
 
 
 def _authority_fixture(tmp_path: Path, monkeypatch):

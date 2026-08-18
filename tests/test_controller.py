@@ -643,6 +643,34 @@ def test_deploy_prestages_host_application_before_component_activation(
     ]
 
 
+def test_host_application_refresh_carries_host_identity_and_bound_environments(
+    setup_controller,
+) -> None:
+    controller, _runner, transport = setup_controller
+    controller.host_layer.app = _app()
+    identity = controller.config.install_files["host_identity"]
+    identity.write_bytes(b"i" * 32)
+    identity.chmod(0o600)
+    for name in ("local_api_env", "channel_env"):
+        controller.config.install_files[name].write_text("TOKEN=test\n", encoding="utf-8")
+
+    controller.host_layer.refresh("r1")
+
+    destinations = {destination for _source, destination, _recursive in transport.uploads}
+    stage = "/var/tmp/eidolon-secrets-r1"
+    assert {
+        f"{stage}/host_identity.ed25519",
+        f"{stage}/local-api.env",
+        f"{stage}/channel.env",
+        f"{stage}/hub.crt",
+        f"{stage}/hub.key",
+        f"{stage}/owner-domain-root-ca.pem",
+        f"{stage}/authority-signing-certificate.pem",
+    } <= destinations
+    assert f"{stage}/owner-domain-root.key.pem" not in destinations
+    assert f"{stage}/authority-signing.key.pem" not in destinations
+
+
 def test_deploy_resume_revalidates_and_resumes_existing_bundle(setup_controller) -> None:
     controller, runner, transport = setup_controller
     controller.deploy(release_id="r1", resume=False, activate=False)

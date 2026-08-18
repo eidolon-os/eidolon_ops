@@ -50,7 +50,7 @@ _STAGED_INSTALL_NAMES = INSTALL_DESTINATION_NAMES
 #: this is a checkout or an installed wheel.
 _PORT_REGISTRY = Path(__file__).with_name("assets") / "ports.yaml"
 #: Environment files whose values name this Host rather than a credential.
-_HOST_BOUND_INPUTS = frozenset({"local_api_env", "channel_env"})
+HOST_BOUND_INPUTS = frozenset({"local_api_env", "channel_env"})
 
 
 class HostLayer:
@@ -146,7 +146,7 @@ class HostLayer:
             temporary = Path(temporary_value)
             for name in names:
                 source = self.config.install_files[name]
-                if application is not None and name in _HOST_BOUND_INPUTS:
+                if application is not None and name in HOST_BOUND_INPUTS:
                     rendered = self.materializer().render_environment(
                         _STAGED_INSTALL_NAMES[name], source.read_text(encoding="utf-8")
                     )
@@ -163,7 +163,11 @@ class HostLayer:
 
     def refresh(self, release_id: str) -> dict[str, object]:
         stage = f"/var/tmp/eidolon-secrets-{release_id}"
-        self.stage_install_files(release_id, stage, names=("host_identity",))
+        self.stage_install_files(
+            release_id,
+            stage,
+            names=("host_identity", *sorted(HOST_BOUND_INPUTS)),
+        )
         return self.transport.run_agent(
             "refresh-host-application",
             {**self.target_payload(), "release_id": release_id},
