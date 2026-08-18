@@ -69,8 +69,9 @@ PORTS = {
 _MEMORY_SUPERVISOR_ANCHOR = "supervisor:\n  eager_init: true"
 
 
-def repository_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+#: Templates Ops ships. Beside the code rather than at a repository root, so
+#: they are found the same way from a checkout and from an installed wheel.
+ASSETS = Path(__file__).with_name("assets")
 
 
 def translate_fhs(profile: HostProfile, value: str) -> str:
@@ -113,7 +114,10 @@ def memory_supervisor_block() -> str:
 
 def eidolond_settings(profile: HostProfile) -> str:
     paths = profile.paths
-    root = repository_root()
+    # The workspace this profile drives, which is a fact the profile carries.
+    # It was read off this module's own __file__ before, which happened to
+    # agree only because both were in one checkout.
+    root = profile.workspace_root
     return f"""\
 manifest:
   path: {paths.config_root / "settings/system-services.yaml"}

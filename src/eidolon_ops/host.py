@@ -21,7 +21,13 @@ from eidolon_ops.config import load_config
 from eidolon_ops.controller import EidolonPiController
 from eidolon_ops.errors import OperationsError
 from eidolon_ops.model import Capability
-from eidolon_ops.paths import HostDriver, HostPlatform, HostProfile, merged_environment
+from eidolon_ops.paths import (
+    HostDriver,
+    HostPlatform,
+    HostProfile,
+    HostProfileError,
+    merged_environment,
+)
 from eidolon_ops.ports import PackageManager, Supervisor, Transport
 from eidolon_ops.process import ProcessRunner
 from eidolon_ops.transport import SSHTransport
@@ -168,12 +174,11 @@ def _product_factory(
 def _workspace_root(profile: HostProfile) -> Path:
     """Where the lifecycle script expects to be run from.
 
-    The script lives at ``<workspace>/deploy/dev/run_all.sh`` and reads the
-    repository around it, so the profile's own script location defines the
-    working directory rather than wherever the operator happened to be.
+    The profile answers this now; the wrapper stays because the failure an
+    operator sees here should be an operations error, not a profile one.
     """
 
-    script = profile.lifecycle_script
-    if script is None:
-        raise OperationsError("this Host profile declares no lifecycle script")
-    return script.parents[2]
+    try:
+        return profile.workspace_root
+    except HostProfileError as exc:
+        raise OperationsError(str(exc)) from exc

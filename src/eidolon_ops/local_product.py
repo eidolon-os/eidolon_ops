@@ -256,7 +256,7 @@ class LocalProductSource:
         rendered[root / "settings/services.yaml"] = source_assets.admin_services_yaml().encode(
             "utf-8"
         )
-        livekit_template = source_assets.repository_root() / "deploy/livekit/livekit.yaml"
+        livekit_template = source_assets.ASSETS / "livekit.yaml"
         rendered[root / "settings/livekit.yaml"] = source_assets.translate_ports(
             livekit_template.read_text(encoding="utf-8")
         ).encode("utf-8")

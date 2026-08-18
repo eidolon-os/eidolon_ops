@@ -81,7 +81,7 @@ def test_livekit_credentials_reject_malformed_persistent_input(
 def test_livekit_runtime_config_is_generated_without_source_credentials(
     tmp_path: Path,
 ) -> None:
-    template = ROOT / "deploy/livekit/livekit.yaml"
+    template = ROOT / "src/eidolon_ops/assets/livekit.yaml"
     generated = tmp_path / "livekit.generated.yaml"
     api_key = "test_runtime_key_1234"
     api_secret = "test_runtime_secret_abcdefghijklmnopqrstuvwxyz_123456"

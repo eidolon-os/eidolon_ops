@@ -130,6 +130,24 @@ class HostProfile:
     paths: HostPaths
     lifecycle_script: Path | None
     operations_config: Path | None
+
+    @property
+    def workspace_root(self) -> Path:
+        """The checkout this profile drives, taken from the profile itself.
+
+        A source-run profile points at a working tree: the lifecycle script it
+        declares lives at ``<workspace>/deploy/dev/run_all.sh``, so the script
+        the operator configured is what defines the workspace. Ops used to
+        answer this by walking up from its own ``__file__``, which is only the
+        same directory by coincidence — and stops being so the moment Ops is
+        installed rather than run from a checkout.
+        """
+
+        if self.lifecycle_script is None:
+            raise HostProfileError(
+                f"{self.host_id} declares no lifecycle script, so it has no workspace"
+            )
+        return self.lifecycle_script.parents[2]
     foundation_mode: Literal["external"] | None = None
     external_livekit_config: Path | None = None
     app: AppAccess | None = None

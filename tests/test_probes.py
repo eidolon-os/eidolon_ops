@@ -188,9 +188,9 @@ def test_the_readiness_ports_do_not_drift_from_the_ops_port_registry() -> None:
 
     from eidolon_ops.readiness import CHANNEL_WORKER_PORT, LIVEKIT_SIGNALLING_PORT
 
-    registry = (
-        Path(__file__).resolve().parents[1] / "config/ports.yaml"
-    ).read_text(encoding="utf-8")
+    from eidolon_ops.host_layer import _PORT_REGISTRY
+
+    registry = _PORT_REGISTRY.read_text(encoding="utf-8")
     channel = re.search(r"(?ms)^channel:\n  worker:\n    port: (\d+)$", registry)
     livekit = re.search(r"(?ms)^livekit:\n  port: (\d+)$", registry)
     assert channel is not None and livekit is not None

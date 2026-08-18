@@ -19,6 +19,7 @@ a reason beside it is a decision.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -244,3 +245,46 @@ def test_the_shipped_unit_files_run_what_their_component_declared(topology) -> N
 
     # A loop that silently checked nothing would pass just as quietly.
     assert checked == len(PRODUCT_UNITS) - len(FOUNDATION_UNITS)
+
+
+def test_the_dev_port_registry_and_the_contracts_use_the_same_numbers(
+    topology,
+) -> None:
+    """The registry a Host is sent, against what each component declared.
+
+    ``ports.yaml`` is a richer document than the contracts — it carries hosts,
+    ranges, and entries for things that are not components at all — so this is
+    not a set comparison. What it catches is the change that actually happens:
+    a component renumbers itself in its contract and the registry Admin builds
+    its service catalog from keeps the old number.
+    """
+
+    from eidolon_ops.host_layer import _PORT_REGISTRY
+
+    registry = set(
+        int(match)
+        for match in re.findall(
+            r"^\s*(?:port|http_port|admin_port|turn_udp_port):\s*(\d+)\s*$",
+            _PORT_REGISTRY.read_text(encoding="utf-8"),
+            re.MULTILINE,
+        )
+    )
+
+    #: Declared by a component, absent from the dev registry on purpose. The
+    #: registry describes the macOS stack that runs under supervisord, and
+    #: neither of these runs there: the Channel Provider is reached through
+    #: Hub, and the Local API is the product Host's own door.
+    NOT_IN_THE_DEV_STACK = {
+        "channel_provider": 8767,
+        "local_api": 9002,
+    }
+
+    for role, port in topology.port_roles.items():
+        if role in NOT_IN_THE_DEV_STACK:
+            # Kept honest in both directions: when one of these does join the
+            # dev stack, this fails and the exemption has to go rather than
+            # quietly covering a real entry.
+            assert NOT_IN_THE_DEV_STACK[role] == port
+            assert port not in registry, f"{role} is in the registry now"
+            continue
+        assert port in registry, f"{role} declares {port}, which the registry does not"

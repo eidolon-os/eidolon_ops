@@ -45,7 +45,10 @@ _STAGED_INSTALL_NAMES = INSTALL_DESTINATION_NAMES
 #: service catalog from it and interpolates the EIDOLON_* variables its
 #: services.yaml names — so a Host is sent this one rather than carrying a
 #: restatement of it that could drift.
-_PORT_REGISTRY = Path(__file__).resolve().parents[2] / "config" / "ports.yaml"
+#: Inside the package, addressed by name rather than by walking up to a
+#: repository root. It is an asset Ops ships, so it travels with Ops whether
+#: this is a checkout or an installed wheel.
+_PORT_REGISTRY = Path(__file__).with_name("assets") / "ports.yaml"
 #: Environment files whose values name this Host rather than a credential.
 _HOST_BOUND_INPUTS = frozenset({"local_api_env", "channel_env"})
 
