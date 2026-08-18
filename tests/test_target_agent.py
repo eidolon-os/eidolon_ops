@@ -1519,10 +1519,12 @@ def test_a_refresh_takes_away_what_a_release_no_longer_installs(tmp_path, monkey
 
 
 def test_the_tls_pair_is_never_among_what_a_refresh_rewrites() -> None:
-    """Material is written once; only renderings of it are refreshed."""
+    """Private Host material is stable; public Owner trust is repairable."""
 
     assert "hub.crt" not in contract.REFRESHABLE_HOST_APPLICATION_INPUTS
     assert "hub.key" not in contract.REFRESHABLE_HOST_APPLICATION_INPUTS
+    assert "owner-domain-root-ca.pem" in contract.REFRESHABLE_HOST_APPLICATION_INPUTS
+    assert "authority-signing-certificate.pem" in contract.REFRESHABLE_HOST_APPLICATION_INPUTS
     assert set(contract.REFRESHABLE_HOST_APPLICATION_INPUTS) <= set(
         contract.HOST_APPLICATION_INPUTS
     )

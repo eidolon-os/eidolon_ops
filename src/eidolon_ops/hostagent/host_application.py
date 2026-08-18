@@ -46,8 +46,10 @@ def refresh_host_application(payload: Mapping[str, object]) -> dict[str, object]
 
     An activation replaces components and leaves this layer alone, so a fix to
     the ingress unit or the rendered Hub settings could reach a Host no way but
-    by installing it again. The TLS pair is not among these: material is
-    written once, and only the renderings of it are refreshed.
+    by installing it again. The Host TLS pair is not among these: private Host
+    material is written once. Public Owner trust material is refreshed
+    atomically with the signed directory so an existing Host can acquire or
+    repair it.
     """
 
     contract.fixed_units(payload)
