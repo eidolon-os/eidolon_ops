@@ -11,9 +11,13 @@ requires-python = ">=3.11"
 license = { text = "PolyForm-Noncommercial-1.0.0" }
 dependencies = [
   "cryptography>=45,<47",
+  "eidolon-sdk",
   "jsonschema>=4.21",
   "supervisor>=4.2,<5",
 ]
+
+[tool.uv.sources]
+eidolon-sdk = { path = "../eidolon_sdk", editable = true }
 
 [project.optional-dependencies]
 dev = [

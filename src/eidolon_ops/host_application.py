@@ -13,7 +13,8 @@ from eidolon_ops.host_identity import (
     HostLanIdentity,
     derive_host_lan_identity,
 )
-from eidolon_ops.hub_assets import ensure_hub_tls_identity, render_hub_settings
+from eidolon_ops.hub_assets import render_hub_settings
+from eidolon_ops.owner_domain_assets import OwnerDomainAssetError, ensure_owner_domain_assets
 from eidolon_ops.paths import AppAccess
 
 
@@ -25,6 +26,9 @@ HOST_APPLICATION_STAGE_NAMES = (
     "hub.generated.yaml",
     "hub.crt",
     "hub.key",
+    "owner-domain-descriptor.json",
+    "owner-domain-root-ca.pem",
+    "authority-signing-certificate.pem",
     "hub-ingress.py",
     "hub-ingress.service",
     "hub-service-override.conf",
@@ -34,6 +38,7 @@ HOST_APPLICATION_STAGE_NAMES = (
 @dataclass(frozen=True, slots=True)
 class HostApplicationAssets:
     identity: HostLanIdentity
+    owner_domain_id: str
     files: dict[str, bytes]
 
 
@@ -48,22 +53,34 @@ class HostApplicationMaterializer:
     @property
     def material_root(self) -> Path:
         input_root = self.config.install_files["host_identity"].parent
-        return input_root.with_name(f"{input_root.name}-host-application")
+        return input_root.parent / "owner-domain"
 
     def prepare(self, hub_template: str) -> HostApplicationAssets:
         identity = self.identity()
-        certificate, private_key = self._ensure_tls(identity)
+        try:
+            owner = ensure_owner_domain_assets(
+                self.material_root, identity, self.app.hub_https_port
+            )
+        except OwnerDomainAssetError as exc:
+            raise HostApplicationError(str(exc)) from exc
         files = {
-            "hub.generated.yaml": self._render_hub_settings(hub_template, identity).encode(),
-            "hub.crt": certificate,
-            "hub.key": private_key,
+            "hub.generated.yaml": self._render_hub_settings(
+                hub_template, owner.owner_domain_id, identity
+            ).encode(),
+            "hub.crt": owner.tls_certificate,
+            "hub.key": owner.tls_private_key,
+            "owner-domain-descriptor.json": owner.descriptor,
+            "owner-domain-root-ca.pem": owner.owner_root_certificate,
+            "authority-signing-certificate.pem": owner.authority_signing_certificate,
             "hub-ingress.py": self.ingress_source,
             "hub-ingress.service": self._ingress_service().encode(),
             "hub-service-override.conf": self._hub_service_override().encode(),
         }
         if set(files) != set(HOST_APPLICATION_STAGE_NAMES):
             raise HostApplicationError("Host application asset set is incomplete")
-        return HostApplicationAssets(identity=identity, files=files)
+        return HostApplicationAssets(
+            identity=identity, owner_domain_id=owner.owner_domain_id, files=files
+        )
 
     def identity(self) -> HostLanIdentity:
         path = self.config.install_files["host_identity"]
@@ -82,13 +99,27 @@ class HostApplicationMaterializer:
         identity = self.identity()
         replacements: dict[str, str]
         if name == "local-api.env":
+            try:
+                owner = ensure_owner_domain_assets(
+                    self.material_root, identity, self.app.hub_https_port
+                )
+            except OwnerDomainAssetError as exc:
+                raise HostApplicationError(str(exc)) from exc
             replacements = {
-                "EIDOLON_LOCAL_API_HUB_ID": identity.hub_id,
-                "EIDOLON_LOCAL_API_HUB_DESCRIPTOR_URI": (
+                "EIDOLON_LOCAL_API_OWNER_DOMAIN_ID": owner.owner_domain_id,
+                "EIDOLON_LOCAL_API_OWNER_DOMAIN_DESCRIPTOR_URI": (
                     identity.hub_origin(self.app.hub_https_port)
                     + "/api/device-onboarding/v1/descriptor"
                 ),
-                "EIDOLON_LOCAL_API_HUB_TLS_CERTIFICATE": "/etc/eidolon/tls/hub.crt",
+                "EIDOLON_LOCAL_API_OWNER_DOMAIN_DESCRIPTOR": (
+                    "/var/lib/eidolon-bootstrap/owner_domain_descriptor.json"
+                ),
+                "EIDOLON_LOCAL_API_OWNER_ROOT_CERTIFICATE": (
+                    "/var/lib/eidolon-bootstrap/owner_domain_root_ca.pem"
+                ),
+                "EIDOLON_LOCAL_API_AUTHORITY_SIGNING_CERTIFICATE": (
+                    "/var/lib/eidolon-bootstrap/authority_signing_certificate.pem"
+                ),
             }
         elif name == "channel.env":
             replacements = {
@@ -103,9 +134,15 @@ class HostApplicationMaterializer:
 
     def public_contract(self) -> dict[str, object]:
         identity = self.identity()
+        try:
+            owner = ensure_owner_domain_assets(
+                self.material_root, identity, self.app.hub_https_port
+            )
+        except OwnerDomainAssetError as exc:
+            raise HostApplicationError(str(exc)) from exc
         return {
             "host_id": identity.host_id,
-            "hub_id": identity.hub_id,
+            "owner_domain_id": owner.owner_domain_id,
             "hub_hostname": identity.hub_hostname,
             "hub_https_port": self.app.hub_https_port,
             "hub_origin": identity.hub_origin(self.app.hub_https_port),
@@ -118,27 +155,12 @@ class HostApplicationMaterializer:
             "allow_insecure_livekit": self.app.allow_insecure_livekit,
         }
 
-    def _ensure_tls(self, identity: HostLanIdentity) -> tuple[bytes, bytes]:
-        root = self.material_root
-        if root.exists():
-            if root.is_symlink() or not root.is_dir() or stat.S_IMODE(root.stat().st_mode) != 0o700:
-                raise HostApplicationError("Host application material directory is unsafe")
-            if {path.name for path in root.iterdir()} - {"hub.crt", "hub.key"}:
-                raise HostApplicationError("Host application material directory has extra files")
-        else:
-            root.mkdir(mode=0o700, parents=False)
-        # A product Host refuses a mismatch rather than rotating: material is
-        # written once, and a pair that stopped matching means something
-        # replaced it, which is an operator's decision and not this code's.
-        return ensure_hub_tls_identity(
-            root / "hub.crt",
-            root / "hub.key",
-            identity,
-            rotate_on_mismatch=False,
+    def _render_hub_settings(
+        self, template: str, owner_domain_id: str, identity: HostLanIdentity
+    ) -> str:
+        return render_hub_settings(
+            template, owner_domain_id, identity, self.app.hub_https_port
         )
-
-    def _render_hub_settings(self, template: str, identity: HostLanIdentity) -> str:
-        return render_hub_settings(template, identity, self.app.hub_https_port)
 
     def _ingress_service(self) -> str:
         return f"""\
@@ -194,5 +216,3 @@ Wants=eidolon-hub-ingress.service
 [Service]
 Environment=EIDOLON_HUB_SETTINGS_YAML=/etc/eidolon/generated/hub.yaml
 """
-
-

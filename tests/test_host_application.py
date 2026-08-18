@@ -7,14 +7,17 @@ import pytest
 
 from eidolon_ops.environment import EnvironmentFileError
 from eidolon_ops.host_application import HostApplicationError, HostApplicationMaterializer
-from eidolon_ops.host_identity import validate_hub_tls_identity
 from eidolon_ops.hub_assets import HubAssetError
 from eidolon_ops.paths import AppAccess
 
 HUB_TEMPLATE = """\
 onboarding:
-  hub_id: eidolon-hub-local
-  public_base_url: https://eidolon-hub.local
+  owner_domain_id: owner-local
+  trust_epoch: 1
+  descriptor_uri: https://eidolon-hub.local/api/device-onboarding/v1/descriptor
+  descriptor_path: /var/lib/eidolon-bootstrap/owner_domain_descriptor.json
+  owner_root_certificate_path: /var/lib/eidolon-bootstrap/owner_domain_root_ca.pem
+  authority_signing_certificate_path: /var/lib/eidolon-bootstrap/authority_signing_certificate.pem
   retrieval_window_seconds: 1800
 discovery:
   mdns:
@@ -35,7 +38,7 @@ def _app(address: str) -> AppAccess:
     )
 
 
-def test_pi_application_assets_are_stable_complete_and_host_bound(config) -> None:
+def test_pi_application_assets_are_stable_and_owner_scoped(config) -> None:
     identity_path = config.install_files["host_identity"]
     identity_path.write_bytes(b"a" * 32)
     identity_path.chmod(0o600)
@@ -48,16 +51,17 @@ def test_pi_application_assets_are_stable_complete_and_host_bound(config) -> Non
     assert first.files["hub.crt"] == second.files["hub.crt"]
     assert first.files["hub.key"] == second.files["hub.key"]
     settings = first.files["hub.generated.yaml"].decode()
-    assert f"hub_id: {first.identity.hub_id}" in settings
-    assert f"public_base_url: {first.identity.hub_origin(8443)}" in settings
-    assert "hub_id: eidolon-hub-local" not in settings
+    assert f"owner_domain_id: {first.owner_domain_id}" in settings
+    assert f"descriptor_uri: {first.identity.hub_origin(8443)}/api/device-onboarding/v1/descriptor" in settings
+    assert "owner_domain_id: owner-local" not in settings
     assert "path: /var/lib/eidolon/hub/eidolon-hub.sqlite3" in settings
     assert b"--listen-port 8443" in first.files["hub-ingress.service"]
     assert b"/etc/eidolon/generated/hub.yaml" in first.files["hub-service-override.conf"]
-    validate_hub_tls_identity(first.files["hub.crt"], first.files["hub.key"], first.identity)
+    assert "owner-domain-root.key.pem" not in first.files
+    assert "authority-signing.key.pem" not in first.files
 
 
-def test_two_hosts_render_non_colliding_hub_contracts(config) -> None:
+def test_host_replacement_keeps_owner_contract_and_changes_observation(config) -> None:
     identity_path = config.install_files["host_identity"]
     identity_path.write_bytes(b"a" * 32)
     identity_path.chmod(0o600)
@@ -69,7 +73,7 @@ def test_two_hosts_render_non_colliding_hub_contracts(config) -> None:
     second_contract = second.public_contract()
 
     assert first_contract["host_id"] != second_contract["host_id"]
-    assert first_contract["hub_id"] != second_contract["hub_id"]
+    assert first_contract["owner_domain_id"] == second_contract["owner_domain_id"]
     assert first_contract["hub_hostname"] != second_contract["hub_hostname"]
 
 
@@ -78,7 +82,7 @@ def test_pi_environment_targets_the_same_host_bound_hub(config) -> None:
     identity_path.write_bytes(b"a" * 32)
     identity_path.chmod(0o600)
     materializer = HostApplicationMaterializer(config, _app("192.168.100.15"), b"runtime")
-    identity = materializer.identity()
+    owner = materializer.prepare(HUB_TEMPLATE)
     local_api = materializer.render_environment(
         "local-api.env",
         "EIDOLON_LOCAL_API_ADMIN_BASE_URL=http://127.0.0.1:9000\n"
@@ -89,8 +93,9 @@ def test_pi_environment_targets_the_same_host_bound_hub(config) -> None:
         "EIDOLON_LIVEKIT_CLIENT_URL=ws://127.0.0.1:7880\nPAIRING_JWT_SECRET=test\n",
     )
 
-    assert f"EIDOLON_LOCAL_API_HUB_ID={identity.hub_id}" in local_api
-    assert identity.hub_origin(8443) in local_api
+    assert f"EIDOLON_LOCAL_API_OWNER_DOMAIN_ID={owner.owner_domain_id}" in local_api
+    assert owner.identity.hub_origin(8443) in local_api
+    assert "EIDOLON_LOCAL_API_OWNER_DOMAIN_DESCRIPTOR=/var/lib/eidolon-bootstrap/owner_domain_descriptor.json" in local_api
     assert "EIDOLON_LIVEKIT_CLIENT_URL=ws://192.168.100.15:7880" in channel
     assert "EIDOLON_CHANNEL_PROVIDER_ALLOW_INSECURE_LAN_CLIENT_URL=1" in channel
 
@@ -104,12 +109,16 @@ def test_host_application_rejects_unsafe_or_drifting_material(config) -> None:
     with pytest.raises(EnvironmentFileError, match="Host application environment is invalid"):
         materializer.render_environment("local-api.env", "invalid")
     with pytest.raises(HubAssetError, match="template drifted"):
-        materializer.prepare(HUB_TEMPLATE.replace("hub_id: eidolon-hub-local", "hub_id: bad"))
+        materializer.prepare(
+            HUB_TEMPLATE.replace("owner_domain_id: owner-local", "owner_domain_id: bad")
+        )
 
-    materializer.prepare(HUB_TEMPLATE)
+    first = materializer.prepare(HUB_TEMPLATE)
     identity_path.write_bytes(b"b" * 32)
-    with pytest.raises(HubAssetError, match="does not match"):
-        materializer.prepare(HUB_TEMPLATE)
+    second = materializer.prepare(HUB_TEMPLATE)
+    assert second.owner_domain_id == first.owner_domain_id
+    assert second.identity != first.identity
+    assert second.files["hub.crt"] != first.files["hub.crt"]
 
 
 def test_host_application_rejects_incomplete_and_unsafe_paths(config) -> None:
@@ -120,7 +129,8 @@ def test_host_application_rejects_incomplete_and_unsafe_paths(config) -> None:
     root = materializer.material_root
     root.mkdir(mode=0o700)
     (root / "hub.crt").write_text("partial", encoding="utf-8")
-    with pytest.raises(HubAssetError, match="incomplete"):
+    (root / "hub.crt").chmod(0o600)
+    with pytest.raises(HostApplicationError, match="incomplete"):
         materializer.prepare(HUB_TEMPLATE)
 
     (root / "hub.crt").unlink()

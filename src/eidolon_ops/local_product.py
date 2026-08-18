@@ -2,28 +2,30 @@
 
 from __future__ import annotations
 
+import json
 import os
 import stat
 from pathlib import Path
 from urllib.parse import urlparse
 
+from cryptography import x509
+from cryptography.hazmat.primitives.asymmetric import ec
+
 from eidolon_ops import environment, lan_observation, probes, source_assets
 from eidolon_ops.config import OperationsConfig
 from eidolon_ops.errors import InstallInputError, OperationsError
-from eidolon_ops.host_identity import (
-    HostIdentityError,
-    HostLanIdentity,
-    derive_host_lan_identity,
-    validate_hub_tls_identity,
-)
+from eidolon_ops.host_identity import HostIdentityError, HostLanIdentity, derive_host_lan_identity
 from eidolon_ops.hub_assets import (
-    HubAssetError,
-    ensure_hub_tls_identity,
     hub_settings_are_bound,
     hub_settings_template,
     render_hub_settings,
 )
 from eidolon_ops.install_inputs import validate_install_input_contract
+from eidolon_ops.owner_domain_assets import (
+    OwnerDomainAssetError,
+    OwnerDomainAssets,
+    ensure_owner_domain_assets,
+)
 from eidolon_ops.paths import AppAccess, HostProfile
 from eidolon_ops.private_files import atomic_private_file
 from eidolon_ops.process import ProcessRunner, checked
@@ -70,7 +72,7 @@ class LocalProductSource:
         self._make_roots()
         source_inputs = next(iter(self.config.install_files.values())).parent
         self._adopt_host_identity(source_inputs)
-        self._ensure_hub_tls_identity()
+        self._ensure_owner_domain_assets()
 
         expected = {
             **self._rendered_environment(source_inputs),
@@ -104,6 +106,9 @@ class LocalProductSource:
             self._host_identity_path(),
             self._hub_certificate_path(),
             self._hub_private_key_path(),
+            self._owner_descriptor_path(),
+            self._owner_root_certificate_path(),
+            self._authority_signing_certificate_path(),
         ]
         missing = [str(path) for path in required if not path.is_file() or path.is_symlink()]
         if missing:
@@ -159,7 +164,7 @@ class LocalProductSource:
     def _rendered_environment(self, source_inputs: Path) -> dict[Path, bytes]:
         root = self.profile.paths.config_root
         app = self._require_app_access()
-        identity = self._host_lan_identity()
+        owner_domain_id = self._owner_domain_id()
         rendered: dict[Path, bytes] = {}
         for name in source_assets.ENV_NAMES:
             value = source_assets.translate_fhs(
@@ -180,9 +185,17 @@ class LocalProductSource:
                 value = environment.merge(
                     value,
                     {
-                        "EIDOLON_LOCAL_API_HUB_ID": identity.hub_id,
-                        "EIDOLON_LOCAL_API_HUB_DESCRIPTOR_URI": self._descriptor_uri(),
-                        "EIDOLON_LOCAL_API_HUB_TLS_CERTIFICATE": str(self._hub_certificate_path()),
+                        "EIDOLON_LOCAL_API_OWNER_DOMAIN_ID": owner_domain_id,
+                        "EIDOLON_LOCAL_API_OWNER_DOMAIN_DESCRIPTOR_URI": self._descriptor_uri(),
+                        "EIDOLON_LOCAL_API_OWNER_DOMAIN_DESCRIPTOR": str(
+                            self._owner_descriptor_path()
+                        ),
+                        "EIDOLON_LOCAL_API_OWNER_ROOT_CERTIFICATE": str(
+                            self._owner_root_certificate_path()
+                        ),
+                        "EIDOLON_LOCAL_API_AUTHORITY_SIGNING_CERTIFICATE": str(
+                            self._authority_signing_certificate_path()
+                        ),
                     },
                     label="generated environment",
                 )
@@ -216,6 +229,7 @@ class LocalProductSource:
         root = self.profile.paths.config_root
         app = self._require_app_access()
         identity = self._host_lan_identity()
+        owner_domain_id = self._owner_domain_id()
         rendered: dict[Path, bytes] = {}
         for name in source_assets.SETTING_INPUT_NAMES:
             value = source_assets.translate_fhs(
@@ -239,7 +253,9 @@ class LocalProductSource:
         template = hub_settings_template(self._source_revisions(), self._read_exact_file)
         rendered[root / "settings" / source_assets.HUB_SETTINGS_NAME] = source_assets.translate_fhs(
             self.profile,
-            render_hub_settings(template.text, identity, app.hub_https_port),
+            render_hub_settings(
+                template.text, owner_domain_id, identity, app.hub_https_port
+            ),
         ).encode("utf-8")
         rendered[root / "settings/channel-provider.yaml"] = source_assets.translate_fhs(
             self.profile,
@@ -303,6 +319,7 @@ class LocalProductSource:
 
         app = self._require_app_access()
         identity = self._host_lan_identity()
+        owner_domain_id = self._owner_domain_id()
         ports = source_assets.PORTS
         backend = self.health()
         interface_addresses = lan_observation.interface_addresses(self.runner)
@@ -352,16 +369,21 @@ class LocalProductSource:
             str(ReadinessFact.HOST_IDENTITY_MATERIAL): self._host_identity_is_private(),
             str(ReadinessFact.HUB_TLS_IDENTITY): self._hub_tls_matches(identity),
             str(ReadinessFact.HUB_SETTINGS_BOUND): hub_settings_are_bound(
-                settings, identity, app.hub_https_port
+                settings, owner_domain_id, identity, app.hub_https_port
             ),
             str(ReadinessFact.HUB_LAN_REACHABLE): bool(hub["healthy"]),
             str(ReadinessFact.LOCAL_API_REACHABLE): bool(local_api["healthy"]),
             str(ReadinessFact.LOCAL_API_TARGETS_HUB): (
-                local_api_values.get("EIDOLON_LOCAL_API_HUB_ID") == identity.hub_id
-                and local_api_values.get("EIDOLON_LOCAL_API_HUB_DESCRIPTOR_URI")
+                local_api_values.get("EIDOLON_LOCAL_API_OWNER_DOMAIN_ID")
+                == owner_domain_id
+                and local_api_values.get("EIDOLON_LOCAL_API_OWNER_DOMAIN_DESCRIPTOR_URI")
                 == self._descriptor_uri()
-                and local_api_values.get("EIDOLON_LOCAL_API_HUB_TLS_CERTIFICATE")
-                == str(self._hub_certificate_path())
+                and local_api_values.get("EIDOLON_LOCAL_API_OWNER_DOMAIN_DESCRIPTOR")
+                == str(self._owner_descriptor_path())
+                and local_api_values.get("EIDOLON_LOCAL_API_OWNER_ROOT_CERTIFICATE")
+                == str(self._owner_root_certificate_path())
+                and local_api_values.get("EIDOLON_LOCAL_API_AUTHORITY_SIGNING_CERTIFICATE")
+                == str(self._authority_signing_certificate_path())
             ),
             str(ReadinessFact.LIVEKIT_CLIENT_ORIGIN): (
                 channel_values.get("EIDOLON_LIVEKIT_CLIENT_URL") == app.livekit_client_url
@@ -400,14 +422,22 @@ class LocalProductSource:
 
     def _hub_tls_matches(self, identity: HostLanIdentity) -> bool:
         try:
-            validate_hub_tls_identity(
-                self._hub_certificate_path().read_bytes(),
-                self._hub_private_key_path().read_bytes(),
-                identity,
+            leaf = x509.load_pem_x509_certificate(self._hub_certificate_path().read_bytes())
+            root = x509.load_pem_x509_certificate(
+                self._owner_root_certificate_path().read_bytes()
             )
-        except (OSError, HostIdentityError):
+            sans = leaf.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+            public = root.public_key()
+            if not isinstance(public, ec.EllipticCurvePublicKey):
+                return False
+            public.verify(
+                leaf.signature,
+                leaf.tbs_certificate_bytes,
+                ec.ECDSA(leaf.signature_hash_algorithm),
+            )
+        except (OSError, ValueError, x509.ExtensionNotFound):
             return False
-        return True
+        return sans.get_values_for_type(x509.DNSName) == [identity.hub_hostname]
 
     def _host_identity_is_private(self) -> bool:
         path = self._host_identity_path()
@@ -479,16 +509,52 @@ class LocalProductSource:
     def _hub_private_key_path(self) -> Path:
         return self.profile.paths.config_root / "tls/hub.key"
 
-    def _ensure_hub_tls_identity(self) -> None:
-        # A workstation re-derives its material when the Host identity under it
-        # changes; a product Host refuses, because there a mismatch means
-        # something replaced material that is written once.
+    def _owner_material_root(self) -> Path:
+        return self.profile.paths.config_root / "owner-domain-private"
+
+    def _owner_descriptor_path(self) -> Path:
+        return self.profile.paths.bootstrap_state_root / "owner_domain_descriptor.json"
+
+    def _owner_root_certificate_path(self) -> Path:
+        return self.profile.paths.bootstrap_state_root / "owner_domain_root_ca.pem"
+
+    def _authority_signing_certificate_path(self) -> Path:
+        return self.profile.paths.bootstrap_state_root / "authority_signing_certificate.pem"
+
+    def _owner_domain_id(self) -> str:
         try:
-            ensure_hub_tls_identity(
-                self._hub_certificate_path(),
-                self._hub_private_key_path(),
+            value = json.loads(self._owner_descriptor_path().read_text(encoding="utf-8"))
+            owner_domain_id = value["owner_domain_id"]
+        except (OSError, KeyError, TypeError, ValueError) as exc:
+            raise OperationsError("Mac Owner Domain descriptor is unreadable") from exc
+        if not isinstance(owner_domain_id, str) or not owner_domain_id:
+            raise OperationsError("Mac Owner Domain descriptor has no Owner identity")
+        return owner_domain_id
+
+    def _ensure_owner_domain_assets(self) -> OwnerDomainAssets:
+        try:
+            assets = ensure_owner_domain_assets(
+                self._owner_material_root(),
                 self._host_lan_identity(),
-                rotate_on_mismatch=True,
+                self._require_app_access().hub_https_port,
             )
-        except HubAssetError as exc:
-            raise OperationsError(f"Mac Hub TLS identity is {exc}") from exc
+        except OwnerDomainAssetError as exc:
+            raise OperationsError(f"Mac Owner Domain material is {exc}") from exc
+        for path, value in (
+            (self._hub_certificate_path(), assets.tls_certificate),
+            (self._hub_private_key_path(), assets.tls_private_key),
+            (self._owner_descriptor_path(), assets.descriptor),
+            (self._owner_root_certificate_path(), assets.owner_root_certificate),
+            (
+                self._authority_signing_certificate_path(),
+                assets.authority_signing_certificate,
+            ),
+        ):
+            atomic_private_file(path, value)
+        return assets
+
+    # Kept as an internal call alias until the local-product tests complete the
+    # same coordinated cutover; it now issues Owner-scoped material, never a
+    # self-signed Host trust anchor.
+    def _ensure_hub_tls_identity(self) -> None:
+        self._ensure_owner_domain_assets()

@@ -42,7 +42,7 @@ def fixed_app(payload: Mapping[str, object]) -> dict[str, object]:
     value = payload.get("app")
     expected = {
         "host_id",
-        "hub_id",
+        "owner_domain_id",
         "hub_hostname",
         "hub_https_port",
         "hub_origin",
@@ -61,13 +61,18 @@ def fixed_app(payload: Mapping[str, object]) -> dict[str, object]:
     hub_hostname = f"{hub_id}.local"
     port = value.get("hub_https_port")
     if (
-        value.get("hub_id") != hub_id
-        or value.get("hub_hostname") != hub_hostname
+        value.get("hub_hostname") != hub_hostname
         or type(port) is not int
         or not 1 <= port <= 65535
         or value.get("hub_origin") != f"https://{hub_hostname}:{port}"
     ):
         raise TargetError("Host application Hub identity is not Host-bound")
+    owner_domain_id = value.get("owner_domain_id")
+    if (
+        not isinstance(owner_domain_id, str)
+        or re.fullmatch(r"owner-[0-9a-f]{20}", owner_domain_id) is None
+    ):
+        raise TargetError("Host application Owner Domain ID is invalid")
     # A declared address is honoured for static setups; otherwise the Host
     # reports the one it currently answers on, because an address it once had
     # tells an operator nothing about whether devices can reach it now.

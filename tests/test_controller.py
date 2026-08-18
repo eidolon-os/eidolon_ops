@@ -36,7 +36,10 @@ DEPLOY_PACKAGE_DIGEST = "4a0a4e9c29dbbebd3c4ddbd73fccbee20aba0cdf1cc9360bbe9fafc
 # is read out of Hub's own pinned commit, so the stand-in answers to the source
 # as well as to the path — Hub is not the only component with a settings.yaml.
 HUB_SETTINGS_TEMPLATE_SOURCE, HUB_SETTINGS_TEMPLATE_PATH = HUB_SETTINGS_TEMPLATE_CONTRACT
-HUB_SETTINGS_TEMPLATE = "hub_id: eidolon-hub-local\npublic_base_url: https://eidolon-hub.local\n"
+HUB_SETTINGS_TEMPLATE = (
+    "owner_domain_id: owner-local\n"
+    "descriptor_uri: https://eidolon-hub.local/api/device-onboarding/v1/descriptor\n"
+)
 
 
 def _read_target(command: tuple[str, ...]) -> tuple[str, str]:
@@ -871,8 +874,8 @@ def test_unified_pi_stage_renders_host_bound_application_assets(config) -> None:
                 return ProcessResult(
                     0,
                     "onboarding:\n"
-                    "  hub_id: eidolon-hub-local\n"
-                    "  public_base_url: https://eidolon-hub.local\n"
+                    "  owner_domain_id: owner-local\n"
+                    "  descriptor_uri: https://eidolon-hub.local/api/device-onboarding/v1/descriptor\n"
                     "discovery:\n  mdns:\n    enabled: true\n"
                     "channel_provider:\n  contract_url: http://127.0.0.1:8767/v1\n"
                     "persistence:\n  path: $EIDOLON_STATE_ROOT/hub/eidolon-hub.sqlite3\n",
@@ -896,17 +899,19 @@ def test_unified_pi_stage_renders_host_bound_application_assets(config) -> None:
     controller.host_layer.stage_install_files("host-bound", stage)
     payload = controller.host_layer.target_payload()
 
-    assert len(transport.uploaded_bytes) == len(config.install_files) + 6
+    assert len(transport.uploaded_bytes) == len(config.install_files) + 9
     app = payload["app"]
     assert isinstance(app, dict)
-    assert app["hub_id"] != "eidolon-hub-local"
+    assert str(app["owner_domain_id"]).startswith("owner-")
     assert str(app["hub_hostname"]).endswith(".local")
     assert str(app["hub_origin"]).endswith(":8443")
     rendered_local = transport.uploaded_bytes[f"{stage}/local-api.env"].decode()
     rendered_hub = transport.uploaded_bytes[f"{stage}/hub.generated.yaml"].decode()
-    assert f"EIDOLON_LOCAL_API_HUB_ID={app['hub_id']}" in rendered_local
-    assert f"hub_id: {app['hub_id']}" in rendered_hub
-    assert f"public_base_url: {app['hub_origin']}" in rendered_hub
+    assert f"EIDOLON_LOCAL_API_OWNER_DOMAIN_ID={app['owner_domain_id']}" in rendered_local
+    assert f"owner_domain_id: {app['owner_domain_id']}" in rendered_hub
+    assert f"descriptor_uri: {app['hub_origin']}/api/device-onboarding/v1/descriptor" in rendered_hub
+    assert f"{stage}/owner-domain-root.key.pem" not in transport.uploaded_bytes
+    assert f"{stage}/authority-signing.key.pem" not in transport.uploaded_bytes
     assert b"--listen-port 8443" in transport.uploaded_bytes[f"{stage}/hub-ingress.service"]
 
 

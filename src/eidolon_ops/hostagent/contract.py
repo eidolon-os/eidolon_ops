@@ -128,6 +128,24 @@ HOST_APPLICATION_INPUTS = {
     ),
     "hub.crt": (Path("/etc/eidolon/tls/hub.crt"), "root", "eidolon", 0o640),
     "hub.key": (Path("/etc/eidolon/tls/hub.key"), "root", "eidolon", 0o640),
+    "owner-domain-descriptor.json": (
+        Path("/var/lib/eidolon-bootstrap/owner_domain_descriptor.json"),
+        "root",
+        "eidolon",
+        0o640,
+    ),
+    "owner-domain-root-ca.pem": (
+        Path("/var/lib/eidolon-bootstrap/owner_domain_root_ca.pem"),
+        "root",
+        "eidolon",
+        0o640,
+    ),
+    "authority-signing-certificate.pem": (
+        Path("/var/lib/eidolon-bootstrap/authority_signing_certificate.pem"),
+        "root",
+        "eidolon",
+        0o640,
+    ),
     "hub-ingress.py": (
         Path("/usr/local/libexec/eidolon-hub-lan-ingress"),
         "root",
@@ -161,6 +179,7 @@ INSTALL_INPUTS = {**SECRET_INPUTS, **HOST_APPLICATION_INPUTS}
 #: it, and material is written once.
 REFRESHABLE_HOST_APPLICATION_INPUTS = (
     "hub.generated.yaml",
+    "owner-domain-descriptor.json",
     "hub-ingress.py",
     "hub-ingress.service",
     "hub-service-override.conf",

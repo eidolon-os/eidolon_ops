@@ -111,21 +111,35 @@ def test_the_derived_input_is_rendered_from_the_template_its_component_declared(
     topology,
 ) -> None:
     derived = [entry for entry in topology.install_inputs if not entry.is_operator_supplied]
+    templated = [entry for entry in derived if entry.template is not None]
 
     # One derived input exists, and Ops renders it from a hard-coded address.
     # That address has to be the one the owning component published, because a
     # component that cannot move its own template is a component whose deployed
     # defaults someone else owns — which is where Hub's settings were, in
     # eidolon_kernel, until they moved back here.
-    assert [(entry.component_id, entry.template) for entry in derived] == [
+    assert [(entry.component_id, entry.template) for entry in templated] == [
         HUB_SETTINGS_TEMPLATE
     ]
-    assert derived[0].install_path == Path(HUB_SETTINGS_DESTINATION)
+    assert templated[0].install_path == Path(HUB_SETTINGS_DESTINATION)
     destination, owner, group, mode = host_contract.HOST_APPLICATION_INPUTS[
         "hub.generated.yaml"
     ]
-    assert destination == derived[0].install_path
-    assert (owner, group, mode) == (derived[0].owner, derived[0].group, derived[0].mode)
+    assert destination == templated[0].install_path
+    assert (owner, group, mode) == (
+        templated[0].owner,
+        templated[0].group,
+        templated[0].mode,
+    )
+    public_owner_material = {
+        entry.name: entry for entry in derived if entry.kind == "identity"
+    }
+    assert set(public_owner_material) == {
+        "owner_domain_descriptor",
+        "owner_domain_root_certificate",
+        "authority_signing_certificate",
+    }
+    assert all(entry.group == "eidolon" and entry.mode == 0o640 for entry in public_owner_material.values())
 
 
 def test_the_backed_up_authorities_are_the_ones_components_named(topology) -> None:

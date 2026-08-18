@@ -66,13 +66,21 @@ HUB_CERTIFICATE = Path("/etc/eidolon/tls/hub.crt")
 
 HUB_PRIVATE_KEY = Path("/etc/eidolon/tls/hub.key")
 
+OWNER_DESCRIPTOR = Path("/var/lib/eidolon-bootstrap/owner_domain_descriptor.json")
+
+OWNER_ROOT_CERTIFICATE = Path("/var/lib/eidolon-bootstrap/owner_domain_root_ca.pem")
+
+AUTHORITY_SIGNING_CERTIFICATE = Path(
+    "/var/lib/eidolon-bootstrap/authority_signing_certificate.pem"
+)
+
 LOCAL_API_ENV = Path("/etc/eidolon/local-api.env")
 
 CHANNEL_ENV = Path("/etc/eidolon/channel.env")
 
 _LOCAL_API_PORT = 9002
 
-_HUB_SERVICE_TYPE = "_eidolon-hub._tcp"
+_HUB_SERVICE_TYPE = "_eidolon-owner._tcp"
 
 _LOCAL_API_SERVICE_TYPE = "_eidolon-local-api._tcp"
 
@@ -192,8 +200,23 @@ def hub_tls_matches(hostname: str) -> bool:
         context.load_cert_chain(HUB_CERTIFICATE, HUB_PRIVATE_KEY)
     except (KeyError, OSError, ssl.SSLError, ValueError):
         return False
+    chain = primitives.run(
+        (
+            "/usr/bin/openssl",
+            "verify",
+            "-CAfile",
+            str(OWNER_ROOT_CERTIFICATE),
+            str(HUB_CERTIFICATE),
+        ),
+        timeout=15,
+    )
     instant = time.time()
-    return sans == (("DNS", hostname),) and starts <= instant and expires > instant
+    return (
+        sans == (("DNS", hostname),)
+        and starts <= instant
+        and expires > instant
+        and chain.returncode == 0
+    )
 
 def service_records(service_type: str, instance: str | None = None) -> list[list[str]]:
     """Resolve one mDNS service type, the way a device on the LAN would."""
@@ -272,7 +295,7 @@ def app_ready(payload: Mapping[str, object]) -> dict[str, object]:
     worker_contract = fixed_readiness(payload)
     app = app_contract.fixed_app(payload)
     hostname = str(app["hub_hostname"])
-    hub_id = str(app["hub_id"])
+    owner_domain_id = str(app["owner_domain_id"])
     address = str(app["lan_ipv4"])
     hub_port = int(app["hub_https_port"])
     origin = str(app["hub_origin"])
@@ -291,6 +314,15 @@ def app_ready(payload: Mapping[str, object]) -> dict[str, object]:
         "hub_settings": primitives.private_file_check(HUB_SETTINGS, 0o640, "root", "eidolon"),
         "hub_certificate": primitives.private_file_check(HUB_CERTIFICATE, 0o640, "root", "eidolon"),
         "hub_private_key": primitives.private_file_check(HUB_PRIVATE_KEY, 0o640, "root", "eidolon"),
+        "owner_descriptor": primitives.private_file_check(
+            OWNER_DESCRIPTOR, 0o640, "root", "eidolon"
+        ),
+        "owner_root_certificate": primitives.private_file_check(
+            OWNER_ROOT_CERTIFICATE, 0o640, "root", "eidolon"
+        ),
+        "authority_signing_certificate": primitives.private_file_check(
+            AUTHORITY_SIGNING_CERTIFICATE, 0o640, "root", "eidolon"
+        ),
     }
     settings = primitives.read_text(HUB_SETTINGS) or ""
     local_api_values = primitives.environment_values_or_empty(LOCAL_API_ENV)
@@ -306,7 +338,7 @@ def app_ready(payload: Mapping[str, object]) -> dict[str, object]:
         hub_health = {"error": str(exc)}
         hub_descriptor = {}
     resolved_ok, resolved = resolved_addresses(hostname)
-    hub_records = service_records(_HUB_SERVICE_TYPE, hub_id)
+    hub_records = service_records(_HUB_SERVICE_TYPE, owner_domain_id)
     local_api_records = service_records(_LOCAL_API_SERVICE_TYPE)
     livekit_origin = urlparse(str(app["livekit_client_url"]))
     livekit_port = livekit_origin.port or (443 if livekit_origin.scheme == "wss" else 80)
@@ -351,21 +383,28 @@ def app_ready(payload: Mapping[str, object]) -> dict[str, object]:
         "hub_tls_identity": (
             bool(files["hub_certificate"]["healthy"])
             and bool(files["hub_private_key"]["healthy"])
+            and bool(files["owner_root_certificate"]["healthy"])
             and hub_tls_matches(hostname)
         ),
         "hub_settings_bound": (
             bool(files["hub_settings"]["healthy"])
-            and f"hub_id: {hub_id}" in settings
-            and f"public_base_url: {origin}" in settings
-            and "hub_id: eidolon-hub-local" not in settings
+            and f"owner_domain_id: {owner_domain_id}" in settings
+            and f"descriptor_uri: {descriptor_uri}" in settings
+            and "owner_domain_id: owner-local" not in settings
         ),
         "hub_lan_reachable": hub_health.get("status") == "ok",
         "local_api_reachable": bool(local_api["healthy"]),
         "local_api_targets_hub": (
-            local_api_values.get("EIDOLON_LOCAL_API_HUB_ID") == hub_id
-            and local_api_values.get("EIDOLON_LOCAL_API_HUB_DESCRIPTOR_URI") == descriptor_uri
-            and local_api_values.get("EIDOLON_LOCAL_API_HUB_TLS_CERTIFICATE")
-            == str(HUB_CERTIFICATE)
+            local_api_values.get("EIDOLON_LOCAL_API_OWNER_DOMAIN_ID")
+            == owner_domain_id
+            and local_api_values.get("EIDOLON_LOCAL_API_OWNER_DOMAIN_DESCRIPTOR_URI")
+            == descriptor_uri
+            and local_api_values.get("EIDOLON_LOCAL_API_OWNER_DOMAIN_DESCRIPTOR")
+            == str(OWNER_DESCRIPTOR)
+            and local_api_values.get("EIDOLON_LOCAL_API_OWNER_ROOT_CERTIFICATE")
+            == str(OWNER_ROOT_CERTIFICATE)
+            and local_api_values.get("EIDOLON_LOCAL_API_AUTHORITY_SIGNING_CERTIFICATE")
+            == str(AUTHORITY_SIGNING_CERTIFICATE)
         ),
         "livekit_client_origin": (
             channel_values.get("EIDOLON_LIVEKIT_CLIENT_URL") == app["livekit_client_url"]
@@ -383,8 +422,11 @@ def app_ready(payload: Mapping[str, object]) -> dict[str, object]:
             for value in foundation.values()
         ),
         "hub_descriptor_published": (
-            hub_descriptor.get("hub_id") == hub_id
-            and hub_descriptor.get("descriptor_uri") == descriptor_uri
+            bool(files["owner_descriptor"]["healthy"])
+            and bool(files["authority_signing_certificate"]["healthy"])
+            and hub_descriptor.get("owner_domain_id") == owner_domain_id
+            and isinstance(hub_descriptor.get("signature"), str)
+            and isinstance(hub_descriptor.get("directory_revision"), int)
         ),
         "hub_mdns_service": bool(hub_records)
         and all(
@@ -404,6 +446,7 @@ def app_ready(payload: Mapping[str, object]) -> dict[str, object]:
     return {
         "status": "app_ready" if all(checks.values()) else "degraded",
         "host_id": app["host_id"],
+        "owner_domain_id": owner_domain_id,
         "lan_ipv4": address,
         "checks": checks,
         "units": units,

@@ -1280,7 +1280,7 @@ def _app_contract(**overrides: object) -> dict[str, object]:
     suffix = host_id.removeprefix("ehost-")
     return {
         "host_id": host_id,
-        "hub_id": f"eidolon-hub-{suffix}",
+        "owner_domain_id": "owner-0123456789abcdefabcd",
         "hub_hostname": f"eidolon-hub-{suffix}.local",
         "hub_https_port": 8443,
         "hub_origin": f"https://eidolon-hub-{suffix}.local:8443",
@@ -1317,7 +1317,14 @@ def test_the_readiness_reporter_finds_the_address_the_contract_carries(monkeypat
     monkeypatch.setattr(app_contract, "observed_lan_address", lambda: IPv4Address("192.168.1.26"))
     app = app_contract.fixed_app({"app": _app_contract()})
 
-    for key in ("hub_hostname", "hub_id", "lan_ipv4", "hub_https_port", "hub_origin", "host_id"):
+    for key in (
+        "hub_hostname",
+        "owner_domain_id",
+        "lan_ipv4",
+        "hub_https_port",
+        "hub_origin",
+        "host_id",
+    ):
         assert key in app
 
 
@@ -1496,13 +1503,13 @@ def test_a_refresh_takes_away_what_a_release_no_longer_installs(tmp_path, monkey
     """Dropping an asset from a release stops it being written, not being there.
 
     The Hub settings copy at /etc/eidolon/hub.yaml is the case this exists for:
-    it is read by nothing, it carries the template's placeholder hub_id, and a
+    it is read by nothing, it carries a retired template placeholder, and a
     Host installed before it was dropped keeps it until someone removes it.
     """
 
     legacy = tmp_path / "etc/eidolon/hub.yaml"
     legacy.parent.mkdir(parents=True)
-    legacy.write_text("onboarding:\n  hub_id: eidolon-hub-local\n", encoding="utf-8")
+    legacy.write_text("onboarding:\n  owner_domain_id: owner-local\n", encoding="utf-8")
     monkeypatch.setattr(contract, "LEGACY_SYSTEM_ASSETS", (Path("/etc/eidolon/hub.yaml"),))
 
     assert host_application.remove_legacy_system_assets(tmp_path) == ["/etc/eidolon/hub.yaml"]

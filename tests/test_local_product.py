@@ -208,8 +208,8 @@ def test_prepare_materializes_one_canonical_mac_product_contract(
                     # states as a variable and this profile resolves.
                     return ProcessResult(
                         0,
-                        "onboarding:\n  hub_id: eidolon-hub-local\n"
-                        "  public_base_url: https://eidolon-hub.local\n"
+                        "onboarding:\n  owner_domain_id: owner-local\n"
+                        "  descriptor_uri: https://eidolon-hub.local/api/device-onboarding/v1/descriptor\n"
                         "persistence:\n  path: $EIDOLON_STATE_ROOT/hub/eidolon-hub.sqlite3\n",
                         "",
                     )
@@ -221,16 +221,6 @@ def test_prepare_materializes_one_canonical_mac_product_contract(
         local_product_module, "validate_install_input_contract", lambda *_a, **_k: None
     )
     product = LocalProductSource(profile, cast(Any, config), runner)
-
-    def create_test_tls_identity() -> None:
-        tls = profile.paths.config_root / "tls"
-        tls.mkdir(parents=True, exist_ok=True)
-        for name in ("hub.crt", "hub.key"):
-            path = tls / name
-            path.write_text("test identity\n", encoding="utf-8")
-            path.chmod(0o600)
-
-    monkeypatch.setattr(product, "_ensure_hub_tls_identity", create_test_tls_identity)
 
     result = product.prepare()
 
@@ -261,6 +251,7 @@ def test_hub_tls_identity_is_generated_validated_and_reused(tmp_path: Path) -> N
     product = _product(tmp_path, foundation_mode="external")
     tls = product.profile.paths.config_root / "tls"
     tls.mkdir(parents=True)
+    product.profile.paths.config_root.chmod(0o700)
     product.runner = SubprocessRunner()
 
     product._ensure_hub_tls_identity()
@@ -279,20 +270,15 @@ def test_hub_tls_identity_is_generated_validated_and_reused(tmp_path: Path) -> N
     assert (certificate.read_bytes(), private_key.read_bytes()) == original
 
 
-def test_hub_tls_identity_fails_closed_for_partial_or_invalid_files(tmp_path: Path) -> None:
+def test_owner_domain_private_material_fails_closed_for_partial_files(tmp_path: Path) -> None:
     product = _product(tmp_path, foundation_mode="external")
-    tls = product.profile.paths.config_root / "tls"
-    tls.mkdir(parents=True)
-    certificate = tls / "hub.crt"
-    private_key = tls / "hub.key"
+    material = product._owner_material_root()
+    material.mkdir(mode=0o700, parents=True)
+    certificate = material / "owner-domain-root-ca.pem"
     certificate.write_text("partial", encoding="utf-8")
+    certificate.chmod(0o600)
     with pytest.raises(OperationsError, match="incomplete"):
         product._ensure_hub_tls_identity()
-
-    private_key.write_text("invalid", encoding="utf-8")
-    product._ensure_hub_tls_identity()
-    decoded = ssl._ssl._test_decode_cert(str(certificate))
-    assert ("DNS", product._host_lan_identity().hub_hostname) in decoded["subjectAltName"]
 
 
 def test_product_health_uses_canonical_endpoints(monkeypatch, tmp_path: Path) -> None:
@@ -339,16 +325,19 @@ def test_app_ready_requires_device_reachable_contract(monkeypatch, tmp_path: Pat
     root = product.profile.paths.config_root
     (root / "env").mkdir(parents=True)
     (root / "settings").mkdir(parents=True)
+    root.chmod(0o700)
     product.profile.paths.log_root.joinpath("admin").mkdir(parents=True)
-    certificate = root / "tls/hub.crt"
     identity = product._host_lan_identity()
     origin = identity.hub_origin(8443)
     product._ensure_hub_tls_identity()
+    owner_domain_id = product._owner_domain_id()
     (root / "env/local-api.env").write_text(
-        f"EIDOLON_LOCAL_API_HUB_ID={identity.hub_id}\n"
-        "EIDOLON_LOCAL_API_HUB_DESCRIPTOR_URI="
+        f"EIDOLON_LOCAL_API_OWNER_DOMAIN_ID={owner_domain_id}\n"
+        "EIDOLON_LOCAL_API_OWNER_DOMAIN_DESCRIPTOR_URI="
         f"{origin}/api/device-onboarding/v1/descriptor\n"
-        f"EIDOLON_LOCAL_API_HUB_TLS_CERTIFICATE={certificate}\n",
+        f"EIDOLON_LOCAL_API_OWNER_DOMAIN_DESCRIPTOR={product._owner_descriptor_path()}\n"
+        f"EIDOLON_LOCAL_API_OWNER_ROOT_CERTIFICATE={product._owner_root_certificate_path()}\n"
+        f"EIDOLON_LOCAL_API_AUTHORITY_SIGNING_CERTIFICATE={product._authority_signing_certificate_path()}\n",
         encoding="utf-8",
     )
     (root / "env/channel.env").write_text(
@@ -357,7 +346,8 @@ def test_app_ready_requires_device_reachable_contract(monkeypatch, tmp_path: Pat
         encoding="utf-8",
     )
     (root / "settings/hub.yaml").write_text(
-        f"onboarding:\n  hub_id: {identity.hub_id}\n  public_base_url: {origin}\n",
+        f"onboarding:\n  owner_domain_id: {owner_domain_id}\n"
+        f"  descriptor_uri: {origin}/api/device-onboarding/v1/descriptor\n",
         encoding="utf-8",
     )
     external_livekit = cast(Path, product.profile.external_livekit_config)

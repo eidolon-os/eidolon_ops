@@ -11,9 +11,10 @@ from pathlib import Path
 import pytest
 
 from eidolon_ops import readiness
-from eidolon_ops.host_identity import derive_host_lan_identity, generate_hub_tls_identity
+from eidolon_ops.host_identity import derive_host_lan_identity
 from eidolon_ops.hostagent import app_contract, contract, primitives, probe
 from eidolon_ops.hostagent.primitives import TargetError
+from eidolon_ops.owner_domain_assets import ensure_owner_domain_assets
 from eidolon_ops.readiness import HostKind, expected_facts, product_payload
 
 
@@ -21,7 +22,7 @@ def _app() -> dict[str, object]:
     identity = derive_host_lan_identity(b"a" * 32)
     return {
         "host_id": identity.host_id,
-        "hub_id": identity.hub_id,
+        "owner_domain_id": "owner-0123456789abcdefabcd",
         "hub_hostname": identity.hub_hostname,
         "hub_https_port": 8443,
         "hub_origin": identity.hub_origin(8443),
@@ -42,20 +43,27 @@ def _payload(app: dict[str, object]) -> dict[str, object]:
 def _materialize(monkeypatch, root: Path, app: dict[str, object]) -> None:
     """Point the agent's fixed Host paths at a directory a test can own."""
 
-    root.mkdir(parents=True, exist_ok=True)
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    root.chmod(0o700)
     identity = derive_host_lan_identity(b"a" * 32)
-    certificate, private_key = generate_hub_tls_identity(identity)
-    (root / "hub.crt").write_bytes(certificate)
-    (root / "hub.key").write_bytes(private_key)
+    owner = ensure_owner_domain_assets(root / "owner-private", identity, 8443)
+    (root / "hub.crt").write_bytes(owner.tls_certificate)
+    (root / "hub.key").write_bytes(owner.tls_private_key)
+    (root / "owner.json").write_bytes(owner.descriptor)
+    (root / "owner.pem").write_bytes(owner.owner_root_certificate)
+    (root / "signer.pem").write_bytes(owner.authority_signing_certificate)
     (root / "hub.yaml").write_text(
-        f"onboarding:\n  hub_id: {app['hub_id']}\n  public_base_url: {app['hub_origin']}\n",
+        f"onboarding:\n  owner_domain_id: {app['owner_domain_id']}\n"
+        f"  descriptor_uri: {app['hub_origin']}/api/device-onboarding/v1/descriptor\n",
         encoding="utf-8",
     )
     (root / "local-api.env").write_text(
-        f"EIDOLON_LOCAL_API_HUB_ID={app['hub_id']}\n"
-        f"EIDOLON_LOCAL_API_HUB_DESCRIPTOR_URI={app['hub_origin']}"
+        f"EIDOLON_LOCAL_API_OWNER_DOMAIN_ID={app['owner_domain_id']}\n"
+        f"EIDOLON_LOCAL_API_OWNER_DOMAIN_DESCRIPTOR_URI={app['hub_origin']}"
         "/api/device-onboarding/v1/descriptor\n"
-        f"EIDOLON_LOCAL_API_HUB_TLS_CERTIFICATE={root / 'hub.crt'}\n",
+        f"EIDOLON_LOCAL_API_OWNER_DOMAIN_DESCRIPTOR={root / 'owner.json'}\n"
+        f"EIDOLON_LOCAL_API_OWNER_ROOT_CERTIFICATE={root / 'owner.pem'}\n"
+        f"EIDOLON_LOCAL_API_AUTHORITY_SIGNING_CERTIFICATE={root / 'signer.pem'}\n",
         encoding="utf-8",
     )
     (root / "channel.env").write_text(
@@ -66,6 +74,9 @@ def _materialize(monkeypatch, root: Path, app: dict[str, object]) -> None:
     monkeypatch.setattr(probe, "HUB_SETTINGS", root / "hub.yaml")
     monkeypatch.setattr(probe, "HUB_CERTIFICATE", root / "hub.crt")
     monkeypatch.setattr(probe, "HUB_PRIVATE_KEY", root / "hub.key")
+    monkeypatch.setattr(probe, "OWNER_DESCRIPTOR", root / "owner.json")
+    monkeypatch.setattr(probe, "OWNER_ROOT_CERTIFICATE", root / "owner.pem")
+    monkeypatch.setattr(probe, "AUTHORITY_SIGNING_CERTIFICATE", root / "signer.pem")
     monkeypatch.setattr(probe, "LOCAL_API_ENV", root / "local-api.env")
     monkeypatch.setattr(probe, "CHANNEL_ENV", root / "channel.env")
     monkeypatch.setattr(probe, "MDNS_DEFINITION", root / "hub.yaml")
@@ -86,7 +97,7 @@ def bootstrap_socket(monkeypatch):
 
 def _healthy_run(app: dict[str, object]):
     hub_record = (
-        f"=;wlan0;IPv4;{app['hub_id']};_eidolon-hub._tcp;local;"
+        f"=;wlan0;IPv4;{app['owner_domain_id']};_eidolon-owner._tcp;local;"
         f"{app['hub_hostname']};{app['lan_ipv4']};8443;"
         f'"descriptor_uri={app["hub_origin"]}/api/device-onboarding/v1/descriptor"\n'
     )
@@ -100,7 +111,7 @@ def _healthy_run(app: dict[str, object]):
         if program.endswith("avahi-resolve-host-name"):
             output = f"{app['hub_hostname']}\t{app['lan_ipv4']}\n"
         elif program.endswith("avahi-browse"):
-            output = hub_record if command[-1] == "_eidolon-hub._tcp" else local_api_record
+            output = hub_record if command[-1] == "_eidolon-owner._tcp" else local_api_record
         elif program.endswith("ip"):
             output = f"2: wlan0 inet {app['lan_ipv4']}/24 brd\n"
         elif program.endswith("ss"):
@@ -205,8 +216,9 @@ def test_app_ready_attests_every_declared_fact(
             {"status": "ok"}
             if path == "/health"
             else {
-                "hub_id": app["hub_id"],
-                "descriptor_uri": app["hub_origin"] + "/api/device-onboarding/v1/descriptor",
+                "owner_domain_id": app["owner_domain_id"],
+                "directory_revision": 1,
+                "signature": "A" * 86,
             }
         ),
     )
@@ -321,7 +333,7 @@ def test_target_environment_reader_rejects_missing_and_ambiguous_files(tmp_path:
     ("field", "value", "message"),
     [
         ("host_id", "bad", "Host ID"),
-        ("hub_id", "eidolon-hub-local", "not Host-bound"),
+        ("owner_domain_id", "owner-local", "Owner Domain ID"),
         ("hub_https_port", 0, "not Host-bound"),
         ("lan_ipv4", "not-an-ip", "LAN address"),
         ("lan_ipv4", "127.0.0.1", "private IPv4"),
