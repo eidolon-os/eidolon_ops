@@ -96,6 +96,12 @@ def test_platform_checks_cover_os_init_memory_and_disk(monkeypatch) -> None:
 
 
 def test_foundation_doctor_composes_every_gate(monkeypatch, tmp_path: Path) -> None:
+    # A Host that keeps its journal in RAM is degraded, so the gate has to be
+    # given a Host that does not — otherwise this asserts the wrong failure.
+    journal = tmp_path / "journal" / "abc123"
+    journal.mkdir(parents=True)
+    (journal / "system.journal").write_bytes(b"")
+    monkeypatch.setattr(host_foundation, "JOURNAL_DIRECTORY", tmp_path / "journal")
     evidence = tmp_path / "foundation.json"
     contract = foundation_payload()
     evidence_document = {
@@ -339,6 +345,10 @@ def test_foundation_install_runs_locked_idempotent_phases(monkeypatch, tmp_path:
     monkeypatch.setattr(host_foundation, "os_release", lambda: {"VERSION_ID": "13"})
     monkeypatch.setattr(host_foundation, "FOUNDATION_LOCK", tmp_path / "foundation.lock")
     monkeypatch.setattr(host_foundation, "FOUNDATION_EVIDENCE", tmp_path / "evidence.json")
+    monkeypatch.setattr(
+        host_foundation, "JOURNAL_PERSISTENCE", tmp_path / "journald.conf.d/50-eidolon.conf"
+    )
+    monkeypatch.setattr(host_foundation, "JOURNAL_DIRECTORY", tmp_path / "journal")
     monkeypatch.setattr(
         host_foundation, "foundation_platform_checks",
         lambda: {"linux": True, "aarch64": True, "capacity": True},
@@ -677,3 +687,94 @@ def test_target_main_routes_all_actions_and_errors(monkeypatch, capsys) -> None:
     assert agent_main.main(("unknown", encoded)) == 1
     assert json.loads(capsys.readouterr().err)["status"] == "failed"
     assert agent_main.main(("only-one",)) == 2
+
+
+def test_a_host_that_forgets_why_it_failed_is_degraded(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """The check that turns an unanswerable incident into a reported fault.
+
+    Raspberry Pi OS keeps the journal in RAM to spare the SD card, so every
+    restart erases the record of whatever went wrong before it. A Host in that
+    state looks perfectly healthy right up until someone asks it a question
+    about the past — which is exactly when a Channel worker that stopped
+    taking jobs became uninvestigable.
+    """
+
+    monkeypatch.setattr(host_foundation, "JOURNAL_DIRECTORY", tmp_path / "absent")
+
+    assert host_foundation.journal_is_persistent() is False
+
+    # And it is the journal on disk that answers, not the drop-in: a file that
+    # is present but outranked, or one journald never reloaded, leaves the
+    # evidence in RAM exactly as if it had never been written.
+    written = tmp_path / "journal"
+    (written / "abc123").mkdir(parents=True)
+    monkeypatch.setattr(host_foundation, "JOURNAL_DIRECTORY", written)
+    assert host_foundation.journal_is_persistent() is False
+
+    (written / "abc123" / "system.journal").write_bytes(b"")
+    assert host_foundation.journal_is_persistent() is True
+
+
+def test_persistent_journal_is_bounded_because_the_default_it_replaces_had_a_reason(
+) -> None:
+    content = host_foundation.JOURNAL_PERSISTENCE_CONTENT
+
+    assert "Storage=persistent" in content
+    # The Pi OS default exists to spare a finite card. Buying back the ability
+    # to diagnose must not turn into an unbounded log that fills it.
+    for bound in ("SystemMaxUse=", "SystemKeepFree=", "MaxRetentionSec="):
+        assert bound in content
+    # /etc outranks the /usr/lib drop-in it is there to override.
+    assert str(host_foundation.JOURNAL_PERSISTENCE).startswith("/etc/")
+
+
+def test_installing_persistence_tells_journald_rather_than_only_writing_a_file(
+    monkeypatch, tmp_path: Path
+) -> None:
+    commands: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        host_foundation, "JOURNAL_PERSISTENCE", tmp_path / "conf.d/50-eidolon.conf"
+    )
+    monkeypatch.setattr(host_foundation, "JOURNAL_DIRECTORY", tmp_path / "journal")
+    monkeypatch.setattr(
+        primitives, "checked",
+        lambda _operation, command, **_kwargs: (
+            commands.append(tuple(command))
+            or subprocess.CompletedProcess(command, 0, "", "")
+        ),
+    )
+    monkeypatch.setattr(primitives, "run", lambda *_a, **_k: None)
+
+    host_foundation_install.install_journal_persistence(
+        host_foundation.JOURNAL_PERSISTENCE_CONTENT
+    )
+
+    # Writing the file and stopping there would leave a Host that reads as
+    # fixed while its logs are still in memory.
+    assert any("systemd-journald" in " ".join(command) for command in commands)
+    assert host_foundation.JOURNAL_PERSISTENCE.is_file()
+
+
+def test_journal_persistence_survives_a_reset_like_the_rest_of_the_foundation(
+) -> None:
+    """A reset returns the product to clean, not the machine to factory.
+
+    The foundation — packages, pinned binaries, the evidence file — is
+    deliberately outside the reset roots, and journal persistence belongs with
+    it. Removing it would make a Host undiagnosable again at exactly the
+    moment someone is reinstalling because something went wrong, which is the
+    opposite of why it is installed.
+    """
+
+    assert host_foundation.JOURNAL_PERSISTENCE not in set(contract.MANAGED_SYSTEM_ASSETS)
+    assert not any(
+        root == host_foundation.JOURNAL_PERSISTENCE
+        or root in host_foundation.JOURNAL_PERSISTENCE.parents
+        for root in contract.RESET_AUTHORITY_ROOTS
+    )
+    assert not any(
+        root in host_foundation.JOURNAL_PERSISTENCE.parents
+        for root in contract.RESET_DEPLOYMENT_ROOTS
+    )

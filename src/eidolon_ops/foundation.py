@@ -7,6 +7,7 @@ digest is a reviewed release change, not an operator-side configuration tweak.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from pathlib import Path
 
 FOUNDATION_PROFILE = "raspberry-pi-os-debian-arm64-v2"
 FOUNDATION_ARCHITECTURE = "aarch64"
@@ -75,6 +76,40 @@ FOUNDATION_SERVICES = (
     "avahi-daemon.service",
 )
 
+#: Where the Host's own account of itself is kept, and how much of it.
+#:
+#: Raspberry Pi OS ships /usr/lib/systemd/journald.conf.d/40-rpi-volatile-storage.conf,
+#: which sets Storage=volatile so an SD card is not worn out by logging. The
+#: cost is that the journal lives in RAM and is gone at the next boot — so a
+#: Host cannot say anything about a failure that preceded a restart, and the
+#: usual first move in diagnosing one ("what did it say before it went?")
+#: returns nothing. That is how the Channel worker's stall stayed
+#: uninvestigated: by the time anyone looked, the evidence had been rebooted
+#: away.
+#:
+#: Persistence belongs to the foundation rather than to a release: it has to
+#: hold before anything is installed, and it must not be undone by rolling
+#: back to an older release. The bounds are the other half of the decision —
+#: the Pi OS default exists for a real reason, and an unbounded journal on a
+#: finite card would be a different bug — so this trades a fixed, small slice
+#: of the card for the ability to explain a failure after the fact.
+JOURNAL_PERSISTENCE = Path("/etc/systemd/journald.conf.d/50-eidolon-persistent.conf")
+JOURNAL_PERSISTENCE_CONTENT = """\
+# Installed by eidolon-ops. Overrides the Raspberry Pi OS default of
+# Storage=volatile, under which the journal is held in RAM and lost at every
+# boot — leaving a Host unable to account for any failure that happened before
+# its last restart.
+#
+# Bounded on purpose: the default it replaces exists to spare the SD card, so
+# this buys back the ability to diagnose rather than an unlimited log.
+[Journal]
+Storage=persistent
+SystemMaxUse=512M
+SystemMaxFileSize=64M
+SystemKeepFree=1G
+MaxRetentionSec=30day
+"""
+
 
 @dataclass(frozen=True, slots=True)
 class FoundationArtifact:
@@ -138,6 +173,10 @@ def foundation_payload() -> dict[str, object]:
         "apt_mirrors": dict(APT_MIRRORS),
         "apt_packages": list(APT_PACKAGES),
         "services": list(FOUNDATION_SERVICES),
+        # Carried like every other reviewed foundation fact, and held on the
+        # Host as well so it can refuse a payload that differs from the profile
+        # it was built against. test_foundation.py keeps the two equal.
+        "journal_persistence": JOURNAL_PERSISTENCE_CONTENT,
         "artifacts": [asdict(artifact) for artifact in FOUNDATION_ARTIFACTS],
     }
 

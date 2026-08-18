@@ -70,6 +70,30 @@ FOUNDATION_PACKAGES = (
     "xz-utils",
 )
 
+#: The Pi OS default keeps the journal in RAM, so a Host forgets why anything
+#: went wrong the moment it restarts. Overridden here, bounded, because a
+#: product that cannot account for its own failures cannot be supported. The
+#: content is sent with the contract rather than restated on the Host.
+#: Where journald keeps a journal that survives a reboot. One place says
+#: it, so the check and the installer cannot come to disagree.
+JOURNAL_DIRECTORY = Path("/var/log/journal")
+JOURNAL_PERSISTENCE = Path("/etc/systemd/journald.conf.d/50-eidolon-persistent.conf")
+JOURNAL_PERSISTENCE_CONTENT = """\
+# Installed by eidolon-ops. Overrides the Raspberry Pi OS default of
+# Storage=volatile, under which the journal is held in RAM and lost at every
+# boot — leaving a Host unable to account for any failure that happened before
+# its last restart.
+#
+# Bounded on purpose: the default it replaces exists to spare the SD card, so
+# this buys back the ability to diagnose rather than an unlimited log.
+[Journal]
+Storage=persistent
+SystemMaxUse=512M
+SystemMaxFileSize=64M
+SystemKeepFree=1G
+MaxRetentionSec=30day
+"""
+
 FOUNDATION_SERVICES = (
     "bluetooth.service",
     "NetworkManager.service",
@@ -145,6 +169,7 @@ def expected_foundation() -> dict[str, object]:
         "apt_packages": list(FOUNDATION_PACKAGES),
         "services": list(FOUNDATION_SERVICES),
         "artifacts": [dict(artifact) for artifact in FOUNDATION_ARTIFACTS],
+        "journal_persistence": JOURNAL_PERSISTENCE_CONTENT,
     }
 
 def foundation_contract(payload: Mapping[str, object]) -> dict[str, object]:
@@ -194,6 +219,19 @@ def foundation_platform_checks() -> dict[str, bool]:
         "disk_free_at_least_12_gib": free_bytes >= 12 * 1024**3,
     }
 
+
+def journal_is_persistent() -> bool:
+    """Whether this Host will still know why something failed after a reboot.
+
+    Asked of the journal on disk rather than of the drop-in this installs. A
+    drop-in that is present but outranked, or one journald has not reloaded,
+    leaves the evidence in RAM exactly as if it had never been written — and
+    what an operator needs to know is where the logs are, not what a file
+    says they should be.
+    """
+
+    return any(JOURNAL_DIRECTORY.glob("*/system.journal"))
+
 def package_installed(package: str) -> bool:
     result = primitives.run(("/usr/bin/dpkg-query", "-W", "-f=${Status}", package), timeout=20)
     return result.returncode == 0 and result.stdout.strip() == "install ok installed"
@@ -221,6 +259,7 @@ def foundation_doctor(payload: Mapping[str, object]) -> dict[str, object]:
         for artifact in contract["artifacts"]
     }
     services = {unit: primitives.service_status(unit) for unit in contract["services"]}
+    journal_persistent = journal_is_persistent()
     evidence: object = None
     if FOUNDATION_EVIDENCE.is_file():
         try:
@@ -248,10 +287,15 @@ def foundation_doctor(payload: Mapping[str, object]) -> dict[str, object]:
         and all(packages.values())
         and all(bool(item["healthy"]) for item in artifacts.values())
         and all(bool(item["healthy"]) for item in services.values())
+        # A Host that cannot say why it failed last time is degraded, not
+        # merely inconvenient: it is one reboot away from being undiagnosable,
+        # and that is a property of the machine, not of the incident.
+        and journal_persistent
         and evidence_healthy
     )
     return {
         "status": "healthy" if healthy else "degraded",
+        "journal_persistent": journal_persistent,
         "profile": FOUNDATION_PROFILE,
         "platform": platform_checks,
         "packages": packages,

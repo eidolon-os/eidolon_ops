@@ -189,6 +189,39 @@ def install_uv(artifact: Mapping[str, str]) -> None:
     finally:
         requirement.unlink(missing_ok=True)
 
+def install_journal_persistence(content: str) -> None:
+    """Make this Host keep its own account of itself across a reboot.
+
+    Raspberry Pi OS keeps the journal in RAM to spare the SD card, which means
+    every restart erases the record of whatever went wrong before it. Writing
+    the drop-in is only half of it: journald has to be told, or the file sits
+    there being correct while the logs stay in memory, and the Host looks
+    fixed without being fixed.
+    """
+
+    foundation.JOURNAL_PERSISTENCE.parent.mkdir(parents=True, exist_ok=True)
+    existing = primitives.read_text(foundation.JOURNAL_PERSISTENCE)
+    if existing == content and foundation.journal_is_persistent():
+        return
+    primitives.atomic_text(foundation.JOURNAL_PERSISTENCE, content, mode=0o644)
+    foundation.JOURNAL_DIRECTORY.mkdir(parents=True, exist_ok=True)
+    primitives.checked(
+        "adopt persistent journal storage",
+        ("/usr/bin/systemctl", "restart", "systemd-journald"),
+        timeout=60,
+    )
+    # journald migrates what it is holding in RAM into the new directory on
+    # its own; flushing makes that happen now rather than at some later
+    # rotation, so the next question asked of this Host can be answered.
+    # Best effort on purpose: the drop-in is written and journald has been
+    # restarted, so persistence is already in force — failing an install over
+    # the timing of a migration would be refusing the fix to hurry it.
+    try:
+        primitives.run(("/usr/bin/journalctl", "--flush"), timeout=60)
+    except TargetError:
+        pass
+
+
 @contextmanager
 def foundation_apt_options(contract: Mapping[str, object]) -> Iterator[tuple[str, ...]]:
     version = foundation.os_release().get("VERSION_ID", "").split(".", 1)[0]
@@ -315,6 +348,9 @@ def foundation_install(payload: Mapping[str, object]) -> dict[str, object]:
                 else:
                     raise TargetError(f"unsupported foundation artifact kind: {kind}")
             phase = "artifacts"
+            record("installing", phase)
+            install_journal_persistence(str(contract["journal_persistence"]))
+            phase = "journal"
             record("installing", phase)
             for unit in contract["services"]:
                 primitives.checked(
