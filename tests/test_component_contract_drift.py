@@ -25,7 +25,7 @@ from pathlib import Path
 import pytest
 
 from eidolon_ops import source_assets
-from eidolon_ops.component_contract import FOUNDATION_UNITS, read_component_contracts
+from eidolon_ops.component_contract import PLATFORM_COMPONENT_ID, read_component_contracts
 from eidolon_ops.config import (
     FIXED_DATA_PATHS,
     INSTALL_FILE_NAMES,
@@ -75,11 +75,10 @@ def test_the_host_agent_carries_the_same_unit_list(topology) -> None:
 
 
 def test_the_declared_ports_are_the_ports_ops_assigns(topology) -> None:
-    # NATS and LiveKit are the platform's, not any component's, so they are in
-    # the Ops table and in no contract.
-    foundation = {"nats", "nats_http", "livekit"}
-
-    assert set(topology.port_roles) | foundation == set(source_assets.PORTS)
+    # Equality, with nothing set aside. NATS and LiveKit used to be exempted
+    # here because they belong to no component; they belong to the platform,
+    # and the platform declares them now.
+    assert set(topology.port_roles) == set(source_assets.PORTS)
     for role, port in topology.port_roles.items():
         assert source_assets.PORTS[role] == port, f"{role} disagrees"
 
@@ -89,10 +88,9 @@ def test_the_operator_inputs_are_the_ones_an_install_asks_for(topology) -> None:
         entry.name for entry in topology.install_inputs if entry.is_operator_supplied
     }
 
-    # livekit.env configures the LiveKit server, which no component owns. It
-    # stays an Ops-side entry until something publishes a contract for the
-    # platform units, and naming it here is what keeps that visible.
-    assert declared | {"livekit_env"} == set(INSTALL_FILE_NAMES)
+    # Also equality. livekit.env was the exemption here — an install input
+    # belonging to no component — until the platform declared it.
+    assert declared == set(INSTALL_FILE_NAMES)
 
 
 def test_each_input_lands_where_and_as_ops_would_write_it(topology) -> None:
@@ -148,16 +146,17 @@ def test_what_the_backup_leaves_out_is_still_what_it_leaves_out(topology) -> Non
     uncovered = {state.path for state in topology.authority if not state.is_covered}
     built_in = {path for path, _reason in host_contract.UNCOVERED_STATE.values()}
 
-    # Two deliberate differences:
-    #
-    #   * JetStream is NATS's, and NATS is a platform server with no repository
-    #     of ours to publish a contract. It stays in the Ops table.
-    #   * Deployment evidence was in neither the covered nor the uncovered
-    #     table — it was only in FIXED_DATA_PATHS, which says where a thing is
-    #     and nothing about whether a backup carries it. Kernel now declares it
-    #     as an uncovered authority, which is what it always was.
-    assert built_in - uncovered == {Path("/var/lib/eidolon/nats/jetstream")}
-    assert uncovered - built_in == {Path("/var/lib/eidolon/deployments")}
+    # Nothing in the old table is unaccounted for now: JetStream was the last
+    # entry that belonged to no component, and the platform declares it.
+    assert built_in - uncovered == set()
+    # Two things the contracts say that the old table did not. Deployment
+    # evidence was only ever in FIXED_DATA_PATHS, which says where a thing is
+    # and nothing about whether a backup carries it; LiveKit's session state
+    # was in no table at all.
+    assert uncovered - built_in == {
+        Path("/var/lib/eidolon/deployments"),
+        Path("/var/lib/eidolon/livekit"),
+    }
 
 
 def test_every_uncovered_path_says_what_covering_it_would_take(topology) -> None:
@@ -173,7 +172,7 @@ def test_every_uncovered_path_says_what_covering_it_would_take(topology) -> None
 def test_the_fixed_data_paths_all_belong_to_some_component(topology) -> None:
     declared = {state.path for state in topology.authority}
     runtime = {
-        path for contract in topology.contracts for path in contract.runtime_paths
+        path for contract in topology.declared for path in contract.runtime_paths
     }
 
     for name, path in FIXED_DATA_PATHS.items():
@@ -184,7 +183,7 @@ def test_the_fixed_data_paths_all_belong_to_some_component(topology) -> None:
 
 def test_a_factory_reset_reaches_everything_every_component_holds(topology) -> None:
     roots = [
-        path for contract in topology.contracts for path in contract.factory_reset_paths
+        path for contract in topology.declared for path in contract.factory_reset_paths
     ]
 
     for state in topology.authority:
@@ -211,22 +210,25 @@ def test_the_shipped_unit_files_run_what_their_component_declared(topology) -> N
 
     declared = {
         unit["id"]: (contract.component_id, unit["exec"])
-        for contract in topology.contracts
+        for contract in topology.declared
         for unit in contract.units
     }
 
     checked = 0
     for asset in SYSTEMD_ASSET_CONTRACTS:
         unit_id = asset.unit.removesuffix(".service")
-        if unit_id not in declared:
-            # nats and livekit: platform units, no component, nothing to check.
-            assert unit_id in FOUNDATION_UNITS
+        component_id, executable = declared[unit_id]
+        if component_id == PLATFORM_COMPONENT_ID:
+            # The platform's units run binaries the host profile installed, at
+            # absolute paths that are the platform's own business. There is no
+            # component venv for them to be rooted in.
+            assert asset.component_root is None
+            assert executable.startswith("/")
             continue
         source = _CHECKOUT_ROOT / asset.source_id / asset.path
         if not source.is_file():
             pytest.skip(f"{asset.source_id} checkout does not carry {asset.path}")
 
-        component_id, executable = declared[unit_id]
         exec_start = next(
             line
             for line in source.read_text(encoding="utf-8").splitlines()
@@ -244,7 +246,8 @@ def test_the_shipped_unit_files_run_what_their_component_declared(topology) -> N
         checked += 1
 
     # A loop that silently checked nothing would pass just as quietly.
-    assert checked == len(PRODUCT_UNITS) - len(FOUNDATION_UNITS)
+    platform_units = len(topology.platform.unit_ids)
+    assert checked == len(PRODUCT_UNITS) - platform_units
 
 
 def test_the_dev_port_registry_and_the_contracts_use_the_same_numbers(

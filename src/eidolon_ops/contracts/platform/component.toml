@@ -1,0 +1,94 @@
+# How the platform's own units are operated, stated by Ops.
+#
+# NATS and LiveKit are upstream servers. They run on every Host, they hold
+# state, they occupy ports, and they have no repository of ours to publish a
+# contract — so until now they were a list of exceptions written into whatever
+# code happened to need them: a foundation-units tuple here, a port-role
+# exemption in a drift test, an install input that belonged to no component,
+# and a directory that a factory reset removed while the report called it
+# unclaimed.
+#
+# "Unclaimed" and "deliberately removed" look identical in a report and are
+# opposites in fact. This file is what makes them different: Ops holds it
+# because Ops installs these, and it is read through exactly the same schema
+# and loader as the eight components', so the platform is described rather
+# than excepted.
+
+schema_version = 1
+component_id = "eidolon_platform"
+contract_version = "1"
+
+[[units]]
+id = "eidolon-nats"
+kind = "platform"
+exec = "/usr/local/bin/nats-server"
+user = "eidolon"
+serves = ["nats", "nats_http"]
+after = ["local-fs.target", "network.target"]
+
+[[units]]
+id = "eidolon-livekit"
+kind = "platform"
+# A launcher rather than the server: the real binary is started by
+# /usr/local/libexec/eidolon-livekit-launch, which renders the runtime config
+# from the environment so no credential is ever written into a settings file.
+exec = "/usr/bin/python3"
+user = "eidolon"
+serves = ["livekit"]
+after = ["local-fs.target", "network-online.target"]
+
+[ports.nats]
+default = 4222
+bind = "loopback"
+purpose = "message bus"
+
+[ports.nats_http]
+default = 8222
+bind = "loopback"
+purpose = "NATS monitoring"
+
+[ports.livekit]
+default = 7880
+bind = "lan"
+purpose = "media signalling, reached by devices"
+
+[[inputs]]
+name = "livekit_env"
+install_path = "/etc/eidolon/livekit.env"
+kind = "secret"
+source = "operator"
+owner = "root"
+group = "root"
+mode = "0600"
+required_by = ["eidolon-livekit"]
+
+[[state.authority]]
+path = "/var/lib/eidolon/nats/jetstream"
+owner = "eidolon"
+group = "eidolon"
+backup = "none"
+uncovered_reason = """\
+JetStream stores are not a file copy while the server is running; carrying \
+them would need either a quiesce window or NATS's own snapshot API, and \
+neither has been decided\
+"""
+# Declared so a factory reset removing it reads as a decision. Handing a Host
+# to someone else while it still holds the last owner's message history is the
+# failure this entry exists to rule out.
+
+[[state.authority]]
+path = "/var/lib/eidolon/livekit"
+owner = "eidolon"
+group = "eidolon"
+backup = "none"
+uncovered_reason = """\
+room and participant state is live media session bookkeeping; restoring it \
+beside a database that no longer describes those sessions would be worse than \
+starting empty\
+"""
+
+[state]
+runtime = ["/run/eidolon/livekit"]
+
+[reset]
+factory = ["/var/lib/eidolon/nats", "/var/lib/eidolon/livekit"]

@@ -1459,9 +1459,15 @@ def test_a_fully_declared_reset_reports_what_each_component_loses(
     authority = plan["authority"]
     assert authority["contracts"] == "complete"
     assert authority["declared_by"]["eidolon_hub"] == ["/var/lib/eidolon/eidolon_hub"]
-    # Nothing here is backed up in this fixture, and an empty list is the
-    # honest answer rather than a missing key.
-    assert authority["not_in_any_backup"] == []
+    # The platform answers here too, out of Ops's own contract, so NATS and
+    # LiveKit are named by something rather than turning up unclaimed.
+    assert "eidolon_platform" in authority["declared_by"]
+    # These fixtures declare no authority, so what is listed is the platform's
+    # own: the two stores it says a backup does not carry.
+    assert authority["not_in_any_backup"] == [
+        "eidolon_platform:/var/lib/eidolon/livekit",
+        "eidolon_platform:/var/lib/eidolon/nats/jetstream",
+    ]
     assert [call[0] for call in transport.agent_calls] == ["reset-plan"]
 
 
@@ -1510,7 +1516,14 @@ def test_the_report_is_about_what_will_actually_be_removed(
         transport,
         [
             "/var/lib/eidolon/eidolon_hub",
+            # The platform's, out of Ops's own contract rather than a source
+            # checkout. Deleting it is right — a Host handed on while it still
+            # holds the last owner's message history is the failure — and now
+            # it reads as a decision instead of as a gap.
             "/var/lib/eidolon/nats",
+            # Nobody's: what a component that has since left the product would
+            # leave behind. This is the case the report exists for.
+            "/var/lib/eidolon/mementos",
         ],
     )
 
@@ -1518,11 +1531,10 @@ def test_the_report_is_about_what_will_actually_be_removed(
     authority = plan["authority"]
 
     assert authority["will_be_removed"] == {
-        "/var/lib/eidolon/eidolon_hub": "eidolon_hub"
+        "/var/lib/eidolon/eidolon_hub": "eidolon_hub",
+        "/var/lib/eidolon/nats": "eidolon_platform",
     }
-    # Not an error, and not hidden: this is how an operator finds out that a
-    # factory reset also takes the message bus's stores.
-    assert authority["removed_but_unclaimed"] == ["/var/lib/eidolon/nats"]
+    assert authority["removed_but_unclaimed"] == ["/var/lib/eidolon/mementos"]
 
 
 def test_a_databases_own_sidecars_belong_to_whoever_declared_it(

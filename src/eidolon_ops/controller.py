@@ -442,7 +442,10 @@ class EidolonPiController:
         roots = tuple(RESET_AUTHORITY_ROOTS)
         removed: dict[str, list[str]] = {}
         stranded: list[str] = []
-        for contract_ in topology.contracts:
+        # The platform included: NATS and LiveKit hold state under these roots
+        # and a reset removes it, so an operator should read that as a decision
+        # someone made rather than as a path nobody accounted for.
+        for contract_ in topology.declared:
             declared = sorted(str(path) for path in contract_.factory_reset_paths)
             removed[contract_.component_id] = declared
             stranded.extend(

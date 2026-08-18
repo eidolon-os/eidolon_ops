@@ -39,23 +39,24 @@ from eidolon_ops.errors import OperationsError
 
 __all__ = [
     "COMPONENT_CONTRACT_PATH",
-    "FOUNDATION_UNITS",
+    "PLATFORM_COMPONENT_ID",
     "AuthorityState",
     "ComponentContract",
     "ContractTopology",
     "InstallInput",
     "component_contract_schema",
     "load_component_contract",
+    "load_platform_contract",
     "read_component_contracts",
 ]
 
 #: Where a component publishes it, relative to that repository's root.
 COMPONENT_CONTRACT_PATH = Path("ops/component.toml")
 
-#: Units the platform profile installs. They are not components: NATS and
-#: LiveKit are upstream servers with no repository of ours to publish a
-#: contract, so a unit may depend on them by name without one.
-FOUNDATION_UNITS = ("eidolon-nats", "eidolon-livekit")
+#: What the platform's own contract calls itself. Ops holds that one, because
+#: Ops installs those units; everything else about it — schema, loader,
+#: checks — is the same as a component's.
+PLATFORM_COMPONENT_ID = "eidolon_platform"
 
 #: Ordering targets systemd provides. A unit may sit behind these without any
 #: component owning them.
@@ -72,7 +73,9 @@ _SYSTEM_TARGETS = frozenset(
 
 #: Inside the package rather than at the repository root, so it is found the
 #: same way whether Ops is run from a checkout or from an installed wheel.
-_SCHEMA_PATH = Path(__file__).with_name("contracts") / "component-ops" / "v1.schema.json"
+_CONTRACTS = Path(__file__).with_name("contracts")
+_SCHEMA_PATH = _CONTRACTS / "component-ops" / "v1.schema.json"
+_PLATFORM_PATH = _CONTRACTS / "platform" / "component.toml"
 
 
 @dataclass(frozen=True, slots=True)
@@ -204,7 +207,13 @@ class ContractTopology:
     cycle it is only one arc of.
     """
 
+    #: The release's components. Deliberately excludes the platform, so
+    #: "nobody declared anything" stays answerable — a release from before the
+    #: contracts existed has no component contracts, and Ops always has the
+    #: platform's.
     contracts: tuple[ComponentContract, ...] = ()
+    #: Ops's own, covering the units the host profile installs.
+    platform: ComponentContract | None = None
     #: Sources that published nothing. Kept rather than raised, because whether
     #: silence is fatal depends on the operation: listing tolerates a partial
     #: picture, a factory reset does not.
@@ -214,20 +223,24 @@ class ContractTopology:
     port_roles: dict[str, int] = field(default_factory=dict)
 
     @property
-    def systemd_units(self) -> tuple[str, ...]:
-        """Every product unit, foundation included, as systemd names."""
+    def declared(self) -> tuple[ComponentContract, ...]:
+        """Everything that speaks for something on the Host, platform included."""
 
-        declared = tuple(f"{unit_id}.service" for unit_id in self.unit_owner)
-        foundation = tuple(f"{unit_id}.service" for unit_id in FOUNDATION_UNITS)
-        return declared + tuple(unit for unit in foundation if unit not in declared)
+        return self.contracts + ((self.platform,) if self.platform else ())
+
+    @property
+    def systemd_units(self) -> tuple[str, ...]:
+        """Every unit on a Host, as systemd names."""
+
+        return tuple(f"{unit_id}.service" for unit_id in self.unit_owner)
 
     @property
     def install_inputs(self) -> tuple[InstallInput, ...]:
-        return tuple(entry for contract in self.contracts for entry in contract.inputs)
+        return tuple(entry for contract in self.declared for entry in contract.inputs)
 
     @property
     def authority(self) -> tuple[AuthorityState, ...]:
-        return tuple(entry for contract in self.contracts for entry in contract.authority)
+        return tuple(entry for contract in self.declared for entry in contract.authority)
 
     def requires_every_component(self, operation: str) -> None:
         """Refuse an operation that cannot be complete while anyone is silent."""
@@ -272,6 +285,14 @@ def load_component_contract(
     except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
         raise OperationsError(f"{source} is not readable TOML: {error}") from error
 
+    contract = _validated(document, source, component_id)
+    _refuse_internal_contradictions(contract)
+    return contract
+
+
+def _validated(
+    document: dict[str, Any], source: Path, expected_id: str
+) -> ComponentContract:
     errors = sorted(
         _validator_class()(component_contract_schema()).iter_errors(document),
         key=lambda item: list(item.path),
@@ -284,21 +305,18 @@ def load_component_contract(
         raise OperationsError(f"{source} does not match component-ops/v1: {detail}")
 
     declared = document["component_id"]
-    if declared != component_id:
-        # A contract speaks for the repository it lives in and no other. Without
-        # this, a copied file quietly makes one component answer for another.
+    if declared != expected_id:
+        # A contract speaks for the thing it was found for and no other.
+        # Without this, a copied file quietly makes one answer for another.
         raise OperationsError(
-            f"{source} declares component_id {declared!r} but sits in {component_id!r}"
+            f"{source} declares component_id {declared!r} but sits in {expected_id!r}"
         )
-
-    contract = ComponentContract(
+    return ComponentContract(
         component_id=declared,
         contract_version=document["contract_version"],
         document=document,
         source=source,
     )
-    _refuse_internal_contradictions(contract)
-    return contract
 
 
 def _refuse_internal_contradictions(contract: ComponentContract) -> None:
@@ -346,6 +364,22 @@ def _refuse_internal_contradictions(contract: ComponentContract) -> None:
             )
 
 
+@lru_cache(maxsize=1)
+def load_platform_contract() -> ComponentContract:
+    """Ops's own contract, for the units the host profile installs.
+
+    Read through the same schema and the same checks as a component's. The
+    only thing it does not do is sit in the repository it speaks for, because
+    NATS and LiveKit have none — which is exactly why they were a list of
+    exceptions before this file existed.
+    """
+
+    document = tomllib.loads(_PLATFORM_PATH.read_text(encoding="utf-8"))
+    contract = _validated(document, _PLATFORM_PATH, PLATFORM_COMPONENT_ID)
+    _refuse_internal_contradictions(contract)
+    return contract
+
+
 def read_component_contracts(sources: dict[str, Path]) -> ContractTopology:
     """Load every contract and check what only the whole set can answer."""
 
@@ -357,6 +391,7 @@ def read_component_contracts(sources: dict[str, Path]) -> ContractTopology:
             silent.append(component_id)
         else:
             contracts.append(contract)
+    platform = load_platform_contract()
 
     unit_owner: dict[str, str] = {}
     port_owner: dict[str, str] = {}
@@ -364,7 +399,7 @@ def read_component_contracts(sources: dict[str, Path]) -> ContractTopology:
     input_owner: dict[str, str] = {}
     installed_as: dict[str, str] = {}
 
-    for contract in contracts:
+    for contract in (*contracts, platform):
         for unit_id in contract.unit_ids:
             _claim(unit_owner, unit_id, contract.component_id, "unit")
         for role, port in contract.ports.items():
@@ -382,11 +417,12 @@ def read_component_contracts(sources: dict[str, Path]) -> ContractTopology:
                 "installed file",
             )
 
-    _refuse_unknown_dependencies(contracts, unit_owner)
-    _refuse_cycles(contracts, unit_owner)
+    _refuse_unknown_dependencies([*contracts, platform], unit_owner)
+    _refuse_cycles([*contracts, platform], unit_owner)
 
     return ContractTopology(
         contracts=tuple(contracts),
+        platform=platform,
         silent=tuple(silent),
         unit_owner=unit_owner,
         port_roles=port_roles,
@@ -415,7 +451,7 @@ def _refuse_unknown_dependencies(
     finding out as a service that never comes up on a board in someone's home.
     """
 
-    known = set(unit_owner) | set(FOUNDATION_UNITS) | _SYSTEM_TARGETS
+    known = set(unit_owner) | _SYSTEM_TARGETS
     for contract in contracts:
         for unit in contract.units:
             for dependency in _dependencies(unit):
@@ -423,7 +459,7 @@ def _refuse_unknown_dependencies(
                     continue
                 raise OperationsError(
                     f"{contract.component_id} unit {unit['id']!r} depends on "
-                    f"{dependency!r}, which no component declares"
+                    f"{dependency!r}, which nothing declares"
                 )
 
 

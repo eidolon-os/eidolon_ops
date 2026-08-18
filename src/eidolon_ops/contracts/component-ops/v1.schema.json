@@ -22,17 +22,29 @@
         "type": "object",
         "additionalProperties": false,
         "required": ["id", "kind", "exec"],
+        "allOf": [
+          {
+            "if": {
+              "properties": {"kind": {"enum": ["service", "oneshot"]}},
+              "required": ["kind"]
+            },
+            "then": {"properties": {"exec": {"pattern": "^[^/][^\\u0000]*$"}}}
+          }
+        ],
         "properties": {
           "id": {
             "description": "The systemd unit name without its .service suffix.",
             "type": "string",
             "pattern": "^[a-z][a-z0-9-]{0,63}$"
           },
-          "kind": {"enum": ["service", "oneshot"]},
+          "kind": {
+            "description": "platform: a unit the host profile installs rather than a release — an upstream server with no repository of ours. It is the one kind allowed an absolute exec, because where it lives IS a platform fact.",
+            "enum": ["service", "oneshot", "platform"]
+          },
           "exec": {
-            "description": "The executable, relative to this component's deployed root. Absolute paths are refused: where the component is unpacked is a platform-profile fact, not the component's.",
+            "description": "The executable, relative to this component's deployed root. Absolute paths are refused for anything a release ships: where a component is unpacked is a platform-profile fact, not the component's.",
             "type": "string",
-            "pattern": "^[^/][^\\u0000]*$"
+            "pattern": "^[^\\u0000]+$"
           },
           "user": {
             "description": "The account the unit runs as. Stated per unit because one component can own units with different accounts — Admin runs its bootstrap daemon as a separate user precisely so a compromise there cannot read the rest.",
