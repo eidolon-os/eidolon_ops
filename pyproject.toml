@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Unified macOS and Raspberry Pi lifecycle, deployment and path management for Eidolon"
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = { text = "PolyForm-Noncommercial-1.0.0" }
 dependencies = [
   "cryptography>=45,<47",
   "jsonschema>=4.21",
