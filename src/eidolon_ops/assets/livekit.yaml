@@ -22,6 +22,13 @@ rtc:
   # var/livekit/livekit.generated.yaml at LiveKit process start and injects the
   # current LAN IP there, so this source config stays portable.
   use_external_ip: false
+  ips:
+    excludes:
+      # An IPv4 link-local address is reachable only from the same physical
+      # link, and a device reaches the Host over the LAN. Offering one as an
+      # ICE candidate spends every device's connection attempt on an address it
+      # cannot route to.
+      - 169.254.0.0/16
   port_range_start: 50000
   port_range_end: 60000
 
