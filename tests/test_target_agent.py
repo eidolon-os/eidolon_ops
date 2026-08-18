@@ -1492,6 +1492,25 @@ def test_the_derived_host_layer_is_delivered_without_a_reinstall(tmp_path, monke
     )["changed"] == []
 
 
+def test_a_refresh_takes_away_what_a_release_no_longer_installs(tmp_path, monkeypatch) -> None:
+    """Dropping an asset from a release stops it being written, not being there.
+
+    The Hub settings copy at /etc/eidolon/hub.yaml is the case this exists for:
+    it is read by nothing, it carries the template's placeholder hub_id, and a
+    Host installed before it was dropped keeps it until someone removes it.
+    """
+
+    legacy = tmp_path / "etc/eidolon/hub.yaml"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text("onboarding:\n  hub_id: eidolon-hub-local\n", encoding="utf-8")
+    monkeypatch.setattr(contract, "LEGACY_SYSTEM_ASSETS", (Path("/etc/eidolon/hub.yaml"),))
+
+    assert host_application.remove_legacy_system_assets(tmp_path) == ["/etc/eidolon/hub.yaml"]
+    assert not legacy.exists()
+    # Nothing left to take away, and a Host that never had it is not an error.
+    assert host_application.remove_legacy_system_assets(tmp_path) == []
+
+
 def test_the_tls_pair_is_never_among_what_a_refresh_rewrites() -> None:
     """Material is written once; only renderings of it are refreshed."""
 

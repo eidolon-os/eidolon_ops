@@ -224,17 +224,28 @@ UNCOVERED_STATE = {
     ),
 }
 
+#: Paths a release used to install and no longer does. They are named rather
+#: than forgotten: a Host installed before the change still carries them, so
+#: something has to be responsible for taking them away.
+#:
+#: /etc/eidolon/hub.yaml was a release copy of Hub's settings that nothing read
+#: — a Hub is started with the per-Host rendering at
+#: /etc/eidolon/generated/hub.yaml — and it carried the template's placeholder
+#: hub_id, so an operator who opened it on a healthy Host read it as proof the
+#: Host was never configured.
+LEGACY_SYSTEM_ASSETS = (Path("/etc/eidolon/hub.yaml"),)
+
 MANAGED_SYSTEM_ASSETS = (
     *(Path("/etc/systemd/system") / unit for unit in PRODUCT_UNITS),
     Path("/etc/eidolon/eidolond.yaml"),
     Path("/etc/eidolon/kernel.yaml"),
-    Path("/etc/eidolon/hub.yaml"),
     Path("/etc/eidolon/system-services.systemd.example.yaml"),
     Path("/etc/polkit-1/rules.d/60-eidolon-system-manager.rules"),
     Path("/etc/polkit-1/rules.d/60-eidolon-bootstrap-network.rules"),
     Path("/etc/avahi/services/eidolon-local-api.service"),
     Path("/usr/local/libexec/eidolon-livekit-launch"),
     *(destination for destination, _user, _group, _mode in HOST_APPLICATION_INPUTS.values()),
+    *LEGACY_SYSTEM_ASSETS,
 )
 
 RESET_DEPLOYMENT_ROOTS = (

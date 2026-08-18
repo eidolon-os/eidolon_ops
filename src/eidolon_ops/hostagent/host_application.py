@@ -83,4 +83,28 @@ def refresh_host_application(payload: Mapping[str, object]) -> dict[str, object]
         changed.append(str(destination_value))
     if changed:
         primitives.checked("systemd reload", ("/usr/bin/systemctl", "daemon-reload"), timeout=120)
-    return {"status": "refreshed", "changed": changed}
+    return {"status": "refreshed", "changed": changed, "removed": remove_legacy_system_assets()}
+
+def remove_legacy_system_assets(root: Path = Path("/")) -> list[str]:
+    """Take away what a release used to install and no longer does.
+
+    A release only ever writes the assets its descriptor names; dropping one
+    from that set stops it being written but does not take the old copy off a
+    Host that already has it. So the paths are named in the contract and
+    removed here, on the same pass that delivers this layer — otherwise a Host
+    keeps the file until someone reinstalls it, which for the Hub settings copy
+    means keeping the misleading placeholder ``hub_id`` an operator reads first.
+
+    Nothing needs the file back on a rollback: the Hub settings path is also
+    named by the systemd drop-in this layer installs, which outlives a release
+    rollback and points a restored older unit at the rendered settings too.
+    """
+
+    removed: list[str] = []
+    for value in contract.LEGACY_SYSTEM_ASSETS:
+        path = primitives.host_path(root, value)
+        if not (path.is_file() and not path.is_symlink()):
+            continue
+        path.unlink()
+        removed.append(str(value))
+    return removed

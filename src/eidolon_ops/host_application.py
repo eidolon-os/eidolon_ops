@@ -179,6 +179,14 @@ WantedBy=multi-user.target
         # started the Hub again and left the LAN closed — the App gate saw a
         # refused connection on the Hub port and rolled the release back. Wants=
         # completes the pair, so whoever starts the Hub opens the LAN with it.
+        #
+        # The settings path repeats what the current unit already says by
+        # default, and is kept for the one case where the unit does not say it:
+        # a rollback restores the release's own unit file, and a release from
+        # before that default changed points the Hub at /etc/eidolon/hub.yaml —
+        # a path this deployer removes. This drop-in survives the rollback and
+        # is read after the unit, so the restored Hub still starts against the
+        # settings rendered for this Host.
         return """\
 [Unit]
 Wants=eidolon-hub-ingress.service

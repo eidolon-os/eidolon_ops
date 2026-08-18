@@ -10,6 +10,8 @@ import pytest
 
 from eidolon_ops.hostagent.contract import (
     HOST_APPLICATION_INPUTS,
+    INSTALL_INPUTS,
+    LEGACY_SYSTEM_ASSETS,
     MANAGED_SYSTEM_ASSETS,
     PRODUCT_UNITS,
     SECRET_INPUTS,
@@ -77,6 +79,10 @@ def test_first_install_prerequisites_match_kernel_descriptor(kernel_contract) ->
 def test_current_release_contract_counts_are_not_stale_document_counts(
     kernel_contract,
 ) -> None:
+    # The pinned Kernel still installs the release copy of Hub's settings that
+    # nothing reads. It is gone from Kernel's fixed set; this count is 22 once
+    # the revision above moves past that, and until then saying 22 here would
+    # describe a release no operator is running.
     assert len(kernel_contract.system_assets) == 23
     assert len(kernel_contract.required_secrets) == 11
     assert len(kernel_contract.affected_units) == 14
@@ -84,9 +90,25 @@ def test_current_release_contract_counts_are_not_stale_document_counts(
 
 
 def test_reset_system_asset_allowlist_matches_kernel_release_contract(kernel_contract) -> None:
+    # Stated as a union with the legacy set so the assertion holds across the
+    # revision bump that drops a path from the release: what a reset must take
+    # away is what any release this deployer can operate has ever installed.
     assert set(MANAGED_SYSTEM_ASSETS) == {
         *kernel_contract.system_assets,
         *(value[0] for value in HOST_APPLICATION_INPUTS.values()),
+        *LEGACY_SYSTEM_ASSETS,
+    }
+
+
+def test_no_path_this_deployer_installs_is_also_declared_legacy() -> None:
+    """A legacy path is removed on every refresh, so it must be nobody's input.
+
+    Declaring a live path legacy would delete it on the same pass that just
+    wrote it.
+    """
+
+    assert not set(LEGACY_SYSTEM_ASSETS) & {
+        destination for destination, _user, _group, _mode in INSTALL_INPUTS.values()
     }
 
 
