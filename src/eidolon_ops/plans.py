@@ -60,11 +60,30 @@ def provision(host_id: str, *, apply: bool) -> Plan:
     )
 
 
-def initialize_inputs(host_id: str) -> Plan:
+def initialize_inputs(host_id: str, *, new_identity: bool = False) -> Plan:
+    """Create the input set, or retire this machine's identity and create it again.
+
+    The second is not a stronger version of the first. A machine keeps the
+    identity it was given; retiring it changes the ``ehost-*`` name every phone
+    pinned and cannot be walked back, so it is declared as what it is.
+    """
+
+    steps = _steps(
+        *(
+            (("retire", "retire this machine's Host identity"),)
+            if new_identity
+            else ()
+        ),
+        ("write", "create the private first-install input set, never overwriting"),
+    )
     return Plan(
         operation="init-inputs",
         host_id=host_id,
-        steps=_steps(("write", "create the private first-install input set, never overwriting")),
+        steps=steps,
+        destructive=(
+            DestructiveLevel.IRREVERSIBLE if new_identity else DestructiveLevel.NONE
+        ),
+        requires_flags=frozenset({"--new-identity"} if new_identity else set()),
         touches=frozenset({ActionKind.SECRET, ActionKind.CONFIG}),
     )
 

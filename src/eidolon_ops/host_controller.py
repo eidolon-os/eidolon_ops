@@ -15,6 +15,7 @@ from eidolon_ops.host import HostAdapter, build_adapter
 from eidolon_ops.model import Capability, Evidence, Outcome, Plan, steps_from_phases
 from eidolon_ops.paths import HostProfile
 from eidolon_ops.process import ProcessRunner
+from eidolon_ops.progress import ProgressSink
 
 _LIFECYCLE_ACTIONS = frozenset({"start", "stop", "restart"})
 #: Flags that survived from a lifecycle model this tool no longer has. Every
@@ -29,17 +30,22 @@ class HostController:
         runner: ProcessRunner,
         *,
         revision_overrides: tuple[str, ...] = (),
+        progress: ProgressSink | None = None,
     ) -> None:
         self.profile = profile
         self.runner = runner
         self.revision_overrides = revision_overrides
+        self.progress = progress
         self._adapter: HostAdapter | None = None
 
     @property
     def adapter(self) -> HostAdapter:
         if self._adapter is None:
             self._adapter = build_adapter(
-                self.profile, self.runner, revision_overrides=self.revision_overrides
+                self.profile,
+                self.runner,
+                revision_overrides=self.revision_overrides,
+                progress=self.progress,
             )
         return self._adapter
 
@@ -145,10 +151,10 @@ class HostController:
         report = release.provision(apply=apply)
         return self._planned_or_applied(plan, report, applied=apply)
 
-    def initialize_inputs(self) -> Evidence:
-        plan = plans.initialize_inputs(self.profile.host_id)
+    def initialize_inputs(self, *, new_identity: bool = False) -> Evidence:
+        plan = plans.initialize_inputs(self.profile.host_id, new_identity=new_identity)
         release = self.adapter.require_release(Capability.INIT_INPUTS)
-        return self._applied(plan, release.initialize_inputs())
+        return self._applied(plan, release.initialize_inputs(new_identity=new_identity))
 
     def install(
         self,

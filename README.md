@@ -219,6 +219,29 @@ unit、配置和运行态，保留 `/var/lib`；它不会让已有数据自动�
 [`docs/architecture-audit.md`](docs/architecture-audit.md)，真实验证结果见
 [`docs/verification.md`](docs/verification.md)。
 
+## 同一份契约的第二个前端
+
+`eidolon-ops-console` 在工作站上开一个只监听 `127.0.0.1` 的控制台，管同一批 `config/hosts/*.toml`。它
+构造同一个 `HostController`、声明同一份 `Plan`、渲染同一份 `Evidence`，不是第二个 Ops：
+
+```bash
+uv sync --all-extras
+cd web && npm install && npm run build   # 界面是构建产物，不进 Git
+uv run eidolon-ops-console               # http://127.0.0.1:9010
+```
+
+它只补终端给不了的两件事。一是**进度**：长操作本就维护着一份 phase 列表（`steps_from_phases` 用来和
+计划配对的那一份），`progress.py` 把它换成一个会播报自己条目的 `Journal`——没有 sink 时它就是原来那个
+list，有 sink 时同一批条目在发生的当下到达，并且 phase 会在开始时也说一声。计划的 step id 就是 phase
+名，所以界面在动工前就画得出骨架。二是**确认梯度**：`plans.py` 从第一天就写着它是给 console 用的。
+`status` 什么都不问；`deploy --activate` 要一次显式勾选；`reset --apply`、`controller-reset`、
+`install --wipe-authority-data`、`init-inputs --new-identity` 要手输这台 Host 的 id。强制在服务端，
+浏览器只负责展示这个要求。
+
+操作面板提供什么由 Host 自己回答——`doctor` 早就发布 `adapter.capabilities`，所以 Mac 上没有 `install`，
+Pi 上没有 `debug`。没有绑定地址开关、没有用户体系：这个进程能永久删除权威数据，这套按钮属于操作者自己
+的机器。run 只活在进程内存里，Host 的收据才是权威。细节见 [`docs/console.md`](docs/console.md)。
+
 ## License
 
 Copyright © 2026 Li Jinsong.

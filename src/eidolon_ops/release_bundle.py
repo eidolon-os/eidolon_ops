@@ -12,15 +12,16 @@ import os
 from pathlib import Path
 
 from eidolon_ops.config import SOURCE_IDS, OperationsConfig
-from eidolon_ops.errors import OperationsError
-from eidolon_ops.process import ProcessRunner, checked
-from eidolon_ops.transport import SSHTransport
 from eidolon_ops.embedding_model import (
     PINNED_EMBEDDING_MODEL,
     embedding_model_digest,
     ensure_workstation_embedding_model,
     host_embedding_model_root,
 )
+from eidolon_ops.errors import OperationsError
+from eidolon_ops.process import ProcessRunner, checked
+from eidolon_ops.progress import Journal
+from eidolon_ops.transport import SSHTransport
 from eidolon_ops.workstation_toolchain import ensure_workstation_uv
 
 #: Dependencies this workstation has already fetched, kept between builds so a
@@ -55,14 +56,31 @@ class BundleTransfer:
             return override
         return ensure_workstation_uv(self.config.workspace.toolchain_root)
 
-    def prepare(self, release_id: str, *, reuse: bool = False) -> list[dict[str, object]]:
+    def prepare(
+        self,
+        release_id: str,
+        *,
+        reuse: bool = False,
+        journal: Journal | None = None,
+    ) -> list[dict[str, object]]:
+        """Seal, transfer and build one release, recording each phase as it lands.
+
+        The caller may pass its own journal, in which case the phases join the
+        operation's own list in the order they actually happened rather than
+        arriving as one block at the end. These are the slowest phases Ops has
+        — a bundle seal, an rsync, a native build on a Pi — so they are also
+        the ones worth watching.
+        """
+
+        phases = Journal() if journal is None else journal
         output = self.config.workspace.bundle_root / release_id
         output.parent.mkdir(parents=True, exist_ok=True)
         if reuse and not output.exists():
             # Backward-compatible activation of a release prepared by another
             # workstation. The subsequent sealed descriptor dry-run is still
             # authoritative and fails closed when the target is not prepared.
-            return []
+            return phases
+        phases.begin("bundle")
         if output.exists():
             if not reuse:
                 raise OperationsError(
@@ -77,19 +95,20 @@ class BundleTransfer:
         else:
             bundle_result = self._seal(output, release_id)
             transfer_id = self.validate_existing(output, release_id)
+        phases.append({"phase": "bundle", "result": bundle_result})
+        phases.begin("upload_guard")
         guard = self.transport.run_agent(
             "guard-upload",
             {"release_id": release_id, "transfer_id": transfer_id},
             sudo=False,
         )
+        phases.append({"phase": "upload_guard", "result": guard})
         if guard.get("status") == "already_prepared":
-            return [
-                {"phase": "bundle", "result": bundle_result},
-                {"phase": "upload_guard", "result": guard},
-            ]
+            return phases
         if guard.get("status") not in _UPLOAD_GUARD_STATES:
             raise OperationsError("remote upload guard returned invalid evidence")
         remote_bundle = f"/var/tmp/eidolon-release-{release_id}"
+        phases.begin("upload_finalize")
         if guard.get("status") != "ready_for_prepare":
             self.transport.upload_directory_resumable(output, remote_bundle)
         finalized = self.transport.run_agent(
@@ -99,15 +118,12 @@ class BundleTransfer:
         )
         if finalized.get("status") not in {"finalized", "already_finalized"}:
             raise OperationsError("remote upload finalization returned invalid evidence")
-        encoder = self._carry_embedding_model()
-        prepare = self._build_on_target(remote_bundle)
-        return [
-            {"phase": "bundle", "result": bundle_result},
-            {"phase": "upload_guard", "result": guard},
-            {"phase": "upload_finalize", "result": finalized},
-            {"phase": "embedding_model", "result": encoder},
-            {"phase": "prepare", "result": prepare},
-        ]
+        phases.append({"phase": "upload_finalize", "result": finalized})
+        phases.begin("embedding_model")
+        phases.append({"phase": "embedding_model", "result": self._carry_embedding_model()})
+        phases.begin("prepare")
+        phases.append({"phase": "prepare", "result": self._build_on_target(remote_bundle)})
+        return phases
 
     def _carry_embedding_model(self) -> dict[str, object]:
         """Put the pinned encoder on the Host, once, and leave it there.

@@ -14,6 +14,7 @@ from pathlib import Path
 from eidolon_ops.config import OperationsConfig, validate_release_id
 from eidolon_ops.errors import OperationsError
 from eidolon_ops.host_layer import HostLayer
+from eidolon_ops.progress import Journal, ProgressSink
 from eidolon_ops.readiness import describe_failures
 from eidolon_ops.release_bundle import BundleTransfer, parse_json
 from eidolon_ops.release_preflight import (
@@ -51,6 +52,7 @@ class ReleaseTransaction:
         provision: Callable[..., dict[str, object]],
         reset: Callable[..., dict[str, object]],
         app_ready: Callable[[], dict[str, object]],
+        progress: ProgressSink | None = None,
     ) -> None:
         self.config = config
         self.transport = transport
@@ -60,6 +62,7 @@ class ReleaseTransaction:
         self._provision = provision
         self._reset = reset
         self._app_ready = app_ready
+        self.progress = progress
 
     def deploy(
         self,
@@ -71,11 +74,12 @@ class ReleaseTransaction:
     ) -> dict[str, object]:
         release_id = validate_release_id(release_id)
         local = self.preflight.run(require_install_files=False)
-        phases: list[dict[str, object]] = []
+        phases = Journal(self.progress)
         if not _skip_prepare:
-            phases.extend(self.bundles.prepare(release_id, reuse=resume))
+            self.bundles.prepare(release_id, reuse=resume, journal=phases)
         descriptor = remote_descriptor(release_id)
         cli = remote_release_cli(release_id)
+        phases.begin("dry_run")
         dry_run = self._remote_json(
             "release activation dry-run",
             (cli, "deploy", descriptor, "--dry-run"),
@@ -90,6 +94,7 @@ class ReleaseTransaction:
                 "phases": phases,
                 "next": "rerun with --resume --activate after reviewing previous_targets",
             }
+        phases.begin("activate")
         activation = self._remote_json(
             "release activation",
             (cli, "deploy", descriptor),
@@ -101,6 +106,7 @@ class ReleaseTransaction:
             # derives — the ingress unit, the rendered Hub settings — exactly
             # as it found them. A fix to those could otherwise reach a Host no
             # way but by installing it again.
+            phases.begin("host_application")
             phases.append(
                 {"phase": "host_application", "result": self.host_layer.refresh(release_id)}
             )
@@ -122,10 +128,9 @@ class ReleaseTransaction:
             "phases": phases,
         }
 
-    def _run_health_gate(
-        self, cli: str, descriptor: str, phases: list[dict[str, object]]
-    ) -> Exception | None:
+    def _run_health_gate(self, cli: str, descriptor: str, phases: Journal) -> Exception | None:
         try:
+            phases.begin("doctor")
             doctor = self._remote_json(
                 "release doctor",
                 (cli, "doctor", descriptor),
@@ -134,6 +139,7 @@ class ReleaseTransaction:
             phases.append({"phase": "doctor", "result": doctor})
             if doctor.get("status") != "healthy":
                 raise OperationsError("release doctor degraded after activation")
+            phases.begin("app_ready")
             app = self._app_ready()
             phases.append({"phase": "app_ready", "result": app})
             if app.get("status") != "app_ready":
@@ -149,10 +155,11 @@ class ReleaseTransaction:
         cli: str,
         descriptor: str,
         snapshot: Path,
-        phases: list[dict[str, object]],
+        phases: Journal,
         gate_error: Exception,
     ) -> None:
         try:
+            phases.begin("health_gate_rollback")
             restored = self._remote_json(
                 "post-activation gate release rollback",
                 (cli, "rollback", descriptor, str(snapshot)),
@@ -203,22 +210,28 @@ class ReleaseTransaction:
                 "next": "rerun with --apply after reviewing every planned mutation",
             }
         local = self.preflight.run(require_install_files=True)
-        phases: list[dict[str, object]] = []
+        phases = Journal(self.progress)
         if reset_existing:
+            phases.begin("reset_existing")
             phases.append(
                 {
                     "phase": "reset_existing",
                     "result": self._reset(wipe_authority_data=True, apply=True),
                 }
             )
+        # The foundation is installed here but reported under its own key, so
+        # it is announced as work in flight and never recorded as a phase: the
+        # phase list is the plan's vocabulary, and the plan does not name it.
+        phases.begin("foundation")
         foundation = self._provision(apply=True)
-        phases.extend(self.bundles.prepare(release_id, reuse=resume))
+        self.bundles.prepare(release_id, reuse=resume, journal=phases)
         self.host_layer.stage_install_files(
             release_id, f"/var/tmp/eidolon-secrets-{release_id}"
         )
         payload = {**self.host_layer.target_payload(), "release_id": release_id}
         primary_error: Exception | None = None
         try:
+            phases.begin("install")
             phases.append(
                 {
                     "phase": "install",
@@ -233,6 +246,7 @@ class ReleaseTransaction:
         except Exception as exc:
             primary_error = exc
         try:
+            phases.begin("secret_cleanup")
             cleanup = self.transport.run_agent(
                 "cleanup-stage",
                 {"release_id": release_id},

@@ -30,6 +30,7 @@ from eidolon_ops.paths import (
 )
 from eidolon_ops.ports import PackageManager, Supervisor, Transport
 from eidolon_ops.process import ProcessRunner
+from eidolon_ops.progress import ProgressSink
 from eidolon_ops.transport import SSHTransport
 
 
@@ -95,13 +96,14 @@ def build_adapter(
     runner: ProcessRunner,
     *,
     revision_overrides: tuple[str, ...] = (),
+    progress: ProgressSink | None = None,
 ) -> HostAdapter:
     """Assemble the adapter this profile describes."""
 
     platform = PLATFORM_PROFILES[profile.platform]
     if profile.driver is HostDriver.LOCAL_SUPERVISORD:
-        return _source_adapter(profile, runner, platform, revision_overrides)
-    return _product_adapter(profile, runner, platform, revision_overrides)
+        return _source_adapter(profile, runner, platform, revision_overrides, progress)
+    return _product_adapter(profile, runner, platform, revision_overrides, progress)
 
 
 def _source_adapter(
@@ -109,6 +111,7 @@ def _source_adapter(
     runner: ProcessRunner,
     platform: PlatformProfile,
     revision_overrides: tuple[str, ...],
+    progress: ProgressSink | None = None,
 ) -> HostAdapter:
     transport = LocalTransport(
         runner,
@@ -119,6 +122,7 @@ def _source_adapter(
         profile,
         transport,
         _product_factory(profile, runner, revision_overrides),
+        progress,
     )
     return HostAdapter(
         platform=platform,
@@ -134,13 +138,16 @@ def _product_adapter(
     runner: ProcessRunner,
     platform: PlatformProfile,
     revision_overrides: tuple[str, ...],
+    progress: ProgressSink | None = None,
 ) -> HostAdapter:
     config_path = profile.operations_config
     if config_path is None:
         raise OperationsError("Pi host profile does not reference an operations config")
     config = load_config(config_path).with_revision_overrides(revision_overrides)
     transport = SSHTransport(config.host, runner)
-    release = EidolonPiController(config, runner, transport=transport, app=profile.app)
+    release = EidolonPiController(
+        config, runner, transport=transport, app=profile.app, progress=progress
+    )
     return HostAdapter(
         platform=platform,
         transport=transport,

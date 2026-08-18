@@ -13,3 +13,7 @@ diagnostics/
 config/eidolon-pi.toml
 config/hosts/*.toml
 !config/hosts/*.example.toml
+
+# The console's interface is a build artifact; `cd web && npm run build` makes it.
+src/eidolon_ops/console/static/
+web/node_modules/

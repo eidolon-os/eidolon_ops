@@ -20,20 +20,35 @@ dev = [
   "pytest>=8.0",
   "pytest-cov>=6.0",
   "ruff>=0.4",
+  # Starlette's TestClient, which is how the console's HTTP contract is tested
+  # without binding a port.
+  "httpx2>=2",
+]
+# The workstation console. An extra rather than a dependency: the CLI is the
+# entry point every Host operation goes through, and it must stay installable
+# without a web server.
+console = [
+  "fastapi>=0.115,<1",
+  "uvicorn>=0.34,<1",
 ]
 
 [project.scripts]
 eidolon-ops = "eidolon_ops.host_cli:run"
+eidolon-ops-console = "eidolon_ops.console.server:run"
 eidolon-lan-ingress = "eidolon_ops.lan_ingress:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/eidolon_ops"]
+# The console's built interface, when it has been built. Absent from a checkout
+# that only ever drives the CLI.
+artifacts = ["src/eidolon_ops/console/static/**"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
 markers = [
   "unit: pure configuration and command construction",
+  "console: the workstation console API and its run store",
   "component: isolated target filesystem or state-machine behavior",
   "contract: compatibility with the existing eidolon-release wire contract",
   "integration: real local subprocesses with fake SSH/SCP executables",

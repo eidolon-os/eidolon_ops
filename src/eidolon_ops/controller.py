@@ -27,6 +27,7 @@ from eidolon_ops.hostagent.contract import RESET_AUTHORITY_ROOTS
 from eidolon_ops.install_inputs import initialize_install_inputs
 from eidolon_ops.paths import AppAccess
 from eidolon_ops.process import ProcessRunner
+from eidolon_ops.progress import Journal, ProgressSink
 from eidolon_ops.readiness import READINESS_TRANSPORT_TIMEOUT_SECONDS
 from eidolon_ops.release_bundle import BundleTransfer, parse_json
 from eidolon_ops.release_preflight import ReleasePreflight
@@ -66,11 +67,13 @@ class EidolonPiController:
         transport: SSHTransport | None = None,
         git: str = "git",
         app: AppAccess | None = None,
+        progress: ProgressSink | None = None,
     ) -> None:
         self.config = config
         self.runner = runner
         self.transport = transport or SSHTransport(config.host, runner)
         self.git = git
+        self.progress = progress
         self.preflight = ReleasePreflight(config, runner, git=git)
         self.bundles = BundleTransfer(config, runner, self.transport)
         self.host_layer = HostLayer(
@@ -85,9 +88,10 @@ class EidolonPiController:
             self.preflight,
             self.bundles,
             self.host_layer,
-            provision=self.provision,
+            provision=self._nested_provision,
             reset=self.reset,
             app_ready=self.app_ready,
+            progress=progress,
         )
 
     @property
@@ -201,13 +205,25 @@ class EidolonPiController:
 
     # -- foundation ----------------------------------------------------------
 
-    def provision(self, *, apply: bool) -> dict[str, object]:
+    def _nested_provision(self, *, apply: bool) -> dict[str, object]:
+        """Install the foundation as part of a larger operation.
+
+        Silent: the release transaction announces one step of its own around
+        this, and a foundation phase named ``install`` arriving in the middle
+        of an ``install`` operation would name two different things the same.
+        """
+
+        return self.provision(apply=apply, journal=Journal())
+
+    def provision(self, *, apply: bool, journal: Journal | None = None) -> dict[str, object]:
         """Detect or install the pinned non-Eidolon Raspberry Pi foundation."""
 
         self.preflight.validate_ssh_material()
         self.preflight.require_commands(("ssh", "scp"))
+        phases = Journal(self.progress) if journal is None else journal
+        phases.begin("python_probe")
         python_available = self._remote_python_available()
-        phases: list[dict[str, object]] = [{"phase": "python_probe", "available": python_available}]
+        phases.append({"phase": "python_probe", "available": python_available})
         if not python_available:
             if not apply:
                 return {
@@ -216,6 +232,7 @@ class EidolonPiController:
                     "phases": phases,
                     "next": "rerun provision --apply to bootstrap Python and the pinned foundation",
                 }
+            phases.begin("python_bootstrap")
             bootstrap = self.transport.run(
                 ("/bin/sh", "-s"),
                 input_bytes=python_bootstrap_script(),
@@ -230,6 +247,7 @@ class EidolonPiController:
                 }
             )
         payload = {"foundation": foundation_payload()}
+        phases.begin("doctor")
         observed = self.transport.run_agent("foundation-doctor", payload, timeout=300)
         phases.append({"phase": "doctor", "result": observed})
         if observed.get("status") == "healthy":
@@ -247,6 +265,7 @@ class EidolonPiController:
                 "phases": phases,
                 "next": "rerun provision --apply after reviewing missing packages and capacity gates",
             }
+        phases.begin("install")
         installed = self.transport.run_agent("foundation-install", payload, timeout=3600)
         phases.append({"phase": "install", "result": installed})
         return {

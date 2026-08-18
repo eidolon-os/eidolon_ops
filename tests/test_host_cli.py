@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 from pathlib import Path
 
@@ -198,3 +199,47 @@ def test_the_exit_code_is_the_operations_own_verdict(capsys, monkeypatch) -> Non
     document = json.loads(capsys.readouterr().out)
     assert document["outcome"] == "degraded"
     assert document["checks"] == {"channel_worker_healthy": False}
+
+
+@pytest.mark.unit
+def test_every_flag_the_cli_offers_binds_to_the_real_controller_signature() -> None:
+    """The fakes above take ``**kwargs``, which is how a TypeError shipped.
+
+    ``eidolon-ops init-inputs`` passed ``new_identity=`` to a method that never
+    accepted it, and raised before reaching the Host — invisible here, because
+    every double in this file accepts anything. Bind the real signatures.
+    """
+
+    from eidolon_ops.host_controller import HostController
+
+    calls = {
+        "status": {},
+        "app_ready": {},
+        "doctor": {"release_id": "r-1"},
+        "provision": {"apply": True},
+        "initialize_inputs": {"new_identity": True},
+        "backup": {"output": Path("/tmp/backup.tar.gz")},
+        "restore": {"source": Path("/tmp/backup.tar.gz"), "apply": True},
+        "commissioning_code": {"ttl_seconds": 600},
+        "install": {
+            "release_id": "r-1",
+            "resume": False,
+            "apply": True,
+            "reset_existing": True,
+            "wipe_authority_data": True,
+        },
+        "controller_reset": {"apply": True},
+        "reset": {"wipe_authority_data": True, "apply": True},
+        "deploy": {"release_id": "r-1", "resume": False, "activate": True},
+        "rollback": {"release_id": "r-1", "snapshot": Path("/snap"), "apply": True},
+        "diagnose": {"output": Path("/tmp/report.tar.gz")},
+        "logs": {"service": None, "lines": 200, "since": None},
+    }
+    for name, keywords in calls.items():
+        signature = inspect.signature(getattr(HostController, name))
+        signature.bind(object(), **keywords)
+
+    inspect.signature(HostController.lifecycle).bind(
+        object(), "restart", dry_run=False, force_cleanup=False, strict=False, wait_ready=True
+    )
+    inspect.signature(HostController.local_profile).bind(object(), "product-source", "status")

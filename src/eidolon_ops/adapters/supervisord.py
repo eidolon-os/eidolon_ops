@@ -11,6 +11,7 @@ from eidolon_ops.errors import OperationsError
 from eidolon_ops.model import Capability
 from eidolon_ops.paths import HostProfile
 from eidolon_ops.ports import SupervisorKind
+from eidolon_ops.progress import Journal, ProgressSink
 
 #: Every profile the lifecycle script is allowed to be asked about. One entry:
 #: the implementation-level profiles this replaced are gone, and a second one
@@ -33,10 +34,12 @@ class SupervisordSupervisor:
         profile: HostProfile,
         transport: LocalTransport,
         product: Callable[[], object],
+        progress: ProgressSink | None = None,
     ) -> None:
         self.profile = profile
         self.transport = transport
         self._product = product
+        self.progress = progress
 
     @property
     def capabilities(self) -> frozenset[Capability]:
@@ -100,16 +103,27 @@ class SupervisordSupervisor:
     def profile_operation(
         self, operation: str, *, arguments: tuple[str, ...] = ()
     ) -> dict[str, object]:
-        """Run one operation of the source-run profile, and read its health."""
+        """Run one operation of the source-run profile, and read its health.
+
+        A source run has three parts an operator waits on separately —
+        materializing the pinned topology, the supervisord command itself, and
+        the health wait afterwards. The journal is local because this report
+        has no ``phases`` key to add them to; announcing them is still what
+        turns a two-minute silence into three named waits.
+        """
 
         script = self.script()
         product = self._product()
-        if operation == "prepare":
-            return product.prepare()
-        if operation == "validate":
-            return product.validate()
+        phases = Journal(self.progress)
+        if operation in {"prepare", "validate"}:
+            phases.begin(operation)
+            direct = product.prepare() if operation == "prepare" else product.validate()
+            phases.append({"phase": operation, "result": direct})
+            return direct
         if operation in _PREPARING_OPERATIONS:
-            product.prepare()
+            phases.begin("prepare")
+            phases.append({"phase": "prepare", "result": product.prepare()})
+        phases.begin(operation)
         result = self.transport.run(
             (str(script), PROFILE, operation, *arguments),
             timeout=300,
@@ -122,13 +136,16 @@ class SupervisordSupervisor:
             "operation": operation,
             "output": result.stdout.strip(),
         }
+        phases.append({"phase": operation, "result": {"output": response["output"]}})
         if operation in _HEALTH_REPORTING_OPERATIONS:
+            phases.begin("health")
             health = product.health(wait_seconds=120 if operation != "status" else 0)
             unhealthy_process = any(marker in result.stdout for marker in _UNHEALTHY_MARKERS)
             response["health"] = health
             response["status"] = (
                 "healthy" if health["status"] == "healthy" and not unhealthy_process else "degraded"
             )
+            phases.append({"phase": "health", "result": health})
         return response
 
     def script(self) -> Path:

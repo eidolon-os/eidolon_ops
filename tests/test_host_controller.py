@@ -199,9 +199,10 @@ def test_pi_adapter_delegates_every_remote_capability(monkeypatch, tmp_path: Pat
         host = SimpleNamespace()
 
     class Pi:
-        def __init__(self, config, runner, *, transport=None, app=None) -> None:
+        def __init__(self, config, runner, *, transport=None, app=None, progress=None) -> None:
             assert isinstance(config, Config)
             assert app is None
+            assert progress is None
 
         def _result(self, name, values=None):
             calls.append((name, values or {}))
@@ -216,8 +217,8 @@ def test_pi_adapter_delegates_every_remote_capability(monkeypatch, tmp_path: Pat
         def provision(self, **kwargs):
             return self._result("provision", kwargs)
 
-        def initialize_inputs(self):
-            return self._result("init-inputs")
+        def initialize_inputs(self, **kwargs):
+            return self._result("init-inputs", kwargs)
 
         def install(self, **kwargs):
             return self._result("install", kwargs)
