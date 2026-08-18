@@ -135,7 +135,7 @@ uv run eidolon-ops --config ... rollback --release-id <id> \
   --snapshot /var/lib/eidolon/deployments/<id>-<tx> --apply
 ```
 
-Rollback restores only 23 allowlist system assets and component links that existed in that exact snapshot. It never
+Rollback restores only 22 allowlist system assets and component links that existed in that exact snapshot. It never
 restores secret, Host identity or database. Schema changes and data backup are independent authority-owned procedures;
 descriptor requires `database_migrations=[]`. If automatic restore reports `rollback_failed`, stop automation and
 collect status/logs/diagnose instead of retrying blindly.

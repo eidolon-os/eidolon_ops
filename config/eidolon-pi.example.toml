@@ -28,7 +28,7 @@ python_concurrent_downloads = 4
 
 [sources.eidolon_kernel]
 path = "../../eidolon_kernel"
-revision = "6f0fc4811383c2dcad2add8bfe4a05d2ef4566db"
+revision = "aeb6aa8b46c8948a8f83342b72df4f35bcdc9fba"
 # Optional human label. The commit above is the identity; a tag is a movable
 # reference, so Ops verifies it still resolves to that commit rather than
 # following it.
@@ -36,31 +36,31 @@ revision = "6f0fc4811383c2dcad2add8bfe4a05d2ef4566db"
 
 [sources.eidolon_data]
 path = "../../eidolon_data"
-revision = "4b588c2ba4399061861b5d99f17358fadad95b9f"
+revision = "746cc1121aabccd2bd6260c53f00f368cd2345a9"
 
 [sources.eidolon_hub]
 path = "../../eidolon_hub"
-revision = "4bab6a0c5201c6adda7ba0f68241297034326cae"
+revision = "6d2697031361f71b201d294ed7b9aa06f9168d55"
 
 [sources.eidolon_admin]
 path = "../../eidolon_admin"
-revision = "43eecc17561b8a831bf068e45ce8cf664e897a60"
+revision = "99fd6a6e7bab12032773b071df19fd1814b81e7b"
 
 [sources.eidolon_agent]
 path = "../../eidolon_agent"
-revision = "309ba573f249f9376275e14a5cc2f5ea1049b022"
+revision = "44840084cbdd22071d077746a2e40232644739b2"
 
 [sources.eidolon_channel]
 path = "../../eidolon_channel"
-revision = "95164e3dbebb31fb6f6152a7da549f8d6f8c0f35"
+revision = "c70d804c2998f10f99674a551796ac9721b0fec1"
 
 [sources.eidolon_memory]
 path = "../../eidolon_memory"
-revision = "4945e87dcd198673b986281163e1875dd616fd6f"
+revision = "e7da3fe8703a4873e896aade771ffbdf2ca2d897"
 
 [sources.eidolon_sdk]
 path = "../../eidolon_sdk"
-revision = "8108970514d9fefd3d93e7466e91706a1681c331"
+revision = "39ebdf71bb2296484876db4aa3fa1e7ee0f779b8"
 
 [services]
 units = [

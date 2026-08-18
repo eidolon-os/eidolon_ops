@@ -80,11 +80,7 @@ def test_first_install_prerequisites_match_kernel_descriptor(kernel_contract) ->
 def test_current_release_contract_counts_are_not_stale_document_counts(
     kernel_contract,
 ) -> None:
-    # The pinned Kernel still installs the release copy of Hub's settings that
-    # nothing reads. It is gone from Kernel's fixed set; this count is 22 once
-    # the revision above moves past that, and until then saying 22 here would
-    # describe a release no operator is running.
-    assert len(kernel_contract.system_assets) == 23
+    assert len(kernel_contract.system_assets) == 22
     assert len(kernel_contract.required_secrets) == 11
     assert len(kernel_contract.affected_units) == 14
     assert len(kernel_contract.readiness) == 13
@@ -248,13 +244,4 @@ def test_programs_outside_the_service_manifest_are_named_rather_than_assumed(
         "hub-ingress",
         "local-api",
         "local-api-mdns",
-        # Pending the Kernel pin that carries the merged manifest: these are
-        # system services in Kernel's topology and will move into `managed`,
-        # which is when the autostart check above starts applying to them.
-        "agent",
-        "channel-provider",
-        "channel-worker",
-        "livekit-server",
-        "memory-discovery",
-        "memory-supervisor",
     }

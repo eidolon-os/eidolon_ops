@@ -83,7 +83,7 @@ atomic asset/link switch, readiness, receipts, automatic restore and explicit ro
 conflicts with current Data V2/systemd authority and was rejected.
 
 The previous Kernel contract covered only the core control path. This change extends the formal contract to 8 source
-archives, 7 components, 23 system assets, 11 private prerequisites, 14 affected units and 13 readiness checks, with
+archives, 7 components, 22 system assets, 11 private prerequisites, 14 affected units and 13 readiness checks, with
 Channel model hydration fail-closed. The independent Ops layer adds strict workstation config, Raspberry Pi
 foundation provision, first install, 15-unit lifecycle/status/logs/diagnostics and a Host-side App gate.
 

@@ -233,13 +233,21 @@ UNCOVERED_STATE = {
 #: /etc/eidolon/generated/hub.yaml — and it carried the template's placeholder
 #: hub_id, so an operator who opened it on a healthy Host read it as proof the
 #: Host was never configured.
-LEGACY_SYSTEM_ASSETS = (Path("/etc/eidolon/hub.yaml"),)
+#:
+#: /etc/eidolon/system-services.systemd.example.yaml is the same file as
+#: /etc/eidolon/system-services.yaml under the name it had while there was a
+#: systemd-only copy of it. Two files claiming to be the service manifest is
+#: worse than one: the stale one is the one an operator has no way to rule out.
+LEGACY_SYSTEM_ASSETS = (
+    Path("/etc/eidolon/hub.yaml"),
+    Path("/etc/eidolon/system-services.systemd.example.yaml"),
+)
 
 MANAGED_SYSTEM_ASSETS = (
     *(Path("/etc/systemd/system") / unit for unit in PRODUCT_UNITS),
     Path("/etc/eidolon/eidolond.yaml"),
     Path("/etc/eidolon/kernel.yaml"),
-    Path("/etc/eidolon/system-services.systemd.example.yaml"),
+    Path("/etc/eidolon/system-services.yaml"),
     Path("/etc/polkit-1/rules.d/60-eidolon-system-manager.rules"),
     Path("/etc/polkit-1/rules.d/60-eidolon-bootstrap-network.rules"),
     Path("/etc/avahi/services/eidolon-local-api.service"),
