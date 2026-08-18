@@ -14,6 +14,20 @@ Only IPv4 candidates are offered. The transport also has to move a release
 bundle, and the rsync macOS ships (openrsync) reads ``host::path`` as its
 daemon syntax — every IPv6 literal collides with it, brackets included. An
 endpoint this transport cannot use for all of its work is not a candidate.
+
+One address family needs more than a choice: it needs the choice enforced.
+Link-local addresses are configured per interface with the same 169.254.0.0/16
+route on every one of them, so the routing table cannot tell which link a
+given link-local address is on — it picks whichever route it happens to have
+first, and on this workstation that is Wi-Fi:
+
+    169.254   link#14  UCS   en0     <- Wi-Fi
+    169.254   link#22  UCSI  en7     <- the wire the Host is actually on
+
+So for a link-local endpoint the interface is not a description, it is an
+instruction: it travels with the endpoint and the transport binds to it. For
+any routable address it stays absent, because there the kernel's own route
+lookup is right and overriding it would only remove a correct answer.
 """
 
 from __future__ import annotations
@@ -57,6 +71,24 @@ class HostEndpoint:
         where = f" via {self.interface}" if self.interface else ""
         return f"{self.address} ({self.link}{where})"
 
+    @property
+    def bind_interface(self) -> str | None:
+        """The interface the transport must bind to, if leaving it out is a bug.
+
+        Only link-local addresses answer with a name here. Their route is
+        ambiguous by construction, so an unbound connection can leave by an
+        interface that cannot reach the Host at all — and the failure looks
+        like a Host that is down rather than a packet that went the wrong way.
+        """
+
+        if self.interface is None:
+            return None
+        try:
+            parsed = ipaddress.IPv4Address(self.address)
+        except ValueError:
+            return None
+        return self.interface if parsed.is_link_local else None
+
 
 def resolve_endpoints(
     hostname: str,
@@ -92,14 +124,22 @@ def resolve_endpoints(
 
 
 def _owning_interface(address: str, interfaces: Sequence[LocalInterface]) -> LocalInterface | None:
+    """The best local interface that reaches ``address``.
+
+    More than one can claim it, and for link-local addresses more than one
+    usually does — every self-assigned interface carries the same /16. Ranking
+    rather than taking the first makes the answer the wire instead of whichever
+    interface ``ifconfig`` happened to print first.
+    """
+
     try:
         parsed = ipaddress.IPv4Address(address)
     except ValueError:
         return None
-    for interface in interfaces:
-        if interface.reaches(parsed):
-            return interface
-    return None
+    owners = [interface for interface in interfaces if interface.reaches(parsed)]
+    if not owners:
+        return None
+    return min(owners, key=lambda item: LINK_RANK.get(item.kind, 1))
 
 
 def local_interfaces(runner: ProcessRunner | None = None) -> tuple[LocalInterface, ...]:

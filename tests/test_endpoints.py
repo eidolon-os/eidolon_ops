@@ -119,3 +119,56 @@ def test_macos_interfaces_are_read_as_kinds_and_networks() -> None:
     assert interfaces["en7"].reaches(ipaddress.IPv4Address("169.254.55.2"))
     assert not interfaces["en0"].reaches(ipaddress.IPv4Address("169.254.55.2"))
     assert interfaces["en0"].reaches(ipaddress.IPv4Address("192.168.1.26"))
+
+
+def test_a_link_local_endpoint_carries_the_interface_as_an_instruction() -> None:
+    """The routing table cannot answer this one, so the endpoint has to.
+
+    Every self-assigned interface carries the same 169.254.0.0/16, so a
+    link-local address matches more than one route and the kernel takes
+    whichever it holds first. On the workstation this was found on, that is
+    Wi-Fi, while the Host is on the wire.
+    """
+
+    endpoints = resolve_endpoints(
+        "eidolon-pi5.local",
+        22,
+        resolver=lambda *_args, **_kwargs: _answers("169.254.19.7"),
+        interfaces=_interfaces,
+    )
+
+    assert endpoints[0].bind_interface == "en7"
+
+
+def test_a_routable_endpoint_asks_for_no_binding() -> None:
+    endpoints = resolve_endpoints(
+        "eidolon-pi5.local",
+        22,
+        resolver=lambda *_args, **_kwargs: _answers("192.168.1.10"),
+        interfaces=_interfaces,
+    )
+
+    # Its route is unambiguous, and overriding a correct route can only take
+    # away a working path — for instance when the Host is reachable two ways.
+    assert endpoints[0].interface == "en0"
+    assert endpoints[0].bind_interface is None
+
+
+def test_the_wire_wins_when_both_links_claim_a_link_local_address() -> None:
+    both = (
+        LocalInterface("en0", "wireless", (ipaddress.IPv4Network("169.254.0.0/16"),)),
+        LocalInterface("en7", "wired", (ipaddress.IPv4Network("169.254.0.0/16"),)),
+    )
+
+    endpoints = resolve_endpoints(
+        "eidolon-pi5.local",
+        22,
+        resolver=lambda *_args, **_kwargs: _answers("169.254.19.7"),
+        interfaces=lambda: both,
+    )
+
+    # This is the real shape of a workstation with a USB Ethernet adapter: two
+    # interfaces, one address range, and nothing in ifconfig's ordering that
+    # means anything. Taking the first match would pick by luck.
+    assert endpoints[0].bind_interface == "en7"
+    assert endpoints[0].link == "wired"

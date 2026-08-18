@@ -81,6 +81,20 @@ class SSHTransport:
         endpoint = self._endpoint
         return endpoint.describe() if endpoint else self.host.hostname
 
+    def _bind_options(self) -> tuple[str, ...]:
+        """Force this session out of the interface the endpoint chose.
+
+        Only link-local endpoints ask for this, and only they need it: their
+        route is ambiguous on every machine that has two self-assigned links,
+        so without it the packets can leave by Wi-Fi while the Host is on the
+        wire. That failure does not look like a routing mistake — it looks
+        like a Host that is not there.
+        """
+
+        self._resolve()
+        interface = self._endpoint.bind_interface if self._endpoint else None
+        return () if interface is None else ("-o", f"BindInterface={interface}")
+
     def _resolve(self) -> None:
         if self._resolved:
             return
@@ -146,6 +160,7 @@ class SSHTransport:
     def _scp_options(self) -> list[str]:
         return [
             self.scp,
+            *self._bind_options(),
             "-P",
             str(self.host.port),
             "-i",
@@ -228,6 +243,7 @@ class SSHTransport:
     def _ssh_prefix(self) -> tuple[str, ...]:
         return (
             self.ssh,
+            *self._bind_options(),
             "-p",
             str(self.host.port),
             "-i",

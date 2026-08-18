@@ -253,3 +253,77 @@ def test_one_run_settles_on_one_endpoint(config) -> None:
 
     assert resolutions == [(config.host.hostname, config.host.port)]
     assert {call["command"][-2] for call in runner.calls} == {f"{config.host.user}@169.254.55.2"}
+
+
+def _link_local(_hostname: str, _port: int):
+    return (HostEndpoint(address="169.254.19.7", interface="en7", link="wired"),)
+
+
+def _routable(_hostname: str, _port: int):
+    return (HostEndpoint(address="192.168.1.10", interface="en0", link="wireless"),)
+
+
+def test_a_link_local_session_is_pinned_to_the_interface_that_reaches_it(
+    config,
+) -> None:
+    """Choosing the wire is not enough; the choice has to leave the machine.
+
+    Two self-assigned interfaces carry the same 169.254.0.0/16, so an unbound
+    connection follows whichever route the kernel holds first — Wi-Fi, on the
+    workstation this was found on — and never reaches a Host that is on the
+    wire.
+    """
+
+    runner = RecordingRunner([ProcessResult(0, "ok", "")])
+    transport = SSHTransport(
+        config.host, runner, endpoints=_link_local, probe=lambda *_args: True
+    )
+
+    transport.run(("/usr/bin/true",))
+
+    command = runner.calls[0]["command"]
+    assert "BindInterface=en7" in command
+    # Before the target, like every other option: ssh stops reading options at
+    # the destination.
+    assert command.index("BindInterface=en7") < command.index(
+        f"{config.host.user}@169.254.19.7"
+    )
+
+
+def test_a_routable_session_is_left_to_the_routing_table(config) -> None:
+    runner = RecordingRunner([ProcessResult(0, "ok", "")])
+    transport = SSHTransport(
+        config.host, runner, endpoints=_routable, probe=lambda *_args: True
+    )
+
+    transport.run(("/usr/bin/true",))
+
+    # Binding here would be a way to lose a working path, not to gain one.
+    assert not any(
+        str(token).startswith("BindInterface") for token in runner.calls[0]["command"]
+    )
+
+
+def test_the_bundle_takes_the_same_link_as_the_commands(config, tmp_path: Path) -> None:
+    """The upload is the part that actually costs three minutes over Wi-Fi.
+
+    A release that ran its commands over the wire and then sent 120 MB over
+    Wi-Fi would look like it chose correctly and behave as if it had not.
+    """
+
+    source = tmp_path / "bundle"
+    source.mkdir()
+    (source / "payload").write_bytes(b"x")
+    runner = RecordingRunner([ProcessResult(0, "", "")])
+    transport = SSHTransport(
+        config.host, runner, endpoints=_link_local, probe=lambda *_args: True
+    )
+
+    transport.upload_directory_resumable(source, "/var/tmp/eidolon-release-x")
+
+    remote_shell = next(
+        token
+        for token in runner.calls[0]["command"]
+        if isinstance(token, str) and "BatchMode" in token
+    )
+    assert "BindInterface=en7" in remote_shell
