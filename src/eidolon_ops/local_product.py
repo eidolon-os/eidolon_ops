@@ -513,13 +513,13 @@ class LocalProductSource:
         return self.profile.paths.config_root / "owner-domain-private"
 
     def _owner_descriptor_path(self) -> Path:
-        return self.profile.paths.bootstrap_state_root / "owner_domain_descriptor.json"
+        return self.profile.paths.config_root / "owner-domain/owner_domain_descriptor.json"
 
     def _owner_root_certificate_path(self) -> Path:
-        return self.profile.paths.bootstrap_state_root / "owner_domain_root_ca.pem"
+        return self.profile.paths.config_root / "owner-domain/owner_domain_root_ca.pem"
 
     def _authority_signing_certificate_path(self) -> Path:
-        return self.profile.paths.bootstrap_state_root / "authority_signing_certificate.pem"
+        return self.profile.paths.config_root / "owner-domain/authority_signing_certificate.pem"
 
     def _owner_domain_id(self) -> str:
         try:

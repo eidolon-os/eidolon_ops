@@ -112,13 +112,13 @@ class HostApplicationMaterializer:
                     + "/api/device-onboarding/v1/descriptor"
                 ),
                 "EIDOLON_LOCAL_API_OWNER_DOMAIN_DESCRIPTOR": (
-                    "/var/lib/eidolon-bootstrap/owner_domain_descriptor.json"
+                    "/etc/eidolon/owner-domain/owner_domain_descriptor.json"
                 ),
                 "EIDOLON_LOCAL_API_OWNER_ROOT_CERTIFICATE": (
-                    "/var/lib/eidolon-bootstrap/owner_domain_root_ca.pem"
+                    "/etc/eidolon/owner-domain/owner_domain_root_ca.pem"
                 ),
                 "EIDOLON_LOCAL_API_AUTHORITY_SIGNING_CERTIFICATE": (
-                    "/var/lib/eidolon-bootstrap/authority_signing_certificate.pem"
+                    "/etc/eidolon/owner-domain/authority_signing_certificate.pem"
                 ),
             }
         elif name == "channel.env":

@@ -129,19 +129,19 @@ HOST_APPLICATION_INPUTS = {
     "hub.crt": (Path("/etc/eidolon/tls/hub.crt"), "root", "eidolon", 0o640),
     "hub.key": (Path("/etc/eidolon/tls/hub.key"), "root", "eidolon", 0o640),
     "owner-domain-descriptor.json": (
-        Path("/var/lib/eidolon-bootstrap/owner_domain_descriptor.json"),
+        Path("/etc/eidolon/owner-domain/owner_domain_descriptor.json"),
         "root",
         "eidolon",
         0o640,
     ),
     "owner-domain-root-ca.pem": (
-        Path("/var/lib/eidolon-bootstrap/owner_domain_root_ca.pem"),
+        Path("/etc/eidolon/owner-domain/owner_domain_root_ca.pem"),
         "root",
         "eidolon",
         0o640,
     ),
     "authority-signing-certificate.pem": (
-        Path("/var/lib/eidolon-bootstrap/authority_signing_certificate.pem"),
+        Path("/etc/eidolon/owner-domain/authority_signing_certificate.pem"),
         "root",
         "eidolon",
         0o640,

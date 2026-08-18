@@ -15,9 +15,9 @@ onboarding:
   owner_domain_id: owner-local
   trust_epoch: 1
   descriptor_uri: https://eidolon-hub.local/api/device-onboarding/v1/descriptor
-  descriptor_path: /var/lib/eidolon-bootstrap/owner_domain_descriptor.json
-  owner_root_certificate_path: /var/lib/eidolon-bootstrap/owner_domain_root_ca.pem
-  authority_signing_certificate_path: /var/lib/eidolon-bootstrap/authority_signing_certificate.pem
+  descriptor_path: /etc/eidolon/owner-domain/owner_domain_descriptor.json
+  owner_root_certificate_path: /etc/eidolon/owner-domain/owner_domain_root_ca.pem
+  authority_signing_certificate_path: /etc/eidolon/owner-domain/authority_signing_certificate.pem
   retrieval_window_seconds: 1800
 discovery:
   mdns:
@@ -95,7 +95,7 @@ def test_pi_environment_targets_the_same_host_bound_hub(config) -> None:
 
     assert f"EIDOLON_LOCAL_API_OWNER_DOMAIN_ID={owner.owner_domain_id}" in local_api
     assert owner.identity.hub_origin(8443) in local_api
-    assert "EIDOLON_LOCAL_API_OWNER_DOMAIN_DESCRIPTOR=/var/lib/eidolon-bootstrap/owner_domain_descriptor.json" in local_api
+    assert "EIDOLON_LOCAL_API_OWNER_DOMAIN_DESCRIPTOR=/etc/eidolon/owner-domain/owner_domain_descriptor.json" in local_api
     assert "EIDOLON_LIVEKIT_CLIENT_URL=ws://192.168.100.15:7880" in channel
     assert "EIDOLON_CHANNEL_PROVIDER_ALLOW_INSECURE_LAN_CLIENT_URL=1" in channel
 

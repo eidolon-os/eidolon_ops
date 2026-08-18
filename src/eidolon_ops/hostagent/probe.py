@@ -66,12 +66,12 @@ HUB_CERTIFICATE = Path("/etc/eidolon/tls/hub.crt")
 
 HUB_PRIVATE_KEY = Path("/etc/eidolon/tls/hub.key")
 
-OWNER_DESCRIPTOR = Path("/var/lib/eidolon-bootstrap/owner_domain_descriptor.json")
+OWNER_DESCRIPTOR = Path("/etc/eidolon/owner-domain/owner_domain_descriptor.json")
 
-OWNER_ROOT_CERTIFICATE = Path("/var/lib/eidolon-bootstrap/owner_domain_root_ca.pem")
+OWNER_ROOT_CERTIFICATE = Path("/etc/eidolon/owner-domain/owner_domain_root_ca.pem")
 
 AUTHORITY_SIGNING_CERTIFICATE = Path(
-    "/var/lib/eidolon-bootstrap/authority_signing_certificate.pem"
+    "/etc/eidolon/owner-domain/authority_signing_certificate.pem"
 )
 
 LOCAL_API_ENV = Path("/etc/eidolon/local-api.env")
