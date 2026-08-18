@@ -14,6 +14,7 @@ from eidolon_ops import local_product as local_product_module
 from eidolon_ops import probes, source_assets
 from eidolon_ops.environment import EnvironmentFileError
 from eidolon_ops.errors import OperationsError
+from eidolon_ops.hub_assets import HUB_SETTINGS_TEMPLATE
 from eidolon_ops.local_product import LocalProductSource
 from eidolon_ops.paths import AppAccess, HostDriver, HostPaths, HostPlatform, HostProfile
 from eidolon_ops.probes import http_health as _http_health
@@ -200,12 +201,16 @@ def test_prepare_materializes_one_canonical_mac_product_contract(
                         "livekit:\n  api_url: http://127.0.0.1:7880\n",
                         "",
                     )
-                if target.endswith("config/hub.systemd.example.yaml"):
+                source, path = command[command.index("-C") + 1], target.partition(":")[2]
+                if (Path(source).name, path) == HUB_SETTINGS_TEMPLATE:
+                    # A source run renders the same template a Host is sent, out
+                    # of Hub's own pinned commit — including the state root Hub
+                    # states as a variable and this profile resolves.
                     return ProcessResult(
                         0,
                         "onboarding:\n  hub_id: eidolon-hub-local\n"
                         "  public_base_url: https://eidolon-hub.local\n"
-                        "persistence:\n  path: /var/lib/eidolon/hub/eidolon-hub.sqlite3\n",
+                        "persistence:\n  path: $EIDOLON_STATE_ROOT/hub/eidolon-hub.sqlite3\n",
                         "",
                     )
                 return ProcessResult(0, "service: product\n", "")

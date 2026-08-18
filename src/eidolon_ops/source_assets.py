@@ -30,11 +30,17 @@ ENV_NAMES = (
     "livekit.env",
 )
 SETTING_INPUT_NAMES = ("agent.yaml", "channel.yaml", "memory.yaml")
+#: Kernel's own product profiles: what eidolond runs and what the manifest of
+#: system services says. Hub's settings used to be a third entry here and is
+#: not one any more — it is rendered from Hub's own repository, which is what
+#: :data:`eidolon_ops.hub_assets.HUB_SETTINGS_TEMPLATE` names.
 KERNEL_SETTINGS = {
     "kernel.yaml": "config/kernel.systemd.example.yaml",
-    "hub.yaml": "config/hub.systemd.example.yaml",
     "system-services.yaml": "config/system-services.yaml",
 }
+#: The rendered Hub settings a source run starts Hub with, under the profile's
+#: settings root like every other name in this module.
+HUB_SETTINGS_NAME = "hub.yaml"
 
 #: Which port each component binds on a source run. ``config/ports.yaml`` is
 #: the registry a product Host is sent; this is the same assignment for the
@@ -68,10 +74,18 @@ def repository_root() -> Path:
 
 
 def translate_fhs(profile: HostProfile, value: str) -> str:
-    """Point a product-shaped template at this workstation's own roots."""
+    """Point a product-shaped template at this workstation's own roots.
+
+    A component may say where its state goes either as the product path or as
+    ``$EIDOLON_STATE_ROOT``, which resolves to the same place on either kind of
+    Host because both export it. Both are translated: a settings file an
+    operator opens should say which directory it means, rather than leave the
+    answer to whichever environment the service happened to inherit.
+    """
 
     paths = profile.paths
     replacements = (
+        ("$EIDOLON_STATE_ROOT", str(paths.state_root)),
         ("/var/lib/eidolon-bootstrap", str(paths.bootstrap_state_root)),
         ("/run/eidolon-bootstrap", str(paths.bootstrap_runtime_root)),
         ("/var/lib/eidolon", str(paths.state_root)),

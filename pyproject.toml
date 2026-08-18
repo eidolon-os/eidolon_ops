@@ -11,12 +11,12 @@ requires-python = ">=3.11"
 license = { text = "MIT" }
 dependencies = [
   "cryptography>=45,<47",
+  "jsonschema>=4.21",
   "supervisor>=4.2,<5",
 ]
 
 [project.optional-dependencies]
 dev = [
-  "jsonschema>=4.21",
   "pytest>=8.0",
   "pytest-cov>=6.0",
   "ruff>=0.4",

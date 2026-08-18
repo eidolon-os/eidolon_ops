@@ -16,6 +16,7 @@ from test_install_inputs import _settings_reader as _product_settings_reader
 from eidolon_ops.config import SOURCE_IDS, ConfigurationError
 from eidolon_ops.controller import EidolonPiController, OperationsError
 from eidolon_ops.endpoints import HostEndpoint
+from eidolon_ops.hub_assets import HUB_SETTINGS_TEMPLATE as HUB_SETTINGS_TEMPLATE_CONTRACT
 from eidolon_ops.paths import AppAccess
 from eidolon_ops.process import ProcessResult
 from eidolon_ops.release_matrix import SYSTEMD_ASSET_CONTRACTS
@@ -31,9 +32,20 @@ DEPLOY_TREE_LISTING = (
 DEPLOY_PACKAGE_DIGEST = "4a0a4e9c29dbbebd3c4ddbd73fccbee20aba0cdf1cc9360bbe9fafc0277c262a"
 
 # The Hub settings template the Host binding rewrites; only the two literals the
-# materializer replaces have to be present for it to be a faithful stand-in.
-HUB_SETTINGS_TEMPLATE_PATH = "config/hub.systemd.example.yaml"
+# materializer replaces have to be present for it to be a faithful stand-in. It
+# is read out of Hub's own pinned commit, so the stand-in answers to the source
+# as well as to the path — Hub is not the only component with a settings.yaml.
+HUB_SETTINGS_TEMPLATE_SOURCE, HUB_SETTINGS_TEMPLATE_PATH = HUB_SETTINGS_TEMPLATE_CONTRACT
 HUB_SETTINGS_TEMPLATE = "hub_id: eidolon-hub-local\npublic_base_url: https://eidolon-hub.local\n"
+
+
+def _read_target(command: tuple[str, ...]) -> tuple[str, str]:
+    """Which repository and which path a ``git show`` in this suite is reading."""
+
+    return (
+        command[command.index("-C") + 1].rsplit("/", 1)[-1],
+        command[-1].partition(":")[2],
+    )
 
 
 class ControllerRunner:
@@ -65,14 +77,13 @@ class ControllerRunner:
                 revision = "f" * 40
             return ProcessResult(0, revision + "\n", "")
         if "show" in command:
-            path = command[-1].partition(":")[2]
+            source, path = _read_target(command)
+            if (source, path) == (HUB_SETTINGS_TEMPLATE_SOURCE, HUB_SETTINGS_TEMPLATE_PATH):
+                return ProcessResult(0, HUB_SETTINGS_TEMPLATE, "")
             if path == "config/settings.yaml":
                 # Component settings are read from the pinned commit whenever the
                 # derived inputs are refreshed.
-                source = command[command.index("-C") + 1].rsplit("/", 1)[-1]
                 return ProcessResult(0, _product_settings_reader(source, "", path), "")
-            if path == HUB_SETTINGS_TEMPLATE_PATH:
-                return ProcessResult(0, HUB_SETTINGS_TEMPLATE, "")
             contract = next(item for item in SYSTEMD_ASSET_CONTRACTS if item.path == path)
             if self.invalid_release_matrix:
                 return ProcessResult(
@@ -852,7 +863,11 @@ def test_unified_pi_stage_renders_host_bound_application_assets(config) -> None:
 
     class Runner(ControllerRunner):
         def run(self, command, **kwargs):
-            if "show" in command and command[-1].endswith("config/hub.systemd.example.yaml"):
+            command = tuple(command)
+            if "show" in command and _read_target(command) == (
+                HUB_SETTINGS_TEMPLATE_SOURCE,
+                HUB_SETTINGS_TEMPLATE_PATH,
+            ):
                 return ProcessResult(
                     0,
                     "onboarding:\n"
@@ -860,7 +875,7 @@ def test_unified_pi_stage_renders_host_bound_application_assets(config) -> None:
                     "  public_base_url: https://eidolon-hub.local\n"
                     "discovery:\n  mdns:\n    enabled: true\n"
                     "channel_provider:\n  contract_url: http://127.0.0.1:8767/v1\n"
-                    "persistence:\n  path: /var/lib/eidolon/hub/eidolon-hub.sqlite3\n",
+                    "persistence:\n  path: $EIDOLON_STATE_ROOT/hub/eidolon-hub.sqlite3\n",
                     "",
                 )
             return super().run(command, **kwargs)

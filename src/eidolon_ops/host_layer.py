@@ -20,8 +20,9 @@ from eidolon_ops.host_application import (
     HostApplicationError,
     HostApplicationMaterializer,
 )
-from eidolon_ops.hub_assets import HubAssetError
+from eidolon_ops.hub_assets import HubAssetError, hub_settings_template
 from eidolon_ops.paths import AppAccess
+from eidolon_ops.private_inputs import INSTALL_DESTINATION_NAMES
 from eidolon_ops.readiness import product_payload
 from eidolon_ops.transport import SSHTransport
 
@@ -35,22 +36,11 @@ ASSET_ERRORS = (
     InstallInputError,
 )
 
-_STAGED_INSTALL_NAMES = {
-    "data_env": "data.env",
-    "hub_env": "hub.env",
-    "kernel_env": "kernel.env",
-    "admin_env": "admin.env",
-    "local_api_env": "local-api.env",
-    "bootstrap_env": "bootstrap.env",
-    "host_identity": "host_identity.ed25519",
-    "agent_env": "agent.env",
-    "channel_env": "channel.env",
-    "memory_env": "memory.env",
-    "livekit_env": "livekit.env",
-    "agent_settings": "agent.yaml",
-    "channel_settings": "channel.yaml",
-    "memory_settings": "memory.yaml",
-}
+#: The one filename each install input is staged and written under. Imported
+#: rather than restated: this used to be a second copy, identical byte for
+#: byte, and two copies of a mapping are a mapping that will eventually
+#: disagree with itself in a way no test was watching for.
+_STAGED_INSTALL_NAMES = INSTALL_DESTINATION_NAMES
 #: Which port each component binds. Ops owns this file — Admin builds its
 #: service catalog from it and interpolates the EIDOLON_* variables its
 #: services.yaml names — so a Host is sent this one rather than carrying a
@@ -123,12 +113,12 @@ class HostLayer:
 
     def prepare(self):
         materializer = self.materializer()
-        kernel = self.config.sources["eidolon_kernel"]
-        template = self._read_exact_source_file(
-            "eidolon_kernel", kernel.revision, "config/hub.systemd.example.yaml"
-        )
         try:
-            return materializer.prepare(template)
+            template = hub_settings_template(
+                {source_id: source.revision for source_id, source in self.config.sources.items()},
+                self._read_exact_source_file,
+            )
+            return materializer.prepare(template.text)
         except ASSET_ERRORS as exc:
             raise OperationsError(str(exc)) from exc
 

@@ -20,6 +20,7 @@ from eidolon_ops.hub_assets import (
     HubAssetError,
     ensure_hub_tls_identity,
     hub_settings_are_bound,
+    hub_settings_template,
     render_hub_settings,
 )
 from eidolon_ops.install_inputs import validate_install_input_contract
@@ -93,6 +94,7 @@ class LocalProductSource:
             *(root / "env" / name for name in source_assets.ENV_NAMES),
             *(root / "settings" / name for name in source_assets.SETTING_INPUT_NAMES),
             *(root / "settings" / name for name in source_assets.KERNEL_SETTINGS),
+            root / "settings" / source_assets.HUB_SETTINGS_NAME,
             root / "settings/channel-provider.yaml",
             root / "settings/eidolond.yaml",
             root / "settings/ports.yaml",
@@ -223,17 +225,22 @@ class LocalProductSource:
                 value = value.rstrip() + source_assets.memory_supervisor_block()
             rendered[root / "settings" / name] = value.encode("utf-8")
         for name, source_path in source_assets.KERNEL_SETTINGS.items():
-            value = source_assets.translate_fhs(
+            rendered[root / "settings" / name] = source_assets.translate_fhs(
                 self.profile,
                 self._read_exact_file(
                     "eidolon_kernel",
                     self.config.sources["eidolon_kernel"].revision,
                     source_path,
                 ),
-            )
-            if name == "hub.yaml":
-                value = render_hub_settings(value, identity, app.hub_https_port)
-            rendered[root / "settings" / name] = value.encode("utf-8")
+            ).encode("utf-8")
+        # The same template a product Host is sent, resolved from the same
+        # pinned commits, so a source run cannot be started from a Hub profile
+        # no Host would get.
+        template = hub_settings_template(self._source_revisions(), self._read_exact_file)
+        rendered[root / "settings" / source_assets.HUB_SETTINGS_NAME] = source_assets.translate_fhs(
+            self.profile,
+            render_hub_settings(template.text, identity, app.hub_https_port),
+        ).encode("utf-8")
         rendered[root / "settings/channel-provider.yaml"] = source_assets.translate_fhs(
             self.profile,
             self._read_exact_file(
@@ -434,6 +441,9 @@ class LocalProductSource:
             f"exact Mac product source file {source_id}:{path}",
             self.runner.run((self.git, "-C", str(source.path), "show", f"{revision}:{path}")),
         ).stdout
+
+    def _source_revisions(self) -> dict[str, str]:
+        return {source_id: source.revision for source_id, source in self.config.sources.items()}
 
     def _require_app_access(self) -> AppAccess:
         if self.profile.app is None:

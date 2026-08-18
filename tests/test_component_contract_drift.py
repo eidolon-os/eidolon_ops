@@ -32,8 +32,9 @@ from eidolon_ops.config import (
     SOURCE_IDS,
 )
 from eidolon_ops.hostagent import contract as host_contract
+from eidolon_ops.hub_assets import HUB_SETTINGS_TEMPLATE
 from eidolon_ops.private_inputs import INSTALL_DESTINATION_NAMES
-from eidolon_ops.release_matrix import SYSTEMD_ASSET_CONTRACTS
+from eidolon_ops.release_matrix import HUB_SETTINGS_DESTINATION, SYSTEMD_ASSET_CONTRACTS
 
 pytestmark = pytest.mark.contract
 
@@ -105,6 +106,27 @@ def test_each_input_lands_where_and_as_ops_would_write_it(topology) -> None:
         # side, where the component that generated the file could not see them.
         assert destination == entry.install_path
         assert (owner, group, mode) == (entry.owner, entry.group, entry.mode)
+
+
+def test_the_derived_input_is_rendered_from_the_template_its_component_declared(
+    topology,
+) -> None:
+    derived = [entry for entry in topology.install_inputs if not entry.is_operator_supplied]
+
+    # One derived input exists, and Ops renders it from a hard-coded address.
+    # That address has to be the one the owning component published, because a
+    # component that cannot move its own template is a component whose deployed
+    # defaults someone else owns — which is where Hub's settings were, in
+    # eidolon_kernel, until they moved back here.
+    assert [(entry.component_id, entry.template) for entry in derived] == [
+        HUB_SETTINGS_TEMPLATE
+    ]
+    assert derived[0].install_path == Path(HUB_SETTINGS_DESTINATION)
+    destination, owner, group, mode = host_contract.HOST_APPLICATION_INPUTS[
+        "hub.generated.yaml"
+    ]
+    assert destination == derived[0].install_path
+    assert (owner, group, mode) == (derived[0].owner, derived[0].group, derived[0].mode)
 
 
 def test_the_backed_up_authorities_are_the_ones_components_named(topology) -> None:

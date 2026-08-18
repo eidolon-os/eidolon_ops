@@ -25,7 +25,7 @@ from eidolon_ops.config import (
 from eidolon_ops.errors import InstallInputError, OperationsError
 from eidolon_ops.install_inputs import validate_install_input_contract
 from eidolon_ops.process import ProcessRunner, checked
-from eidolon_ops.release_matrix import ReleaseMatrixError, validate_release_systemd_matrix
+from eidolon_ops.release_matrix import ReleaseMatrixError, validate_release_matrix
 from eidolon_ops.workstation_toolchain import ensure_workstation_uv
 
 #: Release formats this deployer speaks. The activator reports its own versions
@@ -111,7 +111,7 @@ class ReleasePreflight:
         release_contract = self._release_tool_contract(release_cli)
         source_evidence = self._source_evidence()
         try:
-            release_matrix = validate_release_systemd_matrix(
+            release_matrix = validate_release_matrix(
                 source_evidence,
                 self.read_exact_source_file,
             )

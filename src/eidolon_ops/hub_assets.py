@@ -5,12 +5,17 @@ that matches the Host identity, and a Hub settings file that names this Host
 rather than the template's placeholder. Both existed twice, and the two copies
 had already diverged on when material is replaced and on how a drifted template
 is reported.
+
+Which file that template is also lives here, because the same two callers need
+the same answer and reading it from two places is how the last drift started.
 """
 
 from __future__ import annotations
 
 import os
 import stat
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
 from eidolon_ops.host_identity import (
@@ -28,9 +33,86 @@ from eidolon_ops.private_files import atomic_private_file
 _HUB_ID_PLACEHOLDER = "hub_id: eidolon-hub-local"
 _HUB_ORIGIN_PLACEHOLDER = "public_base_url: https://eidolon-hub.local"
 
+#: Which pinned file a Host's Hub settings are rendered from: Hub's own, and the
+#: same one Hub's tests load and a local run reads. It lived in eidolon_kernel
+#: until this moved, which had two costs worth not repeating — Hub could not
+#: change its own deployed defaults without a release of another component, and
+#: the settings Hub's suite exercised were not the settings a Host started with.
+#: The two had already drifted.
+HUB_SETTINGS_TEMPLATE = ("eidolon_hub", "config/settings.yaml")
+
+#: The same file at the address it had before it moved. A release pins every
+#: component at an exact commit, so deploying or refreshing a release from
+#: before the move still has to work: this is read only when the pinned Hub
+#: carries nothing renderable, and which one answered is recorded in the release
+#: evidence rather than left to be inferred.
+LEGACY_HUB_SETTINGS_TEMPLATE = ("eidolon_kernel", "config/hub.systemd.example.yaml")
+
 
 class HubAssetError(ValueError):
     """Hub TLS material or rendered Hub settings are unsafe or drifted."""
+
+
+@dataclass(frozen=True, slots=True)
+class HubSettingsTemplate:
+    """The template one release renders a Host's Hub settings from."""
+
+    source_id: str
+    revision: str
+    path: str
+    text: str
+
+    @property
+    def is_legacy(self) -> bool:
+        return (self.source_id, self.path) == LEGACY_HUB_SETTINGS_TEMPLATE
+
+
+def template_is_renderable(template: str) -> bool:
+    """Whether both lines Ops rewrites are present exactly once."""
+
+    return all(
+        template.count(placeholder) == 1
+        for placeholder in (_HUB_ID_PLACEHOLDER, _HUB_ORIGIN_PLACEHOLDER)
+    )
+
+
+def hub_settings_template(
+    revisions: Mapping[str, str],
+    read_exact_file: Callable[[str, str, str], str],
+) -> HubSettingsTemplate:
+    """Resolve the Hub settings template from the exact commits a release pins.
+
+    Hub's own copy is authoritative. The pre-move address is tried after it and
+    only for the same reason it is still named at all: a release is a set of
+    exact commits, and one from before the move has nothing to read at the new
+    address. A release where neither address answers is refused here, before any
+    of it reaches a Host, and the report names every address that was tried.
+    """
+
+    rejected: list[str] = []
+    for source_id, path in (HUB_SETTINGS_TEMPLATE, LEGACY_HUB_SETTINGS_TEMPLATE):
+        revision = revisions.get(source_id)
+        if revision is None:
+            rejected.append(f"{source_id}:{path}: component is not pinned by this release")
+            continue
+        label = f"{source_id}@{revision[:12]}:{path}"
+        try:
+            text = read_exact_file(source_id, revision, path)
+        except Exception:
+            # The address is the diagnosis here; the reader's stderr is not, and
+            # the systemd gate beside this one is careful not to repeat it.
+            rejected.append(f"{label}: no such file at this commit")
+            continue
+        if not template_is_renderable(text):
+            rejected.append(f"{label}: does not carry the two lines Ops rewrites, once each")
+            continue
+        return HubSettingsTemplate(
+            source_id=source_id, revision=revision, path=path, text=text
+        )
+    raise HubAssetError(
+        "no pinned Hub settings template can be rendered for this Host:\n"
+        + "\n".join(rejected)
+    )
 
 
 def render_hub_settings(template: str, identity: HostLanIdentity, port: int) -> str:
