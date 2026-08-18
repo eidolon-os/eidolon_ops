@@ -1367,3 +1367,112 @@ def test_a_setup_code_and_a_boundary_action_reach_the_host(setup_controller) -> 
     assert controller.lifecycle("start", dry_run=False)["status"] == "started"
     with pytest.raises(OperationsError, match="unknown lifecycle action"):
         controller.lifecycle("reboot", dry_run=False)
+
+
+def _publish_contract(config, component_id: str, factory: str) -> None:
+    """Give one source checkout an operations contract."""
+
+    root = config.sources[component_id].path / "ops"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "component.toml").write_text(
+        f"""
+schema_version = 1
+component_id = "{component_id}"
+contract_version = "1"
+
+[reset]
+factory = ["{factory}"]
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+
+def test_a_release_from_before_the_contracts_can_still_be_reset(
+    setup_controller,
+) -> None:
+    """Silence from every component is a pre-contract release, not a fault.
+
+    A release pins exact commits, so Ops has to be able to wipe a Host running
+    one that predates any of this. Refusing would take the tool away exactly
+    when it is needed.
+    """
+
+    controller, _runner, transport = setup_controller
+
+    plan = controller.reset(wipe_authority_data=True, apply=False)
+
+    assert plan["authority"]["contracts"] == "absent"
+    # And it says the question went unasked rather than implying an answer.
+    assert "not checked" in plan["authority"]["note"]
+    assert [call[0] for call in transport.agent_calls] == ["reset-plan"]
+
+
+def test_a_half_declared_release_refuses_to_wipe(setup_controller, config) -> None:
+    """The mixture is the dangerous one, so it is the one that fails closed.
+
+    Once the set has started declaring, a component nobody asked is exactly
+    where moved state would be — and a wipe of the old roots would report
+    success while leaving it behind.
+    """
+
+    controller, _runner, transport = setup_controller
+    _publish_contract(config, "eidolon_hub", "/var/lib/eidolon/hub")
+
+    with pytest.raises(OperationsError) as error:
+        controller.reset(wipe_authority_data=True, apply=True)
+
+    message = str(error.value)
+    assert "eidolon_data" in message and "eidolon_memory" in message
+    # Refused before anything was asked of the Host.
+    assert transport.agent_calls == []
+
+
+def test_state_a_reset_could_not_reach_stops_the_reset(
+    setup_controller, config
+) -> None:
+    controller, _runner, transport = setup_controller
+    for source_id in SOURCE_IDS:
+        _publish_contract(config, source_id, "/var/lib/eidolon/example")
+    _publish_contract(config, "eidolon_memory", "/srv/eidolon-memory")
+
+    with pytest.raises(OperationsError) as error:
+        controller.reset(wipe_authority_data=True, apply=True)
+
+    # The Host clears three roots and nothing else. A component that moved its
+    # state outside them would hand the next owner the last one's data, and a
+    # wipe of /var/lib/eidolon would have reported success.
+    message = str(error.value)
+    assert "/srv/eidolon-memory" in message
+    assert "would leave data behind" in message
+    assert transport.agent_calls == []
+
+
+def test_a_fully_declared_reset_reports_what_each_component_loses(
+    setup_controller, config
+) -> None:
+    controller, _runner, transport = setup_controller
+    for source_id in SOURCE_IDS:
+        _publish_contract(config, source_id, f"/var/lib/eidolon/{source_id}")
+
+    plan = controller.reset(wipe_authority_data=True, apply=False)
+
+    authority = plan["authority"]
+    assert authority["contracts"] == "complete"
+    assert authority["declared_by"]["eidolon_hub"] == ["/var/lib/eidolon/eidolon_hub"]
+    # Nothing here is backed up in this fixture, and an empty list is the
+    # honest answer rather than a missing key.
+    assert authority["not_in_any_backup"] == []
+    assert [call[0] for call in transport.agent_calls] == ["reset-plan"]
+
+
+def test_a_reset_that_keeps_authority_does_not_ask_the_components(
+    setup_controller,
+) -> None:
+    controller, _runner, transport = setup_controller
+
+    plan = controller.reset(wipe_authority_data=False, apply=False)
+
+    # Nothing is lost, so there is nothing for a component to be consulted
+    # about, and a missing contract must not block a deployment-only reset.
+    assert "authority" not in plan
+    assert [call[0] for call in transport.agent_calls] == ["reset-plan"]

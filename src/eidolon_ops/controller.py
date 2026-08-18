@@ -13,6 +13,7 @@ import tarfile
 import tempfile
 from pathlib import Path
 
+from eidolon_ops.component_contract import read_component_contracts
 from eidolon_ops.config import SOURCE_IDS, OperationsConfig, validate_release_id
 from eidolon_ops.errors import OperationsError
 from eidolon_ops.foundation import (
@@ -22,6 +23,7 @@ from eidolon_ops.foundation import (
     python_probe_script,
 )
 from eidolon_ops.host_layer import ASSET_ERRORS, HostLayer
+from eidolon_ops.hostagent.contract import RESET_AUTHORITY_ROOTS
 from eidolon_ops.install_inputs import initialize_install_inputs
 from eidolon_ops.paths import AppAccess
 from eidolon_ops.process import ProcessRunner
@@ -315,15 +317,86 @@ class EidolonPiController:
             **self.host_layer.target_payload(),
             "wipe_authority_data": wipe_authority_data,
         }
+        authority = self._authority_to_remove() if wipe_authority_data else None
         plan = self.transport.run_agent("reset-plan", payload, timeout=180)
         if plan.get("status") != "planned":
             raise OperationsError("Host reset plan returned invalid evidence")
+        if authority is not None:
+            plan = {**plan, "authority": authority}
         if not apply:
             return {**plan, "next": "rerun reset --apply after reviewing the detected paths"}
         result = self.transport.run_agent("reset-host", payload, timeout=600)
         if result.get("status") != "reset":
             raise OperationsError("Host reset returned invalid evidence")
-        return result
+        return result if authority is None else {**result, "authority": authority}
+
+    def _authority_to_remove(self) -> dict[str, object]:
+        """What each component says a reset takes from it, checked against the roots.
+
+        A reset that wipes authority is the one operation where being nearly
+        right is worse than refusing, so it is the one that asks the components
+        rather than trusting three coarse roots to have covered them. A
+        component whose state moved outside those roots would leave the next
+        owner holding the last one's data, and a wipe of /var/lib/eidolon
+        would not have said so.
+
+        Silence is read three ways, because a release pins exact commits and
+        Ops has to be able to reset a Host running one from before any of this
+        existed:
+
+        * Every component declares — the answer is checked and reported.
+        * None declares — a pre-contract release. The roots are what they
+          always were, so the reset proceeds and the plan says the question
+          was not asked rather than implying it was answered.
+        * Some declare and some do not — refused. That mixture is the one that
+          is actually dangerous: the set has started moving, and a component
+          that has not been asked is exactly where the moved state would be.
+        """
+
+        sources = {
+            source_id: source.path for source_id, source in self.config.sources.items()
+        }
+        topology = read_component_contracts(sources)
+        if not topology.contracts:
+            return {
+                "contracts": "absent",
+                "note": (
+                    "no component in this release declares an operations contract, "
+                    "so what a reset removes was not checked against them"
+                ),
+            }
+        topology.requires_every_component("wiping authority data")
+
+        roots = tuple(RESET_AUTHORITY_ROOTS)
+        removed: dict[str, list[str]] = {}
+        stranded: list[str] = []
+        for contract_ in topology.contracts:
+            declared = sorted(str(path) for path in contract_.factory_reset_paths)
+            removed[contract_.component_id] = declared
+            stranded.extend(
+                path
+                for path in declared
+                if not any(Path(path).is_relative_to(root) for root in roots)
+            )
+        if stranded:
+            raise OperationsError(
+                "these components declare state a reset would not reach: "
+                + ", ".join(sorted(stranded))
+                + ". The Host clears "
+                + ", ".join(str(root) for root in roots)
+                + " and nothing else, so this reset would leave data behind."
+            )
+        return {
+            "contracts": "complete",
+            "declared_by": removed,
+            # Named here as well as in a backup report, because this is the
+            # last moment anyone can decide not to lose it.
+            "not_in_any_backup": sorted(
+                f"{state.component_id}:{state.path}"
+                for state in topology.authority
+                if not state.is_covered
+            ),
+        }
 
     def controller_reset(self, *, apply: bool) -> dict[str, object]:
         """Return a claimed Host to unclaimed so a new phone can manage it.
