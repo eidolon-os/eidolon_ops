@@ -98,10 +98,9 @@ def test_platform_checks_cover_os_init_memory_and_disk(monkeypatch) -> None:
 def test_foundation_doctor_composes_every_gate(monkeypatch, tmp_path: Path) -> None:
     # A Host that keeps its journal in RAM is degraded, so the gate has to be
     # given a Host that does not — otherwise this asserts the wrong failure.
-    journal = tmp_path / "journal" / "abc123"
-    journal.mkdir(parents=True)
-    (journal / "system.journal").write_bytes(b"")
-    monkeypatch.setattr(host_foundation, "JOURNAL_DIRECTORY", tmp_path / "journal")
+    monkeypatch.setattr(
+        host_foundation, "journal_is_persistent", lambda: True
+    )
     evidence = tmp_path / "foundation.json"
     contract = foundation_payload()
     evidence_document = {
@@ -689,9 +688,16 @@ def test_target_main_routes_all_actions_and_errors(monkeypatch, capsys) -> None:
     assert agent_main.main(("only-one",)) == 2
 
 
-def test_a_host_that_forgets_why_it_failed_is_degraded(
-    monkeypatch, tmp_path: Path
-) -> None:
+def _merged_journald_config(*storage: str) -> str:
+    """What `systemd-analyze cat-config` prints: drop-ins, in order."""
+
+    blocks = ["# /usr/lib/systemd/journald.conf.d/40-rpi-volatile-storage.conf"]
+    for value in storage:
+        blocks.append(f"[Journal]\nStorage={value}")
+    return "\n".join(blocks) + "\n"
+
+
+def test_a_host_that_forgets_why_it_failed_is_degraded(monkeypatch) -> None:
     """The check that turns an unanswerable incident into a reported fault.
 
     Raspberry Pi OS keeps the journal in RAM to spare the SD card, so every
@@ -701,20 +707,50 @@ def test_a_host_that_forgets_why_it_failed_is_degraded(
     taking jobs became uninvestigable.
     """
 
-    monkeypatch.setattr(host_foundation, "JOURNAL_DIRECTORY", tmp_path / "absent")
+    def merged(output: str):
+        return lambda *_a, **_k: subprocess.CompletedProcess([], 0, output, "")
 
+    monkeypatch.setattr(primitives, "run", merged(_merged_journald_config("volatile")))
     assert host_foundation.journal_is_persistent() is False
 
-    # And it is the journal on disk that answers, not the drop-in: a file that
-    # is present but outranked, or one journald never reloaded, leaves the
-    # evidence in RAM exactly as if it had never been written.
-    written = tmp_path / "journal"
-    (written / "abc123").mkdir(parents=True)
-    monkeypatch.setattr(host_foundation, "JOURNAL_DIRECTORY", written)
-    assert host_foundation.journal_is_persistent() is False
-
-    (written / "abc123" / "system.journal").write_bytes(b"")
+    # systemd's own rule: every drop-in is concatenated and the last Storage=
+    # wins. The check has to agree with that or it answers a question systemd
+    # is not asking.
+    monkeypatch.setattr(
+        primitives, "run", merged(_merged_journald_config("volatile", "persistent"))
+    )
     assert host_foundation.journal_is_persistent() is True
+
+    # And ours being outranked by a later drop-in means not persistent, even
+    # though our file is present and correct.
+    monkeypatch.setattr(
+        primitives, "run", merged(_merged_journald_config("persistent", "volatile"))
+    )
+    assert host_foundation.journal_is_persistent() is False
+
+
+def test_journal_files_left_by_an_old_configuration_do_not_count(
+    monkeypatch,
+) -> None:
+    """The defect this check was shipped with, kept from coming back.
+
+    The first version asked the filesystem: does /var/log/journal hold a
+    system.journal? Reverting to volatile storage leaves those files exactly
+    where they are, so a Host that had stopped persisting still had one — and
+    because this gates the foundation installer, such a Host was declared
+    healthy and never given its drop-in back. Found on the real Pi by deleting
+    the drop-in and watching `provision --apply` do nothing.
+    """
+
+    monkeypatch.setattr(
+        primitives,
+        "run",
+        lambda *_a, **_k: subprocess.CompletedProcess(
+            [], 0, _merged_journald_config("volatile"), ""
+        ),
+    )
+
+    assert host_foundation.journal_is_persistent() is False
 
 
 def test_persistent_journal_is_bounded_because_the_default_it_replaces_had_a_reason(

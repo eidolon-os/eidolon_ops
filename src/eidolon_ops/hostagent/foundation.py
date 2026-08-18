@@ -223,14 +223,32 @@ def foundation_platform_checks() -> dict[str, bool]:
 def journal_is_persistent() -> bool:
     """Whether this Host will still know why something failed after a reboot.
 
-    Asked of the journal on disk rather than of the drop-in this installs. A
-    drop-in that is present but outranked, or one journald has not reloaded,
-    leaves the evidence in RAM exactly as if it had never been written — and
-    what an operator needs to know is where the logs are, not what a file
-    says they should be.
+    Asked of systemd's own merged configuration, by systemd's own precedence
+    rule: every drop-in is concatenated in order and the last Storage= wins.
+    That is the property a reboot preserves.
+
+    Not asked of the journal on disk, which was the first attempt and was
+    wrong. Reverting to volatile storage leaves the previously written files
+    exactly where they were, so a Host that had stopped persisting still had a
+    /var/log/journal/<machine-id>/system.journal to find — and since this
+    check gates the foundation installer, a Host that lost its drop-in would
+    have been declared healthy and never given it back. Verified on the real
+    Pi by deleting the drop-in: effective Storage=volatile, stale files
+    present, old check True.
     """
 
-    return any(JOURNAL_DIRECTORY.glob("*/system.journal"))
+    result = primitives.run(
+        ("/usr/bin/systemd-analyze", "cat-config", "systemd/journald.conf"),
+        timeout=30,
+    )
+    if result.returncode != 0:
+        return False
+    storage = None
+    for line in result.stdout.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("Storage="):
+            storage = stripped.split("=", 1)[1].strip()
+    return storage == "persistent"
 
 def package_installed(package: str) -> bool:
     result = primitives.run(("/usr/bin/dpkg-query", "-W", "-f=${Status}", package), timeout=20)
