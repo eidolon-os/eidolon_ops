@@ -310,16 +310,34 @@ def app_ready(payload: Mapping[str, object]) -> dict[str, object]:
     local_api_records = service_records(_LOCAL_API_SERVICE_TYPE)
     livekit_origin = urlparse(str(app["livekit_client_url"]))
     livekit_port = livekit_origin.port or (443 if livekit_origin.scheme == "wss" else 80)
+    # One window between them, not one each. Two probes with a window apiece
+    # could outlast the deadline the operator's side holds, and then a Host
+    # with an unhealthy worker reports as a timed-out connection rather than
+    # as degraded — which is the one thing the report exists to distinguish.
+    budget = primitives.Budget(settle_seconds)
     channel = primitives.settle(
         lambda: channel_worker_report(worker_contract),
         lambda report: bool(report["healthy"]) and bool(report["dispatch_identity"]),
-        seconds=settle_seconds,
+        seconds=budget.remaining(),
     )
+    waited_on_worker = budget.spent()
     link = primitives.settle(
         lambda: channel_worker_livekit_link(worker_contract),
         lambda report: bool(report["healthy"]),
-        seconds=settle_seconds,
+        seconds=budget.remaining(),
     )
+    waiting = {
+        "budget_seconds": settle_seconds,
+        "spent_seconds": round(budget.spent(), 1),
+        # Named so a slow app-ready points at what was slow. Without this the
+        # operator sees only the total and has no way to tell a board that
+        # boots slowly from a worker that never comes back.
+        "spent_on": {
+            "channel_worker": round(waited_on_worker, 1),
+            "channel_worker_livekit_link": round(budget.spent() - waited_on_worker, 1),
+        },
+        "exhausted": budget.exhausted(),
+    }
     checks = {
         "backend_healthy": all(
             value.get("ActiveState") == "active" and value.get("SubState") == "running"
@@ -395,6 +413,7 @@ def app_ready(payload: Mapping[str, object]) -> dict[str, object]:
         "local_api": local_api,
         "hub_health": hub_health,
         "channel_worker": {**channel, "livekit_link": link},
+        "waiting": waiting,
         "resolution": sorted(resolved),
         "mdns": {
             "hub": [";".join(fields) for fields in hub_records],

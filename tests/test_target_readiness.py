@@ -344,3 +344,85 @@ def test_target_rejects_non_host_bound_application_payload(
 def test_target_rejects_missing_application_payload() -> None:
     with pytest.raises(TargetError, match="missing or malformed"):
         app_contract.fixed_app({})
+
+
+def test_two_waiting_probes_share_one_window_rather_than_taking_one_each(
+    monkeypatch,
+) -> None:
+    """The bug that made a degraded Host look like a dead connection.
+
+    Each waiting probe used to be handed the whole settle window. With an
+    unhealthy worker, two of them at 240 seconds ran to 480 while the
+    operator's side gave up at 300 — so what came back was a timeout, which
+    says nothing about the Host, instead of a report naming the failed check.
+    """
+
+    ticks = iter(range(0, 10_000))
+    monkeypatch.setattr(primitives.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(primitives.time, "sleep", lambda _seconds: None)
+
+    budget = primitives.Budget(10)
+    first = budget.remaining()
+    primitives.settle(lambda: {"healthy": False}, lambda _report: False, seconds=first)
+    second = budget.remaining()
+    primitives.settle(lambda: {"healthy": False}, lambda _report: False, seconds=second)
+
+    # The first probe waited out the window, so the second gets what is left:
+    # nothing. Under the old code it would have been handed another full one,
+    # and the two together would have outlasted the operator's deadline.
+    assert first > 0
+    assert second == 0.0
+    assert budget.exhausted()
+
+
+def test_the_operators_deadline_is_derived_from_the_hosts_budget() -> None:
+    from eidolon_ops.readiness import (
+        DEFAULT_CHANNEL_SETTLE_SECONDS,
+        READINESS_TRANSPORT_TIMEOUT_SECONDS,
+    )
+
+    # Written down separately, these drift: raising the Host's budget without
+    # raising the deadline turns every slow-but-honest report into a timeout.
+    assert READINESS_TRANSPORT_TIMEOUT_SECONDS > DEFAULT_CHANNEL_SETTLE_SECONDS
+
+
+def test_a_slow_app_ready_says_which_check_spent_the_time(
+    monkeypatch, tmp_path: Path, bootstrap_socket: Path
+) -> None:
+    """Otherwise the operator is given a number they cannot act on.
+
+    "app-ready took four minutes" is a stopwatch reading. "it waited on the
+    channel worker" names the thing to go look at.
+    """
+
+    app = _app()
+    _materialize(monkeypatch, tmp_path / "host", app)
+    monkeypatch.setattr(primitives, "private_file_check", lambda *_a, **_k: {"healthy": True})
+    monkeypatch.setattr(
+        primitives, "unit_status",
+        lambda _unit: {"ActiveState": "active", "SubState": "running"},
+    )
+    monkeypatch.setattr(primitives, "run", _healthy_run(app))
+    monkeypatch.setattr(primitives, "tcp_reachable", lambda *_a: True)
+    monkeypatch.setattr(probe, "hub_tls_matches", lambda _hostname: True)
+    monkeypatch.setattr(probe, "local_api_json", lambda _path: {"status": "ok"})
+    monkeypatch.setattr(
+        primitives, "https_json_endpoint", lambda *_a, **_k: {"status": "ok"}
+    )
+    monkeypatch.setattr(primitives, "http_json", lambda *_a: (None, None))
+    monkeypatch.setattr(probe, "unit_processes", lambda _unit: {99})
+
+    payload = _payload(app)
+    payload["readiness"] = {
+        **product_payload(),
+        "channel_worker": {**product_payload()["channel_worker"], "settle_seconds": 0},
+    }
+    result = probe.app_ready(payload)
+
+    waiting = result["waiting"]
+    assert waiting["budget_seconds"] == 0
+    assert set(waiting["spent_on"]) == {
+        "channel_worker",
+        "channel_worker_livekit_link",
+    }
+    assert waiting["exhausted"] is True

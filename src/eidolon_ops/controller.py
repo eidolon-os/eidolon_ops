@@ -25,6 +25,7 @@ from eidolon_ops.host_layer import ASSET_ERRORS, HostLayer
 from eidolon_ops.install_inputs import initialize_install_inputs
 from eidolon_ops.paths import AppAccess
 from eidolon_ops.process import ProcessRunner
+from eidolon_ops.readiness import READINESS_TRANSPORT_TIMEOUT_SECONDS
 from eidolon_ops.release_bundle import BundleTransfer, parse_json
 from eidolon_ops.release_preflight import ReleasePreflight
 from eidolon_ops.release_transaction import ReleaseTransaction
@@ -107,7 +108,9 @@ class EidolonPiController:
     def app_ready(self) -> dict[str, object]:
         self.preflight.validate_ssh_material()
         return self.transport.run_agent(
-            "app-ready", self.host_layer.target_payload(), timeout=300
+            "app-ready",
+            self.host_layer.target_payload(),
+            timeout=READINESS_TRANSPORT_TIMEOUT_SECONDS,
         )
 
     def doctor(self, *, release_id: str | None = None) -> dict[str, object]:

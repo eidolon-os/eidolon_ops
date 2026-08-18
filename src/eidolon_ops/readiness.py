@@ -43,6 +43,20 @@ LIVEKIT_SIGNALLING_PORT = 7880
 #: smaller number here is how a healthy release gets rolled back.
 DEFAULT_CHANNEL_SETTLE_SECONDS = 240
 
+#: What the rest of an app-ready costs beyond the waiting: unit status for
+#: every product unit, two HTTPS calls to the Hub, mDNS browsing, file checks.
+#: Seconds on a healthy board, and the allowance is generous because being
+#: wrong here turns a degraded report into a timed-out connection.
+READINESS_OVERHEAD_SECONDS = 60
+
+#: The deadline the operator's side holds. Derived rather than written down, so
+#: raising the budget cannot leave a transport that gives up before the Host
+#: has finished answering — which is exactly how a Host with one unhealthy
+#: worker came back as a 300-second timeout that said nothing.
+READINESS_TRANSPORT_TIMEOUT_SECONDS = (
+    DEFAULT_CHANNEL_SETTLE_SECONDS + READINESS_OVERHEAD_SECONDS
+)
+
 
 class HostKind(StrEnum):
     """Which kind of Host is attesting."""

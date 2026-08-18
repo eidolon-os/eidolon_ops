@@ -176,6 +176,35 @@ def read_uptime() -> float | None:
 def is_port(value: object) -> bool:
     return type(value) is int and 1 <= value <= 65535
 
+class Budget:
+    """One waiting window, shared by every probe allowed to spend it.
+
+    Each probe used to get the whole window to itself. Two of them, each
+    allowed 240 seconds, could outlast the 300-second deadline the operator's
+    side holds — so a Host with one unhealthy worker did not report as
+    degraded, it reported as a connection that timed out, which says nothing
+    about the Host at all.
+
+    A budget also makes the report able to say where the time went: whoever
+    reads it should not have to guess which probe was the slow one.
+    """
+
+    __slots__ = ("total", "_deadline")
+
+    def __init__(self, seconds: float) -> None:
+        self.total = max(float(seconds), 0.0)
+        self._deadline = time.monotonic() + self.total
+
+    def remaining(self) -> float:
+        return max(self._deadline - time.monotonic(), 0.0)
+
+    def spent(self) -> float:
+        return self.total - self.remaining()
+
+    def exhausted(self) -> bool:
+        return self.remaining() <= 0.0
+
+
 def settle(
     probe: Callable[[], dict[str, object]],
     ready: Callable[[dict[str, object]], bool],
