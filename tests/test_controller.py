@@ -1476,3 +1476,74 @@ def test_a_reset_that_keeps_authority_does_not_ask_the_components(
     # about, and a missing contract must not block a deployment-only reset.
     assert "authority" not in plan
     assert [call[0] for call in transport.agent_calls] == ["reset-plan"]
+
+
+def _plan_with_contents(transport, contents: list[str]) -> None:
+    """Make the Host's reset plan report what its roots actually hold."""
+
+    original = transport.run_agent
+
+    def run_agent(action, payload, **kwargs):
+        result = original(action, payload, **kwargs)
+        if action == "reset-plan":
+            return {**result, "authority_contents": contents}
+        return result
+
+    transport.run_agent = run_agent
+
+
+def test_the_report_is_about_what_will_actually_be_removed(
+    setup_controller, config
+) -> None:
+    """The roots are the unit of removal, so they are the unit of the report.
+
+    Narrowing the deletion to the declared paths would be the wrong fix: the
+    NATS JetStream store lives under these roots and no component declares it,
+    because NATS is a platform server with no repository of ours. Deleting only
+    what was claimed would hand the next owner the last one's message history.
+    """
+
+    controller, _runner, transport = setup_controller
+    for source_id in SOURCE_IDS:
+        _publish_contract(config, source_id, f"/var/lib/eidolon/{source_id}")
+    _plan_with_contents(
+        transport,
+        [
+            "/var/lib/eidolon/eidolon_hub",
+            "/var/lib/eidolon/nats",
+        ],
+    )
+
+    plan = controller.reset(wipe_authority_data=True, apply=False)
+    authority = plan["authority"]
+
+    assert authority["will_be_removed"] == {
+        "/var/lib/eidolon/eidolon_hub": "eidolon_hub"
+    }
+    # Not an error, and not hidden: this is how an operator finds out that a
+    # factory reset also takes the message bus's stores.
+    assert authority["removed_but_unclaimed"] == ["/var/lib/eidolon/nats"]
+
+
+def test_a_databases_own_sidecars_belong_to_whoever_declared_it(
+    setup_controller, config
+) -> None:
+    controller, _runner, transport = setup_controller
+    for source_id in SOURCE_IDS:
+        _publish_contract(config, source_id, f"/var/lib/eidolon/{source_id}.sqlite3")
+    _plan_with_contents(
+        transport,
+        [
+            "/var/lib/eidolon/eidolon_hub.sqlite3",
+            "/var/lib/eidolon/eidolon_hub.sqlite3-wal",
+            "/var/lib/eidolon/eidolon_hub.sqlite3-shm",
+            "/var/lib/eidolon/eidolon_hub.sqlite3.lock",
+        ],
+    )
+
+    authority = controller.reset(wipe_authority_data=True, apply=False)["authority"]
+
+    # Seven obvious entries burying the one that matters is how a report stops
+    # being read. A component that declared the database declared these.
+    assert authority["removed_but_unclaimed"] == []
+    assert set(authority["will_be_removed"].values()) == {"eidolon_hub"}

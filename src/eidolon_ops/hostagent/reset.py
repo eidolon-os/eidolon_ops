@@ -34,6 +34,32 @@ def reset_paths(*, wipe_authority_data: bool) -> tuple[Path, ...]:
         paths.update(contract.RESET_AUTHORITY_ROOTS)
     return tuple(sorted(paths, key=str))
 
+
+def authority_contents(root: Path) -> tuple[str, ...]:
+    """What is actually inside the authority roots, one level down.
+
+    The roots stay what gets removed: they are a superset on purpose, because
+    some of what lives under them belongs to no component at all — NATS keeps
+    its JetStream store there, and NATS is a platform server with no
+    repository of ours to publish a contract. Narrowing the removal to what
+    components declared would hand the next owner a Host that still holds the
+    last one's message history.
+
+    So instead of narrowing the deletion to match the report, the report is
+    widened to match the deletion. This enumeration is what lets the operator
+    be told which of these paths anyone has claimed, and which are about to go
+    with nobody's name on them.
+    """
+
+    found: set[str] = set()
+    for authority_root in contract.RESET_AUTHORITY_ROOTS:
+        present = primitives.host_path(root, authority_root)
+        if present.is_symlink() or not present.is_dir():
+            continue
+        for child in present.iterdir():
+            found.add(str(authority_root / child.name))
+    return tuple(sorted(found))
+
 def reset_plan(
     payload: Mapping[str, object],
     *,
@@ -50,6 +76,9 @@ def reset_plan(
         for path in reset_paths(wipe_authority_data=wipe_authority_data)
         if (primitives.host_path(root, path).exists() or primitives.host_path(root, path).is_symlink())
     ]
+    contents = (
+        authority_contents(root) if wipe_authority_data else ()
+    )
     staging = primitives.host_path(root, contract.VAR_TMP)
     staged = []
     if staging.is_dir() and not staging.is_symlink():
@@ -62,6 +91,10 @@ def reset_plan(
         "status": "planned",
         "wipe_authority_data": wipe_authority_data,
         "detected": detected,
+        # What removing those roots actually takes with it. Reported at a
+        # granularity where a component can be held responsible for an entry,
+        # which the roots themselves are not.
+        "authority_contents": list(contents),
         "staging": staged,
         "preserved": [
             "foundation packages and pinned NATS/LiveKit/Node/uv installations",

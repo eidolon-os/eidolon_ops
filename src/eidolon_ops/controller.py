@@ -40,6 +40,23 @@ _SETTINGS_SOURCES = ("eidolon_agent", "eidolon_channel", "eidolon_memory")
 _LIFECYCLE_ACTIONS = frozenset({"start", "stop", "restart"})
 
 
+#: What SQLite leaves beside a database it owns. A component that declared the
+#: database has declared these; listing them as unclaimed would bury the one
+#: entry that genuinely belongs to nobody under seven that obviously do not.
+_SQLITE_SIDECARS = ("-shm", "-wal", ".lock", "-journal")
+
+
+def _same_state(entry: str, declared: str) -> bool:
+    """Whether a path on the Host is the state a component declared."""
+
+    if entry == declared:
+        return True
+    for suffix in _SQLITE_SIDECARS:
+        if entry == f"{declared}{suffix}":
+            return True
+    return Path(entry).is_relative_to(declared) or Path(declared).is_relative_to(entry)
+
+
 class EidolonPiController:
     def __init__(
         self,
@@ -317,11 +334,13 @@ class EidolonPiController:
             **self.host_layer.target_payload(),
             "wipe_authority_data": wipe_authority_data,
         }
+        # Everything that can refuse does so before the Host is touched.
         authority = self._authority_to_remove() if wipe_authority_data else None
         plan = self.transport.run_agent("reset-plan", payload, timeout=180)
         if plan.get("status") != "planned":
             raise OperationsError("Host reset plan returned invalid evidence")
         if authority is not None:
+            authority = self._attribute_authority(authority, plan)
             plan = {**plan, "authority": authority}
         if not apply:
             return {**plan, "next": "rerun reset --apply after reviewing the detected paths"}
@@ -329,6 +348,59 @@ class EidolonPiController:
         if result.get("status") != "reset":
             raise OperationsError("Host reset returned invalid evidence")
         return result if authority is None else {**result, "authority": authority}
+
+    @staticmethod
+    def _attribute_authority(
+        authority: dict[str, object], plan: dict[str, object]
+    ) -> dict[str, object]:
+        """Say who owns each thing this reset is about to take.
+
+        The roots stay the unit of removal, because some of what lives under
+        them belongs to no component: NATS keeps its JetStream store there and
+        has no repository of ours to publish a contract. Narrowing the deletion
+        to the declared paths would hand the next owner a Host that still holds
+        the last one's message history.
+
+        What was wrong was not the breadth — it was that the report described
+        one list and the Host removed another. Now the report is about what the
+        Host will actually remove, and every entry either carries a component's
+        name or is called out as carrying nobody's.
+        """
+
+        contents = plan.get("authority_contents")
+        if not isinstance(contents, list):
+            return authority
+        declared = authority.get("declared_by")
+        owners: dict[str, str] = {}
+        if isinstance(declared, dict):
+            for component_id, paths in declared.items():
+                for path in paths:
+                    owners[str(path)] = str(component_id)
+
+        claimed: dict[str, str] = {}
+        unclaimed: list[str] = []
+        for entry in sorted(str(item) for item in contents):
+            owner = next(
+                (
+                    component_id
+                    for path, component_id in owners.items()
+                    if _same_state(entry, path)
+                ),
+                None,
+            )
+            if owner is None:
+                unclaimed.append(entry)
+            else:
+                claimed[entry] = owner
+        return {
+            **authority,
+            "will_be_removed": claimed,
+            # Not an error. It is how an operator learns that a factory reset
+            # also takes the message bus's stores, and how a directory left by
+            # a component that has since left the product becomes visible
+            # instead of vanishing quietly.
+            "removed_but_unclaimed": unclaimed,
+        }
 
     def _authority_to_remove(self) -> dict[str, object]:
         """What each component says a reset takes from it, checked against the roots.
