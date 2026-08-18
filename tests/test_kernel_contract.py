@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import configparser
 import subprocess
 import tomllib
 from pathlib import Path
@@ -128,3 +129,132 @@ def test_data_v2_paths_are_fixed_in_systemd_assets(kernel_contract) -> None:
 
     assert "EIDOLON_DATA_SQLITE_PATH=/var/lib/eidolon/eidolon-system.sqlite3" in text
     assert "eidolon.sqlite3" not in text
+
+
+@pytest.fixture(scope="module")
+def pinned_system_services(kernel_contract) -> dict[str, str | None]:
+    """Each service in Kernel's manifest and its supervisord target, as pinned.
+
+    Read by hand rather than with a YAML parser: Ops runs on the Host with
+    three dependencies and this test is not a reason to make it four. The shape
+    is narrow and Kernel's own suite validates the file against its schema.
+    """
+
+    text = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(KERNEL_ROOT),
+            "show",
+            f"{kernel_contract.revision}:config/system-services.yaml",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    services: dict[str, str | None] = {}
+    current: str | None = None
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("- service_id:"):
+            current = stripped.split(":", 1)[1].strip()
+            services[current] = None
+        elif stripped.startswith("supervisord:") and current is not None:
+            services[current] = stripped.split(":", 1)[1].strip()
+    assert services, "pinned manifest declared no services; the hand parse is wrong"
+    return services
+
+
+def _product_source_profile() -> tuple[dict[str, set[str]], dict[str, bool]]:
+    parser = configparser.ConfigParser(interpolation=None, strict=False)
+    parser.optionxform = str
+    parser.read(Path(__file__).resolve().parents[1] / "deploy/supervisor/product-source.conf")
+    groups = {
+        section.split(":", 1)[1]: {
+            name.strip() for name in parser[section]["programs"].split(",") if name.strip()
+        }
+        for section in parser.sections()
+        if section.startswith("group:")
+    }
+    autostart = {
+        section.split(":", 1)[1]: parser[section].getboolean("autostart", fallback=True)
+        for section in parser.sections()
+        if section.startswith("program:")
+    }
+    return groups, autostart
+
+
+def _managed_programs(services: dict[str, str | None]) -> set[str]:
+    return {
+        target.split(":", 1)[1]
+        for target in services.values()
+        if target not in (None, "external")
+    }
+
+
+def test_kernel_supervisord_targets_name_programs_this_profile_actually_defines(
+    pinned_system_services,
+) -> None:
+    groups, _autostart = _product_source_profile()
+
+    for service_id, target in pinned_system_services.items():
+        assert target is not None, (
+            f"{service_id} has no supervisord target, so a macOS source run would "
+            "not have that service at all. Say `external` if that is meant."
+        )
+        if target == "external":
+            continue
+        group, separator, program = target.partition(":")
+        assert separator, f"{service_id} supervisord target must be group:program, got {target!r}"
+        assert program in groups.get(group, set()), (
+            f"{service_id} points at {target}, which product-source.conf does not define. "
+            "Kernel names the target; this profile is what has to have it."
+        )
+
+
+def test_services_eidolond_manages_are_not_auto_started_behind_its_back(
+    pinned_system_services,
+) -> None:
+    _groups, autostart = _product_source_profile()
+
+    # supervisord is the executor here, not the authority: a program eidolond
+    # reconciles must wait for eidolond to ask for it, or supervisord's own
+    # autorestart quietly overrides a desired state of "off". The four
+    # authorities have always been wired this way; the check exists so the rest
+    # cannot arrive in the manifest without arriving here too.
+    managed = _managed_programs(pinned_system_services)
+    still_auto_started = sorted(name for name in managed if autostart.get(name, True))
+    assert not still_auto_started, (
+        f"eidolond reconciles {still_auto_started} but product-source.conf starts them "
+        "itself. Set autostart=false so the manifest is the only thing that decides."
+    )
+    assert managed <= set(autostart), sorted(managed - set(autostart))
+
+
+def test_programs_outside_the_service_manifest_are_named_rather_than_assumed(
+    pinned_system_services,
+) -> None:
+    _groups, autostart = _product_source_profile()
+
+    managed = _managed_programs(pinned_system_services)
+    # Everything supervisord runs that eidolond does not: either it is not a
+    # system service at all, or it is one eidolond has not been given yet. Both
+    # are fine; being neither written down nor noticed is not.
+    assert set(autostart) - managed == {
+        "admin-api",
+        "admin-web",
+        "bootstrapd",
+        "eidolond",
+        "hub-ingress",
+        "local-api",
+        "local-api-mdns",
+        # Pending the Kernel pin that carries the merged manifest: these are
+        # system services in Kernel's topology and will move into `managed`,
+        # which is when the autostart check above starts applying to them.
+        "agent",
+        "channel-provider",
+        "channel-worker",
+        "livekit-server",
+        "memory-discovery",
+        "memory-supervisor",
+    }
