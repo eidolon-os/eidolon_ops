@@ -21,6 +21,7 @@ from eidolon_ops.host_identity import HostLanIdentity
 #: shape, and rendering it anyway would ship a Hub that answers to a name no
 #: device asked for.
 _OWNER_ID_PLACEHOLDER = "owner_domain_id: owner-local"
+_OWNER_GENERATION_PLACEHOLDER = "owner_domain_generation: 1"
 _DESCRIPTOR_URI_PLACEHOLDER = (
     "descriptor_uri: https://eidolon-hub.local/api/device-onboarding/v1/descriptor"
 )
@@ -56,7 +57,11 @@ def template_is_renderable(template: str) -> bool:
 
     return all(
         template.count(placeholder) == 1
-        for placeholder in (_OWNER_ID_PLACEHOLDER, _DESCRIPTOR_URI_PLACEHOLDER)
+        for placeholder in (
+            _OWNER_ID_PLACEHOLDER,
+            _OWNER_GENERATION_PLACEHOLDER,
+            _DESCRIPTOR_URI_PLACEHOLDER,
+        )
     )
 
 
@@ -88,7 +93,11 @@ def hub_settings_template(
 
 
 def render_hub_settings(
-    template: str, owner_domain_id: str, identity: HostLanIdentity, port: int
+    template: str,
+    owner_domain_id: str,
+    owner_domain_generation: int,
+    identity: HostLanIdentity,
+    port: int,
 ) -> str:
     """Bind stable Owner identity and the current Host candidate URI."""
 
@@ -97,6 +106,12 @@ def render_hub_settings(
         _OWNER_ID_PLACEHOLDER,
         f"owner_domain_id: {owner_domain_id}",
         "Owner Domain ID",
+    )
+    rendered = _replace_once(
+        rendered,
+        _OWNER_GENERATION_PLACEHOLDER,
+        f"owner_domain_generation: {owner_domain_generation}",
+        "Owner Domain generation",
     )
     return _replace_once(
         rendered,
@@ -109,7 +124,11 @@ def render_hub_settings(
 
 
 def hub_settings_are_bound(
-    settings: str, owner_domain_id: str, identity: HostLanIdentity, port: int
+    settings: str,
+    owner_domain_id: str,
+    owner_domain_generation: int,
+    identity: HostLanIdentity,
+    port: int,
 ) -> bool:
     """Whether settings retain Owner identity while routing to this Host."""
 
@@ -120,6 +139,7 @@ def hub_settings_are_bound(
     )
     return (
         f"owner_domain_id: {owner_domain_id}" in settings
+        and f"owner_domain_generation: {owner_domain_generation}" in settings
         and descriptor_uri in settings
         and _OWNER_ID_PLACEHOLDER not in settings
     )

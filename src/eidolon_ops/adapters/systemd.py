@@ -39,6 +39,7 @@ class SystemdSupervisor:
                 Capability.RESTORE,
                 Capability.RESET,
                 Capability.CONTROLLER_RESET,
+                Capability.AUTHORITY_RESET,
                 Capability.DIAGNOSE,
             }
         )

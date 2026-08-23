@@ -230,6 +230,7 @@ class LocalProductSource:
         app = self._require_app_access()
         identity = self._host_lan_identity()
         owner_domain_id = self._owner_domain_id()
+        owner_domain_generation = self._owner_domain_generation()
         rendered: dict[Path, bytes] = {}
         for name in source_assets.SETTING_INPUT_NAMES:
             value = source_assets.translate_fhs(
@@ -254,7 +255,11 @@ class LocalProductSource:
         rendered[root / "settings" / source_assets.HUB_SETTINGS_NAME] = source_assets.translate_fhs(
             self.profile,
             render_hub_settings(
-                template.text, owner_domain_id, identity, app.hub_https_port
+                template.text,
+                owner_domain_id,
+                owner_domain_generation,
+                identity,
+                app.hub_https_port,
             ),
         ).encode("utf-8")
         rendered[root / "settings/channel-provider.yaml"] = source_assets.translate_fhs(
@@ -320,6 +325,7 @@ class LocalProductSource:
         app = self._require_app_access()
         identity = self._host_lan_identity()
         owner_domain_id = self._owner_domain_id()
+        owner_domain_generation = self._owner_domain_generation()
         ports = source_assets.PORTS
         backend = self.health()
         interface_addresses = lan_observation.interface_addresses(self.runner)
@@ -369,7 +375,11 @@ class LocalProductSource:
             str(ReadinessFact.HOST_IDENTITY_MATERIAL): self._host_identity_is_private(),
             str(ReadinessFact.HUB_TLS_IDENTITY): self._hub_tls_matches(identity),
             str(ReadinessFact.HUB_SETTINGS_BOUND): hub_settings_are_bound(
-                settings, owner_domain_id, identity, app.hub_https_port
+                settings,
+                owner_domain_id,
+                owner_domain_generation,
+                identity,
+                app.hub_https_port,
             ),
             str(ReadinessFact.HUB_LAN_REACHABLE): bool(hub["healthy"]),
             str(ReadinessFact.LOCAL_API_REACHABLE): bool(local_api["healthy"]),
@@ -530,6 +540,16 @@ class LocalProductSource:
         if not isinstance(owner_domain_id, str) or not owner_domain_id:
             raise OperationsError("Mac Owner Domain descriptor has no Owner identity")
         return owner_domain_id
+
+    def _owner_domain_generation(self) -> int:
+        try:
+            value = json.loads(self._owner_descriptor_path().read_text(encoding="utf-8"))
+            generation = value["owner_domain_generation"]
+        except (OSError, KeyError, TypeError, ValueError) as exc:
+            raise OperationsError("Mac Owner Domain generation is unreadable") from exc
+        if not isinstance(generation, int) or generation < 1:
+            raise OperationsError("Mac Owner Domain generation is invalid")
+        return generation
 
     def _ensure_owner_domain_assets(self) -> OwnerDomainAssets:
         try:

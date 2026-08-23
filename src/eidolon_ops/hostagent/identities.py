@@ -15,6 +15,12 @@ SERVICE_USERS = (
     "eidolon-lifecycle",
 )
 SOCKET_GROUP = "eidolon-lifecycle-client"
+OWNER_TRUST_GROUP = "eidolon-owner-trust-readers"
+OWNER_TRUST_READERS = (
+    "eidolon",
+    "eidolon-local-api",
+    "eidolon-lifecycle",
+)
 
 
 def ensure_service_identities(payload: Mapping[str, object]) -> dict[str, object]:
@@ -22,8 +28,11 @@ def ensure_service_identities(payload: Mapping[str, object]) -> dict[str, object
     if os.geteuid() != 0:
         raise TargetError("service identity cutover requires root")
     _ensure_group(SOCKET_GROUP)
+    _ensure_group(OWNER_TRUST_GROUP)
     for name in SERVICE_USERS:
         _ensure_user(name)
+    for name in OWNER_TRUST_READERS:
+        _ensure_group_membership(name, OWNER_TRUST_GROUP)
     observed: dict[str, int] = {}
     for name in SERVICE_USERS:
         uid = _id_value(("/usr/bin/id", "-u", name), "service uid inspection")
@@ -43,11 +52,22 @@ def ensure_service_identities(payload: Mapping[str, object]) -> dict[str, object
     fields = group.split(":")
     if len(fields) != 4 or fields[3].strip():
         raise TargetError("socket group has persistent members")
+    for name in OWNER_TRUST_READERS:
+        groups = set(
+            primitives.checked(
+                "Owner trust group membership inspection",
+                ("/usr/bin/id", "-nG", name),
+            ).stdout.split()
+        )
+        if OWNER_TRUST_GROUP not in groups:
+            raise TargetError(f"service identity cannot read Owner trust: {name}")
     return {
         "status": "service_identities_ready",
         "uids": observed,
         "socket_group": SOCKET_GROUP,
         "persistent_socket_group_members": [],
+        "owner_trust_group": OWNER_TRUST_GROUP,
+        "owner_trust_readers": list(OWNER_TRUST_READERS),
     }
 
 
@@ -76,6 +96,20 @@ def _ensure_user(name: str) -> None:
                 "/usr/sbin/nologin",
                 name,
             ),
+        )
+
+
+def _ensure_group_membership(user: str, group: str) -> None:
+    groups = set(
+        primitives.checked(
+            "service supplementary group inspection",
+            ("/usr/bin/id", "-nG", user),
+        ).stdout.split()
+    )
+    if group not in groups:
+        primitives.checked(
+            "service supplementary group cutover",
+            ("/usr/sbin/usermod", "--append", "--groups", group, user),
         )
 
 

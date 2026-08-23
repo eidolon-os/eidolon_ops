@@ -13,6 +13,7 @@ from types import ModuleType
 
 from . import (
     authorities,
+    authority_reset,
     foundation,
     foundation_install,
     host_application,
@@ -48,6 +49,8 @@ ACTIONS: dict[str, tuple[ModuleType, str]] = {
     "refresh-host-application": (host_application, "refresh_host_application"),
     "backup": (authorities, "backup"),
     "restore": (authorities, "restore"),
+    "authority-reset-plan": (authority_reset, "authority_reset_plan"),
+    "authority-reset": (authority_reset, "reset_owner_authority"),
     "active-release": (lifecycle, "active_release"),
     "reset-plan": (reset, "reset_plan"),
     "reset-host": (reset, "reset_host"),

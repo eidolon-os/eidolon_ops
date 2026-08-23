@@ -25,6 +25,13 @@ from eidolon_ops.foundation import (
 from eidolon_ops.host_layer import ASSET_ERRORS, HostLayer
 from eidolon_ops.hostagent.contract import RESET_AUTHORITY_ROOTS
 from eidolon_ops.install_inputs import initialize_install_inputs
+from eidolon_ops.owner_domain_assets import (
+    OwnerDomainAssetError,
+    mark_authority_bootstrapped,
+)
+from eidolon_ops.owner_domain_assets import (
+    reset_owner_authority as advance_owner_authority,
+)
 from eidolon_ops.paths import AppAccess
 from eidolon_ops.process import ProcessRunner
 from eidolon_ops.progress import Journal, ProgressSink
@@ -519,6 +526,105 @@ class EidolonPiController:
         if result.get("status") != "reset":
             raise OperationsError("Controller reset returned invalid evidence")
         return result
+
+    def authority_reset(self, *, apply: bool) -> dict[str, object]:
+        """Advance one Owner Authority generation and replace only Hub state.
+
+        A pending generation is a durable retry journal: once the controller
+        has advanced, a transport or Host failure retries the same state id
+        instead of minting another generation.  The target independently
+        proves the DB marker and external lineage anchor before the one-shot
+        bootstrap is marked consumed here.
+        """
+
+        self.preflight.validate_ssh_material()
+        if self.app is None:
+            raise OperationsError("Owner Authority reset requires the Pi Host app contract")
+        materializer = self.host_layer.materializer()
+        try:
+            current = materializer.owner_assets()
+        except OwnerDomainAssetError as exc:
+            raise OperationsError(str(exc)) from exc
+        retry = current.bootstrap_pending and current.owner_domain_generation > 1
+        next_generation = (
+            current.owner_domain_generation
+            if retry
+            else current.owner_domain_generation + 1
+        )
+        if not apply:
+            return {
+                "status": "planned",
+                "owner_domain_id": current.owner_domain_id,
+                "previous_generation": next_generation - 1,
+                "next_generation": next_generation,
+                "retry_pending_generation": retry,
+                "removes": "Hub database, SQLite sidecars and Authority lineage anchor only",
+                "preserves": [
+                    "Host identity, active release and Owner root",
+                    "network configuration and all non-Hub authorities",
+                    "Controller-side monotonic generation journal",
+                ],
+                "next": "rerun authority-reset --apply after reviewing the exact target",
+            }
+        try:
+            if not retry:
+                advance_owner_authority(
+                    materializer.material_root,
+                    expected_owner_domain_id=current.owner_domain_id,
+                    expected_generation=current.owner_domain_generation,
+                )
+            pending = materializer.owner_assets()
+        except OwnerDomainAssetError as exc:
+            raise OperationsError(str(exc)) from exc
+        if not pending.bootstrap_pending:
+            raise OperationsError("Owner Authority reset has no pending bootstrap capability")
+        request = {
+            "owner_domain_id": pending.owner_domain_id,
+            "previous_generation": pending.owner_domain_generation - 1,
+            "next_generation": pending.owner_domain_generation,
+            "state_id": pending.authority_state_id,
+        }
+        release_id = self._active_release("release_id")
+        # The expand release is active before this is called. Both interpreter
+        # checks therefore validate the same current parser; no N-1 process is
+        # restarted against a schema it cannot read.
+        refreshed = self.host_layer.refresh(release_id)
+        payload = {
+            **self.host_layer.target_payload(),
+            "authority_reset": request,
+        }
+        plan = self.transport.run_agent("authority-reset-plan", payload, timeout=180)
+        if plan.get("status") not in {"planned", "already_reset"}:
+            raise OperationsError("Owner Authority reset plan returned invalid evidence")
+        result = self.transport.run_agent("authority-reset", payload, timeout=420)
+        authority = result.get("authority")
+        if (
+            result.get("status") not in {"authority_reset", "already_reset"}
+            or not isinstance(authority, dict)
+            or authority.get("owner_domain_id") != pending.owner_domain_id
+            or authority.get("owner_domain_generation")
+            != pending.owner_domain_generation
+            or authority.get("state_id") != pending.authority_state_id
+        ):
+            raise OperationsError("Owner Authority reset returned invalid lineage proof")
+        try:
+            mark_authority_bootstrapped(
+                materializer.material_root,
+                owner_domain_id=pending.owner_domain_id,
+                owner_domain_generation=pending.owner_domain_generation,
+                authority_state_id=pending.authority_state_id,
+            )
+        except OwnerDomainAssetError as exc:
+            raise OperationsError(str(exc)) from exc
+        consumed = self.host_layer.refresh(release_id)
+        ready = self.app_ready()
+        return {
+            **result,
+            "plan": plan,
+            "host_application": refreshed,
+            "bootstrap_tombstone": consumed,
+            "app": ready,
+        }
 
     # -- authorities ---------------------------------------------------------
 

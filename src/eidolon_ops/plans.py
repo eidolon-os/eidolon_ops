@@ -232,6 +232,24 @@ def controller_reset(host_id: str, *, apply: bool) -> Plan:
     )
 
 
+def authority_reset(host_id: str, *, apply: bool) -> Plan:
+    return Plan(
+        operation="authority-reset",
+        host_id=host_id,
+        steps=_steps(
+            ("advance", "advance the controller-held Owner Authority generation"),
+            ("stage", "install the signed next-generation descriptor and one-shot capability"),
+            ("reset", "replace only Hub Authority state under an exact Host-local lock"),
+            ("prove", "match the Hub marker, external lineage anchor and controller journal"),
+        ),
+        destructive=DestructiveLevel.IRREVERSIBLE,
+        requires_flags=frozenset({"--apply"} if apply else set()),
+        touches=frozenset(
+            {ActionKind.CONFIG, ActionKind.SECRET, ActionKind.DATA, ActionKind.LIFECYCLE}
+        ),
+    )
+
+
 def diagnose(host_id: str) -> Plan:
     return Plan(
         operation="diagnose",

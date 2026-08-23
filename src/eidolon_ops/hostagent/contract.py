@@ -134,20 +134,26 @@ HOST_APPLICATION_INPUTS = {
     "owner-domain-descriptor.json": (
         Path("/etc/eidolon/owner-domain/owner_domain_descriptor.json"),
         "root",
-        "root",
-        0o644,
+        "eidolon-owner-trust-readers",
+        0o640,
     ),
     "owner-domain-root-ca.pem": (
         Path("/etc/eidolon/owner-domain/owner_domain_root_ca.pem"),
         "root",
-        "root",
-        0o644,
+        "eidolon-owner-trust-readers",
+        0o640,
     ),
     "authority-signing-certificate.pem": (
         Path("/etc/eidolon/owner-domain/authority_signing_certificate.pem"),
         "root",
-        "root",
-        0o644,
+        "eidolon-owner-trust-readers",
+        0o640,
+    ),
+    "authority-bootstrap.json": (
+        Path("/var/lib/eidolon/hub/authority-bootstrap.json"),
+        "eidolon",
+        "eidolon",
+        0o600,
     ),
     "hub-ingress.py": (
         Path("/usr/local/libexec/eidolon-hub-lan-ingress"),
@@ -189,6 +195,7 @@ REFRESHABLE_HOST_APPLICATION_INPUTS = (
     "owner-domain-descriptor.json",
     "owner-domain-root-ca.pem",
     "authority-signing-certificate.pem",
+    "authority-bootstrap.json",
     "hub-ingress.py",
     "hub-ingress.service",
     "hub-service-override.conf",
@@ -386,6 +393,7 @@ HOST_DIRECTORIES = (
     (Path("/opt/eidolon/releases"), 0o755, "root", "root"),
     (Path("/opt/eidolon/current"), 0o755, "root", "root"),
     (Path("/var/lib/eidolon"), 0o750, "eidolon", "eidolon"),
+    (Path("/var/lib/eidolon/hub"), 0o750, "eidolon", "eidolon"),
     (Path("/var/lib/eidolon/agent"), 0o750, "eidolon", "eidolon"),
     (Path("/var/lib/eidolon/memory"), 0o750, "eidolon", "eidolon"),
     # Encoders are read by services and written only by an install, so unlike
@@ -414,6 +422,12 @@ HOST_DIRECTORIES = (
     # those reviewed paths without granting directory listing or access to any
     # private file; each file's own mode remains the authority.
     (Path("/etc/eidolon"), 0o751, "root", "eidolon"),
+    (
+        Path("/etc/eidolon/owner-domain"),
+        0o750,
+        "root",
+        "eidolon-owner-trust-readers",
+    ),
 )
 
 PHASES = (

@@ -14,7 +14,11 @@ from eidolon_ops.host_identity import (
     derive_host_lan_identity,
 )
 from eidolon_ops.hub_assets import render_hub_settings
-from eidolon_ops.owner_domain_assets import OwnerDomainAssetError, ensure_owner_domain_assets
+from eidolon_ops.owner_domain_assets import (
+    OwnerDomainAssetError,
+    OwnerDomainAssets,
+    ensure_owner_domain_assets,
+)
 from eidolon_ops.paths import AppAccess
 
 
@@ -29,6 +33,7 @@ HOST_APPLICATION_STAGE_NAMES = (
     "owner-domain-descriptor.json",
     "owner-domain-root-ca.pem",
     "authority-signing-certificate.pem",
+    "authority-bootstrap.json",
     "hub-ingress.py",
     "hub-ingress.service",
     "hub-service-override.conf",
@@ -58,20 +63,22 @@ class HostApplicationMaterializer:
     def prepare(self, hub_template: str) -> HostApplicationAssets:
         identity = self.identity()
         try:
-            owner = ensure_owner_domain_assets(
-                self.material_root, identity, self.app.hub_https_port
-            )
+            owner = self.owner_assets(identity=identity)
         except OwnerDomainAssetError as exc:
             raise HostApplicationError(str(exc)) from exc
         files = {
             "hub.generated.yaml": self._render_hub_settings(
-                hub_template, owner.owner_domain_id, identity
+                hub_template,
+                owner.owner_domain_id,
+                owner.owner_domain_generation,
+                identity,
             ).encode(),
             "hub.crt": owner.tls_certificate,
             "hub.key": owner.tls_private_key,
             "owner-domain-descriptor.json": owner.descriptor,
             "owner-domain-root-ca.pem": owner.owner_root_certificate,
             "authority-signing-certificate.pem": owner.authority_signing_certificate,
+            "authority-bootstrap.json": owner.authority_bootstrap,
             "hub-ingress.py": self.ingress_source,
             "hub-ingress.service": self._ingress_service().encode(),
             "hub-service-override.conf": self._hub_service_override().encode(),
@@ -80,6 +87,17 @@ class HostApplicationMaterializer:
             raise HostApplicationError("Host application asset set is incomplete")
         return HostApplicationAssets(
             identity=identity, owner_domain_id=owner.owner_domain_id, files=files
+        )
+
+    def owner_assets(
+        self, *, identity: HostLanIdentity | None = None
+    ) -> OwnerDomainAssets:
+        """Return the controller-held Authority contract, never its signing keys."""
+
+        return ensure_owner_domain_assets(
+            self.material_root,
+            identity or self.identity(),
+            self.app.hub_https_port,
         )
 
     def identity(self) -> HostLanIdentity:
@@ -156,10 +174,18 @@ class HostApplicationMaterializer:
         }
 
     def _render_hub_settings(
-        self, template: str, owner_domain_id: str, identity: HostLanIdentity
+        self,
+        template: str,
+        owner_domain_id: str,
+        owner_domain_generation: int,
+        identity: HostLanIdentity,
     ) -> str:
         return render_hub_settings(
-            template, owner_domain_id, identity, self.app.hub_https_port
+            template,
+            owner_domain_id,
+            owner_domain_generation,
+            identity,
+            self.app.hub_https_port,
         )
 
     def _ingress_service(self) -> str:

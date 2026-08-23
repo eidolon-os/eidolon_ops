@@ -17,6 +17,7 @@ from eidolon_ops.hostagent import __main__ as agent_main
 from eidolon_ops.hostagent import (
     app_contract,
     authorities,
+    authority_reset,
     contract,
     host_application,
     identities,
@@ -888,6 +889,8 @@ def test_upgrade_identity_cutover_proves_distinct_non_root_uids(monkeypatch) -> 
             stdout = f"{uids[command[-1]]}\n"
         elif command[:2] == ("/usr/bin/id", "-gn"):
             stdout = f"{command[-1]}\n"
+        elif command[:2] == ("/usr/bin/id", "-nG"):
+            stdout = f"{command[-1]} eidolon-owner-trust-readers\n"
         elif command[:2] == ("/usr/bin/getent", "group"):
             stdout = "eidolon-lifecycle-client:x:41999:\n"
         else:
@@ -904,6 +907,12 @@ def test_upgrade_identity_cutover_proves_distinct_non_root_uids(monkeypatch) -> 
     assert result["status"] == "service_identities_ready"
     assert len(set(result["uids"].values())) == 4
     assert result["persistent_socket_group_members"] == []
+    assert result["owner_trust_group"] == "eidolon-owner-trust-readers"
+    assert result["owner_trust_readers"] == [
+        "eidolon",
+        "eidolon-local-api",
+        "eidolon-lifecycle",
+    ]
 
 
 def test_upgrade_identity_cutover_rejects_duplicate_uids(monkeypatch) -> None:
@@ -921,6 +930,8 @@ def test_upgrade_identity_cutover_rejects_duplicate_uids(monkeypatch) -> None:
             stdout = "41000\n"
         elif command[:2] == ("/usr/bin/id", "-gn"):
             stdout = f"{command[-1]}\n"
+        elif command[:2] == ("/usr/bin/id", "-nG"):
+            stdout = f"{command[-1]} eidolon-owner-trust-readers\n"
         else:
             stdout = "eidolon-lifecycle-client:x:41999:\n"
         return subprocess.CompletedProcess(command, 0, stdout, "")
@@ -1666,6 +1677,11 @@ def test_public_owner_trust_does_not_grant_access_to_private_host_inputs() -> No
 
     directories = {path: (mode, owner, group) for path, mode, owner, group in contract.HOST_DIRECTORIES}
     assert directories[Path("/etc/eidolon")] == (0o751, "root", "eidolon")
+    assert directories[Path("/etc/eidolon/owner-domain")] == (
+        0o750,
+        "root",
+        "eidolon-owner-trust-readers",
+    )
 
     public_names = {
         "owner-domain-descriptor.json",
@@ -1675,7 +1691,10 @@ def test_public_owner_trust_does_not_grant_access_to_private_host_inputs() -> No
     assert {
         name: contract.HOST_APPLICATION_INPUTS[name][1:]
         for name in public_names
-    } == {name: ("root", "root", 0o644) for name in public_names}
+    } == {
+        name: ("root", "eidolon-owner-trust-readers", 0o640)
+        for name in public_names
+    }
 
     assert contract.HOST_APPLICATION_INPUTS["hub.key"][1:] == ("root", "eidolon", 0o640)
     assert contract.HOST_APPLICATION_INPUTS["hub.generated.yaml"][1:] == (
@@ -1684,6 +1703,121 @@ def test_public_owner_trust_does_not_grant_access_to_private_host_inputs() -> No
         0o640,
     )
     assert contract.SECRET_INPUTS["local-api.env"][1:] == ("root", "root", 0o600)
+
+
+def _authority_reset_payload() -> dict[str, object]:
+    return {
+        "units": list(contract.PRODUCT_UNITS),
+        "authority_reset": {
+            "owner_domain_id": "owner-0123456789abcdefabcd",
+            "previous_generation": 1,
+            "next_generation": 2,
+            "state_id": "authority-state_0123456789abcdef",
+        },
+    }
+
+
+def _stage_authority_reset_inputs(root: Path) -> dict[str, object]:
+    request = _authority_reset_payload()["authority_reset"]
+    assert isinstance(request, dict)
+    expected = {
+        "contract_version": 1,
+        "owner_domain_id": request["owner_domain_id"],
+        "owner_domain_generation": request["next_generation"],
+        "state_id": request["state_id"],
+    }
+    descriptor = root / authority_reset.OWNER_DESCRIPTOR.relative_to("/")
+    descriptor.parent.mkdir(parents=True)
+    descriptor.write_text(
+        json.dumps(
+            {
+                "owner_domain_id": expected["owner_domain_id"],
+                "owner_domain_generation": expected["owner_domain_generation"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    bootstrap = root / authority_reset.AUTHORITY_BOOTSTRAP.relative_to("/")
+    bootstrap.parent.mkdir(parents=True)
+    bootstrap.write_text(
+        json.dumps({"operation": "owner-authority.bootstrap", **expected}),
+        encoding="utf-8",
+    )
+    database = root / authority_reset.HUB_DATABASE.relative_to("/")
+    connection = sqlite3.connect(database)
+    connection.execute("CREATE TABLE legacy_devices (device_id TEXT PRIMARY KEY)")
+    connection.commit()
+    connection.close()
+    return expected
+
+
+def test_owner_authority_reset_is_targeted_monotonic_and_proven(tmp_path: Path) -> None:
+    expected = _stage_authority_reset_inputs(tmp_path)
+    database = tmp_path / authority_reset.HUB_DATABASE.relative_to("/")
+    unrelated = database.parent / "preserved.db"
+    unrelated.write_text("keep", encoding="utf-8")
+    calls: list[tuple[str, ...]] = []
+
+    def command(value, **_kwargs):
+        value = tuple(value)
+        calls.append(value)
+        if value[:3] == ("/usr/bin/systemctl", "start", authority_reset.HUB_UNIT):
+            connection = sqlite3.connect(database)
+            connection.execute(
+                "CREATE TABLE hub_authority_state ("
+                "singleton_id INTEGER PRIMARY KEY, owner_domain_id TEXT, "
+                "owner_domain_generation INTEGER, state_id TEXT)"
+            )
+            connection.execute(
+                "INSERT INTO hub_authority_state VALUES (1, ?, ?, ?)",
+                (
+                    expected["owner_domain_id"],
+                    expected["owner_domain_generation"],
+                    expected["state_id"],
+                ),
+            )
+            connection.commit()
+            connection.close()
+            anchor = tmp_path / authority_reset.AUTHORITY_ANCHOR.relative_to("/")
+            anchor.write_text(json.dumps(expected), encoding="utf-8")
+            (tmp_path / authority_reset.AUTHORITY_BOOTSTRAP.relative_to("/")).unlink()
+        if value[:2] == ("/usr/bin/systemctl", "is-active"):
+            return subprocess.CompletedProcess(value, 0, "active\n", "")
+        return subprocess.CompletedProcess(value, 0, "", "")
+
+    plan = authority_reset.authority_reset_plan(
+        _authority_reset_payload(), root=tmp_path
+    )
+    assert plan["status"] == "planned"
+    assert plan["destructive_work_required"] is True
+
+    result = authority_reset.reset_owner_authority(
+        _authority_reset_payload(), root=tmp_path, command=command
+    )
+
+    assert result["status"] == "authority_reset"
+    assert result["authority"] == expected
+    assert unrelated.read_text(encoding="utf-8") == "keep"
+    assert calls[0] == (
+        "/usr/bin/systemctl",
+        "stop",
+        authority_reset.HUB_INGRESS_UNIT,
+        authority_reset.HUB_UNIT,
+    )
+    assert authority_reset.authority_reset_plan(
+        _authority_reset_payload(), root=tmp_path
+    )["status"] == "already_reset"
+
+
+def test_owner_authority_reset_refuses_partial_lineage(tmp_path: Path) -> None:
+    expected = _stage_authority_reset_inputs(tmp_path)
+    anchor = tmp_path / authority_reset.AUTHORITY_ANCHOR.relative_to("/")
+    anchor.write_text(json.dumps(expected), encoding="utf-8")
+
+    with pytest.raises(TargetError, match="partially committed"):
+        authority_reset.authority_reset_plan(
+            _authority_reset_payload(), root=tmp_path
+        )
 
 
 def _authority_fixture(tmp_path: Path, monkeypatch):

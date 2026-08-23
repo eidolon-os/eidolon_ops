@@ -55,6 +55,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         elif arguments.operation == "controller-reset":
             result = controller.controller_reset(apply=arguments.apply)
+        elif arguments.operation == "authority-reset":
+            result = controller.authority_reset(apply=arguments.apply)
         elif arguments.operation == "reset":
             result = controller.reset(
                 wipe_authority_data=arguments.wipe_authority_data,
@@ -168,6 +170,11 @@ def _parser() -> argparse.ArgumentParser:
         help="revoke every managing phone so a new one can claim this Host",
     )
     controller_reset.add_argument("--apply", action="store_true")
+    authority_reset = operations.add_parser(
+        "authority-reset",
+        help="advance Owner Authority and replace only Hub-owned authority state",
+    )
+    authority_reset.add_argument("--apply", action="store_true")
     reset = operations.add_parser("reset")
     reset.add_argument("--wipe-authority-data", action="store_true")
     reset.add_argument("--apply", action="store_true")

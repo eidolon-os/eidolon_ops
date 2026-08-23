@@ -94,6 +94,7 @@ def test_exact_systemd_matrix_wraps_missing_git_object_without_leaking_details()
 _HUB_TEMPLATE = (
     "onboarding:\n"
     "  owner_domain_id: owner-local\n"
+    "  owner_domain_generation: 1\n"
     "  descriptor_uri: https://eidolon-hub.local/api/device-onboarding/v1/descriptor\n"
     "persistence:\n"
     "  path: $EIDOLON_STATE_ROOT/hub/eidolon-hub.sqlite3\n"

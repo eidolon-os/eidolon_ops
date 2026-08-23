@@ -12,6 +12,8 @@ from eidolon_ops.host_identity import derive_host_lan_identity
 from eidolon_ops.owner_domain_assets import (
     OwnerDomainAssetError,
     ensure_owner_domain_assets,
+    mark_authority_bootstrapped,
+    reset_owner_authority,
 )
 
 NOW = datetime(2026, 8, 18, 12, 0, tzinfo=UTC)
@@ -27,6 +29,10 @@ def test_offline_issuer_keeps_private_signers_off_the_host_bundle(tmp_path: Path
     assert first.owner_domain_id.startswith("owner-")
     assert set(first.__dataclass_fields__) == {
         "owner_domain_id",
+        "owner_domain_generation",
+        "authority_state_id",
+        "bootstrap_pending",
+        "authority_bootstrap",
         "descriptor",
         "owner_root_certificate",
         "authority_signing_certificate",
@@ -95,3 +101,44 @@ def test_existing_host_tls_corruption_fails_closed(tmp_path: Path) -> None:
 
     with pytest.raises(OwnerDomainAssetError, match="certificate is invalid"):
         ensure_owner_domain_assets(root, identity, 8443, now=NOW)
+
+
+def test_authority_reset_is_explicit_monotonic_and_issues_one_lineage(tmp_path: Path) -> None:
+    identity = derive_host_lan_identity(b"a" * 32)
+    root = tmp_path / "owner-domain"
+    first = ensure_owner_domain_assets(root, identity, 8443, now=NOW)
+
+    next_generation, next_state_id = reset_owner_authority(
+        root,
+        expected_owner_domain_id=first.owner_domain_id,
+        expected_generation=first.owner_domain_generation,
+    )
+    reset = ensure_owner_domain_assets(root, identity, 8443, now=NOW + timedelta(minutes=1))
+
+    assert next_generation == reset.owner_domain_generation == 2
+    assert next_state_id == reset.authority_state_id
+    assert reset.owner_domain_id == first.owner_domain_id
+    assert reset.owner_root_certificate == first.owner_root_certificate
+    assert json.loads(reset.descriptor)["directory_revision"] == 1
+    assert json.loads(reset.authority_bootstrap)["operation"] == (
+        "owner-authority.bootstrap"
+    )
+    assert reset.bootstrap_pending is True
+    with pytest.raises(OwnerDomainAssetError, match="reset target changed"):
+        reset_owner_authority(
+            root,
+            expected_owner_domain_id=first.owner_domain_id,
+            expected_generation=1,
+        )
+
+    mark_authority_bootstrapped(
+        root,
+        owner_domain_id=reset.owner_domain_id,
+        owner_domain_generation=reset.owner_domain_generation,
+        authority_state_id=reset.authority_state_id,
+    )
+    consumed = ensure_owner_domain_assets(root, identity, 8443, now=NOW + timedelta(minutes=1))
+    assert json.loads(consumed.authority_bootstrap)["operation"] == (
+        "owner-authority.bootstrap-consumed"
+    )
+    assert consumed.bootstrap_pending is False

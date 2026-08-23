@@ -17,6 +17,7 @@ from eidolon_ops.config import SOURCE_IDS, ConfigurationError
 from eidolon_ops.controller import EidolonPiController, OperationsError
 from eidolon_ops.embedding_model import PINNED_EMBEDDING_MODEL, embedding_model_digest
 from eidolon_ops.endpoints import HostEndpoint
+from eidolon_ops.host_application import HOST_APPLICATION_STAGE_NAMES
 from eidolon_ops.hub_assets import HUB_SETTINGS_TEMPLATE as HUB_SETTINGS_TEMPLATE_CONTRACT
 from eidolon_ops.paths import AppAccess
 from eidolon_ops.process import ProcessResult
@@ -39,6 +40,7 @@ DEPLOY_PACKAGE_DIGEST = "4a0a4e9c29dbbebd3c4ddbd73fccbee20aba0cdf1cc9360bbe9fafc
 HUB_SETTINGS_TEMPLATE_SOURCE, HUB_SETTINGS_TEMPLATE_PATH = HUB_SETTINGS_TEMPLATE_CONTRACT
 HUB_SETTINGS_TEMPLATE = (
     "owner_domain_id: owner-local\n"
+    "owner_domain_generation: 1\n"
     "descriptor_uri: https://eidolon-hub.local/api/device-onboarding/v1/descriptor\n"
 )
 
@@ -1009,6 +1011,7 @@ def test_unified_pi_stage_renders_host_bound_application_assets(config) -> None:
                     0,
                     "onboarding:\n"
                     "  owner_domain_id: owner-local\n"
+                    "  owner_domain_generation: 1\n"
                     "  descriptor_uri: https://eidolon-hub.local/api/device-onboarding/v1/descriptor\n"
                     "discovery:\n  mdns:\n    enabled: true\n"
                     "channel_provider:\n  contract_url: http://127.0.0.1:8767/v1\n"
@@ -1033,7 +1036,9 @@ def test_unified_pi_stage_renders_host_bound_application_assets(config) -> None:
     controller.host_layer.stage_install_files("host-bound", stage)
     payload = controller.host_layer.target_payload()
 
-    assert len(transport.uploaded_bytes) == len(config.install_files) + 9
+    assert len(transport.uploaded_bytes) == (
+        len(config.install_files) + len(HOST_APPLICATION_STAGE_NAMES)
+    )
     app = payload["app"]
     assert isinstance(app, dict)
     assert str(app["owner_domain_id"]).startswith("owner-")

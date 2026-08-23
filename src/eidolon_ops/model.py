@@ -91,6 +91,7 @@ class Capability(StrEnum):
     RESTORE = "restore"
     RESET = "reset"
     CONTROLLER_RESET = "controller-reset"
+    AUTHORITY_RESET = "authority-reset"
     DIAGNOSE = "diagnose"
     #: Workstation-only inspection of the source-run profile.
     SOURCE_PROFILE = "debug"

@@ -13,6 +13,7 @@ from eidolon_ops.paths import AppAccess
 HUB_TEMPLATE = """\
 onboarding:
   owner_domain_id: owner-local
+  owner_domain_generation: 1
   trust_epoch: 1
   descriptor_uri: https://eidolon-hub.local/api/device-onboarding/v1/descriptor
   descriptor_path: /etc/eidolon/owner-domain/owner_domain_descriptor.json

@@ -9,10 +9,12 @@ endpoint and directory revision, never the Owner trust anchor.
 from __future__ import annotations
 
 import json
+import secrets
 import stat
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import TypedDict, cast
 
 from cryptography import x509
 from cryptography.exceptions import InvalidSignature
@@ -35,6 +37,14 @@ class OwnerDomainAssetError(ValueError):
     """The offline trust material or issued public bundle is unsafe."""
 
 
+class _AuthorityState(TypedDict):
+    contract_version: int
+    owner_domain_id: str
+    owner_domain_generation: int
+    authority_state_id: str
+    bootstrap_pending: bool
+
+
 _ROOT_KEY = "owner-domain-root.key.pem"
 _ROOT_CERTIFICATE = "owner-domain-root-ca.pem"
 _SIGNER_KEY = "authority-signing.key.pem"
@@ -42,6 +52,7 @@ _SIGNER_CERTIFICATE = "authority-signing-certificate.pem"
 _DESCRIPTOR = "owner-domain-descriptor.json"
 _TLS_CERTIFICATE = "hub.crt"
 _TLS_KEY = "hub.key"
+_STATE = "owner-domain-state.json"
 _MATERIAL_NAMES = {
     _ROOT_KEY,
     _ROOT_CERTIFICATE,
@@ -50,12 +61,17 @@ _MATERIAL_NAMES = {
     _DESCRIPTOR,
     _TLS_CERTIFICATE,
     _TLS_KEY,
+    _STATE,
 }
 
 
 @dataclass(frozen=True, slots=True)
 class OwnerDomainAssets:
     owner_domain_id: str
+    owner_domain_generation: int
+    authority_state_id: str
+    bootstrap_pending: bool
+    authority_bootstrap: bytes
     descriptor: bytes
     owner_root_certificate: bytes
     authority_signing_certificate: bytes
@@ -81,6 +97,7 @@ def ensure_owner_domain_assets(
         material_root, root_key, root_certificate, instant
     )
     owner_domain_id = _owner_domain_id(root_certificate)
+    authority_state = _authority_state(material_root, owner_domain_id)
     tls_certificate, tls_private_key = _host_tls(
         material_root, identity, root_key, root_certificate, instant
     )
@@ -89,6 +106,7 @@ def ensure_owner_domain_assets(
         identity,
         port,
         owner_domain_id,
+        authority_state["owner_domain_generation"],
         root_certificate,
         signer_certificate,
         signer_key,
@@ -96,6 +114,10 @@ def ensure_owner_domain_assets(
     )
     return OwnerDomainAssets(
         owner_domain_id=owner_domain_id,
+        owner_domain_generation=authority_state["owner_domain_generation"],
+        authority_state_id=authority_state["authority_state_id"],
+        bootstrap_pending=authority_state["bootstrap_pending"],
+        authority_bootstrap=_bootstrap_document(authority_state),
         descriptor=descriptor,
         owner_root_certificate=root_certificate.public_bytes(serialization.Encoding.PEM),
         authority_signing_certificate=signer_certificate.public_bytes(
@@ -119,6 +141,123 @@ def _require_private_material_root(root: Path) -> None:
         return
     ensure_private_parent(root.parent)
     root.mkdir(mode=0o700)
+
+
+def _authority_state(root: Path, owner_domain_id: str) -> _AuthorityState:
+    path = root / _STATE
+    if path.is_file():
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise OwnerDomainAssetError("Owner Authority state is invalid") from exc
+        expected_keys = {
+            "contract_version",
+            "owner_domain_id",
+            "owner_domain_generation",
+            "authority_state_id",
+            "bootstrap_pending",
+        }
+        if (
+            not isinstance(value, dict)
+            or set(value) != expected_keys
+            or value.get("contract_version") != 1
+            or value.get("owner_domain_id") != owner_domain_id
+            or not isinstance(value.get("owner_domain_generation"), int)
+            or value["owner_domain_generation"] < 1
+            or not isinstance(value.get("authority_state_id"), str)
+            or not value["authority_state_id"].startswith("authority-state_")
+            or not isinstance(value.get("bootstrap_pending"), bool)
+        ):
+            raise OwnerDomainAssetError("Owner Authority state does not match its root")
+        return cast(_AuthorityState, value)
+    value: _AuthorityState = {
+        "contract_version": 1,
+        "owner_domain_id": owner_domain_id,
+        "owner_domain_generation": 1,
+        "authority_state_id": "authority-state_" + secrets.token_urlsafe(24),
+        "bootstrap_pending": True,
+    }
+    write_private_file(
+        path,
+        (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode(),
+    )
+    return value
+
+
+def reset_owner_authority(
+    material_root: Path,
+    *,
+    expected_owner_domain_id: str,
+    expected_generation: int,
+) -> tuple[int, str]:
+    """Advance the Authority lineage under an exact, explicit CAS.
+
+    This does not touch a Host or a device. The caller must separately execute
+    the destructive target reset and must not expose the new generation until
+    every release input has been regenerated from this state.
+    """
+
+    _require_private_material_root(material_root)
+    root_certificate = _certificate(material_root / _ROOT_CERTIFICATE)
+    owner_domain_id = _owner_domain_id(root_certificate)
+    state = _authority_state(material_root, owner_domain_id)
+    if (
+        owner_domain_id != expected_owner_domain_id
+        or state["owner_domain_generation"] != expected_generation
+    ):
+        raise OwnerDomainAssetError("Owner Authority reset target changed")
+    next_state: _AuthorityState = {
+        "contract_version": 1,
+        "owner_domain_id": owner_domain_id,
+        "owner_domain_generation": expected_generation + 1,
+        "authority_state_id": "authority-state_" + secrets.token_urlsafe(24),
+        "bootstrap_pending": True,
+    }
+    write_private_file(
+        material_root / _STATE,
+        (json.dumps(next_state, sort_keys=True, separators=(",", ":")) + "\n").encode(),
+    )
+    return next_state["owner_domain_generation"], next_state["authority_state_id"]
+
+
+def mark_authority_bootstrapped(
+    material_root: Path,
+    *,
+    owner_domain_id: str,
+    owner_domain_generation: int,
+    authority_state_id: str,
+) -> None:
+    """Consume a bootstrap capability only after target marker proof."""
+
+    _require_private_material_root(material_root)
+    state = _authority_state(material_root, owner_domain_id)
+    if (
+        state["owner_domain_generation"] != owner_domain_generation
+        or state["authority_state_id"] != authority_state_id
+    ):
+        raise OwnerDomainAssetError("Authority bootstrap proof does not match")
+    if not state["bootstrap_pending"]:
+        return
+    state["bootstrap_pending"] = False
+    write_private_file(
+        material_root / _STATE,
+        (json.dumps(state, sort_keys=True, separators=(",", ":")) + "\n").encode(),
+    )
+
+
+def _bootstrap_document(state: _AuthorityState) -> bytes:
+    value = {
+        "contract_version": 1,
+        "operation": (
+            "owner-authority.bootstrap"
+            if state["bootstrap_pending"]
+            else "owner-authority.bootstrap-consumed"
+        ),
+        "owner_domain_id": state["owner_domain_id"],
+        "owner_domain_generation": state["owner_domain_generation"],
+        "state_id": state["authority_state_id"],
+    }
+    return (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
 
 
 def _owner_root(root: Path, now: datetime) -> tuple[ec.EllipticCurvePrivateKey, x509.Certificate]:
@@ -288,6 +427,7 @@ def _directory(
     identity: HostLanIdentity,
     port: int,
     owner_domain_id: str,
+    owner_domain_generation: int,
     root_certificate: x509.Certificate,
     signer_certificate: x509.Certificate,
     signer_key: ec.EllipticCurvePrivateKey,
@@ -316,18 +456,39 @@ def _directory(
         try:
             current = OwnerDomainDescriptor.model_validate_json(path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
-            raise OwnerDomainAssetError("existing Owner Domain descriptor is invalid") from exc
-        expected = [item.model_dump(mode="json") for item in current.endpoints]
-        if (
-            current.owner_domain_id == owner_domain_id
-            and expected == endpoints
-            and current.issued_at <= now < current.expires_at
-        ):
-            _validate_directory(current, root_certificate, signer_certificate, now)
-            return path.read_bytes()
-        revision = current.directory_revision + 1
+            try:
+                legacy = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as legacy_exc:
+                raise OwnerDomainAssetError(
+                    "existing Owner Domain descriptor is invalid"
+                ) from legacy_exc
+            if (
+                not isinstance(legacy, dict)
+                or "owner_domain_generation" in legacy
+                or legacy.get("owner_domain_id") != owner_domain_id
+                or not isinstance(legacy.get("directory_revision"), int)
+                or legacy["directory_revision"] < 1
+            ):
+                raise OwnerDomainAssetError(
+                    "existing Owner Domain descriptor is invalid"
+                ) from exc
+            revision = legacy["directory_revision"] + 1
+            current = None
+        if current is not None:
+            expected = [item.model_dump(mode="json") for item in current.endpoints]
+            if (
+                current.owner_domain_id == owner_domain_id
+                and current.owner_domain_generation == owner_domain_generation
+                and expected == endpoints
+                and current.issued_at <= now < current.expires_at
+            ):
+                _validate_directory(current, root_certificate, signer_certificate, now)
+                return path.read_bytes()
+            if current.owner_domain_generation == owner_domain_generation:
+                revision = current.directory_revision + 1
     source = {
         "owner_domain_id": owner_domain_id,
+        "owner_domain_generation": owner_domain_generation,
         "trust_epoch": 1,
         "directory_revision": revision,
         "endpoints": endpoints,

@@ -209,6 +209,7 @@ def test_prepare_materializes_one_canonical_mac_product_contract(
                     return ProcessResult(
                         0,
                         "onboarding:\n  owner_domain_id: owner-local\n"
+                        "  owner_domain_generation: 1\n"
                         "  descriptor_uri: https://eidolon-hub.local/api/device-onboarding/v1/descriptor\n"
                         "persistence:\n  path: $EIDOLON_STATE_ROOT/hub/eidolon-hub.sqlite3\n",
                         "",
@@ -347,6 +348,7 @@ def test_app_ready_requires_device_reachable_contract(monkeypatch, tmp_path: Pat
     )
     (root / "settings/hub.yaml").write_text(
         f"onboarding:\n  owner_domain_id: {owner_domain_id}\n"
+        "  owner_domain_generation: 1\n"
         f"  descriptor_uri: {origin}/api/device-onboarding/v1/descriptor\n",
         encoding="utf-8",
     )
