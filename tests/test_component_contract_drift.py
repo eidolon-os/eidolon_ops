@@ -139,7 +139,10 @@ def test_the_derived_input_is_rendered_from_the_template_its_component_declared(
         "owner_domain_root_certificate",
         "authority_signing_certificate",
     }
-    assert all(entry.group == "eidolon" and entry.mode == 0o640 for entry in public_owner_material.values())
+    assert all(
+        (entry.owner, entry.group, entry.mode) == ("root", "root", 0o644)
+        for entry in public_owner_material.values()
+    )
 
 
 def test_the_backed_up_authorities_are_the_ones_components_named(topology) -> None:

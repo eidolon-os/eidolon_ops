@@ -315,13 +315,13 @@ def app_ready(payload: Mapping[str, object]) -> dict[str, object]:
         "hub_certificate": primitives.private_file_check(HUB_CERTIFICATE, 0o640, "root", "eidolon"),
         "hub_private_key": primitives.private_file_check(HUB_PRIVATE_KEY, 0o640, "root", "eidolon"),
         "owner_descriptor": primitives.private_file_check(
-            OWNER_DESCRIPTOR, 0o640, "root", "eidolon"
+            OWNER_DESCRIPTOR, 0o644, "root", "root"
         ),
         "owner_root_certificate": primitives.private_file_check(
-            OWNER_ROOT_CERTIFICATE, 0o640, "root", "eidolon"
+            OWNER_ROOT_CERTIFICATE, 0o644, "root", "root"
         ),
         "authority_signing_certificate": primitives.private_file_check(
-            AUTHORITY_SIGNING_CERTIFICATE, 0o640, "root", "eidolon"
+            AUTHORITY_SIGNING_CERTIFICATE, 0o644, "root", "root"
         ),
     }
     settings = primitives.read_text(HUB_SETTINGS) or ""

@@ -1632,6 +1632,37 @@ def test_refresh_rewrites_host_tls_but_never_owner_signing_authority() -> None:
     assert set(contract.REFRESHABLE_HOST_LAYER_INPUTS) <= set(contract.INSTALL_INPUTS)
 
 
+def test_public_owner_trust_does_not_grant_access_to_private_host_inputs() -> None:
+    """Verification material is shared by services; credentials are not.
+
+    Local API is deliberately not in the broad ``eidolon`` group.  It reaches
+    only known paths through the non-enumerable config root, and the three
+    public files are root-owned.  Widening Hub's key, settings, or environment
+    files along with them would erase that boundary.
+    """
+
+    directories = {path: (mode, owner, group) for path, mode, owner, group in contract.HOST_DIRECTORIES}
+    assert directories[Path("/etc/eidolon")] == (0o751, "root", "eidolon")
+
+    public_names = {
+        "owner-domain-descriptor.json",
+        "owner-domain-root-ca.pem",
+        "authority-signing-certificate.pem",
+    }
+    assert {
+        name: contract.HOST_APPLICATION_INPUTS[name][1:]
+        for name in public_names
+    } == {name: ("root", "root", 0o644) for name in public_names}
+
+    assert contract.HOST_APPLICATION_INPUTS["hub.key"][1:] == ("root", "eidolon", 0o640)
+    assert contract.HOST_APPLICATION_INPUTS["hub.generated.yaml"][1:] == (
+        "root",
+        "eidolon",
+        0o640,
+    )
+    assert contract.SECRET_INPUTS["local-api.env"][1:] == ("root", "root", 0o600)
+
+
 def _authority_fixture(tmp_path: Path, monkeypatch):
     """Give the Host a set of real SQLite authorities to snapshot."""
 

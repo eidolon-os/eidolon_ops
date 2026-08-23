@@ -134,20 +134,20 @@ HOST_APPLICATION_INPUTS = {
     "owner-domain-descriptor.json": (
         Path("/etc/eidolon/owner-domain/owner_domain_descriptor.json"),
         "root",
-        "eidolon",
-        0o640,
+        "root",
+        0o644,
     ),
     "owner-domain-root-ca.pem": (
         Path("/etc/eidolon/owner-domain/owner_domain_root_ca.pem"),
         "root",
-        "eidolon",
-        0o640,
+        "root",
+        0o644,
     ),
     "authority-signing-certificate.pem": (
         Path("/etc/eidolon/owner-domain/authority_signing_certificate.pem"),
         "root",
-        "eidolon",
-        0o640,
+        "root",
+        0o644,
     ),
     "hub-ingress.py": (
         Path("/usr/local/libexec/eidolon-hub-lan-ingress"),
@@ -395,7 +395,11 @@ HOST_DIRECTORIES = (
     ),
     (Path("/var/cache/eidolon"), 0o750, "eidolon", "eidolon"),
     (Path("/var/log/eidolon"), 0o750, "eidolon", "eidolon"),
-    (Path("/etc/eidolon"), 0o750, "root", "eidolon"),
+    # Public Owner trust artifacts live below this otherwise non-enumerable
+    # configuration root. Execute-only for other services permits traversal of
+    # those reviewed paths without granting directory listing or access to any
+    # private file; each file's own mode remains the authority.
+    (Path("/etc/eidolon"), 0o751, "root", "eidolon"),
 )
 
 PHASES = (
