@@ -59,6 +59,17 @@ def refresh_host_application(payload: Mapping[str, object]) -> dict[str, object]
     if not stage.is_dir() or stage.is_symlink():
         raise TargetError("Host application staging directory is missing")
     _validate_hub_settings_compatibility(stage, release_id)
+    # A refresh is the deployment path for Host-owned contract changes, not
+    # merely a byte copier.  Reconcile the path contract before replacing
+    # files so a new public/private classification (including parent traversal
+    # modes) takes effect before candidate services start.  Previously only a
+    # first install did this, leaving updates with new file modes trapped below
+    # an old, non-traversable /etc/eidolon directory.
+    contract.ensure_host_path_contract(
+        Path("/"),
+        primitives.chown_path,
+        contract.fixed_port_registry(payload),
+    )
     changed: list[str] = []
     for name in contract.REFRESHABLE_HOST_LAYER_INPUTS:
         source = stage / name

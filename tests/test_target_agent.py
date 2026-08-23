@@ -1530,6 +1530,12 @@ def test_the_derived_host_layer_is_delivered_without_a_reinstall(tmp_path, monke
     monkeypatch.setattr(
         primitives, "checked", lambda *_a, **_k: subprocess.CompletedProcess((), 0, "", "")
     )
+    reconciled: list[tuple[Path, str]] = []
+    monkeypatch.setattr(
+        contract,
+        "ensure_host_path_contract",
+        lambda root, _chown, registry: reconciled.append((root, registry)),
+    )
     placed: dict[str, Path] = {}
     for name in contract.REFRESHABLE_HOST_LAYER_INPUTS:
         destination = tmp_path / "host" / name
@@ -1546,18 +1552,31 @@ def test_the_derived_host_layer_is_delivered_without_a_reinstall(tmp_path, monke
     )
 
     result = host_application.refresh_host_application(
-        {"units": list(contract.PRODUCT_UNITS), "release_id": "r1"}
+        {
+            "units": list(contract.PRODUCT_UNITS),
+            "release_id": "r1",
+            "port_registry": "admin:\n  api:\n    port: 9000\n",
+        }
     )
 
     assert result["status"] == "refreshed"
     assert len(result["changed"]) == len(contract.REFRESHABLE_HOST_LAYER_INPUTS)
     for name, destination in placed.items():
         assert destination.read_text(encoding="utf-8") == f"new-{name}"
+    assert reconciled == [(Path("/"), "admin:\n  api:\n    port: 9000\n")]
 
     # Second run has nothing to deliver, so systemd is left alone.
     assert host_application.refresh_host_application(
-        {"units": list(contract.PRODUCT_UNITS), "release_id": "r1"}
+        {
+            "units": list(contract.PRODUCT_UNITS),
+            "release_id": "r1",
+            "port_registry": "admin:\n  api:\n    port: 9000\n",
+        }
     )["changed"] == []
+    assert reconciled == [
+        (Path("/"), "admin:\n  api:\n    port: 9000\n"),
+        (Path("/"), "admin:\n  api:\n    port: 9000\n"),
+    ]
 
 
 def test_host_layer_refuses_settings_that_previous_release_cannot_parse(
@@ -1595,7 +1614,11 @@ def test_host_layer_refuses_settings_that_previous_release_cannot_parse(
 
     with pytest.raises(TargetError, match="previous Hub rejected"):
         host_application.refresh_host_application(
-            {"units": list(contract.PRODUCT_UNITS), "release_id": "r1"}
+            {
+                "units": list(contract.PRODUCT_UNITS),
+                "release_id": "r1",
+                "port_registry": "admin:\n  api:\n    port: 9000\n",
+            }
         )
 
     assert destination.read_text(encoding="utf-8") == "old-compatible"
