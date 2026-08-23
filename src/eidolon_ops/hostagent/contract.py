@@ -324,6 +324,20 @@ VAR_TMP = Path("/var/tmp")
 
 RELEASES = Path("/opt/eidolon/releases")
 
+CURRENT_ROOT = Path("/opt/eidolon/current")
+
+# Shared with the sealed release activator. Reclamation and activation may not
+# inspect or mutate the release graph concurrently.
+RELEASE_LOCK = Path("/run/lock/eidolon-release.lock")
+
+# Shared with prepare_target.py from the sealed deployment package. A prepared
+# tree becomes visible under RELEASES before its environments are finished.
+RELEASE_PREPARE_LOCK = Path("/run/lock/eidolon-release-prepare.lock")
+
+# A reboot-safe recovery is unnecessary here: /run disappearing also removes
+# every in-flight process. The prepared release remains discoverable on disk.
+RECLAMATION_STATE = Path("/run/lock/eidolon-release-candidate.json")
+
 #: Component-neutral operator entries published inside every sealed release.
 RELEASE_ACTIVATOR = ".release/bin/eidolon-release"
 

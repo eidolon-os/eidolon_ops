@@ -75,69 +75,103 @@ class ReleaseTransaction:
         release_id = validate_release_id(release_id)
         local = self.preflight.run(require_install_files=False)
         phases = Journal(self.progress)
+        candidate_prepared = False
+        health_gates_passed = False
         if not _skip_prepare:
             self.bundles.prepare(release_id, reuse=resume, journal=phases)
-        descriptor = remote_descriptor(release_id)
-        cli = remote_release_cli(release_id)
-        phases.begin("dry_run")
-        dry_run = self._remote_json(
-            "release activation dry-run",
-            (cli, "deploy", descriptor, "--dry-run"),
-            timeout=300,
-        )
-        phases.append({"phase": "dry_run", "result": dry_run})
-        if not activate:
+            candidate_prepared = True
+        try:
+            descriptor = remote_descriptor(release_id)
+            cli = remote_release_cli(release_id)
+            phases.begin("dry_run")
+            dry_run = self._remote_json(
+                "release activation dry-run",
+                (cli, "deploy", descriptor, "--dry-run"),
+                timeout=300,
+            )
+            phases.append({"phase": "dry_run", "result": dry_run})
+            if not activate:
+                phases.begin("release_reclaim_retain")
+                retained = self.bundles.reclaim(release_id, phase="retain")
+                self.bundles.require_reclamation(retained, "retained")
+                phases.append({"phase": "release_reclaim_retain", "result": retained})
+                return {
+                    "status": "dry_run",
+                    "release_id": release_id,
+                    "local": local,
+                    "phases": phases,
+                    "next": "rerun with --resume --activate after reviewing previous_targets",
+                }
+            phases.begin("service_identities")
+            identities = self.transport.run_agent(
+                "ensure-service-identities",
+                {"units": list(self.config.units)},
+                timeout=120,
+            )
+            if identities.get("status") != "service_identities_ready":
+                raise OperationsError("service identity cutover returned invalid evidence")
+            phases.append({"phase": "service_identities", "result": identities})
+            if self.host_layer.app is not None:
+                # The Host layer is an input to the new component graph, not a
+                # post-activation decoration. In particular, Hub validates its
+                # strict settings model while importing the ASGI app; starting the
+                # new Hub against the previous settings schema can never become
+                # ready. Prestage atomically while the old processes still hold
+                # their already-loaded configuration, then switch components.
+                phases.begin("host_application")
+                phases.append(
+                    {
+                        "phase": "host_application",
+                        "result": self.host_layer.refresh(release_id),
+                    }
+                )
+            phases.begin("activate")
+            activation = self._remote_json(
+                "release activation",
+                (cli, "deploy", descriptor),
+                timeout=600,
+            )
+            phases.append({"phase": "activate", "result": activation})
+            transaction_id = activation.get("transaction_id")
+            if (
+                activation.get("status") != "activated"
+                or not isinstance(transaction_id, str)
+                or _TRANSACTION_ID.fullmatch(transaction_id) is None
+            ):
+                raise OperationsError("release activation returned invalid transaction evidence")
+            snapshot = self.config.data.deployment_evidence / f"{release_id}-{transaction_id}"
+            gate_error = self._run_health_gate(cli, descriptor, phases)
+            if gate_error is not None:
+                self._restore(cli, descriptor, snapshot, phases, gate_error)
+            health_gates_passed = True
+            phases.begin("release_reclaim_commit")
+            committed = self.bundles.reclaim(release_id, phase="commit")
+            self.bundles.require_reclamation(committed, "committed")
+            phases.append({"phase": "release_reclaim_commit", "result": committed})
             return {
-                "status": "dry_run",
+                "status": "activated",
                 "release_id": release_id,
                 "local": local,
                 "phases": phases,
-                "next": "rerun with --resume --activate after reviewing previous_targets",
             }
-        phases.begin("service_identities")
-        identities = self.transport.run_agent(
-            "ensure-service-identities",
-            {"units": list(self.config.units)},
-            timeout=120,
-        )
-        if identities.get("status") != "service_identities_ready":
-            raise OperationsError("service identity cutover returned invalid evidence")
-        phases.append({"phase": "service_identities", "result": identities})
-        if self.host_layer.app is not None:
-            # The Host layer is an input to the new component graph, not a
-            # post-activation decoration. In particular, Hub validates its
-            # strict settings model while importing the ASGI app; starting the
-            # new Hub against the previous settings schema can never become
-            # ready. Prestage atomically while the old processes still hold
-            # their already-loaded configuration, then switch components.
-            phases.begin("host_application")
-            phases.append(
-                {"phase": "host_application", "result": self.host_layer.refresh(release_id)}
-            )
-        phases.begin("activate")
-        activation = self._remote_json(
-            "release activation",
-            (cli, "deploy", descriptor),
-            timeout=600,
-        )
-        phases.append({"phase": "activate", "result": activation})
-        transaction_id = activation.get("transaction_id")
-        if (
-            activation.get("status") != "activated"
-            or not isinstance(transaction_id, str)
-            or _TRANSACTION_ID.fullmatch(transaction_id) is None
-        ):
-            raise OperationsError("release activation returned invalid transaction evidence")
-        snapshot = self.config.data.deployment_evidence / f"{release_id}-{transaction_id}"
-        gate_error = self._run_health_gate(cli, descriptor, phases)
-        if gate_error is not None:
-            self._restore(cli, descriptor, snapshot, phases, gate_error)
-        return {
-            "status": "activated",
-            "release_id": release_id,
-            "local": local,
-            "phases": phases,
-        }
+        except Exception as exc:
+            if candidate_prepared and not health_gates_passed:
+                self._abort_candidate(release_id, phases, exc)
+            raise
+
+    def _abort_candidate(
+        self, release_id: str, phases: Journal, primary_error: Exception
+    ) -> None:
+        try:
+            phases.begin("release_reclaim_abort")
+            aborted = self.bundles.reclaim(release_id, phase="abort")
+            self.bundles.require_reclamation(aborted, "aborted")
+            phases.append({"phase": "release_reclaim_abort", "result": aborted})
+        except Exception as cleanup_error:
+            raise OperationsError(
+                f"release transaction failed ({primary_error}); candidate cleanup also failed: "
+                f"{cleanup_error}"
+            ) from cleanup_error
 
     def _run_health_gate(self, cli: str, descriptor: str, phases: Journal) -> Exception | None:
         try:
@@ -236,9 +270,14 @@ class ReleaseTransaction:
         phases.begin("foundation")
         foundation = self._provision(apply=True)
         self.bundles.prepare(release_id, reuse=resume, journal=phases)
-        self.host_layer.stage_install_files(
-            release_id, f"/var/tmp/eidolon-secrets-{release_id}"
-        )
+        candidate_prepared = True
+        try:
+            self.host_layer.stage_install_files(
+                release_id, f"/var/tmp/eidolon-secrets-{release_id}"
+            )
+        except Exception as stage_error:
+            self._abort_candidate(release_id, phases, stage_error)
+            raise
         payload = {**self.host_layer.target_payload(), "release_id": release_id}
         primary_error: Exception | None = None
         try:
@@ -266,13 +305,22 @@ class ReleaseTransaction:
             phases.append({"phase": "secret_cleanup", "result": cleanup})
         except Exception as cleanup_exc:
             if primary_error is not None:
-                raise OperationsError(
+                combined = OperationsError(
                     f"install failed ({primary_error}); secret staging cleanup also failed: "
                     f"{cleanup_exc}"
-                ) from cleanup_exc
+                )
+                self._abort_candidate(release_id, phases, combined)
+                raise combined from cleanup_exc
+            self._abort_candidate(release_id, phases, cleanup_exc)
             raise
         if primary_error is not None:
+            if candidate_prepared:
+                self._abort_candidate(release_id, phases, primary_error)
             raise primary_error
+        phases.begin("release_reclaim_commit")
+        committed = self.bundles.reclaim(release_id, phase="commit")
+        self.bundles.require_reclamation(committed, "committed")
+        phases.append({"phase": "release_reclaim_commit", "result": committed})
         return {
             "status": "installed",
             "release_id": release_id,

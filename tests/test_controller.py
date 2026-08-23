@@ -15,6 +15,7 @@ from test_install_inputs import _settings_reader as _product_settings_reader
 
 from eidolon_ops.config import SOURCE_IDS, ConfigurationError
 from eidolon_ops.controller import EidolonPiController, OperationsError
+from eidolon_ops.embedding_model import PINNED_EMBEDDING_MODEL, embedding_model_digest
 from eidolon_ops.endpoints import HostEndpoint
 from eidolon_ops.hub_assets import HUB_SETTINGS_TEMPLATE as HUB_SETTINGS_TEMPLATE_CONTRACT
 from eidolon_ops.paths import AppAccess
@@ -205,6 +206,24 @@ class FakeTransport:
             return self.overrides[action]
         if action in self.fail_actions:
             raise self.fail_actions[action]
+        if action == "reclaim-releases":
+            return {
+                "status": {
+                    "prepare": "ready",
+                    "retain": "retained",
+                    "commit": "committed",
+                    "abort": "aborted",
+                }[payload["phase"]],
+                "phase": payload["phase"],
+                "candidate_release_id": payload["release_id"],
+                "capacity": {
+                    "free_bytes_after": 20 * 1024**3,
+                    "effective_required_bytes": payload["required_bytes"],
+                    "reserve_bytes": payload["reserve_bytes"],
+                    "sufficient": True,
+                },
+                "removed": {"releases": [], "uploads": [], "secrets": []},
+            }
         values = {
             "status": {"status": "observed"},
             "foundation-doctor": {"status": "healthy"},
@@ -277,9 +296,12 @@ class FakeTransport:
             "restore": {"status": "restored", "restored": ["system"]},
             "commissioning-code": {"status": "issued", "setup_code": "123456"},
             "refresh-host-application": {"status": "refreshed", "changed": []},
-            # A Host that has never been given an encoder, so a deploy carries
-            # one. The already-held path is exercised in test_embedding_model.
-            "embedding-model-state": {"status": "absent"},
+            # Controller tests stay hermetic; transfer of an absent encoder is
+            # covered by the dedicated embedding-model contract suite.
+            "embedding-model-state": {
+                "status": "held",
+                "digest": embedding_model_digest(PINNED_EMBEDDING_MODEL),
+            },
             "install-embedding-model": {"status": "installed"},
         }
         return values[action]
@@ -572,6 +594,7 @@ def test_deploy_defaults_to_prepare_and_dry_run(setup_controller) -> None:
     assert result["status"] == "dry_run"
     assert [phase["phase"] for phase in result["phases"]] == [
         "bundle",
+        "release_reclaim_prepare",
         "upload_guard",
         "upload_finalize",
         # The encoder is carried before the release is prepared: a Host that
@@ -580,6 +603,7 @@ def test_deploy_defaults_to_prepare_and_dry_run(setup_controller) -> None:
         "embedding_model",
         "prepare",
         "dry_run",
+        "release_reclaim_retain",
     ]
     assert transport.resumable_uploads[0][1] == "/var/tmp/eidolon-release-r1"
     assert transport.resumable_uploads[0][0].name == "r1"
@@ -602,6 +626,32 @@ def test_deploy_defaults_to_prepare_and_dry_run(setup_controller) -> None:
         if any(token.endswith("/prepare_target.py") for token in remote)
     )
     assert transport.remote_timeouts[prepare_index] == 3600
+    reclaim = next(
+        payload for action, payload, _python, _sudo in transport.agent_calls
+        if action == "reclaim-releases"
+    )
+    assert reclaim["phase"] == "prepare"
+    assert reclaim["required_bytes"] > 0
+    assert reclaim["reserve_bytes"] == 1024**3
+
+
+def test_deploy_capacity_gate_fails_before_upload(setup_controller) -> None:
+    controller, _runner, transport = setup_controller
+    transport.overrides["reclaim-releases"] = {
+        "status": "insufficient_capacity",
+        "capacity": {
+            "free_bytes_after": 100,
+            "effective_required_bytes": 200,
+            "reserve_bytes": 300,
+            "sufficient": False,
+        },
+    }
+
+    with pytest.raises(OperationsError, match="insufficient release capacity"):
+        controller.deploy(release_id="r1", resume=False, activate=False)
+
+    assert transport.resumable_uploads == []
+    assert not any(call[0] == "guard-upload" for call in transport.agent_calls)
 
 
 def test_deploy_resume_activate_skips_transfer(setup_controller) -> None:
@@ -611,11 +661,13 @@ def test_deploy_resume_activate_skips_transfer(setup_controller) -> None:
 
     assert result["status"] == "activated"
     assert [phase["phase"] for phase in result["phases"]] == [
+        "release_reclaim_prepare",
         "dry_run",
         "service_identities",
         "activate",
         "doctor",
         "app_ready",
+        "release_reclaim_commit",
     ]
     assert transport.uploads == []
     assert not any(len(call) > 1 and call[1] == "bundle" for call in runner.calls)
@@ -647,12 +699,14 @@ def test_deploy_prestages_host_application_before_component_activation(
     assert result["status"] == "activated"
     assert events.index("host application r1") < events.index("release activation")
     assert [phase["phase"] for phase in result["phases"]] == [
+        "release_reclaim_prepare",
         "dry_run",
         "service_identities",
         "host_application",
         "activate",
         "doctor",
         "app_ready",
+        "release_reclaim_commit",
     ]
 
 
@@ -772,6 +826,8 @@ def test_deploy_app_gate_failure_restores_exact_activation_snapshot(config) -> N
 
     rollback = next(call for call, _sudo in transport.remote_calls if "rollback" in call)
     assert rollback[-1] == "/var/lib/eidolon/deployments/r1-" + "a" * 32
+    assert transport.agent_calls[-1][0] == "reclaim-releases"
+    assert transport.agent_calls[-1][1]["phase"] == "abort"
 
 
 def test_deploy_doctor_failure_restores_exact_activation_snapshot(config) -> None:
@@ -872,6 +928,8 @@ def test_deploy_stops_after_prepare_failure(setup_controller) -> None:
         controller.deploy(release_id="r1", resume=False, activate=True)
 
     assert not any(" deploy " in f" {' '.join(call[0])} " for call in transport.remote_calls)
+    assert transport.agent_calls[-1][0] == "reclaim-releases"
+    assert transport.agent_calls[-1][1]["phase"] == "abort"
 
 
 def test_install_without_apply_is_read_only(setup_controller) -> None:
@@ -921,7 +979,8 @@ def test_install_apply_stages_exact_files_and_cleans(setup_controller) -> None:
         "/var/tmp/eidolon-secrets-r1/memory.yaml",
     ]
     actions = [call[0] for call in transport.agent_calls]
-    assert actions[-2:] == ["install", "cleanup-stage"]
+    assert actions[-3:] == ["install", "cleanup-stage", "reclaim-releases"]
+    assert transport.agent_calls[-1][1]["phase"] == "commit"
     assert actions[0] == "foundation-doctor"
 
 
@@ -1073,7 +1132,11 @@ def test_install_failure_still_cleans_secret_stage(setup_controller) -> None:
     with pytest.raises(RuntimeError, match="install failure"):
         controller.install(release_id="r1", resume=True, apply=True)
 
-    assert [call[0] for call in transport.agent_calls][-1] == "cleanup-stage"
+    assert [call[0] for call in transport.agent_calls][-2:] == [
+        "cleanup-stage",
+        "reclaim-releases",
+    ]
+    assert transport.agent_calls[-1][1]["phase"] == "abort"
 
 
 def test_install_and_cleanup_failure_reports_both(setup_controller) -> None:
