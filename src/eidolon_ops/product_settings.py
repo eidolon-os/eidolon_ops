@@ -21,26 +21,11 @@ def product_settings(
         "eidolon_agent", config.sources["eidolon_agent"].revision, "config/settings.yaml"
     )
     agent = _replace(agent, "env: dev", "env: prod", expected=1)
-    agent = _replace(
-        agent,
-        "uds_path: ~/eidolon/run/eidolon-agent.sock",
-        "uds_path: /run/eidolon/agent/eidolon-agent.sock",
-        expected=1,
-    )
-    agent = _replace(agent, "~/eidolon/logs/agent", "/var/log/eidolon/agent", expected=2)
-    agent = _replace(agent, "run_dir: ~/eidolon/run", "run_dir: /run/eidolon/agent", expected=1)
-    agent = _replace(
-        agent,
-        "debug_dir: ~/eidolon/debug",
-        "debug_dir: /var/cache/eidolon/agent/debug",
-        expected=1,
-    )
-    agent = _replace(
-        agent,
-        "sqlite_path: ~/eidolon/data/eidolon-agent.sqlite3",
-        "sqlite_path: /var/lib/eidolon/agent/eidolon-agent.sqlite3",
-        expected=1,
-    )
+    # Runtime, state, cache, and log paths are part of the component/Host
+    # environment contract.  The pinned Agent template deliberately expresses
+    # them through EIDOLON_*_ROOT; the systemd unit supplies the product values.
+    # Rewriting historical ~/eidolon literals here couples Ops to an obsolete
+    # template and prevents otherwise valid component upgrades.
     agent = _replace(agent, "http://127.0.0.1:8030/mcp", "http://127.0.0.1:10030/mcp", expected=1)
     agent = _replace(
         agent,
@@ -55,21 +40,9 @@ def product_settings(
         "config/settings.yaml",
     )
     channel = _replace(channel, "avatar:\n  enabled: true", "avatar:\n  enabled: false", expected=1)
-    channel = _replace(
-        channel, "root: ~/eidolon/voiceprints", "root: /var/lib/eidolon/voiceprints", expected=1
-    )
-    channel = _replace(
-        channel,
-        'timeline_debug_path: "~/eidolon/logs/channel/turn-timeline.jsonl"',
-        'timeline_debug_path: "/var/log/eidolon/channel/turn-timeline.jsonl"',
-        expected=1,
-    )
-    channel = _replace(
-        channel,
-        'dump_dir: "~/eidolon/debug"',
-        'dump_dir: "/var/cache/eidolon/channel/debug"',
-        expected=1,
-    )
+    # Channel path settings follow the same Host environment contract as
+    # Agent; systemd supplies EIDOLON_STATE_ROOT, EIDOLON_LOG_ROOT, and
+    # EIDOLON_CACHE_ROOT for the product installation.
 
     # Memory needs no overlay: its settings resolve paths from the Host path
     # contract this deployer already exports, and the Host's encoder is chosen

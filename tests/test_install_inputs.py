@@ -50,12 +50,12 @@ def _settings_reader(_source_id: str, _revision: str, path: str) -> str:
     if _source_id == "eidolon_agent":
         return """\
 env: dev
-uds_path: ~/eidolon/run/eidolon-agent.sock
-log_a: ~/eidolon/logs/agent
-log_b: ~/eidolon/logs/agent
-run_dir: ~/eidolon/run
-debug_dir: ~/eidolon/debug
-sqlite_path: ~/eidolon/data/eidolon-agent.sqlite3
+uds_path: $EIDOLON_RUNTIME_ROOT/agent/eidolon-agent.sock
+log_a: $EIDOLON_LOG_ROOT/agent
+log_b: $EIDOLON_LOG_ROOT/agent
+run_dir: $EIDOLON_RUNTIME_ROOT/agent
+debug_dir: $EIDOLON_CACHE_ROOT/debug/agent
+sqlite_path: $EIDOLON_STATE_ROOT/agent/eidolon-agent.sqlite3
 mcp_url: http://127.0.0.1:8030/mcp
 discovery_token_env: ''
 """
@@ -63,9 +63,9 @@ discovery_token_env: ''
         return """\
 avatar:
   enabled: true
-root: ~/eidolon/voiceprints
-timeline_debug_path: "~/eidolon/logs/channel/turn-timeline.jsonl"
-dump_dir: "~/eidolon/debug"
+root: $EIDOLON_STATE_ROOT/voiceprints
+timeline_debug_path: "$EIDOLON_LOG_ROOT/channel/turn-timeline.jsonl"
+dump_dir: "$EIDOLON_CACHE_ROOT/debug/channel"
 """
     if _source_id == "eidolon_memory":
         return """\
@@ -147,8 +147,11 @@ def test_initializer_creates_one_private_consistent_input_set(config, tmp_path: 
     assert channel["SENSETIME_STT_API_KEY"] == "optional-stt-key"
     assert "SENSETIME_TTS_API_KEY" not in channel
     assert (target / "bootstrap.env").read_bytes() == b""
-    assert "~/eidolon" not in (target / "agent.yaml").read_text(encoding="utf-8")
-    assert (target / "agent.yaml").read_text(encoding="utf-8").startswith("env: prod\n")
+    agent_settings = (target / "agent.yaml").read_text(encoding="utf-8")
+    assert "~/eidolon" not in agent_settings
+    assert agent_settings.startswith("env: prod\n")
+    assert "uds_path: $EIDOLON_RUNTIME_ROOT/agent/eidolon-agent.sock" in agent_settings
+    assert "sqlite_path: $EIDOLON_STATE_ROOT/agent/eidolon-agent.sqlite3" in agent_settings
     assert "avatar:\n  enabled: false" in (target / "channel.yaml").read_text(encoding="utf-8")
     # Memory's settings ship unmodified: the Host expresses its encoder through
     # the environment, so improving that file cannot break an install.
