@@ -135,6 +135,39 @@ def test_the_declared_check_set_is_the_same_on_both_sides() -> None:
     }
 
 
+def test_owner_trust_readiness_consumes_the_host_application_security_contract(
+    monkeypatch,
+) -> None:
+    observed: list[tuple[Path, int, str, str]] = []
+    monkeypatch.setattr(
+        primitives,
+        "private_file_check",
+        lambda path, mode, user, group: observed.append((path, mode, user, group))
+        or {"healthy": True},
+    )
+
+    for name, path in (
+        ("owner-domain-descriptor.json", probe.OWNER_DESCRIPTOR),
+        ("owner-domain-root-ca.pem", probe.OWNER_ROOT_CERTIFICATE),
+        ("authority-signing-certificate.pem", probe.AUTHORITY_SIGNING_CERTIFICATE),
+    ):
+        probe._host_application_file_check(name, path)
+
+    assert observed == [
+        (
+            path,
+            contract.HOST_APPLICATION_INPUTS[name][3],
+            contract.HOST_APPLICATION_INPUTS[name][1],
+            contract.HOST_APPLICATION_INPUTS[name][2],
+        )
+        for name, path in (
+            ("owner-domain-descriptor.json", probe.OWNER_DESCRIPTOR),
+            ("owner-domain-root-ca.pem", probe.OWNER_ROOT_CERTIFICATE),
+            ("authority-signing-certificate.pem", probe.AUTHORITY_SIGNING_CERTIFICATE),
+        )
+    ]
+
+
 def test_the_worker_window_is_the_host_readiness_budget() -> None:
     """An activation restarts LiveKit under the worker.
 

@@ -88,6 +88,19 @@ _CGROUP_ROOT = Path("/sys/fs/cgroup/system.slice")
 
 _SS_PROCESS_ID = re.compile(r"\bpid=(\d+)\b")
 
+
+def _host_application_file_check(name: str, path: Path) -> dict[str, object]:
+    """Attest a Host-layer file against the installation contract.
+
+    Ownership and mode are security policy, so readiness must consume the same
+    declaration that materialization enforces.  Copying those values here let
+    the probe retain the former world-readable Owner trust policy after the
+    Host contract moved to the dedicated reader group.
+    """
+
+    _destination, user, group, mode = contract.HOST_APPLICATION_INPUTS[name]
+    return primitives.private_file_check(path, mode, user, group)
+
 def local_api_json(path: str) -> dict[str, object]:
     return primitives.https_json_endpoint("127.0.0.1", 9002, path, label="Local API")
 
@@ -314,14 +327,14 @@ def app_ready(payload: Mapping[str, object]) -> dict[str, object]:
         "hub_settings": primitives.private_file_check(HUB_SETTINGS, 0o640, "root", "eidolon"),
         "hub_certificate": primitives.private_file_check(HUB_CERTIFICATE, 0o640, "root", "eidolon"),
         "hub_private_key": primitives.private_file_check(HUB_PRIVATE_KEY, 0o640, "root", "eidolon"),
-        "owner_descriptor": primitives.private_file_check(
-            OWNER_DESCRIPTOR, 0o644, "root", "root"
+        "owner_descriptor": _host_application_file_check(
+            "owner-domain-descriptor.json", OWNER_DESCRIPTOR
         ),
-        "owner_root_certificate": primitives.private_file_check(
-            OWNER_ROOT_CERTIFICATE, 0o644, "root", "root"
+        "owner_root_certificate": _host_application_file_check(
+            "owner-domain-root-ca.pem", OWNER_ROOT_CERTIFICATE
         ),
-        "authority_signing_certificate": primitives.private_file_check(
-            AUTHORITY_SIGNING_CERTIFICATE, 0o644, "root", "root"
+        "authority_signing_certificate": _host_application_file_check(
+            "authority-signing-certificate.pem", AUTHORITY_SIGNING_CERTIFICATE
         ),
     }
     settings = primitives.read_text(HUB_SETTINGS) or ""
