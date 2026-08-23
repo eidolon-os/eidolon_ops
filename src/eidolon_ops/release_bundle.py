@@ -38,6 +38,12 @@ _BUNDLE_SHAPE = {
 }
 _UPLOAD_GUARD_STATES = {"ready_for_upload", "resume_upload", "ready_for_prepare"}
 
+# A sealed bundle coexists with its unpacked sources, environments and upload
+# until transaction commit. Keep an explicit operating reserve beyond that
+# estimate so a release cannot consume the space needed for logs and state.
+_TARGET_EXPANSION_FACTOR = 4
+_CAPACITY_RESERVE_BYTES = 1024**3
+
 
 class BundleTransfer:
     def __init__(
@@ -79,6 +85,10 @@ class BundleTransfer:
             # Backward-compatible activation of a release prepared by another
             # workstation. The subsequent sealed descriptor dry-run is still
             # authoritative and fails closed when the target is not prepared.
+            phases.begin("release_reclaim_prepare")
+            reclaim = self.reclaim(release_id, phase="prepare", required_bytes=0)
+            phases.append({"phase": "release_reclaim_prepare", "result": reclaim})
+            self.require_reclamation(reclaim, "ready")
             return phases
         phases.begin("bundle")
         if output.exists():
@@ -96,34 +106,99 @@ class BundleTransfer:
             bundle_result = self._seal(output, release_id)
             transfer_id = self.validate_existing(output, release_id)
         phases.append({"phase": "bundle", "result": bundle_result})
-        phases.begin("upload_guard")
-        guard = self.transport.run_agent(
-            "guard-upload",
-            {"release_id": release_id, "transfer_id": transfer_id},
-            sudo=False,
+        phases.begin("release_reclaim_prepare")
+        bundle_bytes = self._bundle_bytes(output)
+        reclaim = self.reclaim(
+            release_id,
+            phase="prepare",
+            required_bytes=bundle_bytes * (1 + _TARGET_EXPANSION_FACTOR),
         )
-        phases.append({"phase": "upload_guard", "result": guard})
-        if guard.get("status") == "already_prepared":
-            return phases
-        if guard.get("status") not in _UPLOAD_GUARD_STATES:
-            raise OperationsError("remote upload guard returned invalid evidence")
-        remote_bundle = f"/var/tmp/eidolon-release-{release_id}"
-        phases.begin("upload_finalize")
-        if guard.get("status") != "ready_for_prepare":
-            self.transport.upload_directory_resumable(output, remote_bundle)
-        finalized = self.transport.run_agent(
-            "finalize-upload",
-            {"release_id": release_id, "transfer_id": transfer_id},
-            sudo=False,
-        )
-        if finalized.get("status") not in {"finalized", "already_finalized"}:
-            raise OperationsError("remote upload finalization returned invalid evidence")
-        phases.append({"phase": "upload_finalize", "result": finalized})
-        phases.begin("embedding_model")
-        phases.append({"phase": "embedding_model", "result": self._carry_embedding_model()})
-        phases.begin("prepare")
-        phases.append({"phase": "prepare", "result": self._build_on_target(remote_bundle)})
+        phases.append({"phase": "release_reclaim_prepare", "result": reclaim})
+        self.require_reclamation(reclaim, "ready")
+        try:
+            phases.begin("upload_guard")
+            guard = self.transport.run_agent(
+                "guard-upload",
+                {"release_id": release_id, "transfer_id": transfer_id},
+                sudo=False,
+            )
+            phases.append({"phase": "upload_guard", "result": guard})
+            if guard.get("status") == "already_prepared":
+                return phases
+            if guard.get("status") not in _UPLOAD_GUARD_STATES:
+                raise OperationsError("remote upload guard returned invalid evidence")
+            remote_bundle = f"/var/tmp/eidolon-release-{release_id}"
+            phases.begin("upload_finalize")
+            if guard.get("status") != "ready_for_prepare":
+                self.transport.upload_directory_resumable(output, remote_bundle)
+            finalized = self.transport.run_agent(
+                "finalize-upload",
+                {"release_id": release_id, "transfer_id": transfer_id},
+                sudo=False,
+            )
+            if finalized.get("status") not in {"finalized", "already_finalized"}:
+                raise OperationsError("remote upload finalization returned invalid evidence")
+            phases.append({"phase": "upload_finalize", "result": finalized})
+            phases.begin("embedding_model")
+            phases.append({"phase": "embedding_model", "result": self._carry_embedding_model()})
+            phases.begin("prepare")
+            phases.append({"phase": "prepare", "result": self._build_on_target(remote_bundle)})
+        except Exception as exc:
+            self._abort_after_failure(release_id, phases, exc)
         return phases
+
+    def reclaim(
+        self,
+        release_id: str,
+        *,
+        phase: str,
+        required_bytes: int = 0,
+    ) -> dict[str, object]:
+        return self.transport.run_agent(
+            "reclaim-releases",
+            {
+                "release_id": release_id,
+                "phase": phase,
+                "required_bytes": required_bytes,
+                "reserve_bytes": _CAPACITY_RESERVE_BYTES,
+            },
+            timeout=300,
+        )
+
+    @staticmethod
+    def require_reclamation(result: dict[str, object], expected: str) -> None:
+        capacity = result.get("capacity")
+        if result.get("status") == "insufficient_capacity" and isinstance(capacity, dict):
+            raise OperationsError(
+                "Host has insufficient release capacity: "
+                f"free={capacity.get('free_bytes_after')} "
+                f"required={capacity.get('effective_required_bytes')} "
+                f"reserve={capacity.get('reserve_bytes')}"
+            )
+        if result.get("status") != expected:
+            raise OperationsError("release reclamation returned invalid evidence")
+
+    def _abort_after_failure(
+        self,
+        release_id: str,
+        phases: Journal,
+        primary_error: Exception,
+    ) -> None:
+        try:
+            phases.begin("release_reclaim_abort")
+            aborted = self.reclaim(release_id, phase="abort")
+            self.require_reclamation(aborted, "aborted")
+            phases.append({"phase": "release_reclaim_abort", "result": aborted})
+        except Exception as cleanup_error:
+            raise OperationsError(
+                f"release preparation failed ({primary_error}); candidate cleanup also failed: "
+                f"{cleanup_error}"
+            ) from cleanup_error
+        raise primary_error
+
+    @staticmethod
+    def _bundle_bytes(output: Path) -> int:
+        return sum(path.stat().st_size for path in output.rglob("*") if path.is_file())
 
     def _carry_embedding_model(self) -> dict[str, object]:
         """Put the pinned encoder on the Host, once, and leave it there.

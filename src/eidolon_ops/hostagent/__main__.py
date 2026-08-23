@@ -20,6 +20,7 @@ from . import (
     install,
     lifecycle,
     probe,
+    reclamation,
     reset,
     staging,
 )
@@ -37,6 +38,7 @@ ACTIONS: dict[str, tuple[ModuleType, str]] = {
     "guard-upload": (staging, "guard_upload"),
     "finalize-upload": (staging, "finalize_upload"),
     "cleanup-stage": (staging, "cleanup_stage"),
+    "reclaim-releases": (reclamation, "reclaim"),
     "embedding-model-state": (staging, "embedding_model_state"),
     "install-embedding-model": (staging, "install_embedding_model"),
     "install": (install, "install"),
