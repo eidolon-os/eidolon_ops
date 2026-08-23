@@ -113,6 +113,9 @@ def initialize_install_inputs(
         "local-api.env": {
             "EIDOLON_LOCAL_API_ADMIN_BASE_URL": "http://127.0.0.1:9000",
             "EIDOLON_LOCAL_API_ADMIN_SERVICE_TOKEN": local_api_token,
+            "EIDOLON_LOCAL_API_LIFECYCLE_WORKFLOW_SOCKET": (
+                "/run/eidolon-lifecycle/workflow.sock"
+            ),
         },
         "bootstrap.env": {},
         "agent.env": {
@@ -216,6 +219,7 @@ def validate_install_input_contract(
         "local-api.env": {
             "EIDOLON_LOCAL_API_ADMIN_BASE_URL",
             "EIDOLON_LOCAL_API_ADMIN_SERVICE_TOKEN",
+            "EIDOLON_LOCAL_API_LIFECYCLE_WORKFLOW_SOCKET",
         },
         "bootstrap.env": set(),
         "agent.env": {

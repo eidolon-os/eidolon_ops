@@ -28,7 +28,7 @@ python_concurrent_downloads = 4
 
 [sources.eidolon_kernel]
 path = "../../eidolon_kernel"
-revision = "aeb6aa8b46c8948a8f83342b72df4f35bcdc9fba"
+revision = "fee7a99066438208b0289536a3a3d0ab5906e47f"
 # Optional human label. The commit above is the identity; a tag is a movable
 # reference, so Ops verifies it still resolves to that commit rather than
 # following it.
@@ -40,11 +40,11 @@ revision = "746cc1121aabccd2bd6260c53f00f368cd2345a9"
 
 [sources.eidolon_hub]
 path = "../../eidolon_hub"
-revision = "6d2697031361f71b201d294ed7b9aa06f9168d55"
+revision = "c73bc4092ecb269898687963cc88d67442654777"
 
 [sources.eidolon_admin]
 path = "../../eidolon_admin"
-revision = "99fd6a6e7bab12032773b071df19fd1814b81e7b"
+revision = "1e9c82c7f248ed2ec9c938385e5ab8e9c4f9580b"
 
 [sources.eidolon_agent]
 path = "../../eidolon_agent"
@@ -60,7 +60,7 @@ revision = "e7da3fe8703a4873e896aade771ffbdf2ca2d897"
 
 [sources.eidolon_sdk]
 path = "../../eidolon_sdk"
-revision = "39ebdf71bb2296484876db4aa3fa1e7ee0f779b8"
+revision = "2a5a7e8029f7eb3965e5ceab721f612509f4c8bb"
 
 [services]
 units = [
@@ -71,6 +71,7 @@ units = [
   "eidolon-hub.service",
   "eidolon-kernel.service",
   "eidolon-local-api.service",
+  "eidolon-lifecycle-workflow.service",
   "eidolon-admin.service",
   "eidolon-nats.service",
   "eidolon-livekit.service",

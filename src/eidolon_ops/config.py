@@ -31,6 +31,7 @@ PRODUCT_UNITS = (
     "eidolon-hub.service",
     "eidolon-kernel.service",
     "eidolon-local-api.service",
+    "eidolon-lifecycle-workflow.service",
     "eidolon-admin.service",
     "eidolon-nats.service",
     "eidolon-livekit.service",

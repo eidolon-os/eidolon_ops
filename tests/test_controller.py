@@ -231,6 +231,17 @@ class FakeTransport:
                 "removed": ["/opt/eidolon"],
             },
             "install": {"status": "installed"},
+            "ensure-service-identities": {
+                "status": "service_identities_ready",
+                "uids": {
+                    "eidolon": 41000,
+                    "eidolon-bootstrap": 41001,
+                    "eidolon-local-api": 41002,
+                    "eidolon-lifecycle": 41003,
+                },
+                "socket_group": "eidolon-lifecycle-client",
+                "persistent_socket_group_members": [],
+            },
             "controller-reset": {
                 "status": "reset",
                 "controller_reset": {
@@ -601,6 +612,7 @@ def test_deploy_resume_activate_skips_transfer(setup_controller) -> None:
     assert result["status"] == "activated"
     assert [phase["phase"] for phase in result["phases"]] == [
         "dry_run",
+        "service_identities",
         "activate",
         "doctor",
         "app_ready",
@@ -636,6 +648,7 @@ def test_deploy_prestages_host_application_before_component_activation(
     assert events.index("host application r1") < events.index("release activation")
     assert [phase["phase"] for phase in result["phases"]] == [
         "dry_run",
+        "service_identities",
         "host_application",
         "activate",
         "doctor",

@@ -19,6 +19,7 @@ from eidolon_ops.hostagent import (
     authorities,
     contract,
     host_application,
+    identities,
     primitives,
     staging,
 )
@@ -868,6 +869,66 @@ def test_service_identity_rejects_wrong_primary_group(install_fixture) -> None:
     installer.command = command
     with pytest.raises(TargetError, match="primary group"):
         installer._ensure_service_identity("eidolon")
+
+
+def test_upgrade_identity_cutover_proves_distinct_non_root_uids(monkeypatch) -> None:
+    uids = {
+        "eidolon": 41000,
+        "eidolon-bootstrap": 41001,
+        "eidolon-local-api": 41002,
+        "eidolon-lifecycle": 41003,
+    }
+    monkeypatch.setattr(identities.os, "geteuid", lambda: 0)
+
+    def run(command, **_kwargs):
+        return subprocess.CompletedProcess(command, 0, "exists\n", "")
+
+    def checked(_operation, command, **_kwargs):
+        if command[:2] == ("/usr/bin/id", "-u"):
+            stdout = f"{uids[command[-1]]}\n"
+        elif command[:2] == ("/usr/bin/id", "-gn"):
+            stdout = f"{command[-1]}\n"
+        elif command[:2] == ("/usr/bin/getent", "group"):
+            stdout = "eidolon-lifecycle-client:x:41999:\n"
+        else:
+            stdout = ""
+        return subprocess.CompletedProcess(command, 0, stdout, "")
+
+    monkeypatch.setattr(primitives, "run", run)
+    monkeypatch.setattr(primitives, "checked", checked)
+
+    result = identities.ensure_service_identities(
+        {"units": list(contract.PRODUCT_UNITS)}
+    )
+
+    assert result["status"] == "service_identities_ready"
+    assert len(set(result["uids"].values())) == 4
+    assert result["persistent_socket_group_members"] == []
+
+
+def test_upgrade_identity_cutover_rejects_duplicate_uids(monkeypatch) -> None:
+    monkeypatch.setattr(identities.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(
+        primitives,
+        "run",
+        lambda command, **_kwargs: subprocess.CompletedProcess(
+            command, 0, "exists\n", ""
+        ),
+    )
+
+    def checked(_operation, command, **_kwargs):
+        if command[:2] == ("/usr/bin/id", "-u"):
+            stdout = "41000\n"
+        elif command[:2] == ("/usr/bin/id", "-gn"):
+            stdout = f"{command[-1]}\n"
+        else:
+            stdout = "eidolon-lifecycle-client:x:41999:\n"
+        return subprocess.CompletedProcess(command, 0, stdout, "")
+
+    monkeypatch.setattr(primitives, "checked", checked)
+
+    with pytest.raises(TargetError, match="distinct UIDs"):
+        identities.ensure_service_identities({"units": list(contract.PRODUCT_UNITS)})
 
 
 def test_real_run_and_host_path_guards(tmp_path: Path) -> None:

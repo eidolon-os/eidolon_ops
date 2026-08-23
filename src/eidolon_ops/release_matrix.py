@@ -68,6 +68,12 @@ SYSTEMD_ASSET_CONTRACTS = (
     ),
     SystemdAssetContract(
         "eidolon_admin",
+        "deploy/systemd/eidolon-lifecycle-workflow.service",
+        "eidolon-lifecycle-workflow.service",
+        "eidolon_admin",
+    ),
+    SystemdAssetContract(
+        "eidolon_admin",
         "deploy/systemd/eidolon-admin.service",
         "eidolon-admin.service",
         "eidolon_admin",

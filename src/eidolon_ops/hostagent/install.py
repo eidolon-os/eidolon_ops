@@ -236,9 +236,20 @@ class TargetInstaller:
 
     def _ensure_identities_and_directories(self) -> None:
         if self.root == Path("/"):
+            self._ensure_service_group("eidolon-lifecycle-client")
             self._ensure_service_identity("eidolon")
             self._ensure_service_identity("eidolon-bootstrap")
+            self._ensure_service_identity("eidolon-local-api")
+            self._ensure_service_identity("eidolon-lifecycle")
+            self._validate_service_identity_boundary()
         contract.ensure_host_path_contract(self.root, self._chown, self.port_registry)
+
+    def _ensure_service_group(self, name: str) -> None:
+        group = self.command(("/usr/bin/getent", "group", name), timeout=30)
+        if group.returncode != 0:
+            self._command_checked(
+                "service group creation", ("/usr/sbin/groupadd", "--system", name)
+            )
 
     def _ensure_service_identity(self, name: str) -> None:
         group = self.command(("/usr/bin/getent", "group", name), timeout=30)
@@ -265,6 +276,34 @@ class TargetInstaller:
         primary = self._command_checked("service identity inspection", ("/usr/bin/id", "-gn", name))
         if primary.stdout.strip() != name:
             raise TargetError(f"service identity has unexpected primary group: {name}")
+
+    def _validate_service_identity_boundary(self) -> None:
+        uids: list[int] = []
+        for name in (
+            "eidolon",
+            "eidolon-bootstrap",
+            "eidolon-local-api",
+            "eidolon-lifecycle",
+        ):
+            result = self._command_checked(
+                "service uid inspection", ("/usr/bin/id", "-u", name)
+            )
+            try:
+                uid = int(result.stdout.strip())
+            except ValueError as exc:
+                raise TargetError("service uid inspection returned an invalid value") from exc
+            if uid == 0:
+                raise TargetError(f"service identity must not be root: {name}")
+            uids.append(uid)
+        if len(set(uids)) != len(uids):
+            raise TargetError("service identities must have distinct UIDs")
+        group = self._command_checked(
+            "socket group inspection",
+            ("/usr/bin/getent", "group", "eidolon-lifecycle-client"),
+        ).stdout.strip()
+        fields = group.split(":")
+        if len(fields) != 4 or fields[3].strip():
+            raise TargetError("socket group has persistent members")
 
     def _install_prerequisites(self, inputs: Mapping[str, str]) -> None:
         selected_inputs = {name: contract.INSTALL_INPUTS[name] for name in inputs}

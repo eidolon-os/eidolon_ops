@@ -80,10 +80,10 @@ def test_first_install_prerequisites_match_kernel_descriptor(kernel_contract) ->
 def test_current_release_contract_counts_are_not_stale_document_counts(
     kernel_contract,
 ) -> None:
-    assert len(kernel_contract.system_assets) == 22
+    assert len(kernel_contract.system_assets) == 23
     assert len(kernel_contract.required_secrets) == 11
-    assert len(kernel_contract.affected_units) == 14
-    assert len(kernel_contract.readiness) == 13
+    assert len(kernel_contract.affected_units) == 15
+    assert len(kernel_contract.readiness) == 14
 
 
 def test_reset_system_asset_allowlist_matches_kernel_release_contract(kernel_contract) -> None:

@@ -23,6 +23,7 @@ PRODUCT_UNITS = (
     "eidolon-hub.service",
     "eidolon-kernel.service",
     "eidolon-local-api.service",
+    "eidolon-lifecycle-workflow.service",
     "eidolon-admin.service",
     "eidolon-nats.service",
     "eidolon-livekit.service",
@@ -45,8 +46,9 @@ RESET_RECONCILER_UNITS = ("eidolond.service",)
 # particular, an active legacy eidolond can race a later Kernel stop with a
 # start transaction and make systemd cancel the reset job.
 RESET_STOP_UNITS = (
-    "eidolon-admin.service",
     "eidolon-local-api.service",
+    "eidolon-lifecycle-workflow.service",
+    "eidolon-admin.service",
     "eidolond.service",
     "eidolon-bootstrapd.service",
     "eidolon-channel-provider.service",
@@ -67,6 +69,7 @@ DIRECT_ENABLE_UNITS = (
     "eidolon-bootstrapd.service",
     "eidolond.service",
     "eidolon-local-api.service",
+    "eidolon-lifecycle-workflow.service",
     "eidolon-admin.service",
 )
 
@@ -232,6 +235,11 @@ BACKED_UP_AUTHORITIES = {
         "eidolon-bootstrap",
         "eidolon-bootstrap",
     ),
+    "lifecycle": (
+        Path("/var/lib/eidolon-lifecycle/lifecycle-workflows.sqlite3"),
+        "eidolon-lifecycle",
+        "eidolon-lifecycle",
+    ),
 }
 
 #: State a backup does not carry, named rather than quietly omitted. Each of
@@ -295,12 +303,14 @@ RESET_DEPLOYMENT_ROOTS = (
     Path("/etc/eidolon"),
     Path("/run/eidolon"),
     Path("/run/eidolon-bootstrap"),
+    Path("/run/eidolon-lifecycle"),
     Path("/var/log/eidolon"),
 )
 
 RESET_AUTHORITY_ROOTS = (
     Path("/var/lib/eidolon"),
     Path("/var/lib/eidolon-bootstrap"),
+    Path("/var/lib/eidolon-lifecycle"),
     Path("/var/lib/eidolon-admin"),
 )
 
@@ -371,6 +381,12 @@ HOST_DIRECTORIES = (
     (Path("/var/lib/eidolon/voiceprints"), 0o750, "eidolon", "eidolon"),
     (Path("/var/lib/eidolon/objects"), 0o750, "eidolon", "eidolon"),
     (Path("/var/lib/eidolon/admin"), 0o750, "eidolon", "eidolon"),
+    (
+        Path("/var/lib/eidolon-lifecycle"),
+        0o700,
+        "eidolon-lifecycle",
+        "eidolon-lifecycle",
+    ),
     (
         Path("/var/lib/eidolon-bootstrap"),
         0o710,

@@ -94,6 +94,15 @@ class ReleaseTransaction:
                 "phases": phases,
                 "next": "rerun with --resume --activate after reviewing previous_targets",
             }
+        phases.begin("service_identities")
+        identities = self.transport.run_agent(
+            "ensure-service-identities",
+            {"units": list(self.config.units)},
+            timeout=120,
+        )
+        if identities.get("status") != "service_identities_ready":
+            raise OperationsError("service identity cutover returned invalid evidence")
+        phases.append({"phase": "service_identities", "result": identities})
         if self.host_layer.app is not None:
             # The Host layer is an input to the new component graph, not a
             # post-activation decoration. In particular, Hub validates its
