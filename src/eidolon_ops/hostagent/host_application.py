@@ -58,6 +58,7 @@ def refresh_host_application(payload: Mapping[str, object]) -> dict[str, object]
         raise TargetError("secret staging path is unsafe")
     if not stage.is_dir() or stage.is_symlink():
         raise TargetError("Host application staging directory is missing")
+    _validate_hub_settings_compatibility(stage, release_id)
     changed: list[str] = []
     for name in contract.REFRESHABLE_HOST_LAYER_INPUTS:
         source = stage / name
@@ -85,6 +86,37 @@ def refresh_host_application(payload: Mapping[str, object]) -> dict[str, object]
     if changed:
         primitives.checked("systemd reload", ("/usr/bin/systemctl", "daemon-reload"), timeout=120)
     return {"status": "refreshed", "changed": changed, "removed": remove_legacy_system_assets()}
+
+
+def _validate_hub_settings_compatibility(stage: Path, release_id: str) -> None:
+    """Require one rendered config to load in both sides of the cutover.
+
+    The Host layer is installed before component symlinks switch.  A strict
+    config understood only by the candidate can therefore strand the previous
+    release during automatic rollback.  Schema expansion must first ship as
+    code defaults; only a later release may require new YAML fields.
+    """
+
+    settings = stage / "hub.generated.yaml"
+    if not settings.is_file() or settings.is_symlink():
+        raise TargetError("rendered Hub settings were not staged safely")
+    script = "from hub.config import HubConfig; HubConfig.load()"
+    interpreters = (
+        Path("/opt/eidolon/current/eidolon_hub/.venv/bin/python"),
+        Path(f"/opt/eidolon/releases/{release_id}/eidolon_hub/.venv/bin/python"),
+    )
+    for interpreter in interpreters:
+        primitives.checked(
+            "cross-release Hub settings validation",
+            (
+                "/usr/bin/env",
+                f"EIDOLON_HUB_SETTINGS_PATH={settings}",
+                str(interpreter),
+                "-c",
+                script,
+            ),
+            timeout=120,
+        )
 
 def remove_legacy_system_assets(root: Path = Path("/")) -> list[str]:
     """Take away what a release used to install and no longer does.

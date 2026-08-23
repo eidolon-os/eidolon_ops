@@ -1560,6 +1560,47 @@ def test_the_derived_host_layer_is_delivered_without_a_reinstall(tmp_path, monke
     )["changed"] == []
 
 
+def test_host_layer_refuses_settings_that_previous_release_cannot_parse(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(contract, "VAR_TMP", tmp_path / "var-tmp")
+    stage = tmp_path / "var-tmp" / "eidolon-secrets-r1"
+    stage.mkdir(parents=True)
+    for name in contract.REFRESHABLE_HOST_LAYER_INPUTS:
+        (stage / name).write_text(f"new-{name}", encoding="utf-8")
+    destination = tmp_path / "host/hub.yaml"
+    destination.parent.mkdir(parents=True)
+    destination.write_text("old-compatible", encoding="utf-8")
+    monkeypatch.setattr(
+        contract,
+        "INSTALL_INPUTS",
+        {
+            name: (
+                destination if name == "hub.generated.yaml" else tmp_path / "host" / name,
+                "root",
+                "root",
+                0o644,
+            )
+            for name in contract.REFRESHABLE_HOST_LAYER_INPUTS
+        },
+    )
+
+    def reject_previous(label, command, **_kwargs):
+        assert label == "cross-release Hub settings validation"
+        if "/opt/eidolon/current/" in command[2]:
+            raise TargetError("previous Hub rejected candidate settings")
+        return subprocess.CompletedProcess((), 0, "", "")
+
+    monkeypatch.setattr(primitives, "checked", reject_previous)
+
+    with pytest.raises(TargetError, match="previous Hub rejected"):
+        host_application.refresh_host_application(
+            {"units": list(contract.PRODUCT_UNITS), "release_id": "r1"}
+        )
+
+    assert destination.read_text(encoding="utf-8") == "old-compatible"
+
+
 def test_a_refresh_takes_away_what_a_release_no_longer_installs(tmp_path, monkeypatch) -> None:
     """Dropping an asset from a release stops it being written, not being there.
 
