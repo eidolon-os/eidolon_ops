@@ -81,6 +81,7 @@ class ReleaseTransaction:
         health_gates_passed = False
         host_snapshot: str | None = None
         host_restored = False
+        persistent_barrier_crossed = False
         if not _skip_prepare:
             self.bundles.prepare(
                 release_id,
@@ -160,6 +161,7 @@ class ReleaseTransaction:
                 and activation.get("cutover_mode") == "forward-only"
                 and activation.get("persistent_state_mutated") is True
             ):
+                persistent_barrier_crossed = True
                 health_gates_passed = True
                 self._finalize_cutover(
                     release_id, cutover_mode, host_snapshot, activation, phases
@@ -184,6 +186,7 @@ class ReleaseTransaction:
                 # Starting the candidate is the durable barrier.  From here
                 # neither candidate reclaim nor an old-interpretation restore
                 # is permitted, even if later evidence recording itself fails.
+                persistent_barrier_crossed = True
                 health_gates_passed = True
             snapshot = self.config.data.deployment_evidence / f"{release_id}-{transaction_id}"
             gate_error = self._run_health_gate(cli, descriptor, phases)
@@ -228,8 +231,8 @@ class ReleaseTransaction:
         except Exception as exc:
             if (
                 host_snapshot is not None
-                and cutover_mode == "reversible"
                 and not host_restored
+                and not persistent_barrier_crossed
                 and not health_gates_passed
             ):
                 try:

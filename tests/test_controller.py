@@ -826,6 +826,35 @@ def test_reversible_activation_failure_restores_host_layer_before_candidate_abor
     assert restore_index < abort_index
 
 
+def test_forward_only_failure_before_barrier_restores_host_layer_and_aborts(
+    setup_controller, monkeypatch
+) -> None:
+    controller, _runner, transport = setup_controller
+    controller.host_layer.app = _app()
+    monkeypatch.setattr(
+        controller.host_layer, "refresh", lambda release_id: {"status": "refreshed"}
+    )
+
+    def fail_before_barrier(*args, **kwargs):
+        raise RuntimeError("quiesce failed before candidate start")
+
+    monkeypatch.setattr(controller.releases, "_activation_json", fail_before_barrier)
+
+    with pytest.raises(RuntimeError, match="before candidate start"):
+        controller.deploy(
+            release_id="r1", resume=False, activate=True, cutover_mode="forward-only"
+        )
+
+    assert any(
+        action == "release-cutover-restore"
+        for action, _payload, _python, _sudo in transport.agent_calls
+    )
+    assert any(
+        action == "reclaim-releases" and payload.get("phase") == "abort"
+        for action, payload, _python, _sudo in transport.agent_calls
+    )
+
+
 def test_host_application_refresh_carries_host_identity_and_bound_environments(
     setup_controller,
 ) -> None:
