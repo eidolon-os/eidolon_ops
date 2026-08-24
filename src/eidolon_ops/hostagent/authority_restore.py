@@ -226,6 +226,26 @@ def clear_restore_stage(
     }
 
 
+def finalize_restore_stage(
+    payload: Mapping[str, object], *, root: Path = Path("/")
+) -> dict[str, object]:
+    """Remove the exact uploaded RestoreAuthority package after an attempt."""
+
+    release_id = contract.fixed_release_id(payload)
+    destination = _stage(root.resolve(), release_id, "restore")
+    removed = destination.exists()
+    if removed:
+        _private_stage(destination)
+        shutil.rmtree(destination)
+    elif destination.is_symlink():
+        raise _error("AUTHORITY_RESTORE_INVALID", "restore staging path is unsafe")
+    return {
+        "status": "authority_restore_stage_absent",
+        "directory": str(contract.VAR_TMP / destination.name),
+        "removed": removed,
+    }
+
+
 def _prepared(payload: Mapping[str, object], root: Path) -> tuple[dict[str, object], Path, Path]:
     release_id = contract.fixed_release_id(payload)
     request = _request(payload)

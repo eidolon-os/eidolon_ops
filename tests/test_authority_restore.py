@@ -254,6 +254,30 @@ def test_restore_stage_reset_rejects_symlink(tmp_path: Path) -> None:
     assert outside.is_dir()
 
 
+def test_restore_stage_finalize_is_exact_safe_and_idempotent(tmp_path: Path) -> None:
+    stage = tmp_path / "var/tmp/eidolon-authority-restore-release-8"
+    stage.mkdir(parents=True)
+    stage.chmod(0o700)
+    secret = stage / "eidolon-hub.sqlite3"
+    secret.write_bytes(b"private snapshot")
+    secret.chmod(0o600)
+    unrelated = tmp_path / "var/tmp/eidolon-authority-restore-release-80"
+    unrelated.mkdir()
+
+    first = authority_restore.finalize_restore_stage(
+        {"release_id": "release-8"}, root=tmp_path
+    )
+    second = authority_restore.finalize_restore_stage(
+        {"release_id": "release-8"}, root=tmp_path
+    )
+
+    assert first["status"] == "authority_restore_stage_absent"
+    assert first["removed"] is True
+    assert second["removed"] is False
+    assert not stage.exists()
+    assert unrelated.is_dir()
+
+
 @pytest.mark.parametrize("drift", ["directory", "file"])
 def test_restore_rejects_private_stage_permission_drift(
     tmp_path: Path, drift: str

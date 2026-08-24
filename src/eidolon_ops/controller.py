@@ -93,6 +93,26 @@ def _wait_for_restored_authority_readiness(
         time.sleep(min(0.5, remaining))
 
 
+def _finalize_authority_restore_stage(
+    transport: SSHTransport, payload: dict[str, object]
+) -> dict[str, object]:
+    """Require positive proof that the sensitive upload is absent."""
+
+    try:
+        result = transport.run_agent(
+            "authority-restore-stage-finalize", payload, timeout=120
+        )
+    except Exception as exc:
+        raise OperationsError(
+            "AUTHORITY_RESTORE_FAILED: sensitive restore staging cleanup failed"
+        ) from exc
+    if result.get("status") != "authority_restore_stage_absent":
+        raise OperationsError(
+            "AUTHORITY_RESTORE_FAILED: restore staging cleanup was not proven"
+        )
+    return result
+
+
 class EidolonPiController:
     def __init__(
         self,
@@ -962,37 +982,64 @@ class EidolonPiController:
         )
         if staged.get("status") != "authority_restore_stage_ready":
             raise OperationsError("AUTHORITY_RESTORE_FAILED: restore staging was not prepared")
-        self.transport.upload(source / "host-state", remote, recursive=True)
-        payload = {
-            **self.host_layer.target_payload(),
-            "release_id": release_id,
-            "authority_restore": request,
-        }
-        plan = self.transport.run_agent("authority-restore-plan", payload, timeout=180)
-        if plan.get("status") != "authority_restore_planned" or plan.get("authority") != authority:
-            raise OperationsError("AUTHORITY_RESTORE_FAILED: target restore plan is invalid")
-        if not materializer.material_root.exists():
-            materializer.material_root.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copytree(source / "owner-material", materializer.material_root)
-            material_installed = True
-        refreshed = self.host_layer.refresh(release_id)
-        result = self.transport.run_agent("authority-restore", payload, timeout=420)
-        if result.get("status") != "authority_restored" or result.get("authority") != authority:
-            raise OperationsError("AUTHORITY_RESTORE_FAILED: target returned invalid proof")
-        reclaimed = self.bundles.reclaim(release_id, phase="commit")
-        self.bundles.require_reclamation(reclaimed, "committed")
-        ready = _wait_for_restored_authority_readiness(
-            self.app_ready,
-            timeout_seconds=self.config.host.readiness_timeout_seconds,
+        try:
+            self.transport.upload(source / "host-state", remote, recursive=True)
+            payload = {
+                **self.host_layer.target_payload(),
+                "release_id": release_id,
+                "authority_restore": request,
+            }
+            plan = self.transport.run_agent("authority-restore-plan", payload, timeout=180)
+            if (
+                plan.get("status") != "authority_restore_planned"
+                or plan.get("authority") != authority
+            ):
+                raise OperationsError(
+                    "AUTHORITY_RESTORE_FAILED: target restore plan is invalid"
+                )
+            if not materializer.material_root.exists():
+                materializer.material_root.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(source / "owner-material", materializer.material_root)
+                material_installed = True
+            refreshed = self.host_layer.refresh(release_id)
+            result = self.transport.run_agent("authority-restore", payload, timeout=420)
+            if (
+                result.get("status") != "authority_restored"
+                or result.get("authority") != authority
+            ):
+                raise OperationsError(
+                    "AUTHORITY_RESTORE_FAILED: target returned invalid proof"
+                )
+            reclaimed = self.bundles.reclaim(release_id, phase="commit")
+            self.bundles.require_reclamation(reclaimed, "committed")
+            ready = _wait_for_restored_authority_readiness(
+                self.app_ready,
+                timeout_seconds=self.config.host.readiness_timeout_seconds,
+            )
+            response = {
+                **result,
+                "plan": plan,
+                "host_application": refreshed,
+                "owner_root_imported": material_installed,
+                "release_reclaim": reclaimed,
+                "app": ready,
+            }
+        except Exception as primary_error:
+            try:
+                _finalize_authority_restore_stage(
+                    self.transport,
+                    {"release_id": release_id, **self.host_layer.target_payload()},
+                )
+            except Exception:
+                raise OperationsError(
+                    "AUTHORITY_RESTORE_FAILED: restore failed and sensitive staging cleanup failed"
+                ) from primary_error
+            raise
+        finalized = _finalize_authority_restore_stage(
+            self.transport,
+            {"release_id": release_id, **self.host_layer.target_payload()},
         )
-        return {
-            **result,
-            "plan": plan,
-            "host_application": refreshed,
-            "owner_root_imported": material_installed,
-            "release_reclaim": reclaimed,
-            "app": ready,
-        }
+        return {**response, "restore_stage_cleanup": finalized}
 
     # -- authorities ---------------------------------------------------------
 

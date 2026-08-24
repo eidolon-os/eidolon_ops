@@ -18,6 +18,7 @@ from eidolon_ops.config import SOURCE_IDS, ConfigurationError
 from eidolon_ops.controller import (
     EidolonPiController,
     OperationsError,
+    _finalize_authority_restore_stage,
     _wait_for_restored_authority_readiness,
 )
 from eidolon_ops.embedding_model import PINNED_EMBEDDING_MODEL, embedding_model_digest
@@ -77,6 +78,24 @@ def test_authority_restore_readiness_timeout_is_a_stable_failure() -> None:
             },
             timeout_seconds=0,
         )
+
+
+@pytest.mark.parametrize(
+    "result",
+    [RuntimeError("transport failed"), {"status": "authority_restore_stage_ready"}],
+)
+def test_authority_restore_stage_cleanup_fails_closed(result) -> None:
+    class CleanupTransport:
+        def run_agent(self, action, payload, *, timeout):
+            assert action == "authority-restore-stage-finalize"
+            assert payload["release_id"] == "r1"
+            assert timeout == 120
+            if isinstance(result, Exception):
+                raise result
+            return result
+
+    with pytest.raises(OperationsError, match="AUTHORITY_RESTORE_FAILED"):
+        _finalize_authority_restore_stage(CleanupTransport(), {"release_id": "r1"})
 
 
 def _read_target(command: tuple[str, ...]) -> tuple[str, str]:
@@ -335,6 +354,11 @@ class FakeTransport:
             "authority-restore-stage-reset": {
                 "status": "authority_restore_stage_ready",
                 "directory": "/var/tmp/eidolon-authority-restore-r1",
+            },
+            "authority-restore-stage-finalize": {
+                "status": "authority_restore_stage_absent",
+                "directory": "/var/tmp/eidolon-authority-restore-r1",
+                "removed": True,
             },
             "commissioning-code": {"status": "issued", "setup_code": "123456"},
             "refresh-host-application": {"status": "refreshed", "changed": []},

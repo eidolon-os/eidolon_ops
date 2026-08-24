@@ -57,6 +57,7 @@ ACTIONS: dict[str, tuple[ModuleType, str]] = {
     "authority-restore-plan": (authority_restore, "restore_plan"),
     "authority-restore": (authority_restore, "restore"),
     "authority-restore-stage-reset": (authority_restore, "clear_restore_stage"),
+    "authority-restore-stage-finalize": (authority_restore, "finalize_restore_stage"),
     "release-cutover-snapshot": (cutover, "snapshot"),
     "release-cutover-restore": (cutover, "restore"),
     "release-cutover-finalize": (cutover, "finalize"),
