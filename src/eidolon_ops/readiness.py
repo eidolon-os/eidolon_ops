@@ -81,6 +81,7 @@ class ReadinessFact(StrEnum):
     HUB_SETTINGS_BOUND = "hub_settings_bound"
     HUB_LAN_REACHABLE = "hub_lan_reachable"
     HUB_DESCRIPTOR_PUBLISHED = "hub_descriptor_published"
+    HUB_ADMITS_DEVICES = "hub_admits_devices"
     HUB_MDNS_SERVICE = "hub_mdns_service"
     LOCAL_API_REACHABLE = "local_api_reachable"
     LOCAL_API_TARGETS_HUB = "local_api_targets_hub"
@@ -189,6 +190,11 @@ READINESS_CONTRACT: tuple[ReadinessCheck, ...] = (
         HostKind.PRODUCT,
         ReadinessFact.HUB_DESCRIPTOR_PUBLISHED,
         "the Hub publishes the onboarding descriptor devices fetch",
+    ),
+    _only(
+        HostKind.PRODUCT,
+        ReadinessFact.HUB_ADMITS_DEVICES,
+        "the Hub can verify a device's commissioning proof, so a device can be added",
     ),
     _only(
         HostKind.PRODUCT,

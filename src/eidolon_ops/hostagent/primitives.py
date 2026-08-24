@@ -296,6 +296,34 @@ def https_json_endpoint(host: str, port: int, path: str, *, label: str) -> dict[
         raise TargetError(f"{label} self-check returned a non-object")
     return document
 
+def https_json(host: str, port: int, path: str) -> tuple[int | None, dict[str, object] | None]:
+    """One HTTPS request, reporting the status and any JSON body.
+
+    Separate from :func:`https_json_endpoint` because some readiness facts live
+    in a refusal: a Host that answers "not ready, and here is why" has told us
+    something, and raising on the status would throw that away.
+    """
+
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    connection = http.client.HTTPSConnection(host, port, timeout=5, context=context)
+    try:
+        connection.request("GET", path)
+        response = connection.getresponse()
+        body = response.read(1024 * 1024)
+        status = response.status
+    except (OSError, http.client.HTTPException):
+        return None, None
+    finally:
+        connection.close()
+    try:
+        document = json.loads(body)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return status, None
+    return status, document if isinstance(document, dict) else None
+
+
 def http_json(host: str, port: int, path: str) -> tuple[int | None, dict[str, object] | None]:
     """One plain-HTTP request, reporting the status and any JSON body."""
 

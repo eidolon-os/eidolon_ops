@@ -40,6 +40,7 @@ READINESS_FACTS = (
     "bootstrap_control_socket",
     "foundation_services",
     "hub_descriptor_published",
+    "hub_admits_devices",
     "hub_mdns_service",
     "local_api_mdns_service",
 )
@@ -350,6 +351,11 @@ def app_ready(payload: Mapping[str, object]) -> dict[str, object]:
     except TargetError as exc:
         hub_health = {"error": str(exc)}
         hub_descriptor = {}
+    # Not through https_json_endpoint: the answer we need is in the refusal.
+    # A Hub with no commissioning proof verifier answers 503 and names the
+    # reason, and every other fact about that Host still reads healthy — which
+    # is how a Pi ran for hours admitting nothing at all.
+    _, hub_ready = primitives.https_json(address, hub_port, "/ready")
     resolved_ok, resolved = resolved_addresses(hostname)
     hub_records = service_records(_HUB_SERVICE_TYPE, owner_domain_id)
     local_api_records = service_records(_LOCAL_API_SERVICE_TYPE)
@@ -441,6 +447,7 @@ def app_ready(payload: Mapping[str, object]) -> dict[str, object]:
             and isinstance(hub_descriptor.get("signature"), str)
             and isinstance(hub_descriptor.get("directory_revision"), int)
         ),
+        "hub_admits_devices": (hub_ready or {}).get("status") == "ready",
         "hub_mdns_service": bool(hub_records)
         and all(
             fields[6] == hostname

@@ -255,6 +255,10 @@ def test_app_ready_attests_every_declared_fact(
             }
         ),
     )
+    monkeypatch.setattr(
+        primitives, "https_json",
+        lambda _host, _port, _path: (200, {"status": "ready"}),
+    )
 
     result = probe.app_ready(_payload(app))
 
@@ -262,6 +266,78 @@ def test_app_ready_attests_every_declared_fact(
     assert [n for n, v in result["checks"].items() if not v] == []
     assert result["status"] == "app_ready"
     assert result["channel_worker"]["livekit_link"]["linked_processes"] == [4242]
+
+
+def test_a_hub_that_cannot_admit_a_device_fails_the_gate(
+    monkeypatch, tmp_path: Path, bootstrap_socket: Path
+) -> None:
+    """Every other fact reads healthy and no device can be added.
+
+    A Hub with no commissioning proof verifier answers its own readiness with
+    503 and names the reason, but nothing else about the Host looks wrong — so
+    a release that dropped the verifier passed this gate and ran for hours
+    admitting nothing.
+    """
+
+    app = _app()
+    _materialize(monkeypatch, tmp_path / "host", app)
+    monkeypatch.setattr(primitives, "private_file_check", lambda *_a, **_k: {"healthy": True})
+    monkeypatch.setattr(
+        primitives, "unit_status",
+        lambda _unit: {"ActiveState": "active", "SubState": "running"},
+    )
+    monkeypatch.setattr(primitives, "run", _healthy_run(app))
+    monkeypatch.setattr(primitives, "tcp_reachable", lambda *_a: True)
+    monkeypatch.setattr(probe, "unit_processes", lambda _unit: {4242})
+    monkeypatch.setattr(probe, "hub_tls_matches", lambda _hostname: True)
+    monkeypatch.setattr(
+        probe, "channel_worker_report",
+        lambda worker: {
+            "healthy": True,
+            "http_status": 200,
+            "agent_name": worker["agent_name"],
+            "worker_type": "JT_PUBLISHER",
+            "dispatch_identity": True,
+            "expected_agent_name": worker["agent_name"],
+        },
+    )
+    monkeypatch.setattr(
+        probe, "local_api_json",
+        lambda path: (
+            {"status": "ok", "bootstrap": "ready"}
+            if path == "/healthz"
+            else {
+                "contract_version": "1",
+                "host_id": "ehost-0123456789abcdefabcd",
+                "host_public_key_fingerprint": "sha256:test",
+                "ble_service_uuid": "123e4567-e89b-42d3-a456-426614174000",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        primitives, "https_json_endpoint",
+        lambda _host, _port, path, *, label: (
+            {"status": "ok"}
+            if path == "/health"
+            else {
+                "owner_domain_id": app["owner_domain_id"],
+                "directory_revision": 1,
+                "signature": "A" * 86,
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        primitives, "https_json",
+        lambda _host, _port, _path: (
+            503,
+            {"status": "not-ready", "reason": "commissioning-proof-verifier-unavailable"},
+        ),
+    )
+
+    result = probe.app_ready(_payload(app))
+
+    assert result["status"] != "app_ready"
+    assert [n for n, v in result["checks"].items() if not v] == ["hub_admits_devices"]
 
 
 def test_a_worker_that_cannot_take_a_job_fails_the_gate(

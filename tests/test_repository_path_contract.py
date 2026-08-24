@@ -34,7 +34,13 @@ def test_product_runtime_assets_do_not_reintroduce_legacy_host_paths() -> None:
     forbidden = ("/srv/eidolon", "/Users/manson", "%(ENV_HOME)s/eidolon")
     violations: list[str] = []
     for path in _files(REPOSITORY, patterns):
+        # Operator-local, and gitignored for that reason: `config/eidolon-pi.toml`
+        # and the host profiles beside it describe one workstation's view of one
+        # Host. Naming a local path is what they are for. Everything else here
+        # ships, and a workstation path in it is the defect this test names.
         if path == REPOSITORY / "config/eidolon-pi.toml":
+            continue
+        if path.parent == REPOSITORY / "config/hosts" and path.suffix == ".toml":
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
         for value in forbidden:
