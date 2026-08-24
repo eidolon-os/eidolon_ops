@@ -19,6 +19,10 @@ from typing import Any
 
 CONTRACT = "eidolon.device-management.release-gate.v1"
 HIL_CONTRACT = "eidolon.device-management.hil-evidence.v1"
+PROVENANCE_CONTRACT = "eidolon.device-management.build-provenance.v1"
+_FOUNDATION_INVENTORY = Path(
+    "eidolon_sdk/contracts/device_foundation/v1/baseline/cross-repo-heads.v1.json"
+)
 _HEX_40 = frozenset("0123456789abcdef")
 _HEX_64 = _HEX_40
 
@@ -124,10 +128,60 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _evidence_path(path_value: object, label: str) -> Path:
+    if not isinstance(path_value, str):
+        raise GateError(f"evidence path is missing: {label}")
+    path = Path(path_value)
+    if not path.is_absolute() or not path.is_file() or path.is_symlink():
+        raise GateError(f"evidence must be an absolute non-symlink file: {label}")
+    return path
+
+
 def _source_digest(repo: Path, revision: str) -> str:
-    archive = _git(repo, "archive", "--format=tar", revision, binary=True)
-    assert isinstance(archive, bytes)
-    return hashlib.sha256(archive).hexdigest()
+    tree = _git(repo, "ls-tree", "-r", "-z", "--full-tree", revision, binary=True)
+    assert isinstance(tree, bytes)
+    return "sha256:" + hashlib.sha256(tree).hexdigest()
+
+
+def _discover(workspace: Path) -> set[str]:
+    projects: set[str] = set()
+    for marker in workspace.rglob(".git"):
+        if not marker.is_dir():
+            continue
+        relative = marker.parent.relative_to(workspace)
+        if any(part in {".worktrees", ".claude", ".migration-backups"} for part in relative.parts):
+            continue
+        projects.add(relative.as_posix())
+    return projects
+
+
+def _inventory(workspace: Path) -> dict[str, dict[str, object]]:
+    manifest = _json(workspace / _FOUNDATION_INVENTORY)
+    entries = manifest.get("repositories")
+    if not isinstance(entries, list):
+        raise GateError("SDK Foundation inventory has no repositories list")
+    inventory: dict[str, dict[str, object]] = {}
+    for entry in entries:
+        if not isinstance(entry, dict) or not isinstance(entry.get("path"), str):
+            raise GateError("SDK Foundation inventory contains a malformed repository")
+        path = entry["path"]
+        if path in inventory:
+            raise GateError(f"SDK Foundation inventory contains a duplicate path: {path}")
+        inventory[path] = entry
+    actual = _discover(workspace)
+    if actual != set(inventory):
+        raise GateError(
+            "workspace repository set drifted from SDK Foundation inventory; "
+            f"added={sorted(actual - set(inventory))}, "
+            f"missing={sorted(set(inventory) - actual)}"
+        )
+    participant_paths = set(REPOSITORIES.values())
+    missing_participants = sorted(participant_paths - set(inventory))
+    if missing_participants:
+        raise GateError(
+            f"release participants are absent from Foundation inventory: {missing_participants}"
+        )
+    return inventory
 
 
 def _is_hex(value: object, length: int) -> bool:
@@ -136,7 +190,7 @@ def _is_hex(value: object, length: int) -> bool:
 
 def _canonical_identity(repositories: Mapping[str, object]) -> str:
     identity_input: dict[str, object] = {}
-    for name in REPOSITORIES:
+    for name in sorted(repositories):
         item = repositories.get(name)
         if not isinstance(item, dict):
             raise GateError(f"repository entry must be an object: {name}")
@@ -159,30 +213,53 @@ def _canonical_identity(repositories: Mapping[str, object]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _release_inventory(
+    inventory: Mapping[str, dict[str, object]],
+) -> dict[str, tuple[str, dict[str, object]]]:
+    participant_by_path = {path: name for name, path in REPOSITORIES.items()}
+    result: dict[str, tuple[str, dict[str, object]]] = {}
+    for path, entry in inventory.items():
+        name_value = participant_by_path.get(path, entry.get("repo"))
+        if not isinstance(name_value, str) or not name_value or name_value in result:
+            raise GateError(f"SDK Foundation inventory has an invalid/duplicate repo id: {path}")
+        result[name_value] = (path, entry)
+    return result
+
+
 def capture_template(workspace_root: Path, release_id: str) -> dict[str, object]:
     """Capture exact source facts and leave tests/artifacts visibly pending."""
 
     if not release_id or len(release_id) > 64:
         raise GateError("release_id must contain 1..64 characters")
     repositories: dict[str, object] = {}
-    for name, relative in REPOSITORIES.items():
+    release_inventory = _release_inventory(_inventory(workspace_root))
+    for name, (relative, inventory_entry) in release_inventory.items():
         repo = workspace_root / relative
-        if not (repo / ".git").exists():
-            raise GateError(f"required repository is missing: {name}: {repo}")
         sha = _git(repo, "rev-parse", "HEAD")
         branch = _git(repo, "branch", "--show-current")
         dirty = bool(_git(repo, "status", "--porcelain"))
         assert isinstance(sha, str) and isinstance(branch, str)
+        participant = name in REPOSITORIES
         repositories[name] = {
             "path": str(repo.resolve()),
             "branch": branch,
             "sha": sha,
             "dirty": dirty,
-            "participation": "required",
-            "reason": "device-management vertical release participant",
+            "participation": participant,
+            "reason": (
+                "device-management vertical release participant"
+                if participant
+                else "not part of this release capability; retained from SDK Foundation "
+                f"inventory ({inventory_entry.get('reason')})"
+            ),
             "required_tests": [
-                {"id": test_id, "status": "pending", "evidence_digest": None}
-                for test_id in REQUIRED_TESTS[name]
+                {
+                    "id": test_id,
+                    "status": "pending",
+                    "evidence_path": None,
+                    "evidence_digest": None,
+                }
+                for test_id in REQUIRED_TESTS.get(name, ())
             ],
             "artifact_digest": _source_digest(repo, sha),
         }
@@ -197,6 +274,8 @@ def capture_template(workspace_root: Path, release_id: str) -> dict[str, object]
                 "path": None,
                 "sha256": None,
                 "release_identity": identity,
+                "provenance_path": None,
+                "provenance_sha256": None,
                 "sources": {
                     source: repositories[source]["sha"]  # type: ignore[index]
                     for source in sources
@@ -215,12 +294,13 @@ def verify_release(document: Mapping[str, object], workspace_root: Path) -> dict
     repositories = document.get("repositories")
     if not isinstance(repositories, dict):
         raise GateError("repositories must be an object")
-    if set(repositories) != set(REPOSITORIES):
-        missing = sorted(set(REPOSITORIES) - set(repositories))
-        added = sorted(set(repositories) - set(REPOSITORIES))
+    release_inventory = _release_inventory(_inventory(workspace_root))
+    if set(repositories) != set(release_inventory):
+        missing = sorted(set(release_inventory) - set(repositories))
+        added = sorted(set(repositories) - set(release_inventory))
         raise GateError(f"repository set drifted; missing={missing}, added={added}")
 
-    for name, relative in REPOSITORIES.items():
+    for name, (relative, _inventory_entry) in release_inventory.items():
         item = repositories[name]
         if not isinstance(item, dict):
             raise GateError(f"repository entry must be an object: {name}")
@@ -231,13 +311,14 @@ def verify_release(document: Mapping[str, object], workspace_root: Path) -> dict
         sha = _git(repo, "rev-parse", "HEAD")
         dirty = bool(_git(repo, "status", "--porcelain"))
         assert isinstance(branch, str) and isinstance(sha, str)
-        if branch != "main" or item.get("branch") != branch:
-            raise GateError(f"repository is not on captured main: {name}")
+        participant = name in REPOSITORIES
+        if item.get("branch") != branch or (participant and branch != "main"):
+            raise GateError(f"repository is not on its captured/required branch: {name}")
         if not _is_hex(item.get("sha"), 40) or item.get("sha") != sha:
             raise GateError(f"repository HEAD drifted: {name}")
-        if dirty or item.get("dirty") is not False:
+        if item.get("dirty") is not dirty or (participant and dirty):
             raise GateError(f"repository is dirty: {name}")
-        if item.get("participation") != "required" or not item.get("reason"):
+        if item.get("participation") is not participant or not item.get("reason"):
             raise GateError(f"repository participation is not explicit: {name}")
         expected_digest = _source_digest(repo, sha)
         if item.get("artifact_digest") != expected_digest:
@@ -246,12 +327,15 @@ def verify_release(document: Mapping[str, object], workspace_root: Path) -> dict
         if not isinstance(receipts, list):
             raise GateError(f"required_tests must be a list: {name}")
         receipt_ids = [receipt.get("id") for receipt in receipts if isinstance(receipt, dict)]
-        if receipt_ids != list(REQUIRED_TESTS[name]) or len(receipt_ids) != len(receipts):
+        if receipt_ids != list(REQUIRED_TESTS.get(name, ())) or len(receipt_ids) != len(receipts):
             raise GateError(f"required test set drifted: {name}")
         for receipt in receipts:
             assert isinstance(receipt, dict)
             if receipt.get("status") != "passed" or not _is_hex(receipt.get("evidence_digest"), 64):
                 raise GateError(f"required test has no passing receipt: {name}:{receipt.get('id')}")
+            evidence = _evidence_path(receipt.get("evidence_path"), f"{name}:{receipt.get('id')}")
+            if receipt.get("evidence_digest") != _sha256_file(evidence):
+                raise GateError(f"required test evidence drifted: {name}:{receipt.get('id')}")
 
     identity = _canonical_identity(repositories)
     if document.get("release_identity") != identity:
@@ -277,6 +361,18 @@ def verify_release(document: Mapping[str, object], workspace_root: Path) -> dict
         expected = {source: repositories[source]["sha"] for source in expected_sources}
         if sources != expected:
             raise GateError(f"artifact source commits drifted: {name}")
+        provenance_path = _evidence_path(item.get("provenance_path"), f"{name}:provenance")
+        if item.get("provenance_sha256") != _sha256_file(provenance_path):
+            raise GateError(f"artifact provenance digest drifted: {name}")
+        provenance = _json(provenance_path)
+        expected_provenance = {
+            "contract": PROVENANCE_CONTRACT,
+            "artifact_sha256": item.get("sha256"),
+            "release_identity": identity,
+            "sources": expected,
+        }
+        if any(provenance.get(key) != value for key, value in expected_provenance.items()):
+            raise GateError(f"artifact provenance does not bind release inputs: {name}")
     return {
         "status": "ready_for_device_management_release",
         "release_id": document.get("release_id"),
@@ -300,6 +396,7 @@ def hil_template(release_document: Mapping[str, object], device_id: str) -> dict
             {
                 "id": step,
                 "status": "paused" if step in _CONFIRMATION_STEPS else "pending",
+                "evidence_path": None,
                 "evidence_digest": None,
                 **(
                     {"confirmation": f"ERASE {device_id} FOR {identity}"}
@@ -334,6 +431,9 @@ def verify_hil(
         step_id = step["id"]
         if step.get("status") != "passed" or not _is_hex(step.get("evidence_digest"), 64):
             raise GateError(f"HIL step is not backed by passing evidence: {step_id}")
+        evidence_path = _evidence_path(step.get("evidence_path"), f"HIL:{step_id}")
+        if step.get("evidence_digest") != _sha256_file(evidence_path):
+            raise GateError(f"HIL evidence drifted: {step_id}")
         if step_id in _CONFIRMATION_STEPS:
             expected = f"ERASE {device_id} FOR {identity}"
             if step.get("confirmation") != expected:

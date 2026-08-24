@@ -7,10 +7,12 @@ deployment platform and it does not cover PH3 or PH6 product behavior.
 
 ## 1. Capture one source identity
 
-Run from a clean workspace whose nine participating repositories are all on
-`main`. The capture fails if any required repository is absent and records the
-current branch, exact HEAD, dirty state, deterministic Git-archive digest and
-the required test receipt slots.
+Run from a workspace whose nine participating repositories are clean and on
+`main`. Repository discovery and exclusions come from the canonical SDK P0
+Foundation inventory. Capture fails if any Git project is added or omitted;
+formal non-participants remain explicit with `participation=false` and a
+reason. It records branch, exact HEAD, dirty state, the Foundation
+`sha256(git-ls-tree-r-z-full-tree-output)` digest and required test slots.
 
 ```sh
 uv run eidolon-device-management-gate template \
@@ -20,8 +22,10 @@ uv run eidolon-device-management-gate template \
 ```
 
 Run every named test at the captured commit. Change each receipt from `pending`
-to `passed` only after saving its output and putting the SHA-256 of that output
-in `evidence_digest`. Build in this order, passing the manifest's
+to `passed` only after saving its output at an absolute, non-symlink
+`evidence_path` and putting the real SHA-256 of that file in
+`evidence_digest`. The verifier opens and hashes the file. Build in this order,
+passing the manifest's
 `release_identity` into each build's existing version/metadata input:
 
 1. seal the Pi5 native release from the captured SDK, Hub, Kernel, Admin,
@@ -29,8 +33,12 @@ in `evidence_digest`. Build in this order, passing the manifest's
 2. build the Mobile APK from the captured SDK and Mobile commits;
 3. build the Box3 firmware from the captured SDK and ESP32 commits.
 
-Record an absolute, non-symlink artifact path, its SHA-256, the same
-`release_identity`, and the exact source mapping in each artifact entry. Then:
+For every build, emit a provenance JSON object containing at least `contract`,
+`artifact_sha256`, `release_identity`, and `sources`. Record absolute,
+non-symlink artifact and provenance paths, both SHA-256 values, the same
+`release_identity`, and the exact source mapping in each artifact entry. The
+verifier opens the provenance object and compares all four required fields instead of
+trusting the release manifest's self-report. Then:
 
 ```sh
 uv run eidolon-device-management-gate verify \
@@ -57,8 +65,9 @@ uv run eidolon-device-management-gate hil-template \
 ```
 
 Execute the listed steps in order. For every step, save process/API/device log
-evidence, hash that evidence, and set only that step to `passed`. Stop on any
-unexpected state; never skip or reorder a step.
+evidence at an absolute, non-symlink `evidence_path`, record its real SHA-256,
+and set only that step to `passed`. The verifier opens and hashes every file.
+Stop on any unexpected state; never skip or reorder a step.
 
 The two `confirm_*_remove` steps are hard pauses immediately before a removal
 request may cause device-local erase. A human must inspect the device ID and
