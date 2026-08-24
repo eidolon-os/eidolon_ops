@@ -21,7 +21,17 @@ from eidolon_ops.device_management_gate import (
 )
 
 _NON_PARTICIPANT = "eidolon-official-site"
-_TEST_INVENTORY = {**REPOSITORIES, _NON_PARTICIPANT: _NON_PARTICIPANT}
+_ARTIFACT_ONLY = {
+    source: source
+    for sources in ARTIFACT_SOURCES.values()
+    for source in sources
+    if source not in REPOSITORIES
+}
+_TEST_INVENTORY = {
+    **REPOSITORIES,
+    **_ARTIFACT_ONLY,
+    _NON_PARTICIPANT: _NON_PARTICIPANT,
+}
 
 
 def _run(*command: str, cwd: Path) -> None:
@@ -111,7 +121,7 @@ def test_release_gate_accepts_one_exact_identity_across_all_artifacts(tmp_path: 
         "status": "ready_for_device_management_release",
         "release_id": "dm-v1",
         "release_identity": document["release_identity"],
-        "repositories": 10,
+        "repositories": 13,
         "artifacts": ["esp32_firmware", "mobile_apk", "pi5_release"],
     }
 

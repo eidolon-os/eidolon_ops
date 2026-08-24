@@ -53,10 +53,13 @@ REQUIRED_TESTS: Mapping[str, tuple[str, ...]] = {
 ARTIFACT_SOURCES: Mapping[str, tuple[str, ...]] = {
     "pi5_release": (
         "eidolon_sdk",
+        "eidolon_data",
         "eidolon_hub",
         "eidolon_kernel",
         "eidolon_admin",
+        "eidolon_agent",
         "eidolon_channel",
+        "eidolon_memory",
         "eidolon_ops",
     ),
     "mobile_apk": ("eidolon_sdk", "eidolon_client_mobile"),

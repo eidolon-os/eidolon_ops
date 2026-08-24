@@ -27,8 +27,8 @@ to `passed` only after saving its output at an absolute, non-symlink
 `evidence_digest`. The verifier opens and hashes the file. Build from the
 captured clean commits in this order:
 
-1. seal the Pi5 native release from the captured SDK, Hub, Kernel, Admin,
-   Channel and Ops commits;
+1. seal the Pi5 native release from the captured SDK, Data, Hub, Kernel,
+   Admin, Agent, Channel, Memory and Ops commits;
 2. build the Mobile APK from the captured SDK and Mobile commits;
 3. build the Box3 firmware from the captured SDK and ESP32 commits.
 
