@@ -6,6 +6,7 @@ import base64
 import binascii
 import json
 import os
+import re
 import stat
 from dataclasses import dataclass
 from pathlib import Path
@@ -248,17 +249,26 @@ class HostApplicationMaterializer:
                 raise HostApplicationError(
                     "development commissioning registry must contain at least one device"
                 )
-            for device_id, encoded in devices.items():
+            for hardware_lookup_id, entry in devices.items():
                 if (
-                    not isinstance(device_id, str)
-                    or not device_id.strip()
-                    or len(device_id.encode()) > 128
-                    or not isinstance(encoded, str)
-                    or not encoded
+                    not isinstance(hardware_lookup_id, str)
+                    or not hardware_lookup_id.strip()
+                    or len(hardware_lookup_id.encode()) > 128
+                    or not isinstance(entry, dict)
+                    or set(entry) != {"setup_secret", "hardware_identity_ref"}
+                    or not isinstance(entry["setup_secret"], str)
+                    or not entry["setup_secret"]
+                    or not isinstance(entry["hardware_identity_ref"], str)
+                    or re.fullmatch(
+                        r"[A-Za-z0-9][A-Za-z0-9._:-]{2,127}",
+                        entry["hardware_identity_ref"],
+                    )
+                    is None
                 ):
                     raise HostApplicationError(
                         "development commissioning registry contains an invalid device entry"
                     )
+                encoded = entry["setup_secret"]
                 padding = "=" * (-len(encoded) % 4)
                 secret = base64.b64decode(
                     encoded + padding,

@@ -52,7 +52,10 @@ def _registry(tmp_path: Path, *, secret: bytes = b"d" * 32, extra: bool = False)
     document = {
         "profile": "eidolon-development-hmac-commissioning-v1",
         "devices": {
-            "box-3-hil": base64.urlsafe_b64encode(secret).rstrip(b"=").decode()
+            "box-3-hil": {
+                "setup_secret": base64.urlsafe_b64encode(secret).rstrip(b"=").decode(),
+                "hardware_identity_ref": "hardware-box-3-hil",
+            }
         },
     }
     if extra:
@@ -146,6 +149,25 @@ def test_development_commissioning_registry_rejects_symlink_mode_and_shape(
     with pytest.raises(HostApplicationError, match="unknown or missing fields"):
         HostApplicationMaterializer(
             config, _app("192.168.100.15", registry=unknown), b"runtime"
+        ).prepare(HUB_TEMPLATE)
+
+    legacy_flat = _registry(tmp_path)
+    legacy_flat.write_text(
+        json.dumps(
+            {
+                "profile": "eidolon-development-hmac-commissioning-v1",
+                "devices": {
+                    "box-3-hil": base64.urlsafe_b64encode(b"d" * 32)
+                    .rstrip(b"=")
+                    .decode()
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(HostApplicationError, match="invalid device entry"):
+        HostApplicationMaterializer(
+            config, _app("192.168.100.15", registry=legacy_flat), b"runtime"
         ).prepare(HUB_TEMPLATE)
 
 
