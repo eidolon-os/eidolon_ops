@@ -16,7 +16,6 @@ from eidolon_ops.config import INSTALL_FILE_NAMES, OperationsConfig
 from eidolon_ops.environment import EnvironmentFileError
 from eidolon_ops.errors import InstallInputError, OperationsError
 from eidolon_ops.host_application import (
-    HOST_APPLICATION_STAGE_NAMES,
     HostApplicationError,
     HostApplicationMaterializer,
 )
@@ -162,7 +161,7 @@ class HostLayer:
                     os.chmod(source, 0o600)
                 self.transport.upload(source, f"{stage}/{_STAGED_INSTALL_NAMES[name]}")
             if application is not None:
-                for name in HOST_APPLICATION_STAGE_NAMES:
+                for name in sorted(application.files):
                     source = temporary / name
                     source.write_bytes(application.files[name])
                     os.chmod(source, 0o600)

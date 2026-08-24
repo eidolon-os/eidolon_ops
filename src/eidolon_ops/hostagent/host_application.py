@@ -67,6 +67,12 @@ def refresh_host_application(payload: Mapping[str, object]) -> dict[str, object]
         raise TargetError("secret staging path is unsafe")
     if not stage.is_dir() or stage.is_symlink():
         raise TargetError("Host application staging directory is missing")
+    optional_name = "commissioning-secrets.json"
+    optional_source = stage / optional_name
+    if optional_source.is_symlink() or (
+        optional_source.exists() and not optional_source.is_file()
+    ):
+        raise TargetError("development commissioning registry staging input is unsafe")
     _validate_hub_settings_compatibility(stage, release_id)
     # A refresh is the deployment path for Host-owned contract changes, not
     # merely a byte copier.  Reconcile the path contract before replacing
@@ -80,7 +86,15 @@ def refresh_host_application(payload: Mapping[str, object]) -> dict[str, object]
         contract.fixed_port_registry(payload),
     )
     changed: list[str] = []
-    for name in contract.REFRESHABLE_HOST_LAYER_INPUTS:
+    selected_inputs: list[str] = []
+    if optional_source.is_file():
+        selected_inputs.append(optional_name)
+    # Place the credential before enabling the profile in Hub settings.  The
+    # previous/default manufacturer profile ignores the otherwise inert file;
+    # the inverse order could briefly enable development-hmac against a stale
+    # registry if a later copy failed.
+    selected_inputs.extend(contract.REFRESHABLE_HOST_LAYER_INPUTS)
+    for name in selected_inputs:
         source = stage / name
         if not source.is_file():
             raise TargetError(f"Host application asset was not staged: {name}")
@@ -115,9 +129,32 @@ def refresh_host_application(payload: Mapping[str, object]) -> dict[str, object]
         finally:
             temporary.unlink(missing_ok=True)
         changed.append(str(destination_value))
+    removed: list[str] = []
+    if not optional_source.exists():
+        destination_value, user, group, mode = contract.OPTIONAL_HOST_APPLICATION_INPUTS[
+            optional_name
+        ]
+        destination = primitives.host_path(Path("/"), destination_value)
+        if destination.exists() or destination.is_symlink():
+            if destination.is_symlink() or not destination.is_file():
+                raise TargetError(
+                    "development commissioning registry destination is unsafe"
+                )
+            expected_uid, expected_gid = _expected_ids(user, group)
+            metadata = destination.stat()
+            if (
+                stat.S_IMODE(metadata.st_mode) != mode
+                or (metadata.st_uid, metadata.st_gid) != (expected_uid, expected_gid)
+            ):
+                raise TargetError(
+                    "development commissioning registry ownership or mode drifted"
+                )
+            destination.unlink()
+            removed.append(str(destination_value))
     if changed:
         primitives.checked("systemd reload", ("/usr/bin/systemctl", "daemon-reload"), timeout=120)
-    return {"status": "refreshed", "changed": changed, "removed": remove_legacy_system_assets()}
+    removed.extend(remove_legacy_system_assets())
+    return {"status": "refreshed", "changed": changed, "removed": removed}
 
 
 def _validate_hub_settings_compatibility(stage: Path, release_id: str) -> None:

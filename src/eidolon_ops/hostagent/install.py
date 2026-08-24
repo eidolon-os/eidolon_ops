@@ -144,14 +144,22 @@ class TargetInstaller:
         if not self.secret_stage.is_dir() or self.secret_stage.is_symlink():
             raise TargetError("secret staging directory is missing or unsafe")
         actual = {path.name for path in self.secret_stage.iterdir()}
-        if frozenset(actual) not in {frozenset(contract.SECRET_INPUTS), frozenset(contract.INSTALL_INPUTS)}:
+        if frozenset(actual) not in {
+            frozenset(contract.SECRET_INPUTS),
+            frozenset(contract.BASE_INSTALL_INPUTS),
+            frozenset(contract.INSTALL_INPUTS),
+        }:
             raise TargetError("secret staging file set is invalid")
         values: dict[str, str] = {}
         for name in sorted(actual):
             path = self.secret_stage / name
             if not path.is_file() or path.is_symlink():
                 raise TargetError(f"secret staging input is unsafe: {name}")
-            values[name] = primitives.file_sha256(path)
+            values[name] = (
+                "private-input-redacted"
+                if name in contract.OPTIONAL_HOST_APPLICATION_INPUTS
+                else primitives.file_sha256(path)
+            )
         return values
 
     def _load_or_begin(self, inputs: Mapping[str, str]) -> dict[str, object]:
@@ -328,7 +336,11 @@ class TargetInstaller:
                 if (
                     destination.is_symlink()
                     or not destination.is_file()
-                    or primitives.file_sha256(destination) != inputs[name]
+                    or (
+                        destination.read_bytes() != source.read_bytes()
+                        if name in contract.OPTIONAL_HOST_APPLICATION_INPUTS
+                        else primitives.file_sha256(destination) != inputs[name]
+                    )
                     or stat.S_IMODE(metadata.st_mode) != mode
                     or (
                         expected_ids is not None

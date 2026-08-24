@@ -1,12 +1,19 @@
 from __future__ import annotations
 
+import base64
+import json
 import os
 from ipaddress import IPv4Address
+from pathlib import Path
 
 import pytest
 
 from eidolon_ops.environment import EnvironmentFileError
-from eidolon_ops.host_application import HostApplicationError, HostApplicationMaterializer
+from eidolon_ops.host_application import (
+    DEVELOPMENT_COMMISSIONING_STAGE_NAME,
+    HostApplicationError,
+    HostApplicationMaterializer,
+)
 from eidolon_ops.hub_assets import HubAssetError
 from eidolon_ops.paths import AppAccess
 
@@ -30,13 +37,29 @@ persistence:
 """
 
 
-def _app(address: str) -> AppAccess:
+def _app(address: str, *, registry: Path | None = None) -> AppAccess:
     return AppAccess(
         lan_ipv4=IPv4Address(address),
         hub_https_port=8443,
         livekit_client_url=f"ws://{address}:7880",
         allow_insecure_livekit=True,
+        development_commissioning_registry=registry,
     )
+
+
+def _registry(tmp_path: Path, *, secret: bytes = b"d" * 32, extra: bool = False) -> Path:
+    path = tmp_path / "commissioning-secrets.json"
+    document = {
+        "profile": "eidolon-development-hmac-commissioning-v1",
+        "devices": {
+            "box-3-hil": base64.urlsafe_b64encode(secret).rstrip(b"=").decode()
+        },
+    }
+    if extra:
+        document["unexpected"] = True
+    path.write_text(json.dumps(document), encoding="utf-8")
+    path.chmod(0o600)
+    return path
 
 
 def test_pi_application_assets_are_stable_and_owner_scoped(config) -> None:
@@ -60,6 +83,70 @@ def test_pi_application_assets_are_stable_and_owner_scoped(config) -> None:
     assert b"/etc/eidolon/generated/hub.yaml" in first.files["hub-service-override.conf"]
     assert "owner-domain-root.key.pem" not in first.files
     assert "authority-signing.key.pem" not in first.files
+    assert DEVELOPMENT_COMMISSIONING_STAGE_NAME not in first.files
+    assert "commissioning_proof:" not in settings
+
+
+def test_development_commissioning_is_an_explicit_private_host_input(
+    config, tmp_path: Path
+) -> None:
+    identity_path = config.install_files["host_identity"]
+    identity_path.write_bytes(b"a" * 32)
+    identity_path.chmod(0o600)
+    registry = _registry(tmp_path)
+    materializer = HostApplicationMaterializer(
+        config,
+        _app("192.168.100.15", registry=registry),
+        b"runtime",
+    )
+
+    assets = materializer.prepare(HUB_TEMPLATE)
+    settings = assets.files["hub.generated.yaml"].decode()
+
+    assert assets.files[DEVELOPMENT_COMMISSIONING_STAGE_NAME] == registry.read_bytes()
+    assert "commissioning_proof:\n  profile: development-hmac\n" in settings
+    assert (
+        "setup_secret_registry_path: /etc/eidolon/commissioning-secrets.json"
+        in settings
+    )
+    public = materializer.public_contract()
+    assert "commissioning" not in repr(public)
+    assert base64.urlsafe_b64encode(b"d" * 32).rstrip(b"=").decode() not in repr(public)
+
+
+def test_development_commissioning_registry_rejects_symlink_mode_and_shape(
+    config, tmp_path: Path
+) -> None:
+    identity_path = config.install_files["host_identity"]
+    identity_path.write_bytes(b"a" * 32)
+    identity_path.chmod(0o600)
+
+    unsafe_mode = _registry(tmp_path)
+    unsafe_mode.chmod(0o640)
+    with pytest.raises(HostApplicationError, match="mode-0600 non-symlink"):
+        HostApplicationMaterializer(
+            config, _app("192.168.100.15", registry=unsafe_mode), b"runtime"
+        ).prepare(HUB_TEMPLATE)
+
+    unsafe_mode.chmod(0o600)
+    link = tmp_path / "registry-link.json"
+    link.symlink_to(unsafe_mode)
+    with pytest.raises(HostApplicationError, match="mode-0600 non-symlink"):
+        HostApplicationMaterializer(
+            config, _app("192.168.100.15", registry=link), b"runtime"
+        ).prepare(HUB_TEMPLATE)
+
+    weak = _registry(tmp_path, secret=b"too-short")
+    with pytest.raises(HostApplicationError, match="weak or non-canonical"):
+        HostApplicationMaterializer(
+            config, _app("192.168.100.15", registry=weak), b"runtime"
+        ).prepare(HUB_TEMPLATE)
+
+    unknown = _registry(tmp_path, extra=True)
+    with pytest.raises(HostApplicationError, match="unknown or missing fields"):
+        HostApplicationMaterializer(
+            config, _app("192.168.100.15", registry=unknown), b"runtime"
+        ).prepare(HUB_TEMPLATE)
 
 
 def test_host_replacement_keeps_owner_contract_and_changes_observation(config) -> None:

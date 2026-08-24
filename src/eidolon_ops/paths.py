@@ -119,6 +119,7 @@ class AppAccess:
     hub_https_port: int
     livekit_client_url: str
     allow_insecure_livekit: bool
+    development_commissioning_registry: Path | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -246,7 +247,7 @@ def load_host_profile(path: Path) -> HostProfile:
     source_overrides = _source_overrides(document.get("source_overrides"), base=base)
     if source_overrides and driver is not HostDriver.LOCAL_SUPERVISORD:
         raise HostProfileError("source_overrides are available only for local-supervisord hosts")
-    app = _app_access(document.get("app"))
+    app = _app_access(document.get("app"), platform=platform)
     return HostProfile(
         path=resolved,
         host_id=host_id,
@@ -325,14 +326,16 @@ def _member(enumeration: type[Any], value: object, label: str) -> Any:
         raise HostProfileError(f"{label} must be one of {allowed}") from exc
 
 
-def _app_access(value: object | None) -> AppAccess | None:
+def _app_access(value: object | None, *, platform: HostPlatform) -> AppAccess | None:
     if value is None:
         return None
     document = _table(value, "app")
     required = {"hub_https_port", "livekit_client_url", "allow_insecure_livekit"}
-    if not required <= set(document) or not set(document) <= (required | {"lan_ipv4"}):
+    optional = {"lan_ipv4", "development_commissioning_registry"}
+    if not required <= set(document) or not set(document) <= (required | optional):
         raise HostProfileError(
-            f"app must contain exactly {', '.join(sorted(required))}, with lan_ipv4 optional"
+            f"app must contain exactly {', '.join(sorted(required))}, with only "
+            "lan_ipv4 and development_commissioning_registry optional"
         )
     address: IPv4Address | None = None
     if "lan_ipv4" in document:
@@ -369,11 +372,28 @@ def _app_access(value: object | None) -> AppAccess | None:
         )
     if address is not None and parsed.scheme == "ws" and parsed.hostname != str(address):
         raise HostProfileError("an insecure LiveKit URL must use app.lan_ipv4")
+    development_registry: Path | None = None
+    if "development_commissioning_registry" in document:
+        if platform is not HostPlatform.RASPBERRY_PI:
+            raise HostProfileError(
+                "app.development_commissioning_registry is available only for Raspberry Pi HIL"
+            )
+        development_registry = Path(
+            _text(
+                document["development_commissioning_registry"],
+                "app.development_commissioning_registry",
+            )
+        ).expanduser()
+        if not development_registry.is_absolute() or ".." in development_registry.parts:
+            raise HostProfileError(
+                "app.development_commissioning_registry must be a safe absolute local path"
+            )
     return AppAccess(
         lan_ipv4=address,
         hub_https_port=port,
         livekit_client_url=livekit_url.rstrip("/"),
         allow_insecure_livekit=allow_insecure,
+        development_commissioning_registry=development_registry,
     )
 
 

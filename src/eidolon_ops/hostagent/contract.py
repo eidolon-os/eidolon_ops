@@ -176,7 +176,17 @@ HOST_APPLICATION_INPUTS = {
     ),
 }
 
-INSTALL_INPUTS = {**SECRET_INPUTS, **HOST_APPLICATION_INPUTS}
+OPTIONAL_HOST_APPLICATION_INPUTS = {
+    "commissioning-secrets.json": (
+        Path("/etc/eidolon/commissioning-secrets.json"),
+        "root",
+        "eidolon",
+        0o640,
+    ),
+}
+
+BASE_INSTALL_INPUTS = {**SECRET_INPUTS, **HOST_APPLICATION_INPUTS}
+INSTALL_INPUTS = {**BASE_INSTALL_INPUTS, **OPTIONAL_HOST_APPLICATION_INPUTS}
 
 #: The Host layer Ops derives rather than keeps: settings rendered from the
 #: Host identity, the ingress program, and the two units that run it. Unlike a

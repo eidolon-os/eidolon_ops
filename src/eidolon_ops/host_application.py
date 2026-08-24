@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
+import json
+import os
 import stat
 from dataclasses import dataclass
 from pathlib import Path
@@ -38,6 +42,11 @@ HOST_APPLICATION_STAGE_NAMES = (
     "hub-ingress.service",
     "hub-service-override.conf",
 )
+DEVELOPMENT_COMMISSIONING_STAGE_NAME = "commissioning-secrets.json"
+DEVELOPMENT_COMMISSIONING_TARGET = "/etc/eidolon/commissioning-secrets.json"
+_DEVELOPMENT_COMMISSIONING_PROFILE = "eidolon-development-hmac-commissioning-v1"
+_MINIMUM_DEVELOPMENT_SECRET_BYTES = 32
+_MAXIMUM_DEVELOPMENT_REGISTRY_BYTES = 64 * 1024
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,13 +75,17 @@ class HostApplicationMaterializer:
             owner = self.owner_assets(identity=identity)
         except OwnerDomainAssetError as exc:
             raise HostApplicationError(str(exc)) from exc
+        commissioning_registry = self._development_commissioning_registry()
+        settings = self._render_hub_settings(
+            hub_template,
+            owner.owner_domain_id,
+            owner.owner_domain_generation,
+            identity,
+        )
+        if commissioning_registry is not None:
+            settings = self._enable_development_commissioning(settings)
         files = {
-            "hub.generated.yaml": self._render_hub_settings(
-                hub_template,
-                owner.owner_domain_id,
-                owner.owner_domain_generation,
-                identity,
-            ).encode(),
+            "hub.generated.yaml": settings.encode(),
             "hub.crt": owner.tls_certificate,
             "hub.key": owner.tls_private_key,
             "owner-domain-descriptor.json": owner.descriptor,
@@ -83,7 +96,12 @@ class HostApplicationMaterializer:
             "hub-ingress.service": self._ingress_service().encode(),
             "hub-service-override.conf": self._hub_service_override().encode(),
         }
-        if set(files) != set(HOST_APPLICATION_STAGE_NAMES):
+        if commissioning_registry is not None:
+            files[DEVELOPMENT_COMMISSIONING_STAGE_NAME] = commissioning_registry
+        expected = set(HOST_APPLICATION_STAGE_NAMES)
+        if commissioning_registry is not None:
+            expected.add(DEVELOPMENT_COMMISSIONING_STAGE_NAME)
+        if set(files) != expected:
             raise HostApplicationError("Host application asset set is incomplete")
         return HostApplicationAssets(
             identity=identity, owner_domain_id=owner.owner_domain_id, files=files
@@ -186,6 +204,94 @@ class HostApplicationMaterializer:
             owner_domain_generation,
             identity,
             self.app.hub_https_port,
+        )
+
+    def _development_commissioning_registry(self) -> bytes | None:
+        """Validate one explicit HIL registry without exposing its contents or digest."""
+
+        path = self.app.development_commissioning_registry
+        if path is None:
+            return None
+        try:
+            if path.is_symlink():
+                raise HostApplicationError(
+                    "development commissioning registry must be a mode-0600 non-symlink "
+                    "file no larger than 65536 bytes"
+                )
+            descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+            try:
+                metadata = os.fstat(descriptor)
+                if (
+                    not stat.S_ISREG(metadata.st_mode)
+                    or stat.S_IMODE(metadata.st_mode) != 0o600
+                    or metadata.st_size > _MAXIMUM_DEVELOPMENT_REGISTRY_BYTES
+                ):
+                    raise HostApplicationError(
+                        "development commissioning registry must be a mode-0600 non-symlink "
+                        "file no larger than 65536 bytes"
+                    )
+                with os.fdopen(descriptor, "rb", closefd=False) as stream:
+                    value = stream.read()
+            finally:
+                os.close(descriptor)
+            document = json.loads(value)
+            if not isinstance(document, dict) or set(document) != {"profile", "devices"}:
+                raise HostApplicationError(
+                    "development commissioning registry has unknown or missing fields"
+                )
+            if document["profile"] != _DEVELOPMENT_COMMISSIONING_PROFILE:
+                raise HostApplicationError(
+                    "development commissioning registry has the wrong profile"
+                )
+            devices = document["devices"]
+            if not isinstance(devices, dict) or not devices:
+                raise HostApplicationError(
+                    "development commissioning registry must contain at least one device"
+                )
+            for device_id, encoded in devices.items():
+                if (
+                    not isinstance(device_id, str)
+                    or not device_id.strip()
+                    or len(device_id.encode()) > 128
+                    or not isinstance(encoded, str)
+                    or not encoded
+                ):
+                    raise HostApplicationError(
+                        "development commissioning registry contains an invalid device entry"
+                    )
+                padding = "=" * (-len(encoded) % 4)
+                secret = base64.b64decode(
+                    encoded + padding,
+                    altchars=b"-_",
+                    validate=True,
+                )
+                canonical = base64.urlsafe_b64encode(secret).rstrip(b"=").decode()
+                if (
+                    len(secret) < _MINIMUM_DEVELOPMENT_SECRET_BYTES
+                    or canonical != encoded
+                ):
+                    raise HostApplicationError(
+                        "development commissioning registry contains a weak or non-canonical secret"
+                    )
+            return value
+        except HostApplicationError:
+            raise
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, binascii.Error) as exc:
+            raise HostApplicationError(
+                "development commissioning registry is unreadable or invalid"
+            ) from exc
+
+    @staticmethod
+    def _enable_development_commissioning(settings: str) -> str:
+        if "\ncommissioning_proof:" in settings:
+            raise HostApplicationError(
+                "Hub settings template already selects a commissioning proof profile"
+            )
+        return (
+            settings.rstrip()
+            + "\n\ncommissioning_proof:\n"
+            + "  profile: development-hmac\n"
+            + f"  setup_secret_registry_path: {DEVELOPMENT_COMMISSIONING_TARGET}\n"
         )
 
     def _ingress_service(self) -> str:

@@ -175,6 +175,79 @@ operations_config = "{operations}"
         load_host_profile(profile_file)
 
 
+def test_pi_profile_requires_explicit_absolute_development_commissioning_opt_in(
+    tmp_path: Path,
+) -> None:
+    operations = tmp_path / "pi.toml"
+    operations.write_text("placeholder", encoding="utf-8")
+    registry = tmp_path / "commissioning-secrets.json"
+    profile_file = tmp_path / "host.toml"
+    profile_file.write_text(
+        f"""schema_version = 1
+[host]
+id = "pi5"
+platform = "raspberry-pi"
+driver = "ssh-systemd"
+[paths]
+install_root = "/opt/eidolon"
+current_root = "/opt/eidolon/current"
+config_root = "/etc/eidolon"
+state_root = "/var/lib/eidolon"
+runtime_root = "/run/eidolon"
+log_root = "/var/log/eidolon"
+cache_root = "/var/cache/eidolon"
+bootstrap_state_root = "/var/lib/eidolon-bootstrap"
+bootstrap_runtime_root = "/run/eidolon-bootstrap"
+[adapter]
+operations_config = "{operations}"
+[app]
+hub_https_port = 8443
+livekit_client_url = "wss://eidolon-hub.example.test:7880"
+allow_insecure_livekit = false
+development_commissioning_registry = "{registry}"
+""",
+        encoding="utf-8",
+    )
+
+    profile = load_host_profile(profile_file)
+
+    assert profile.app is not None
+    assert profile.app.development_commissioning_registry == registry
+
+    profile_file.write_text(
+        profile_file.read_text(encoding="utf-8").replace(str(registry), "relative.json"),
+        encoding="utf-8",
+    )
+    with pytest.raises(HostProfileError, match="safe absolute local path"):
+        load_host_profile(profile_file)
+
+
+def test_development_commissioning_opt_in_is_pi_only_and_app_fields_are_closed(
+    tmp_path: Path,
+) -> None:
+    script = tmp_path / "run.sh"
+    script.write_text("#!/bin/sh\n", encoding="utf-8")
+    path = _write_mac_profile(tmp_path, script=script)
+    text = path.read_text(encoding="utf-8")
+    path.write_text(
+        text.replace(
+            "allow_insecure_livekit = true",
+            'allow_insecure_livekit = true\n'
+            'development_commissioning_registry = "/private/registry.json"',
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(HostProfileError, match="only for Raspberry Pi HIL"):
+        load_host_profile(path)
+
+    path.write_text(
+        text.replace("allow_insecure_livekit = true", "allow_insecure_livekit = true\nextra = 1"),
+        encoding="utf-8",
+    )
+    with pytest.raises(HostProfileError, match="with only"):
+        load_host_profile(path)
+
+
 @pytest.mark.parametrize(
     ("old", "new", "message"),
     [
