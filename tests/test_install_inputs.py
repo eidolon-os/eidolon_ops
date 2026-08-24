@@ -9,6 +9,7 @@ import pytest
 
 from eidolon_ops.config import OperationsConfig
 from eidolon_ops.install_inputs import (
+    add_missing_install_credentials,
     INSTALL_DESTINATION_NAMES,
     InstallInputError,
     initialize_install_inputs,
@@ -453,3 +454,175 @@ def test_a_machine_can_be_retired_but_only_by_saying_so(config, tmp_path: Path) 
     assert (
         tmp_path / "operator-private/pi5/install-v3/host_identity.ed25519"
     ).read_bytes() == minted
+
+
+# --- 产品长出一个凭据，已装好的主机怎么拿到 ---------------------------------
+
+
+def _strip_keys(target: Path, removals: dict[str, set[str]]) -> dict[str, dict[str, str]]:
+    """Make an input set look like one generated before a credential existed."""
+
+    before: dict[str, dict[str, str]] = {}
+    for name, keys in removals.items():
+        values = _env(target / name)
+        before[name] = dict(values)
+        for key in keys:
+            values.pop(key)
+        _write_env(target / name, values)
+    return before
+
+
+#: What a Host installed before 2026-08-25 has: the memory authority credential
+#: and the Agent admin credential simply did not exist.
+_OLDER_HOST = {
+    "memory.env": {"EIDOLON_MEMORY_API_TOKEN"},
+    "admin.env": {
+        "EIDOLON_ADMIN_MEMORY_API_SERVICE_TOKEN",
+        "EIDOLON_AGENT_ADMIN_API_TOKEN",
+    },
+    "agent.env": {"EIDOLON_AGENT_ADMIN_API_TOKEN"},
+}
+
+
+def test_an_older_input_set_is_refused_by_the_contract_check(config, tmp_path: Path) -> None:
+    """The premise. Without a repair this is a Host the check condemns and
+    nothing can fix short of reissuing every credential on it."""
+
+    configured = _config_for_init(config, tmp_path)
+    initialize_install_inputs(configured, _settings_reader)
+    target = next(iter(configured.install_files.values())).parent
+    _strip_keys(target, _OLDER_HOST)
+
+    with pytest.raises(InstallInputError, match="key set drifted"):
+        validate_install_input_contract(configured, _settings_reader)
+
+
+def test_the_repair_adds_only_what_is_missing_and_says_so_first(
+    config, tmp_path: Path
+) -> None:
+    """Dry by default: the operator running this holds a Host that works."""
+
+    configured = _config_for_init(config, tmp_path)
+    initialize_install_inputs(configured, _settings_reader)
+    target = next(iter(configured.install_files.values())).parent
+    before = _strip_keys(target, _OLDER_HOST)
+
+    planned = add_missing_install_credentials(configured)
+
+    assert planned["status"] == "planned"
+    assert planned["applied"] is False
+    assert planned["added"] == {
+        "admin.env": [
+            "EIDOLON_ADMIN_MEMORY_API_SERVICE_TOKEN",
+            "EIDOLON_AGENT_ADMIN_API_TOKEN",
+        ],
+        "agent.env": ["EIDOLON_AGENT_ADMIN_API_TOKEN"],
+        "memory.env": ["EIDOLON_MEMORY_API_TOKEN"],
+    }
+    # Nothing written, and no value in the report to leak.
+    assert "EIDOLON_MEMORY_API_TOKEN" not in _env(target / "memory.env")
+    assert str(planned["added"]).count("=") == 0
+    assert _env(target / "admin.env").keys() == before["admin.env"].keys() - _OLDER_HOST["admin.env"]
+
+
+def test_applying_the_repair_leaves_every_existing_secret_untouched(
+    config, tmp_path: Path
+) -> None:
+    """The property that makes it safe to run on a working Host."""
+
+    configured = _config_for_init(config, tmp_path)
+    initialize_install_inputs(configured, _settings_reader)
+    target = next(iter(configured.install_files.values())).parent
+    before = _strip_keys(target, _OLDER_HOST)
+
+    add_missing_install_credentials(configured, apply=True)
+
+    for name, previous in before.items():
+        current = _env(target / name)
+        for key, value in previous.items():
+            if key in _OLDER_HOST[name]:
+                continue
+            assert current[key] == value, f"{name}:{key} was rewritten"
+
+
+def test_the_repair_restores_the_relationships_the_check_requires(
+    config, tmp_path: Path
+) -> None:
+    """Minting one side of a shared secret is how a pair breaks, so a value the
+    other side already has is copied rather than re-made."""
+
+    configured = _config_for_init(config, tmp_path)
+    initialize_install_inputs(configured, _settings_reader)
+    target = next(iter(configured.install_files.values())).parent
+    # Only one side of each pair is missing here, which is the ordinary case: a
+    # Host whose admin.env was hand-patched but whose memory.env was not.
+    _strip_keys(
+        target,
+        {
+            "admin.env": {"EIDOLON_ADMIN_MEMORY_API_SERVICE_TOKEN"},
+            "agent.env": {"EIDOLON_AGENT_ADMIN_API_TOKEN"},
+        },
+    )
+    memory_before = _env(target / "memory.env")["EIDOLON_MEMORY_API_TOKEN"]
+    admin_before = _env(target / "admin.env")["EIDOLON_AGENT_ADMIN_API_TOKEN"]
+
+    add_missing_install_credentials(configured, apply=True)
+
+    assert (
+        _env(target / "admin.env")["EIDOLON_ADMIN_MEMORY_API_SERVICE_TOKEN"]
+        == memory_before
+    )
+    assert _env(target / "agent.env")["EIDOLON_AGENT_ADMIN_API_TOKEN"] == admin_before
+    # And the whole set passes the check it used to fail.
+    validate_install_input_contract(configured, _settings_reader)
+
+
+def test_a_credential_nobody_has_yet_is_minted_once_for_both_sides(
+    config, tmp_path: Path
+) -> None:
+    configured = _config_for_init(config, tmp_path)
+    initialize_install_inputs(configured, _settings_reader)
+    target = next(iter(configured.install_files.values())).parent
+    _strip_keys(target, _OLDER_HOST)
+
+    add_missing_install_credentials(configured, apply=True)
+
+    memory = _env(target / "memory.env")
+    admin = _env(target / "admin.env")
+    agent = _env(target / "agent.env")
+    assert admin["EIDOLON_ADMIN_MEMORY_API_SERVICE_TOKEN"] == memory["EIDOLON_MEMORY_API_TOKEN"]
+    assert admin["EIDOLON_AGENT_ADMIN_API_TOKEN"] == agent["EIDOLON_AGENT_ADMIN_API_TOKEN"]
+    assert len(memory["EIDOLON_MEMORY_API_TOKEN"]) >= 24
+    validate_install_input_contract(configured, _settings_reader)
+
+
+def test_running_it_again_changes_nothing(config, tmp_path: Path) -> None:
+    """Idempotent, because an operator who is unsure will run it twice."""
+
+    configured = _config_for_init(config, tmp_path)
+    initialize_install_inputs(configured, _settings_reader)
+    target = next(iter(configured.install_files.values())).parent
+    _strip_keys(target, _OLDER_HOST)
+    add_missing_install_credentials(configured, apply=True)
+    after = {name: _env(target / name) for name in _OLDER_HOST}
+
+    second = add_missing_install_credentials(configured, apply=True)
+
+    assert second["added"] == {}
+    assert second["applied"] is False
+    assert {name: _env(target / name) for name in _OLDER_HOST} == after
+
+
+def test_a_missing_provider_credential_is_refused_rather_than_invented(
+    config, tmp_path: Path
+) -> None:
+    """An LLM key this process made up would authenticate to nothing, and the
+    Host would then fail somewhere far from here."""
+
+    configured = _config_for_init(config, tmp_path)
+    initialize_install_inputs(configured, _settings_reader)
+    target = next(iter(configured.install_files.values())).parent
+    _strip_keys(target, {"memory.env": {"EIDOLON_MEMORY_LLM_API_KEY"}})
+
+    with pytest.raises(InstallInputError, match="provider credentials"):
+        add_missing_install_credentials(configured, apply=True)

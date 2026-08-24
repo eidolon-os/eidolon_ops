@@ -29,7 +29,10 @@ from eidolon_ops.foundation import (
 )
 from eidolon_ops.host_layer import ASSET_ERRORS, HostLayer
 from eidolon_ops.hostagent.contract import RESET_AUTHORITY_ROOTS
-from eidolon_ops.install_inputs import initialize_install_inputs
+from eidolon_ops.install_inputs import (
+    add_missing_install_credentials,
+    initialize_install_inputs,
+)
 from eidolon_ops.owner_domain_assets import (
     OWNER_DOMAIN_MATERIAL_NAMES,
     OwnerDomainAssetError,
@@ -362,6 +365,23 @@ class EidolonPiController:
             # The contract describes the Host binding, which the materializer
             # owns; the assets it produced are the private material itself.
             return {**result, "host_application": self.host_layer.public_contract()}
+        except ASSET_ERRORS as exc:
+            raise OperationsError(str(exc)) from exc
+
+    def add_missing_input_credentials(self, *, apply: bool = False) -> dict[str, object]:
+        """Give this machine's input set the credentials the product grew since.
+
+        Not an install and not a reissue: it adds keys the set is missing and
+        touches nothing that is already there. Without it, a Host installed
+        before a credential existed has an input set the contract check refuses
+        and no way to fix but reinitialising — which rotates every secret on the
+        Host and re-anchors its identity.
+
+        Dry unless asked, because whoever runs this is holding a Host that works.
+        """
+
+        try:
+            return add_missing_install_credentials(self.config, apply=apply)
         except ASSET_ERRORS as exc:
             raise OperationsError(str(exc)) from exc
 

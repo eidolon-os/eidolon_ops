@@ -182,6 +182,214 @@ def initialize_install_inputs(
     }
 
 
+#: Every secret two files have to agree on, and what to call the disagreement.
+#:
+#: Declared once because two things read it: the contract check, which proves the
+#: two sides still match, and the repair below, which gives an already-installed
+#: Host a credential the product grew after it was installed. Those two used to
+#: be the same table written twice — and the second copy is how a new credential
+#: gets validated on a Host that has no way to receive it.
+SHARED_CREDENTIALS: tuple[tuple[str, str, str, str, str], ...] = (
+    ("data.env", "EIDOLON_DATA_MEMORY_RUNTIME_ROSTER_TOKEN", "memory.env", "EIDOLON_DATA_MEMORY_RUNTIME_ROSTER_TOKEN", "Data/Memory runtime roster token"),
+    ("data.env", "EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN", "kernel.env", "EIDOLON_KERNEL_COMPANION_AUTHORITY_TOKEN", "Data/Kernel companion authority token"),
+    ("data.env", "EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN", "admin.env", "EIDOLON_ADMIN_DATA_AUTHORITY_TOKEN", "Data/Admin authority token"),
+    ("data.env", "EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN", "agent.env", "EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN", "Data/Agent companion authority token"),
+    ("data.env", "EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN", "channel.env", "EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN", "Data/Channel companion authority token"),
+    ("data.env", "EIDOLON_DATA_WORKSPACE_AUTHORITY_TOKEN", "admin.env", "EIDOLON_ADMIN_DATA_WORKSPACE_AUTHORITY_TOKEN", "Data/Admin Workspace authority token"),
+    ("hub.env", "EIDOLON_HUB_DEVICE_REGISTRY_READER_TOKEN", "kernel.env", "EIDOLON_KERNEL_HUB_MANAGEMENT_TOKEN", "Hub/Kernel management token"),
+    ("hub.env", "EIDOLON_HUB_MANAGEMENT_JWT_SECRET", "admin.env", "EIDOLON_ADMIN_HUB_MANAGEMENT_JWT_SECRET", "Hub/Admin management JWT secret"),
+    ("hub.env", "EIDOLON_HUB_CHANNEL_PROVIDER_TOKEN", "channel.env", "EIDOLON_CHANNEL_PROVIDER_TOKEN", "Hub/Channel Provider token"),
+    ("admin.env", "EIDOLON_ADMIN_LOCAL_API_SERVICE_TOKEN", "local-api.env", "EIDOLON_LOCAL_API_ADMIN_SERVICE_TOKEN", "Admin/Local API service token"),
+    ("agent.env", "PAIRING_JWT_SECRET", "channel.env", "PAIRING_JWT_SECRET", "Agent/Channel JWT"),
+    ("agent.env", "EIDOLON_MEMORY_MCP_TOKEN", "memory.env", "EIDOLON_MEMORY_MCP_TOKEN", "Agent/Memory MCP token"),
+    ("admin.env", "EIDOLON_ADMIN_MEMORY_API_SERVICE_TOKEN", "memory.env", "EIDOLON_MEMORY_API_TOKEN", "Admin/Memory API service token"),
+    ("admin.env", "EIDOLON_AGENT_ADMIN_API_TOKEN", "agent.env", "EIDOLON_AGENT_ADMIN_API_TOKEN", "Admin/Agent admin API token"),
+    ("channel.env", "LIVEKIT_API_KEY", "livekit.env", "LIVEKIT_API_KEY", "Channel/LiveKit key"),
+    ("channel.env", "LIVEKIT_API_SECRET", "livekit.env", "LIVEKIT_API_SECRET", "Channel/LiveKit secret"),
+)
+
+#: Exactly which keys each generated env file holds.
+#:
+#: Module level, and read by two callers for the same reason ``SHARED_CREDENTIALS``
+#: is: the contract check proves a set has not drifted, and the repair below
+#: works out what an older Host is missing. A second copy would let a credential
+#: be required by one and unknown to the other.
+DECLARED_ENV_KEYS: dict[str, set[str]] = {
+    "data.env": {
+        "EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN",
+        "EIDOLON_DATA_MEMORY_RUNTIME_ROSTER_TOKEN",
+        "EIDOLON_DATA_WORKSPACE_AUTHORITY_TOKEN",
+        "EIDOLON_DATA_SQLITE_PATH",
+        "EIDOLON_DATA_DATABASE_URL",
+        "EIDOLON_DATA_OBJECT_STORE_PATH",
+    },
+    "hub.env": {
+        "EIDOLON_HUB_MANAGEMENT_JWT_SECRET",
+        "EIDOLON_HUB_DEVICE_REGISTRY_READER_TOKEN",
+        "EIDOLON_HUB_CHANNEL_PROVIDER_TOKEN",
+    },
+    "kernel.env": {
+        "EIDOLON_KERNEL_HUB_MANAGEMENT_TOKEN",
+        "EIDOLON_KERNEL_COMPANION_AUTHORITY_TOKEN",
+    },
+    "admin.env": {
+        "EIDOLON_ADMIN_DATA_AUTHORITY_TOKEN",
+        "EIDOLON_ADMIN_DATA_WORKSPACE_AUTHORITY_TOKEN",
+        "EIDOLON_ADMIN_HUB_MANAGEMENT_JWT_SECRET",
+        "EIDOLON_ADMIN_LOCAL_API_SERVICE_TOKEN",
+        "EIDOLON_ADMIN_MEMORY_API_SERVICE_TOKEN",
+        "EIDOLON_AGENT_ADMIN_API_TOKEN",
+        "EIDOLON_ADMIN_SYSTEM_DIRECTORY_UDS",
+    },
+    "local-api.env": {
+        "EIDOLON_LOCAL_API_ADMIN_BASE_URL",
+        "EIDOLON_LOCAL_API_ADMIN_SERVICE_TOKEN",
+        "EIDOLON_LOCAL_API_LIFECYCLE_WORKFLOW_SOCKET",
+    },
+    "bootstrap.env": set(),
+    "agent.env": {
+        "EIDOLON_AGENT_LLM_API_KEY",
+        "EIDOLON_AGENT_ADMIN_API_TOKEN",
+        "EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN",
+        "EIDOLON_MEMORY_MCP_TOKEN",
+        "PAIRING_JWT_SECRET",
+    },
+    "memory.env": {
+        "EIDOLON_DATA_MEMORY_RUNTIME_ROSTER_TOKEN",
+        "EIDOLON_MEMORY_LLM_API_KEY",
+        "EIDOLON_MEMORY_MCP_TOKEN",
+        "EIDOLON_MEMORY_API_TOKEN",
+    },
+    "livekit.env": {"LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"},
+}
+
+#: Entries that are product topology rather than secrets: the same on every
+#: Host, so a repair can write them and a check can prove they were not edited.
+FIXED_ENV_VALUES: dict[str, str] = {
+    "EIDOLON_DATA_SQLITE_PATH": "/var/lib/eidolon/eidolon-system.sqlite3",
+    "EIDOLON_DATA_DATABASE_URL": (
+        "sqlite+aiosqlite:////var/lib/eidolon/eidolon-system.sqlite3"
+    ),
+    "EIDOLON_DATA_OBJECT_STORE_PATH": "/var/lib/eidolon/objects",
+    "EIDOLON_ADMIN_SYSTEM_DIRECTORY_UDS": "/run/eidolon/system.sock",
+    "EIDOLON_LOCAL_API_ADMIN_BASE_URL": "http://127.0.0.1:9000",
+    "EIDOLON_LOCAL_API_LIFECYCLE_WORKFLOW_SOCKET": "/run/eidolon-lifecycle/workflow.sock",
+    "EIDOLON_LIVEKIT_CLIENT_URL": "ws://127.0.0.1:7880",
+}
+
+_DATA_PATH_KEYS = (
+    "EIDOLON_DATA_SQLITE_PATH",
+    "EIDOLON_DATA_DATABASE_URL",
+    "EIDOLON_DATA_OBJECT_STORE_PATH",
+)
+
+#: Credentials only an operator can supply. A repair refuses when one is missing
+#: rather than inventing a value that would authenticate to nothing.
+PROVIDER_ENV_KEYS: tuple[tuple[str, str], ...] = (
+    ("agent.env", "EIDOLON_AGENT_LLM_API_KEY"),
+    ("channel.env", "OPENAI_LLM_API_KEY"),
+    ("channel.env", "BAILIAN_STT_API_KEY"),
+    ("channel.env", "BAILIAN_TTS_API_KEY"),
+    ("memory.env", "EIDOLON_MEMORY_LLM_API_KEY"),
+)
+
+def add_missing_install_credentials(
+    config: OperationsConfig,
+    *,
+    apply: bool = False,
+) -> dict[str, object]:
+    """Give an already-installed Host the credentials the product grew since.
+
+    The gap this closes: a component adds a credential, the generator learns to
+    mint it, the contract check learns to require it — and every Host installed
+    before that day has an input set the check now refuses and no supported way
+    to fix. The alternatives were hand-editing secrets or reinitialising, and
+    reinitialising rotates every credential on the Host and re-anchors its
+    identity. Neither is a thing to ask of someone whose Host is working.
+
+    What it will do: add keys this file set is *missing*, and only those.
+    - a secret shared with another file that already has it is **copied**, never
+      re-minted, because minting one side of a pair is how the pair breaks;
+    - a secret nobody has yet is minted once and written to both sides;
+    - product topology (paths, loopback URLs) is written from the contract.
+
+    What it will not do: touch a value that is already there, rotate anything,
+    re-anchor the Host identity, or invent a provider credential — an LLM key
+    this process made up would authenticate to nothing, so a missing one is
+    reported and the repair refuses. It also does not repair ``channel.env``,
+    whose key set is deliberately open; see below.
+
+    Dry by default. ``apply=False`` reports what it would add and writes nothing,
+    because the operator running this is holding a Host that currently works.
+    """
+
+    target = _target_directory(config)
+    require_safe_input_directory(target)
+    # ``channel.env`` is read but never repaired: its key set is open — optional
+    # provider credentials are legitimately absent — so "missing" is not a
+    # decidable question there. A credential added to that file needs the
+    # generator, and this says so rather than half-handling it.
+    envs = {
+        name: parse_provider_env(target / name)
+        for name in (*DECLARED_ENV_KEYS, "channel.env")
+    }
+
+    missing_provider = [
+        f"{name}:{key}"
+        for name, key in PROVIDER_ENV_KEYS
+        if not usable_secret(envs[name].get(key), key=key)
+    ]
+    if missing_provider:
+        raise InstallInputError(
+            "provider credentials must be supplied by the operator, not generated: "
+            + ", ".join(missing_provider)
+        )
+
+    #: Where each shared secret can be copied from, keyed by (file, key).
+    partners: dict[tuple[str, str], tuple[str, str]] = {}
+    for left_file, left_key, right_file, right_key, _label in SHARED_CREDENTIALS:
+        partners.setdefault((left_file, left_key), (right_file, right_key))
+        partners.setdefault((right_file, right_key), (left_file, left_key))
+
+    added: dict[str, list[str]] = {}
+    minted: dict[tuple[str, str], str] = {}
+    for name, declared in DECLARED_ENV_KEYS.items():
+        for key in sorted(declared - set(envs[name])):
+            value = FIXED_ENV_VALUES.get(key)
+            if value is None:
+                partner = partners.get((name, key))
+                if partner is not None and envs[partner[0]].get(partner[1]):
+                    value = envs[partner[0]][partner[1]]
+                elif partner is not None:
+                    # Neither side has it: mint once for the pair, so both get
+                    # the same value in one pass.
+                    value = minted.setdefault(
+                        min((name, key), partner), secrets.token_urlsafe(32)
+                    )
+                else:
+                    value = secrets.token_urlsafe(32)
+            envs[name][key] = value
+            added.setdefault(name, []).append(key)
+
+    if apply and added:
+        for name in added:
+            write_private_file(target / name, serialize_env(envs[name]))
+
+    return {
+        "status": "credentials_added" if apply and added else "planned",
+        "directory": str(target),
+        # Named rather than silently skipped: a reader should not have to work
+        # out why one file is not in the accounting.
+        "not_repairable": ["channel.env"],
+        # Names only. A report that carried the values would put every new
+        # secret in a terminal's scrollback.
+        "added": {name: sorted(keys) for name, keys in sorted(added.items())},
+        "unchanged": sorted(set(DECLARED_ENV_KEYS) - set(added)),
+        "applied": bool(apply and added),
+        "redaction": "credential values are never returned",
+    }
+
+
 def validate_install_input_contract(
     config: OperationsConfig,
     read_exact_file: Callable[[str, str, str], str],
@@ -207,54 +415,7 @@ def validate_install_input_contract(
             "livekit.env",
         )
     }
-    exact_keys = {
-        "data.env": {
-            "EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN",
-            "EIDOLON_DATA_MEMORY_RUNTIME_ROSTER_TOKEN",
-            "EIDOLON_DATA_WORKSPACE_AUTHORITY_TOKEN",
-            "EIDOLON_DATA_SQLITE_PATH",
-            "EIDOLON_DATA_DATABASE_URL",
-            "EIDOLON_DATA_OBJECT_STORE_PATH",
-        },
-        "hub.env": {
-            "EIDOLON_HUB_MANAGEMENT_JWT_SECRET",
-            "EIDOLON_HUB_DEVICE_REGISTRY_READER_TOKEN",
-            "EIDOLON_HUB_CHANNEL_PROVIDER_TOKEN",
-        },
-        "kernel.env": {
-            "EIDOLON_KERNEL_HUB_MANAGEMENT_TOKEN",
-            "EIDOLON_KERNEL_COMPANION_AUTHORITY_TOKEN",
-        },
-        "admin.env": {
-            "EIDOLON_ADMIN_DATA_AUTHORITY_TOKEN",
-            "EIDOLON_ADMIN_DATA_WORKSPACE_AUTHORITY_TOKEN",
-            "EIDOLON_ADMIN_HUB_MANAGEMENT_JWT_SECRET",
-            "EIDOLON_ADMIN_LOCAL_API_SERVICE_TOKEN",
-            "EIDOLON_ADMIN_MEMORY_API_SERVICE_TOKEN",
-            "EIDOLON_AGENT_ADMIN_API_TOKEN",
-            "EIDOLON_ADMIN_SYSTEM_DIRECTORY_UDS",
-        },
-        "local-api.env": {
-            "EIDOLON_LOCAL_API_ADMIN_BASE_URL",
-            "EIDOLON_LOCAL_API_ADMIN_SERVICE_TOKEN",
-            "EIDOLON_LOCAL_API_LIFECYCLE_WORKFLOW_SOCKET",
-        },
-        "bootstrap.env": set(),
-        "agent.env": {
-            "EIDOLON_AGENT_LLM_API_KEY",
-            "EIDOLON_AGENT_ADMIN_API_TOKEN",
-            "EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN",
-            "EIDOLON_MEMORY_MCP_TOKEN",
-            "PAIRING_JWT_SECRET",
-        },
-        "memory.env": {
-            "EIDOLON_DATA_MEMORY_RUNTIME_ROSTER_TOKEN",
-            "EIDOLON_MEMORY_LLM_API_KEY",
-            "EIDOLON_MEMORY_MCP_TOKEN",
-            "EIDOLON_MEMORY_API_TOKEN",
-        },
-        "livekit.env": {"LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"},
-    }
+    exact_keys = DECLARED_ENV_KEYS
     channel_required = {
         "OPENAI_LLM_API_KEY",
         "BAILIAN_STT_API_KEY",
@@ -320,90 +481,12 @@ def validate_install_input_contract(
     channel = envs["channel.env"]
     memory = envs["memory.env"]
     livekit = envs["livekit.env"]
-    relationships = (
-        (
-            data["EIDOLON_DATA_MEMORY_RUNTIME_ROSTER_TOKEN"],
-            memory["EIDOLON_DATA_MEMORY_RUNTIME_ROSTER_TOKEN"],
-            "Data/Memory runtime roster token",
-        ),
-        (
-            data["EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN"],
-            kernel["EIDOLON_KERNEL_COMPANION_AUTHORITY_TOKEN"],
-            "Data/Kernel companion authority token",
-        ),
-        (
-            data["EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN"],
-            admin["EIDOLON_ADMIN_DATA_AUTHORITY_TOKEN"],
-            "Data/Admin authority token",
-        ),
-        (
-            data["EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN"],
-            agent["EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN"],
-            "Data/Agent companion authority token",
-        ),
-        (
-            data["EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN"],
-            channel["EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN"],
-            "Data/Channel companion authority token",
-        ),
-        (
-            data["EIDOLON_DATA_WORKSPACE_AUTHORITY_TOKEN"],
-            admin["EIDOLON_ADMIN_DATA_WORKSPACE_AUTHORITY_TOKEN"],
-            "Data/Admin Workspace authority token",
-        ),
-        (
-            hub["EIDOLON_HUB_DEVICE_REGISTRY_READER_TOKEN"],
-            kernel["EIDOLON_KERNEL_HUB_MANAGEMENT_TOKEN"],
-            "Hub/Kernel management token",
-        ),
-        (
-            hub["EIDOLON_HUB_MANAGEMENT_JWT_SECRET"],
-            admin["EIDOLON_ADMIN_HUB_MANAGEMENT_JWT_SECRET"],
-            "Hub/Admin management JWT secret",
-        ),
-        (
-            hub["EIDOLON_HUB_CHANNEL_PROVIDER_TOKEN"],
-            channel["EIDOLON_CHANNEL_PROVIDER_TOKEN"],
-            "Hub/Channel Provider token",
-        ),
-        (
-            admin["EIDOLON_ADMIN_LOCAL_API_SERVICE_TOKEN"],
-            local_api["EIDOLON_LOCAL_API_ADMIN_SERVICE_TOKEN"],
-            "Admin/Local API service token",
-        ),
-        (agent["PAIRING_JWT_SECRET"], channel["PAIRING_JWT_SECRET"], "Agent/Channel JWT"),
-        (
-            agent["EIDOLON_MEMORY_MCP_TOKEN"],
-            memory["EIDOLON_MEMORY_MCP_TOKEN"],
-            "Agent/Memory MCP token",
-        ),
-        (
-            admin["EIDOLON_ADMIN_MEMORY_API_SERVICE_TOKEN"],
-            memory["EIDOLON_MEMORY_API_TOKEN"],
-            "Admin/Memory API service token",
-        ),
-        (
-            admin["EIDOLON_AGENT_ADMIN_API_TOKEN"],
-            agent["EIDOLON_AGENT_ADMIN_API_TOKEN"],
-            "Admin/Agent admin API token",
-        ),
-        (channel["LIVEKIT_API_KEY"], livekit["LIVEKIT_API_KEY"], "Channel/LiveKit key"),
-        (
-            channel["LIVEKIT_API_SECRET"],
-            livekit["LIVEKIT_API_SECRET"],
-            "Channel/LiveKit secret",
-        ),
-    )
-    for left, right, label in relationships:
+    for left_file, left_key, right_file, right_key, label in SHARED_CREDENTIALS:
+        left = envs[left_file][left_key]
+        right = envs[right_file][right_key]
         if left != right or len(left) < 24:
             raise InstallInputError(f"install input relationship drifted: {label}")
-    fixed_values = {
-        "EIDOLON_DATA_SQLITE_PATH": "/var/lib/eidolon/eidolon-system.sqlite3",
-        "EIDOLON_DATA_DATABASE_URL": (
-            "sqlite+aiosqlite:////var/lib/eidolon/eidolon-system.sqlite3"
-        ),
-        "EIDOLON_DATA_OBJECT_STORE_PATH": "/var/lib/eidolon/objects",
-    }
+    fixed_values = {key: FIXED_ENV_VALUES[key] for key in _DATA_PATH_KEYS}
     if any(data[key] != value for key, value in fixed_values.items()):
         raise InstallInputError("Data authority paths drifted from the product contract")
     if admin["EIDOLON_ADMIN_SYSTEM_DIRECTORY_UDS"] != "/run/eidolon/system.sock":

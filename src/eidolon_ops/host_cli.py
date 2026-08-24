@@ -39,6 +39,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = controller.provision(apply=arguments.apply)
         elif arguments.operation == "init-inputs":
             result = controller.initialize_inputs(new_identity=arguments.new_identity)
+        elif arguments.operation == "add-input-credentials":
+            result = controller.add_missing_input_credentials(apply=arguments.apply)
         elif arguments.operation == "backup":
             result = controller.backup(output=arguments.output)
         elif arguments.operation == "restore":
@@ -153,6 +155,15 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="retire this machine's Host identity and mint a new one",
     )
+    add_input_credentials = operations.add_parser(
+        "add-input-credentials",
+        help=(
+            "add credentials this machine's input set is missing because the "
+            "product grew them after it was installed; existing values are never "
+            "touched"
+        ),
+    )
+    add_input_credentials.add_argument("--apply", action="store_true")
     backup = operations.add_parser(
         "backup",
         help="snapshot every authority that can be snapshotted, and fetch it here",
