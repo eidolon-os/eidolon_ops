@@ -254,8 +254,7 @@ def _clean_staging(
     if not paths.staging.exists() and not paths.staging.is_symlink():
         return [], 0
     _require_real_directory(paths.staging, "staging root")
-    removed: list[str] = []
-    reclaimed = 0
+    candidates: list[Path] = []
     for path in sorted(paths.staging.iterdir(), key=lambda item: item.name):
         if not path.name.startswith(prefix):
             continue
@@ -266,6 +265,14 @@ def _clean_staging(
             continue
         if path.is_symlink() or not path.is_dir():
             raise TargetError(f"staging deletion target is not a real directory: {path}")
+        if prefix == "eidolon-secrets-":
+            _require_private_secret_stage(path)
+        candidates.append(path)
+    # Validate the whole deletion set before removing the first path. A later
+    # ownership/symlink failure must not leave an unreviewable partial cleanup.
+    removed: list[str] = []
+    reclaimed = 0
+    for path in candidates:
         size = _tree_bytes(path)
         try:
             shutil.rmtree(path)
@@ -274,6 +281,41 @@ def _clean_staging(
         removed.append(str(contract.VAR_TMP / path.name))
         reclaimed += size
     return removed, reclaimed
+
+
+def _require_private_secret_stage(path: Path) -> None:
+    """Prove a staging copy still has the exact private upload ownership."""
+
+    expected_uid_value = os.environ.get("SUDO_UID")
+    try:
+        expected_uid = (
+            int(expected_uid_value) if expected_uid_value is not None else os.geteuid()
+        )
+    except ValueError as exc:
+        raise TargetError("secret staging operator identity is invalid") from exc
+    for directory, names, files in os.walk(path, followlinks=False):
+        current = Path(directory)
+        metadata = current.stat(follow_symlinks=False)
+        if (
+            current.is_symlink()
+            or not stat.S_ISDIR(metadata.st_mode)
+            or stat.S_IMODE(metadata.st_mode) != 0o700
+            or metadata.st_uid != expected_uid
+        ):
+            raise TargetError(f"secret staging ownership or mode drifted: {current}")
+        for name in (*names, *files):
+            child = current / name
+            child_metadata = child.stat(follow_symlinks=False)
+            if child.is_symlink():
+                raise TargetError(f"secret staging contains a symlink: {child}")
+            if stat.S_ISDIR(child_metadata.st_mode):
+                continue
+            if (
+                not stat.S_ISREG(child_metadata.st_mode)
+                or stat.S_IMODE(child_metadata.st_mode) != 0o600
+                or child_metadata.st_uid != expected_uid
+            ):
+                raise TargetError(f"secret staging ownership or mode drifted: {child}")
 
 
 def _require_real_directory(path: Path, label: str) -> None:

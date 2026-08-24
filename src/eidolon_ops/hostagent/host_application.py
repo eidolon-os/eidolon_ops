@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import grp
 import os
+import pwd
 import shutil
 import stat
 import time
@@ -18,6 +20,13 @@ from .primitives import TargetError
 HOST_APPLICATION_UNIT = "eidolon-hub-ingress.service"
 
 HOST_APPLICATION_READY_SECONDS = 30.0
+
+
+def _expected_ids(user: str, group: str) -> tuple[int, int]:
+    try:
+        return pwd.getpwnam(user).pw_uid, grp.getgrnam(group).gr_gid
+    except KeyError as exc:
+        raise TargetError(f"required Host layer identity is missing: {user}:{group}") from exc
 
 def await_host_application(run: Callable[..., object], root: Path = Path("/")) -> None:
     """Wait for the Host layer, the way the release waits for its components.
@@ -77,11 +86,23 @@ def refresh_host_application(payload: Mapping[str, object]) -> dict[str, object]
             raise TargetError(f"Host application asset was not staged: {name}")
         destination_value, user, group, mode = contract.INSTALL_INPUTS[name]
         destination = primitives.host_path(Path("/"), destination_value)
+        if destination.exists() or destination.is_symlink():
+            if destination.is_symlink() or not destination.is_file():
+                raise TargetError(f"Host application destination is unsafe: {destination_value}")
+            expected_uid, expected_gid = _expected_ids(user, group)
+            metadata = destination.stat()
+            if (
+                stat.S_IMODE(metadata.st_mode) != mode
+                or metadata.st_uid != expected_uid
+                or metadata.st_gid != expected_gid
+            ):
+                raise TargetError(
+                    f"Host application ownership or mode drifted: {destination_value}"
+                )
         if (
             destination.is_file()
             and not destination.is_symlink()
             and destination.read_bytes() == source.read_bytes()
-            and stat.S_IMODE(destination.stat().st_mode) == mode
         ):
             continue
         destination.parent.mkdir(parents=True, exist_ok=True)

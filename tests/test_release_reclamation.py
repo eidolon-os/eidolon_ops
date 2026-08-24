@@ -31,8 +31,11 @@ def _link(root: Path, name: str, release_id: str, component: str = "kernel") -> 
 
 def _stage(root: Path, kind: str, release_id: str) -> Path:
     path = root / contract.VAR_TMP.relative_to("/") / f"eidolon-{kind}-{release_id}"
-    path.mkdir(parents=True)
-    (path / "payload").write_bytes(b"payload")
+    path.mkdir(parents=True, mode=0o700)
+    path.chmod(0o700)
+    payload = path / "payload"
+    payload.write_bytes(b"payload")
+    payload.chmod(0o600)
     return path
 
 
@@ -178,6 +181,43 @@ def test_reclamation_rejects_non_conventional_release_children(tmp_path: Path) -
 
     with pytest.raises(TargetError, match="non-conventional"):
         reclamation.reclaim(_payload("candidate"), root=tmp_path)
+
+
+@pytest.mark.parametrize("drift", ["directory-mode", "file-mode", "symlink"])
+def test_secret_reclamation_fails_closed_on_private_stage_drift(
+    tmp_path: Path, drift: str
+) -> None:
+    _host(tmp_path, ("active", "candidate"))
+    _link(tmp_path, "eidolon_kernel", "active")
+    first = _stage(tmp_path, "secrets", "first")
+    unsafe = _stage(tmp_path, "secrets", "unsafe")
+    if drift == "directory-mode":
+        unsafe.chmod(0o755)
+    elif drift == "file-mode":
+        (unsafe / "payload").chmod(0o644)
+    else:
+        (unsafe / "payload").unlink()
+        (unsafe / "payload").symlink_to(tmp_path / "outside")
+
+    with pytest.raises(TargetError, match=r"ownership or mode|symlink"):
+        reclamation.reclaim(_payload("candidate"), root=tmp_path)
+
+    assert first.is_dir(), "validation must complete before any secret path is removed"
+    assert unsafe.exists()
+
+
+def test_reclamation_never_enters_deployment_receipts(tmp_path: Path) -> None:
+    _host(tmp_path, ("active", "candidate"))
+    _link(tmp_path, "eidolon_kernel", "active")
+    receipt = tmp_path / "var/lib/eidolon/deployments/candidate-tx/receipt.json"
+    receipt.parent.mkdir(parents=True)
+    receipt.write_text('{"status":"activated"}\n', encoding="utf-8")
+    _stage(tmp_path, "secrets", "stale")
+
+    result = reclamation.reclaim(_payload("candidate"), root=tmp_path)
+
+    assert result["removed"]["secrets"] == ["/var/tmp/eidolon-secrets-stale"]
+    assert receipt.is_file()
 
 
 def test_reclamation_is_idempotent(tmp_path: Path) -> None:

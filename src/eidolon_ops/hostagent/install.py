@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import grp
 import json
 import os
+import pwd
 import shutil
 import stat
 import subprocess
@@ -311,11 +313,27 @@ class TargetInstaller:
             source = self.secret_stage / name
             destination = primitives.host_path(self.root, destination_value)
             if destination.exists():
+                expected_ids: tuple[int, int] | None = None
+                if self.manage_ownership and self.root == Path("/"):
+                    try:
+                        expected_ids = (
+                            pwd.getpwnam(user).pw_uid,
+                            grp.getgrnam(group).gr_gid,
+                        )
+                    except KeyError as exc:
+                        raise TargetError(
+                            f"required prerequisite identity is missing: {user}:{group}"
+                        ) from exc
+                metadata = destination.stat()
                 if (
                     destination.is_symlink()
                     or not destination.is_file()
                     or primitives.file_sha256(destination) != inputs[name]
-                    or stat.S_IMODE(destination.stat().st_mode) != mode
+                    or stat.S_IMODE(metadata.st_mode) != mode
+                    or (
+                        expected_ids is not None
+                        and (metadata.st_uid, metadata.st_gid) != expected_ids
+                    )
                 ):
                     raise TargetError(
                         f"existing prerequisite differs during resume: {destination_value}"

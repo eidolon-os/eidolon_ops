@@ -201,6 +201,36 @@ def restore(host_id: str, *, apply: bool) -> Plan:
     )
 
 
+def authority_backup(host_id: str) -> Plan:
+    return Plan(
+        operation="authority-backup",
+        host_id=host_id,
+        destructive=DestructiveLevel.NONE,
+        steps=_steps(
+            ("prove", "match Owner root state, Hub marker and external lineage"),
+            ("snapshot", "capture the complete Hub database and lineage anchor"),
+            ("package", "copy the private Owner recovery material with exact digests"),
+        ),
+        touches=frozenset({ActionKind.DATA}),
+    )
+
+
+def authority_restore(host_id: str, *, apply: bool) -> Plan:
+    return Plan(
+        operation="authority-restore",
+        host_id=host_id,
+        destructive=DestructiveLevel.REVERSIBLE if apply else DestructiveLevel.NONE,
+        steps=_steps(
+            ("validate", "prove a complete same-generation Owner Authority package"),
+            ("refresh", "render Host endpoint material from the restored Owner root"),
+            ("replace", "quiesce Hub and restore its database plus lineage anchor"),
+            ("prove", "verify generation is unchanged and Hub/App readiness succeeds"),
+        ),
+        requires_flags=frozenset({"--apply"} if apply else set()),
+        touches=frozenset({ActionKind.CONFIG, ActionKind.DATA, ActionKind.LIFECYCLE}),
+    )
+
+
 def reset(host_id: str, *, apply: bool, wipe_authority_data: bool) -> Plan:
     touches = {ActionKind.CODE, ActionKind.CONFIG, ActionKind.SECRET, ActionKind.LIFECYCLE}
     if wipe_authority_data:

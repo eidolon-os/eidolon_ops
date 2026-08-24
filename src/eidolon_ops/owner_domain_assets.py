@@ -63,6 +63,7 @@ _MATERIAL_NAMES = {
     _TLS_KEY,
     _STATE,
 }
+OWNER_DOMAIN_MATERIAL_NAMES = frozenset(_MATERIAL_NAMES)
 
 
 @dataclass(frozen=True, slots=True)

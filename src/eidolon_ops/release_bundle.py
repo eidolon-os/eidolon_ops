@@ -67,6 +67,7 @@ class BundleTransfer:
         release_id: str,
         *,
         reuse: bool = False,
+        cutover_mode: str = "reversible",
         journal: Journal | None = None,
     ) -> list[dict[str, object]]:
         """Seal, transfer and build one release, recording each phase as it lands.
@@ -96,15 +97,15 @@ class BundleTransfer:
                 raise OperationsError(
                     f"bundle output already exists; use --resume or a new ID: {output}"
                 )
-            transfer_id = self.validate_existing(output, release_id)
+            transfer_id = self.validate_existing(output, release_id, cutover_mode=cutover_mode)
             bundle_result: dict[str, object] = {
                 "status": "reused_validated_bundle",
                 "manifest": str(output / "bundle.json"),
                 "sha256": transfer_id,
             }
         else:
-            bundle_result = self._seal(output, release_id)
-            transfer_id = self.validate_existing(output, release_id)
+            bundle_result = self._seal(output, release_id, cutover_mode=cutover_mode)
+            transfer_id = self.validate_existing(output, release_id, cutover_mode=cutover_mode)
         phases.append({"phase": "bundle", "result": bundle_result})
         phases.begin("release_reclaim_prepare")
         bundle_bytes = self._bundle_bytes(output)
@@ -235,13 +236,16 @@ class BundleTransfer:
         )
         return {"status": "carried", "model": artifact.model_id}
 
-    def _seal(self, output: Path, release_id: str) -> dict[str, object]:
+    def _seal(
+        self, output: Path, release_id: str, *, cutover_mode: str
+    ) -> dict[str, object]:
         command = [
             str(self.config.workspace.release_cli),
             "bundle",
             release_id,
             str(output),
         ]
+        command.extend(("--cutover-mode", cutover_mode))
         for source_id in SOURCE_IDS:
             flag = source_id.removeprefix("eidolon_").replace("eidolon-", "")
             command.extend((f"--{flag}-repo", str(self.config.sources[source_id].path)))
@@ -292,7 +296,9 @@ class BundleTransfer:
         )
         return parse_json(result.stdout, "target-native release preparation")
 
-    def validate_existing(self, output: Path, release_id: str) -> str:
+    def validate_existing(
+        self, output: Path, release_id: str, *, cutover_mode: str = "reversible"
+    ) -> str:
         manifest = output / "bundle.json"
         try:
             document = json.loads(manifest.read_text(encoding="utf-8"))
@@ -302,6 +308,7 @@ class BundleTransfer:
         if (
             not isinstance(document, dict)
             or document.get("release_id") != release_id
+            or document.get("cutover_mode") != cutover_mode
             or not isinstance(sources, list)
             or len(sources) != len(SOURCE_IDS)
         ):

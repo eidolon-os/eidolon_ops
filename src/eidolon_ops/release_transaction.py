@@ -14,6 +14,7 @@ from pathlib import Path
 from eidolon_ops.config import OperationsConfig, validate_release_id
 from eidolon_ops.errors import OperationsError
 from eidolon_ops.host_layer import HostLayer
+from eidolon_ops.process import ProcessError
 from eidolon_ops.progress import Journal, ProgressSink
 from eidolon_ops.readiness import describe_failures
 from eidolon_ops.release_bundle import BundleTransfer, parse_json
@@ -70,6 +71,7 @@ class ReleaseTransaction:
         release_id: str,
         resume: bool,
         activate: bool,
+        cutover_mode: str = "reversible",
         _skip_prepare: bool = False,
     ) -> dict[str, object]:
         release_id = validate_release_id(release_id)
@@ -77,8 +79,15 @@ class ReleaseTransaction:
         phases = Journal(self.progress)
         candidate_prepared = False
         health_gates_passed = False
+        host_snapshot: str | None = None
+        host_restored = False
         if not _skip_prepare:
-            self.bundles.prepare(release_id, reuse=resume, journal=phases)
+            self.bundles.prepare(
+                release_id,
+                reuse=resume,
+                cutover_mode=cutover_mode,
+                journal=phases,
+            )
             candidate_prepared = True
         try:
             descriptor = remote_descriptor(release_id)
@@ -112,6 +121,20 @@ class ReleaseTransaction:
                 raise OperationsError("service identity cutover returned invalid evidence")
             phases.append({"phase": "service_identities", "result": identities})
             if self.host_layer.app is not None:
+                phases.begin("host_cutover_snapshot")
+                host_cutover = self.transport.run_agent(
+                    "release-cutover-snapshot",
+                    {"release_id": release_id, "cutover_mode": cutover_mode},
+                    timeout=180,
+                )
+                host_snapshot_value = host_cutover.get("host_snapshot")
+                if (
+                    host_cutover.get("status") != "host_cutover_snapshotted"
+                    or not isinstance(host_snapshot_value, str)
+                ):
+                    raise OperationsError("Host cutover snapshot returned invalid evidence")
+                host_snapshot = host_snapshot_value
+                phases.append({"phase": "host_cutover_snapshot", "result": host_cutover})
                 # The Host layer is an input to the new component graph, not a
                 # post-activation decoration. In particular, Hub validates its
                 # strict settings model while importing the ASGI app; starting the
@@ -126,23 +149,71 @@ class ReleaseTransaction:
                     }
                 )
             phases.begin("activate")
-            activation = self._remote_json(
+            activation = self._activation_json(
                 "release activation",
                 (cli, "deploy", descriptor),
                 timeout=600,
             )
             phases.append({"phase": "activate", "result": activation})
+            if (
+                activation.get("status") == "forward_fix_required"
+                and activation.get("cutover_mode") == "forward-only"
+                and activation.get("persistent_state_mutated") is True
+            ):
+                health_gates_passed = True
+                self._finalize_cutover(
+                    release_id, cutover_mode, host_snapshot, activation, phases
+                )
+                self._commit_reclaim_after_barrier(release_id, phases)
+                raise OperationsError(
+                    "release crossed the forward-only persistent-state barrier; "
+                    "old interpreters were not restored and this release requires "
+                    "a same-schema forward fix"
+                )
             transaction_id = activation.get("transaction_id")
             if (
                 activation.get("status") != "activated"
                 or not isinstance(transaction_id, str)
                 or _TRANSACTION_ID.fullmatch(transaction_id) is None
+                or activation.get("cutover_mode") != cutover_mode
+                or activation.get("persistent_state_mutated")
+                is not (cutover_mode == "forward-only")
             ):
                 raise OperationsError("release activation returned invalid transaction evidence")
+            if cutover_mode == "forward-only":
+                # Starting the candidate is the durable barrier.  From here
+                # neither candidate reclaim nor an old-interpretation restore
+                # is permitted, even if later evidence recording itself fails.
+                health_gates_passed = True
             snapshot = self.config.data.deployment_evidence / f"{release_id}-{transaction_id}"
             gate_error = self._run_health_gate(cli, descriptor, phases)
             if gate_error is not None:
-                self._restore(cli, descriptor, snapshot, phases, gate_error)
+                if cutover_mode == "forward-only":
+                    health_gates_passed = True
+                    self._finalize_cutover(
+                        release_id,
+                        cutover_mode,
+                        host_snapshot,
+                        {**activation, "health_gate_error": str(gate_error)},
+                        phases,
+                    )
+                    self._commit_reclaim_after_barrier(release_id, phases)
+                    raise OperationsError(
+                        "post-activation health gate failed after the forward-only "
+                        f"persistent-state barrier ({gate_error}); old interpreters were "
+                        "not restored and this release requires a same-schema forward fix"
+                    )
+                try:
+                    self._restore(cli, descriptor, snapshot, phases, gate_error)
+                finally:
+                    if host_snapshot is not None:
+                        self._restore_host_cutover(
+                            release_id, cutover_mode, host_snapshot, phases
+                        )
+                        host_restored = True
+            self._finalize_cutover(
+                release_id, cutover_mode, host_snapshot, activation, phases
+            )
             health_gates_passed = True
             phases.begin("release_reclaim_commit")
             committed = self.bundles.reclaim(release_id, phase="commit")
@@ -155,9 +226,80 @@ class ReleaseTransaction:
                 "phases": phases,
             }
         except Exception as exc:
+            if (
+                host_snapshot is not None
+                and cutover_mode == "reversible"
+                and not host_restored
+                and not health_gates_passed
+            ):
+                try:
+                    self._restore_host_cutover(
+                        release_id, cutover_mode, host_snapshot, phases
+                    )
+                except Exception as host_restore_error:
+                    raise OperationsError(
+                        f"release transaction failed ({exc}); Host layer rollback also failed: "
+                        f"{host_restore_error}"
+                    ) from host_restore_error
             if candidate_prepared and not health_gates_passed:
                 self._abort_candidate(release_id, phases, exc)
             raise
+
+    def _restore_host_cutover(
+        self,
+        release_id: str,
+        cutover_mode: str,
+        host_snapshot: str,
+        phases: Journal,
+    ) -> None:
+        phases.begin("host_cutover_rollback")
+        restored = self.transport.run_agent(
+            "release-cutover-restore",
+            {
+                "release_id": release_id,
+                "cutover_mode": cutover_mode,
+                "host_snapshot": host_snapshot,
+            },
+            timeout=180,
+        )
+        if restored.get("status") != "host_cutover_restored":
+            raise OperationsError("Host layer rollback returned invalid evidence")
+        phases.append({"phase": "host_cutover_rollback", "result": restored})
+
+    def _commit_reclaim_after_barrier(
+        self, release_id: str, phases: Journal
+    ) -> None:
+        """Clean private staging after a candidate became forward-only current."""
+
+        phases.begin("release_reclaim_commit")
+        committed = self.bundles.reclaim(release_id, phase="commit")
+        self.bundles.require_reclamation(committed, "committed")
+        phases.append({"phase": "release_reclaim_commit", "result": committed})
+
+    def _finalize_cutover(
+        self,
+        release_id: str,
+        cutover_mode: str,
+        host_snapshot: str | None,
+        activation: dict[str, object],
+        phases: Journal,
+    ) -> None:
+        if host_snapshot is None:
+            return
+        phases.begin("cutover_receipt")
+        recorded = self.transport.run_agent(
+            "release-cutover-finalize",
+            {
+                "release_id": release_id,
+                "cutover_mode": cutover_mode,
+                "host_snapshot": host_snapshot,
+                "activation": activation,
+            },
+            timeout=180,
+        )
+        if recorded.get("status") != "cutover_recorded":
+            raise OperationsError("release cutover receipt returned invalid evidence")
+        phases.append({"phase": "cutover_receipt", "result": recorded})
 
     def _abort_candidate(
         self, release_id: str, phases: Journal, primary_error: Exception
@@ -269,7 +411,9 @@ class ReleaseTransaction:
         # phase list is the plan's vocabulary, and the plan does not name it.
         phases.begin("foundation")
         foundation = self._provision(apply=True)
-        self.bundles.prepare(release_id, reuse=resume, journal=phases)
+        self.bundles.prepare(
+            release_id, reuse=resume, cutover_mode="reversible", journal=phases
+        )
         candidate_prepared = True
         try:
             self.host_layer.stage_install_files(
@@ -361,6 +505,25 @@ class ReleaseTransaction:
     ) -> dict[str, object]:
         result = self.transport.run(command, sudo=True, timeout=timeout, operation=operation)
         return parse_json(result.stdout, operation)
+
+    def _activation_json(
+        self,
+        operation: str,
+        command: tuple[str, ...],
+        *,
+        timeout: float,
+    ) -> dict[str, object]:
+        """Preserve the activator's durable forward-fix receipt on exit 4."""
+
+        try:
+            return self._remote_json(operation, command, timeout=timeout)
+        except ProcessError as exc:
+            if exc.result.returncode != 4:
+                raise
+            receipt = parse_json(exc.result.stderr, operation)
+            if receipt.get("status") != "forward_fix_required":
+                raise
+            return receipt
 
 
 def remote_release_cli(release_id: str) -> str:

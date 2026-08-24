@@ -334,6 +334,14 @@ CATALOG: tuple[Operation, ...] = (
             _release_id(),
             Field(name="resume", kind=Kind.BOOLEAN, label="续传"),
             Field(
+                name="cutover_mode",
+                kind=Kind.STRING,
+                label="切换模式",
+                help="reversible 可恢复完整 previous state；forward-only 跨持久化屏障后只允许同 schema 修复",
+                default="reversible",
+                choices=("reversible", "forward-only"),
+            ),
+            Field(
                 name="activate",
                 kind=Kind.BOOLEAN,
                 label="执行切换",
@@ -346,6 +354,7 @@ CATALOG: tuple[Operation, ...] = (
             release_id=params["release_id"],
             resume=params["resume"],
             activate=params["activate"],
+            cutover_mode=params["cutover_mode"],
         ),
         applies=lambda params: params["activate"],
     ),
@@ -410,6 +419,46 @@ CATALOG: tuple[Operation, ...] = (
         ),
         plan=lambda host_id, params: plans.restore(host_id, apply=params["apply"]),
         invoke=lambda controller, params: controller.restore(
+            source=params["source"], apply=params["apply"]
+        ),
+        applies=lambda params: params["apply"],
+    ),
+    Operation(
+        name="authority-backup",
+        label="备份 Owner Authority",
+        summary="封存 Owner root、完整 Hub 状态与同代 lineage 供显式恢复",
+        capability=Capability.BACKUP,
+        group="authority",
+        fields=(
+            Field(
+                name="output",
+                kind=Kind.PATH,
+                label="输出目录",
+                help="这台工作站上的绝对目录",
+                required=True,
+            ),
+        ),
+        plan=lambda host_id, _params: plans.authority_backup(host_id),
+        invoke=lambda controller, params: controller.authority_backup(output=params["output"]),
+    ),
+    Operation(
+        name="authority-restore",
+        label="恢复 Owner Authority",
+        summary="从完整备份恢复同一 generation；不会 Reset、commission 或重新 Claim",
+        capability=Capability.RESTORE,
+        group="authority",
+        fields=(
+            Field(
+                name="source",
+                kind=Kind.PATH,
+                label="恢复包",
+                help="authority-restore.json 所在的绝对目录",
+                required=True,
+            ),
+            _apply("执行恢复", "不勾选只验证完整性与恢复计划"),
+        ),
+        plan=lambda host_id, params: plans.authority_restore(host_id, apply=params["apply"]),
+        invoke=lambda controller, params: controller.authority_restore(
             source=params["source"], apply=params["apply"]
         ),
         applies=lambda params: params["apply"],

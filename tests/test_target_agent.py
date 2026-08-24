@@ -4,6 +4,7 @@ import base64
 import contextlib
 import hashlib
 import json
+import os
 import sqlite3
 import subprocess
 import sys
@@ -1539,6 +1540,9 @@ def test_the_derived_host_layer_is_delivered_without_a_reinstall(tmp_path, monke
         (stage / name).write_text(f"new-{name}", encoding="utf-8")
     monkeypatch.setattr(primitives, "chown_path", lambda *_a: None)
     monkeypatch.setattr(
+        host_application, "_expected_ids", lambda *_a: (os.getuid(), os.getgid())
+    )
+    monkeypatch.setattr(
         primitives, "checked", lambda *_a, **_k: subprocess.CompletedProcess((), 0, "", "")
     )
     reconciled: list[tuple[Path, str]] = []
@@ -1588,6 +1592,16 @@ def test_the_derived_host_layer_is_delivered_without_a_reinstall(tmp_path, monke
         (Path("/"), "admin:\n  api:\n    port: 9000\n"),
         (Path("/"), "admin:\n  api:\n    port: 9000\n"),
     ]
+
+    placed["owner-domain-root-ca.pem"].chmod(0o666)
+    with pytest.raises(TargetError, match="ownership or mode drifted"):
+        host_application.refresh_host_application(
+            {
+                "units": list(contract.PRODUCT_UNITS),
+                "release_id": "r1",
+                "port_registry": "admin:\n  api:\n    port: 9000\n",
+            }
+        )
 
 
 def test_host_layer_refuses_settings_that_previous_release_cannot_parse(

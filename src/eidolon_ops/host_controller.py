@@ -181,10 +181,22 @@ class HostController:
         )
         return self._planned_or_applied(plan, report, applied=apply)
 
-    def deploy(self, *, release_id: str, resume: bool, activate: bool) -> Evidence:
+    def deploy(
+        self,
+        *,
+        release_id: str,
+        resume: bool,
+        activate: bool,
+        cutover_mode: str = "reversible",
+    ) -> Evidence:
         plan = plans.deploy(self.profile.host_id, activate=activate)
         release = self.adapter.require_release(Capability.DEPLOY)
-        report = release.deploy(release_id=release_id, resume=resume, activate=activate)
+        report = release.deploy(
+            release_id=release_id,
+            resume=resume,
+            activate=activate,
+            cutover_mode=cutover_mode,
+        )
         return self._planned_or_applied(plan, report, applied=activate)
 
     def rollback(self, *, release_id: str, snapshot: Path, apply: bool) -> Evidence:

@@ -128,6 +128,7 @@ class ControllerRunner:
             return ProcessResult(0, version + "\n", "")
         if len(command) > 1 and command[1] == "bundle":
             output = Path(command[3])
+            cutover_mode = command[command.index("--cutover-mode") + 1]
             output.mkdir(parents=True)
             sources = output / "sources"
             sources.mkdir()
@@ -152,6 +153,7 @@ class ControllerRunner:
                     {
                         "schema_version": 2,
                         "release_id": command[2],
+                        "cutover_mode": cutover_mode,
                         "target": {"system": "linux", "machine": "aarch64"},
                         "sources": records,
                         "preparer": {
@@ -296,8 +298,18 @@ class FakeTransport:
                 "not_covered": [{"state": "memory", "path": "/var/lib/eidolon/memory"}],
             },
             "restore": {"status": "restored", "restored": ["system"]},
+            "authority-restore-stage-reset": {
+                "status": "authority_restore_stage_ready",
+                "directory": "/var/tmp/eidolon-authority-restore-r1",
+            },
             "commissioning-code": {"status": "issued", "setup_code": "123456"},
             "refresh-host-application": {"status": "refreshed", "changed": []},
+            "release-cutover-snapshot": {
+                "status": "host_cutover_snapshotted",
+                "host_snapshot": "/var/lib/eidolon/deployments/r1-host-" + "b" * 32,
+            },
+            "release-cutover-restore": {"status": "host_cutover_restored"},
+            "release-cutover-finalize": {"status": "cutover_recorded"},
             # Controller tests stay hermetic; transfer of an absent encoder is
             # covered by the dedicated embedding-model contract suite.
             "embedding-model-state": {
@@ -328,7 +340,12 @@ class FakeTransport:
         elif "rollback" in remote:
             payload = {"status": "restored"}
         elif "deploy" in remote:
-            payload = {"status": "activated", "transaction_id": "a" * 32}
+            payload = {
+                "status": "activated",
+                "transaction_id": "a" * 32,
+                "cutover_mode": "reversible",
+                "persistent_state_mutated": False,
+            }
         else:
             payload = {"status": "ok"}
         return ProcessResult(0, json.dumps(payload), "")
@@ -704,12 +721,109 @@ def test_deploy_prestages_host_application_before_component_activation(
         "release_reclaim_prepare",
         "dry_run",
         "service_identities",
+        "host_cutover_snapshot",
         "host_application",
         "activate",
         "doctor",
         "app_ready",
+        "cutover_receipt",
         "release_reclaim_commit",
     ]
+
+
+def test_forward_only_activation_failure_requires_same_schema_fix_without_abort(
+    setup_controller, monkeypatch
+) -> None:
+    controller, _runner, transport = setup_controller
+    controller.host_layer.app = _app()
+    monkeypatch.setattr(
+        controller.host_layer, "refresh", lambda release_id: {"status": "refreshed"}
+    )
+    monkeypatch.setattr(
+        controller.releases,
+        "_activation_json",
+        lambda *args, **kwargs: {
+            "status": "forward_fix_required",
+            "transaction_id": "a" * 32,
+            "cutover_mode": "forward-only",
+            "persistent_state_mutated": True,
+            "database_migrations": [],
+        },
+    )
+
+    with pytest.raises(OperationsError, match="same-schema forward fix"):
+        controller.deploy(
+            release_id="r1", resume=False, activate=True, cutover_mode="forward-only"
+        )
+
+    actions = [action for action, _payload, _python, _sudo in transport.agent_calls]
+    assert "release-cutover-finalize" in actions
+    assert not any(
+        action == "reclaim-releases" and payload.get("phase") == "abort"
+        for action, payload, _python, _sudo in transport.agent_calls
+    )
+    assert "release-cutover-restore" not in actions
+
+
+def test_forward_only_app_readiness_failure_never_restores_old_interpreters(
+    setup_controller, monkeypatch
+) -> None:
+    controller, _runner, transport = setup_controller
+    controller.host_layer.app = _app()
+    monkeypatch.setattr(
+        controller.host_layer, "refresh", lambda release_id: {"status": "refreshed"}
+    )
+    monkeypatch.setattr(
+        controller.releases,
+        "_activation_json",
+        lambda *args, **kwargs: {
+            "status": "activated",
+            "transaction_id": "a" * 32,
+            "cutover_mode": "forward-only",
+            "persistent_state_mutated": True,
+            "database_migrations": [],
+        },
+    )
+    monkeypatch.setattr(
+        controller.releases, "_app_ready", lambda: {"status": "degraded", "checks": []}
+    )
+
+    with pytest.raises(OperationsError, match="same-schema forward fix"):
+        controller.deploy(
+            release_id="r1", resume=False, activate=True, cutover_mode="forward-only"
+        )
+
+    actions = [action for action, _payload, _python, _sudo in transport.agent_calls]
+    assert "release-cutover-finalize" in actions
+    assert "release-cutover-restore" not in actions
+    assert not any("rollback" in command for command, _sudo in transport.remote_calls)
+
+
+def test_reversible_activation_failure_restores_host_layer_before_candidate_abort(
+    setup_controller, monkeypatch
+) -> None:
+    controller, _runner, transport = setup_controller
+    controller.host_layer.app = _app()
+    monkeypatch.setattr(
+        controller.host_layer, "refresh", lambda release_id: {"status": "refreshed"}
+    )
+
+    def fail_activation(*args, **kwargs):
+        raise RuntimeError("activation failed before persistent mutation")
+
+    monkeypatch.setattr(controller.releases, "_activation_json", fail_activation)
+
+    with pytest.raises(RuntimeError, match="before persistent mutation"):
+        controller.deploy(release_id="r1", resume=False, activate=True)
+
+    actions = [action for action, _payload, _python, _sudo in transport.agent_calls]
+    restore_index = actions.index("release-cutover-restore")
+    abort_index = next(
+        index
+        for index, (action, payload, _python, _sudo) in enumerate(transport.agent_calls)
+        if action == "reclaim-releases" and payload.get("phase") == "abort"
+    )
+    assert restore_index < abort_index
 
 
 def test_host_application_refresh_carries_host_identity_and_bound_environments(

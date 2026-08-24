@@ -9,6 +9,9 @@ operations the injected agent performs.
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import stat
 import tarfile
 import tempfile
 from pathlib import Path
@@ -26,7 +29,9 @@ from eidolon_ops.host_layer import ASSET_ERRORS, HostLayer
 from eidolon_ops.hostagent.contract import RESET_AUTHORITY_ROOTS
 from eidolon_ops.install_inputs import initialize_install_inputs
 from eidolon_ops.owner_domain_assets import (
+    OWNER_DOMAIN_MATERIAL_NAMES,
     OwnerDomainAssetError,
+    ensure_owner_domain_assets,
     mark_authority_bootstrapped,
 )
 from eidolon_ops.owner_domain_assets import (
@@ -36,7 +41,7 @@ from eidolon_ops.paths import AppAccess
 from eidolon_ops.process import ProcessRunner
 from eidolon_ops.progress import Journal, ProgressSink
 from eidolon_ops.readiness import READINESS_TRANSPORT_TIMEOUT_SECONDS
-from eidolon_ops.release_bundle import BundleTransfer, parse_json
+from eidolon_ops.release_bundle import BundleTransfer, file_sha256, parse_json
 from eidolon_ops.release_preflight import ReleasePreflight
 from eidolon_ops.release_transaction import ReleaseTransaction
 from eidolon_ops.transport import SSHTransport
@@ -617,13 +622,349 @@ class EidolonPiController:
         except OwnerDomainAssetError as exc:
             raise OperationsError(str(exc)) from exc
         consumed = self.host_layer.refresh(release_id)
+        reclaimed = self.bundles.reclaim(release_id, phase="commit")
+        self.bundles.require_reclamation(reclaimed, "committed")
         ready = self.app_ready()
         return {
             **result,
             "plan": plan,
             "host_application": refreshed,
             "bootstrap_tombstone": consumed,
+            "release_reclaim": reclaimed,
             "app": ready,
+        }
+
+    def authority_backup(self, *, output: Path) -> dict[str, object]:
+        """Capture the Owner root package and the matching complete Hub state."""
+
+        self.preflight.validate_ssh_material()
+        if not output.is_absolute():
+            raise OperationsError("Owner Authority backup output must be absolute")
+        if (
+            output.is_symlink()
+            or not output.is_dir()
+            or stat.S_IMODE(output.stat().st_mode) != 0o700
+            or output.stat().st_uid != os.getuid()
+        ):
+            raise OperationsError(
+                "Owner Authority backup output must be an owned private directory"
+            )
+        if self.app is None:
+            raise OperationsError("Owner Authority backup requires the Pi Host app contract")
+        materializer = self.host_layer.materializer()
+        try:
+            owner = materializer.owner_assets()
+        except OwnerDomainAssetError as exc:
+            raise OperationsError(str(exc)) from exc
+        if owner.bootstrap_pending:
+            raise OperationsError(
+                "AUTHORITY_RESTORE_INCOMPLETE: pending ResetAuthority state cannot be backed up"
+            )
+        release_id = self._active_release("release_id")
+        request = {
+            "owner_domain_id": owner.owner_domain_id,
+            "owner_domain_generation": owner.owner_domain_generation,
+            "state_id": owner.authority_state_id,
+        }
+        captured = self.transport.run_agent(
+            "authority-backup",
+            {
+                **self.host_layer.target_payload(),
+                "release_id": release_id,
+                "authority_restore": request,
+            },
+            timeout=300,
+        )
+        if captured.get("status") != "authority_backup_captured":
+            raise OperationsError("Owner Authority backup returned invalid evidence")
+        if captured.get("authority") != {
+            "contract_version": 1,
+            **request,
+        }:
+            raise OperationsError("Owner Authority backup lineage evidence mismatched")
+        destination = output / (
+            f"{release_id}-owner-authority-generation-{owner.owner_domain_generation}"
+        )
+        if destination.exists() or destination.is_symlink():
+            raise OperationsError(f"Owner Authority backup destination exists: {destination}")
+        destination.mkdir(mode=0o700)
+        host_state = destination / "host-state"
+        self.transport.download(str(captured["directory"]), host_state, recursive=True)
+        owner_material = destination / "owner-material"
+        shutil.copytree(materializer.material_root, owner_material)
+        os.chmod(host_state, 0o700)
+        os.chmod(owner_material, 0o700)
+        for path in owner_material.iterdir():
+            if path.is_symlink() or not path.is_file():
+                raise OperationsError("Owner Authority material package is unsafe")
+            os.chmod(path, 0o600)
+        for path in host_state.iterdir():
+            if path.is_symlink() or not path.is_file():
+                raise OperationsError("Owner Authority Host state package is unsafe")
+            os.chmod(path, 0o600)
+        files = captured.get("files")
+        if not isinstance(files, dict) or set(files) != {"database", "anchor"}:
+            raise OperationsError("Owner Authority backup returned no file evidence")
+        for kind, expected_name in {
+            "database": "eidolon-hub.sqlite3",
+            "anchor": "authority-lineage.json",
+        }.items():
+            record = files[kind]
+            path = host_state / expected_name
+            if (
+                not isinstance(record, dict)
+                or record.get("name") != expected_name
+                or record.get("sha256") != file_sha256(path)
+                or record.get("bytes") != path.stat().st_size
+            ):
+                raise OperationsError("Owner Authority backup file evidence mismatched")
+        material_files = {
+            path.name: {"sha256": file_sha256(path), "bytes": path.stat().st_size}
+            for path in sorted(owner_material.iterdir())
+        }
+        manifest = {
+            "contract_version": 1,
+            "operation": "owner-authority.restore-package",
+            "release_id": release_id,
+            "authority": captured.get("authority"),
+            "host_files": files,
+            "owner_material": material_files,
+        }
+        write_json(destination / "authority-restore.json", manifest)
+        os.chmod(destination / "authority-restore.json", 0o600)
+        return {
+            "status": "authority_backup_captured",
+            "directory": str(destination),
+            "authority": captured.get("authority"),
+            "host_files": files,
+            "owner_material_files": sorted(material_files),
+        }
+
+    def authority_restore(self, *, source: Path, apply: bool) -> dict[str, object]:
+        """Restore one complete same-generation Owner Authority package."""
+
+        self.preflight.validate_ssh_material()
+        if self.app is None:
+            raise OperationsError("Owner Authority restore requires the Pi Host app contract")
+        manifest_path = source / "authority-restore.json"
+        if (
+            not source.is_absolute()
+            or source.is_symlink()
+            or not source.is_dir()
+            or stat.S_IMODE(source.stat().st_mode) != 0o700
+            or source.stat().st_uid != os.getuid()
+            or manifest_path.is_symlink()
+            or not manifest_path.is_file()
+            or stat.S_IMODE(manifest_path.stat().st_mode) != 0o600
+            or manifest_path.stat().st_uid != os.getuid()
+        ):
+            raise OperationsError("AUTHORITY_RESTORE_INVALID: restore package is unsafe")
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise OperationsError(
+                "AUTHORITY_RESTORE_INCOMPLETE: restore manifest is missing or invalid"
+            ) from exc
+        authority = manifest.get("authority") if isinstance(manifest, dict) else None
+        host_files = manifest.get("host_files") if isinstance(manifest, dict) else None
+        owner_files = manifest.get("owner_material") if isinstance(manifest, dict) else None
+        if (
+            not isinstance(manifest, dict)
+            or set(manifest)
+            != {
+                "contract_version",
+                "operation",
+                "release_id",
+                "authority",
+                "host_files",
+                "owner_material",
+            }
+            or manifest.get("contract_version") != 1
+            or manifest.get("operation") != "owner-authority.restore-package"
+            or not isinstance(manifest.get("release_id"), str)
+            or not isinstance(authority, dict)
+            or set(authority)
+            != {"contract_version", "owner_domain_id", "owner_domain_generation", "state_id"}
+            or authority.get("contract_version") != 1
+            or not isinstance(authority.get("owner_domain_id"), str)
+            or not authority["owner_domain_id"].startswith("owner-")
+            or type(authority.get("owner_domain_generation")) is not int
+            or authority["owner_domain_generation"] < 1
+            or not isinstance(authority.get("state_id"), str)
+            or not authority["state_id"].startswith("authority-state_")
+            or not isinstance(host_files, dict)
+            or set(host_files) != {"database", "anchor"}
+            or not isinstance(owner_files, dict)
+            or set(owner_files) != set(OWNER_DOMAIN_MATERIAL_NAMES)
+        ):
+            raise OperationsError("AUTHORITY_RESTORE_INVALID: restore manifest shape is invalid")
+        try:
+            validate_release_id(manifest["release_id"])
+        except (TypeError, ValueError) as exc:
+            raise OperationsError(
+                "AUTHORITY_RESTORE_INVALID: backup release identity is invalid"
+            ) from exc
+        if {path.name for path in source.iterdir()} != {
+            "authority-restore.json",
+            "host-state",
+            "owner-material",
+        }:
+            raise OperationsError("AUTHORITY_RESTORE_INVALID: restore package has extra content")
+        for section, directory in ((host_files, source / "host-state"), (owner_files, source / "owner-material")):
+            if (
+                directory.is_symlink()
+                or not directory.is_dir()
+                or stat.S_IMODE(directory.stat().st_mode) != 0o700
+                or directory.stat().st_uid != os.getuid()
+            ):
+                raise OperationsError("AUTHORITY_RESTORE_INVALID: restore directory is unsafe")
+            expected_names = {
+                str(value.get("name")) if section is host_files else str(name)
+                for name, value in section.items()
+                if isinstance(value, dict)
+            }
+            if {path.name for path in directory.iterdir()} != expected_names:
+                raise OperationsError("AUTHORITY_RESTORE_INCOMPLETE: restore package is partial")
+            for name, value in section.items():
+                if not isinstance(value, dict):
+                    raise OperationsError("AUTHORITY_RESTORE_INVALID: restore file record is invalid")
+                filename = str(value.get("name")) if section is host_files else str(name)
+                expected_filename = (
+                    {"database": "eidolon-hub.sqlite3", "anchor": "authority-lineage.json"}[name]
+                    if section is host_files
+                    else name
+                )
+                if (
+                    filename != expected_filename
+                    or not isinstance(value.get("sha256"), str)
+                    or len(value["sha256"]) != 64
+                    or any(character not in "0123456789abcdef" for character in value["sha256"])
+                    or type(value.get("bytes")) is not int
+                    or value["bytes"] < 1
+                ):
+                    raise OperationsError("AUTHORITY_RESTORE_INVALID: restore file record is invalid")
+                path = directory / filename
+                if (
+                    path.is_symlink()
+                    or not path.is_file()
+                    or stat.S_IMODE(path.stat().st_mode) != 0o600
+                    or path.stat().st_uid != os.getuid()
+                    or file_sha256(path) != value.get("sha256")
+                    or path.stat().st_size != value.get("bytes")
+                ):
+                    raise OperationsError("AUTHORITY_RESTORE_INVALID: restore file evidence drifted")
+        state_path = source / "owner-material/owner-domain-state.json"
+        try:
+            recovery_state = json.loads(state_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise OperationsError("AUTHORITY_RESTORE_INVALID: Owner recovery state is invalid") from exc
+        if (
+            not isinstance(recovery_state, dict)
+            or
+            recovery_state.get("owner_domain_id") != authority["owner_domain_id"]
+            or recovery_state.get("owner_domain_generation")
+            != authority["owner_domain_generation"]
+            or recovery_state.get("authority_state_id") != authority["state_id"]
+            or recovery_state.get("bootstrap_pending") is not False
+        ):
+            raise OperationsError(
+                "AUTHORITY_RESTORE_MISMATCH: Owner root state and Authority snapshot differ"
+            )
+        materializer = self.host_layer.materializer()
+        # Validate the complete private root, key pairs, certificates,
+        # descriptor signature, endpoint binding and recovery state without
+        # allowing validation to rewrite the supplied backup package.
+        try:
+            with tempfile.TemporaryDirectory(prefix="eidolon-authority-restore-") as temporary:
+                validation_root = Path(temporary) / "owner-domain"
+                shutil.copytree(source / "owner-material", validation_root)
+                os.chmod(validation_root, 0o700)
+                for path in validation_root.iterdir():
+                    os.chmod(path, 0o600)
+                validated = ensure_owner_domain_assets(
+                    validation_root,
+                    materializer.identity(),
+                    self.app.hub_https_port,
+                )
+        except OwnerDomainAssetError as exc:
+            raise OperationsError(f"AUTHORITY_RESTORE_INVALID: {exc}") from exc
+        if (
+            validated.owner_domain_id != authority["owner_domain_id"]
+            or validated.owner_domain_generation != authority["owner_domain_generation"]
+            or validated.authority_state_id != authority["state_id"]
+            or validated.bootstrap_pending
+        ):
+            raise OperationsError(
+                "AUTHORITY_RESTORE_MISMATCH: validated Owner root lineage differs from snapshot"
+            )
+        material_installed = False
+        if materializer.material_root.exists():
+            try:
+                current = materializer.owner_assets()
+            except OwnerDomainAssetError as exc:
+                raise OperationsError(str(exc)) from exc
+            if (
+                current.owner_domain_id != authority["owner_domain_id"]
+                or current.owner_domain_generation != authority["owner_domain_generation"]
+                or current.authority_state_id != authority["state_id"]
+                or current.bootstrap_pending
+            ):
+                raise OperationsError(
+                    "AUTHORITY_RESTORE_MISMATCH: current Owner root lineage differs from backup"
+                )
+        request = {
+            "owner_domain_id": authority["owner_domain_id"],
+            "owner_domain_generation": authority["owner_domain_generation"],
+            "state_id": authority["state_id"],
+            "database_sha256": host_files["database"]["sha256"],
+            "anchor_sha256": host_files["anchor"]["sha256"],
+        }
+        if not apply:
+            return {
+                "status": "authority_restore_planned",
+                "authority": authority,
+                "owner_root_import_required": not materializer.material_root.exists(),
+                "generation_advanced": False,
+                "next": "rerun with --apply to restore this exact same-generation package",
+            }
+        # Re-render Host endpoint/TLS material from the restored root before Hub
+        # sees the restored database. Endpoint relocation changes directory
+        # revision, never the Authority generation or database marker.
+        release_id = self._active_release("release_id")
+        remote = f"/var/tmp/eidolon-authority-restore-{release_id}"
+        staged = self.transport.run_agent(
+            "authority-restore-stage-reset",
+            {"release_id": release_id, **self.host_layer.target_payload()},
+            timeout=120,
+        )
+        if staged.get("status") != "authority_restore_stage_ready":
+            raise OperationsError("AUTHORITY_RESTORE_FAILED: restore staging was not prepared")
+        self.transport.upload(source / "host-state", remote, recursive=True)
+        payload = {
+            **self.host_layer.target_payload(),
+            "release_id": release_id,
+            "authority_restore": request,
+        }
+        plan = self.transport.run_agent("authority-restore-plan", payload, timeout=180)
+        if plan.get("status") != "authority_restore_planned" or plan.get("authority") != authority:
+            raise OperationsError("AUTHORITY_RESTORE_FAILED: target restore plan is invalid")
+        if not materializer.material_root.exists():
+            materializer.material_root.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(source / "owner-material", materializer.material_root)
+            material_installed = True
+        refreshed = self.host_layer.refresh(release_id)
+        result = self.transport.run_agent("authority-restore", payload, timeout=420)
+        if result.get("status") != "authority_restored" or result.get("authority") != authority:
+            raise OperationsError("AUTHORITY_RESTORE_FAILED: target returned invalid proof")
+        reclaimed = self.bundles.reclaim(release_id, phase="commit")
+        self.bundles.require_reclamation(reclaimed, "committed")
+        return {
+            **result,
+            "plan": plan,
+            "host_application": refreshed,
+            "owner_root_imported": material_installed,
+            "release_reclaim": reclaimed,
+            "app": self.app_ready(),
         }
 
     # -- authorities ---------------------------------------------------------
