@@ -57,6 +57,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = controller.controller_reset(apply=arguments.apply)
         elif arguments.operation == "authority-reset":
             result = controller.authority_reset(apply=arguments.apply)
+        elif arguments.operation == "authority-backup":
+            result = controller.authority_backup(output=arguments.output)
+        elif arguments.operation == "authority-restore":
+            result = controller.authority_restore(
+                source=arguments.source, apply=arguments.apply
+            )
         elif arguments.operation == "reset":
             result = controller.reset(
                 wipe_authority_data=arguments.wipe_authority_data,
@@ -67,6 +73,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 release_id=arguments.release_id,
                 resume=arguments.resume,
                 activate=arguments.activate,
+                cutover_mode=arguments.cutover_mode,
             )
         elif arguments.operation == "rollback":
             result = controller.rollback(
@@ -175,6 +182,17 @@ def _parser() -> argparse.ArgumentParser:
         help="advance Owner Authority and replace only Hub-owned authority state",
     )
     authority_reset.add_argument("--apply", action="store_true")
+    authority_backup = operations.add_parser(
+        "authority-backup",
+        help="capture a complete same-generation Owner Authority restore package",
+    )
+    authority_backup.add_argument("--output", type=Path, required=True)
+    authority_restore = operations.add_parser(
+        "authority-restore",
+        help="restore one complete Owner Authority package without generation advance",
+    )
+    authority_restore.add_argument("--source", type=Path, required=True)
+    authority_restore.add_argument("--apply", action="store_true")
     reset = operations.add_parser("reset")
     reset.add_argument("--wipe-authority-data", action="store_true")
     reset.add_argument("--apply", action="store_true")
@@ -183,6 +201,11 @@ def _parser() -> argparse.ArgumentParser:
         deploy.add_argument("--release-id", required=True)
         deploy.add_argument("--resume", action="store_true")
         deploy.add_argument("--activate", action="store_true")
+        deploy.add_argument(
+            "--cutover-mode",
+            choices=("reversible", "forward-only"),
+            default="reversible",
+        )
     rollback = operations.add_parser("rollback")
     rollback.add_argument("--release-id", required=True)
     rollback.add_argument("--snapshot", type=Path, required=True)

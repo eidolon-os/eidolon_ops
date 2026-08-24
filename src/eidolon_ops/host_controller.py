@@ -216,6 +216,17 @@ class HostController:
         report = release.restore(source=source, apply=apply)
         return self._planned_or_applied(plan, report, applied=apply)
 
+    def authority_backup(self, *, output: Path) -> Evidence:
+        plan = plans.authority_backup(self.profile.host_id)
+        release = self.adapter.require_release(Capability.BACKUP)
+        return self._applied(plan, release.authority_backup(output=output))
+
+    def authority_restore(self, *, source: Path, apply: bool) -> Evidence:
+        plan = plans.authority_restore(self.profile.host_id, apply=apply)
+        release = self.adapter.require_release(Capability.RESTORE)
+        report = release.authority_restore(source=source, apply=apply)
+        return self._planned_or_applied(plan, report, applied=apply)
+
     def reset(self, *, wipe_authority_data: bool, apply: bool) -> Evidence:
         plan = plans.reset(
             self.profile.host_id, apply=apply, wipe_authority_data=wipe_authority_data

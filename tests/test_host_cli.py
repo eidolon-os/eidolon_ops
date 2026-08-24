@@ -45,6 +45,12 @@ class FakeHostController:
     def controller_reset(self, **kwargs):
         return self._result("controller-reset", **kwargs)
 
+    def authority_backup(self, **kwargs):
+        return self._result("authority-backup", **kwargs)
+
+    def authority_restore(self, **kwargs):
+        return self._result("authority-restore", **kwargs)
+
     def reset(self, **kwargs):
         return self._result("reset", **kwargs)
 
@@ -102,7 +108,17 @@ def fake_host(monkeypatch) -> None:
             "install",
         ),
         (["reset", "--wipe-authority-data", "--apply"], "reset"),
-        (["deploy", "--release-id", "r1", "--activate"], "deploy"),
+        (
+            [
+                "deploy",
+                "--release-id",
+                "r1",
+                "--activate",
+                "--cutover-mode",
+                "forward-only",
+            ],
+            "deploy",
+        ),
         (["update", "--release-id", "r1"], "deploy"),
         (
             ["rollback", "--release-id", "r1", "--snapshot", "/var/lib/eidolon/deployments/r1-x"],
@@ -116,6 +132,11 @@ def fake_host(monkeypatch) -> None:
         (["restart", "--dry-run"], "lifecycle"),
         (["logs", "--service", "agent", "--lines", "10"], "logs"),
         (["controller-reset", "--apply"], "controller-reset"),
+        (["authority-backup", "--output", "/tmp/authority"], "authority-backup"),
+        (
+            ["authority-restore", "--source", "/tmp/authority", "--apply"],
+            "authority-restore",
+        ),
         (["debug", "status"], "local-profile"),
         (["debug", "prepare"], "local-profile"),
     ],
@@ -220,6 +241,8 @@ def test_every_flag_the_cli_offers_binds_to_the_real_controller_signature() -> N
         "initialize_inputs": {"new_identity": True},
         "backup": {"output": Path("/tmp/backup.tar.gz")},
         "restore": {"source": Path("/tmp/backup.tar.gz"), "apply": True},
+        "authority_backup": {"output": Path("/tmp/authority")},
+        "authority_restore": {"source": Path("/tmp/authority"), "apply": True},
         "commissioning_code": {"ttl_seconds": 600},
         "install": {
             "release_id": "r-1",
@@ -230,7 +253,12 @@ def test_every_flag_the_cli_offers_binds_to_the_real_controller_signature() -> N
         },
         "controller_reset": {"apply": True},
         "reset": {"wipe_authority_data": True, "apply": True},
-        "deploy": {"release_id": "r-1", "resume": False, "activate": True},
+        "deploy": {
+            "release_id": "r-1",
+            "resume": False,
+            "activate": True,
+            "cutover_mode": "forward-only",
+        },
         "rollback": {"release_id": "r-1", "snapshot": Path("/snap"), "apply": True},
         "diagnose": {"output": Path("/tmp/report.tar.gz")},
         "logs": {"service": None, "lines": 200, "since": None},
