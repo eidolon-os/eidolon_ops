@@ -72,6 +72,11 @@ def initialize_install_inputs(
     hub_provider_token = secrets.token_urlsafe(32)
     pairing_token = secrets.token_urlsafe(48)
     memory_token = secrets.token_urlsafe(32)
+    # Two credentials for the two Owner-facing authority surfaces that grew one.
+    # Both were unauthenticated until 2026-08-25 and both hold the most personal
+    # state on a Host: what an Eidolon remembers, and what was said to it.
+    memory_api_token = secrets.token_urlsafe(32)
+    agent_admin_token = secrets.token_urlsafe(32)
     livekit_key = secrets.token_urlsafe(18)
     livekit_secret = secrets.token_urlsafe(48)
 
@@ -108,6 +113,15 @@ def initialize_install_inputs(
             "EIDOLON_ADMIN_DATA_WORKSPACE_AUTHORITY_TOKEN": workspace_token,
             "EIDOLON_ADMIN_HUB_MANAGEMENT_JWT_SECRET": hub_jwt_secret,
             "EIDOLON_ADMIN_LOCAL_API_SERVICE_TOKEN": local_api_token,
+            # The per-Realm memory surface Admin reads the Owner's memory
+            # through. Without it every memory management page answers 503 with
+            # "credential is not configured" — which is what a Host installed
+            # before this line did.
+            "EIDOLON_ADMIN_MEMORY_API_SERVICE_TOKEN": memory_api_token,
+            # Unprefixed on purpose: the service registry names this exact
+            # variable (``config/services.yaml``, agent entry), and two names for
+            # one secret is how they come to disagree.
+            "EIDOLON_AGENT_ADMIN_API_TOKEN": agent_admin_token,
             "EIDOLON_ADMIN_SYSTEM_DIRECTORY_UDS": "/run/eidolon/system.sock",
         },
         "local-api.env": {
@@ -122,6 +136,7 @@ def initialize_install_inputs(
             "EIDOLON_AGENT_LLM_API_KEY": providers["eidolon_agent"]["EIDOLON_AGENT_LLM_API_KEY"],
             "EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN": data_token,
             "EIDOLON_MEMORY_MCP_TOKEN": memory_token,
+            "EIDOLON_AGENT_ADMIN_API_TOKEN": agent_admin_token,
             "PAIRING_JWT_SECRET": pairing_token,
         },
         "channel.env": {
@@ -137,6 +152,7 @@ def initialize_install_inputs(
             "EIDOLON_DATA_MEMORY_RUNTIME_ROSTER_TOKEN": memory_roster_token,
             "EIDOLON_MEMORY_LLM_API_KEY": providers["eidolon_memory"]["EIDOLON_MEMORY_LLM_API_KEY"],
             "EIDOLON_MEMORY_MCP_TOKEN": memory_token,
+            "EIDOLON_MEMORY_API_TOKEN": memory_api_token,
         },
         "livekit.env": {
             "LIVEKIT_API_KEY": livekit_key,
@@ -214,6 +230,8 @@ def validate_install_input_contract(
             "EIDOLON_ADMIN_DATA_WORKSPACE_AUTHORITY_TOKEN",
             "EIDOLON_ADMIN_HUB_MANAGEMENT_JWT_SECRET",
             "EIDOLON_ADMIN_LOCAL_API_SERVICE_TOKEN",
+            "EIDOLON_ADMIN_MEMORY_API_SERVICE_TOKEN",
+            "EIDOLON_AGENT_ADMIN_API_TOKEN",
             "EIDOLON_ADMIN_SYSTEM_DIRECTORY_UDS",
         },
         "local-api.env": {
@@ -224,6 +242,7 @@ def validate_install_input_contract(
         "bootstrap.env": set(),
         "agent.env": {
             "EIDOLON_AGENT_LLM_API_KEY",
+            "EIDOLON_AGENT_ADMIN_API_TOKEN",
             "EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN",
             "EIDOLON_MEMORY_MCP_TOKEN",
             "PAIRING_JWT_SECRET",
@@ -232,6 +251,7 @@ def validate_install_input_contract(
             "EIDOLON_DATA_MEMORY_RUNTIME_ROSTER_TOKEN",
             "EIDOLON_MEMORY_LLM_API_KEY",
             "EIDOLON_MEMORY_MCP_TOKEN",
+            "EIDOLON_MEMORY_API_TOKEN",
         },
         "livekit.env": {"LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"},
     }
@@ -356,6 +376,16 @@ def validate_install_input_contract(
             agent["EIDOLON_MEMORY_MCP_TOKEN"],
             memory["EIDOLON_MEMORY_MCP_TOKEN"],
             "Agent/Memory MCP token",
+        ),
+        (
+            admin["EIDOLON_ADMIN_MEMORY_API_SERVICE_TOKEN"],
+            memory["EIDOLON_MEMORY_API_TOKEN"],
+            "Admin/Memory API service token",
+        ),
+        (
+            admin["EIDOLON_AGENT_ADMIN_API_TOKEN"],
+            agent["EIDOLON_AGENT_ADMIN_API_TOKEN"],
+            "Admin/Agent admin API token",
         ),
         (channel["LIVEKIT_API_KEY"], livekit["LIVEKIT_API_KEY"], "Channel/LiveKit key"),
         (

@@ -141,6 +141,19 @@ def test_initializer_creates_one_private_consistent_input_set(config, tmp_path: 
     assert agent["PAIRING_JWT_SECRET"] == channel["PAIRING_JWT_SECRET"]
     assert agent["EIDOLON_AGENT_LLM_API_KEY"] == "agent-provider-key"
     assert agent["EIDOLON_MEMORY_MCP_TOKEN"] == memory["EIDOLON_MEMORY_MCP_TOKEN"]
+    # The two Owner-facing authority surfaces that grew a credential. Each one is
+    # shared by exactly two files, and a Host missing either has a management
+    # surface that answers 503 rather than a management surface that is open.
+    assert (
+        admin["EIDOLON_ADMIN_MEMORY_API_SERVICE_TOKEN"]
+        == memory["EIDOLON_MEMORY_API_TOKEN"]
+    )
+    assert (
+        admin["EIDOLON_AGENT_ADMIN_API_TOKEN"] == agent["EIDOLON_AGENT_ADMIN_API_TOKEN"]
+    )
+    # Distinct secrets: memory's MCP tool surface and its HTTP authority surface
+    # are different boundaries with different callers.
+    assert memory["EIDOLON_MEMORY_API_TOKEN"] != memory["EIDOLON_MEMORY_MCP_TOKEN"]
     assert channel["LIVEKIT_API_KEY"] == livekit["LIVEKIT_API_KEY"]
     assert channel["LIVEKIT_API_SECRET"] == livekit["LIVEKIT_API_SECRET"]
     assert channel["OPENAI_LLM_API_KEY"] == "channel-llm-key"
@@ -335,6 +348,19 @@ def test_validator_rejects_identity_and_settings_drift(config, tmp_path: Path) -
             "agent.env",
             ("EIDOLON_AGENT_LLM_API_KEY", "EIDOLON_AGENT_LLM_API_KEY"),
             "provider credential",
+        ),
+        # The two credentials that make the Owner-facing authority surfaces
+        # answer at all. A Host where either side drifts has a management page
+        # that reports the wrong thing: 401 rather than "not configured".
+        (
+            "memory.env",
+            ("EIDOLON_MEMORY_API_TOKEN", "drifted-memory-api-token-value"),
+            "Admin/Memory API service token",
+        ),
+        (
+            "agent.env",
+            ("EIDOLON_AGENT_ADMIN_API_TOKEN", "drifted-agent-admin-token-value"),
+            "Admin/Agent admin API token",
         ),
     ],
 )
