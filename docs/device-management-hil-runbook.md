@@ -24,9 +24,8 @@ uv run eidolon-device-management-gate template \
 Run every named test at the captured commit. Change each receipt from `pending`
 to `passed` only after saving its output at an absolute, non-symlink
 `evidence_path` and putting the real SHA-256 of that file in
-`evidence_digest`. The verifier opens and hashes the file. Build in this order,
-passing the manifest's
-`release_identity` into each build's existing version/metadata input:
+`evidence_digest`. The verifier opens and hashes the file. Build from the
+captured clean commits in this order:
 
 1. seal the Pi5 native release from the captured SDK, Hub, Kernel, Admin,
    Channel and Ops commits;
@@ -39,6 +38,11 @@ non-symlink artifact and provenance paths, both SHA-256 values, the same
 `release_identity`, and the exact source mapping in each artifact entry. The
 verifier opens the provenance object and compares all four required fields instead of
 trusting the release manifest's self-report. Then:
+
+The Pi release may also carry its existing release metadata. Mobile and ESP32
+do not currently embed this identity; their exact bytes are bound to it by the
+artifact SHA-256 and external provenance above. Do not invent a second product
+metadata mechanism for this gate.
 
 ```sh
 uv run eidolon-device-management-gate verify \
@@ -55,6 +59,9 @@ artifact byte or source mapping fails closed.
 
 Use the existing `eidolon-ops deploy` transaction for Pi5. Install the APK and
 flash firmware only after all three bytes have passed the same release gate.
+The HIL `release_identity_proven` evidence must compare the active Pi release
+manifest, installed APK bytes and firmware readback with the three verified
+artifact hashes; build provenance alone is not evidence of what is running.
 Create the device-specific checklist:
 
 ```sh
@@ -76,7 +83,8 @@ the checklist. Without it the final gate refuses the run.
 
 The ordered scenarios are:
 
-1. commissioning → proposal → explicit approval → GrantAck → ClaimActive → Mount;
+1. commissioning → proposal → explicit approval → GrantAck → ClaimActive → Mount,
+   followed by an independently observed business Channel Ready condition;
 2. confirmed online remove → platform revoke → unmount → signed erase ACK;
 3. rejoin the erased device and take it offline;
 4. confirmed offline remove → platform revoke/unmount while erase is pending;
@@ -92,3 +100,6 @@ uv run eidolon-device-management-gate hil-verify \
 ```
 
 Only `device_management_hil_passed` closes the overall hardware gate.
+Channel Ready is evidence that the released Box can enter normal operation; it
+does not become a Claim, Mount, platform-removal, or device-erase completion
+condition and is never allowed to carry the erase operation.

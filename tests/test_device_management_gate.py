@@ -210,7 +210,10 @@ def test_hil_gate_requires_ordered_evidence_and_explicit_erase_confirmation(
     assert result["status"] == "device_management_hil_passed"
     assert result["steps"] == len(HIL_STEPS)
 
-    steps[7]["confirmation"] = "yes"
+    online_confirmation = next(
+        step for step in steps if step["id"] == "confirm_online_remove"
+    )
+    online_confirmation["confirmation"] = "yes"
     with pytest.raises(GateError, match="destructive erase was not explicitly confirmed"):
         verify_hil(evidence, release)
 

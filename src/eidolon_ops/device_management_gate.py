@@ -71,6 +71,7 @@ HIL_STEPS = (
     "grant_ack_observed",
     "claim_active_observed",
     "mount_active_observed",
+    "channel_ready_observed",
     "confirm_online_remove",
     "online_remove_requested",
     "platform_revoked_observed",
