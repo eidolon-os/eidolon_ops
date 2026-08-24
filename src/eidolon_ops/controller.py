@@ -14,6 +14,8 @@ import shutil
 import stat
 import tarfile
 import tempfile
+import time
+from collections.abc import Callable
 from pathlib import Path
 
 from eidolon_ops.component_contract import read_component_contracts
@@ -40,7 +42,7 @@ from eidolon_ops.owner_domain_assets import (
 from eidolon_ops.paths import AppAccess
 from eidolon_ops.process import ProcessRunner
 from eidolon_ops.progress import Journal, ProgressSink
-from eidolon_ops.readiness import READINESS_TRANSPORT_TIMEOUT_SECONDS
+from eidolon_ops.readiness import READINESS_TRANSPORT_TIMEOUT_SECONDS, describe_failures
 from eidolon_ops.release_bundle import BundleTransfer, file_sha256, parse_json
 from eidolon_ops.release_preflight import ReleasePreflight
 from eidolon_ops.release_transaction import ReleaseTransaction
@@ -68,6 +70,27 @@ def _same_state(entry: str, declared: str) -> bool:
         if entry == f"{declared}{suffix}":
             return True
     return Path(entry).is_relative_to(declared) or Path(declared).is_relative_to(entry)
+
+
+def _wait_for_restored_authority_readiness(
+    probe: Callable[[], dict[str, object]],
+    *,
+    timeout_seconds: float,
+) -> dict[str, object]:
+    """Require the restored graph to become App-ready before reporting success."""
+
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        report = probe()
+        if report.get("status") == "app_ready":
+            return report
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise OperationsError(
+                "AUTHORITY_RESTORE_FAILED: App readiness degraded after restore: "
+                + describe_failures(report)
+            )
+        time.sleep(min(0.5, remaining))
 
 
 class EidolonPiController:
@@ -958,13 +981,17 @@ class EidolonPiController:
             raise OperationsError("AUTHORITY_RESTORE_FAILED: target returned invalid proof")
         reclaimed = self.bundles.reclaim(release_id, phase="commit")
         self.bundles.require_reclamation(reclaimed, "committed")
+        ready = _wait_for_restored_authority_readiness(
+            self.app_ready,
+            timeout_seconds=self.config.host.readiness_timeout_seconds,
+        )
         return {
             **result,
             "plan": plan,
             "host_application": refreshed,
             "owner_root_imported": material_installed,
             "release_reclaim": reclaimed,
-            "app": self.app_ready(),
+            "app": ready,
         }
 
     # -- authorities ---------------------------------------------------------

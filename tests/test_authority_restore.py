@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -137,6 +138,37 @@ def test_restore_authority_preserves_complete_same_generation_state(tmp_path: Pa
     assert authority_restore.restore(payload, root=tmp_path, manage_services=False)[
         "authority"
     ] == _AUTHORITY
+
+
+def test_restore_starts_and_requires_both_hub_and_ingress(tmp_path: Path) -> None:
+    payload = _stage(tmp_path)
+    calls: list[tuple[str, ...]] = []
+
+    def command(value: tuple[str, ...], *, timeout: float):
+        calls.append(value)
+        return subprocess.CompletedProcess(value, 0, "active\nactive\n", "")
+
+    result = authority_restore.restore(
+        payload,
+        root=tmp_path,
+        command=command,
+        manage_services=True,
+        ready_timeout_seconds=1,
+    )
+
+    assert result["status"] == "authority_restored"
+    assert (
+        "/usr/bin/systemctl",
+        "start",
+        authority_restore.authority_reset.HUB_UNIT,
+        authority_restore.authority_reset.HUB_INGRESS_UNIT,
+    ) in calls
+    assert (
+        "/usr/bin/systemctl",
+        "is-active",
+        authority_restore.authority_reset.HUB_UNIT,
+        authority_restore.authority_reset.HUB_INGRESS_UNIT,
+    ) in calls
 
 
 @pytest.mark.parametrize("failure", ["missing-anchor", "partial", "generation-mismatch", "digest"])

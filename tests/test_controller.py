@@ -13,8 +13,13 @@ import pytest
 # contains them. Shared with the install-inputs suite.
 from test_install_inputs import _settings_reader as _product_settings_reader
 
+from eidolon_ops import controller as controller_module
 from eidolon_ops.config import SOURCE_IDS, ConfigurationError
-from eidolon_ops.controller import EidolonPiController, OperationsError
+from eidolon_ops.controller import (
+    EidolonPiController,
+    OperationsError,
+    _wait_for_restored_authority_readiness,
+)
 from eidolon_ops.embedding_model import PINNED_EMBEDDING_MODEL, embedding_model_digest
 from eidolon_ops.endpoints import HostEndpoint
 from eidolon_ops.host_application import HOST_APPLICATION_STAGE_NAMES
@@ -43,6 +48,35 @@ HUB_SETTINGS_TEMPLATE = (
     "owner_domain_generation: 1\n"
     "descriptor_uri: https://eidolon-hub.local/api/device-onboarding/v1/descriptor\n"
 )
+
+
+def test_authority_restore_waits_for_app_readiness_without_accepting_degraded(
+    monkeypatch,
+) -> None:
+    reports = iter(
+        [
+            {"status": "degraded", "checks": {"hub_lan_reachable": False}},
+            {"status": "app_ready", "checks": {"hub_lan_reachable": True}},
+        ]
+    )
+    monkeypatch.setattr(controller_module.time, "sleep", lambda _seconds: None)
+
+    result = _wait_for_restored_authority_readiness(
+        lambda: next(reports), timeout_seconds=1
+    )
+
+    assert result["status"] == "app_ready"
+
+
+def test_authority_restore_readiness_timeout_is_a_stable_failure() -> None:
+    with pytest.raises(OperationsError, match="AUTHORITY_RESTORE_FAILED"):
+        _wait_for_restored_authority_readiness(
+            lambda: {
+                "status": "degraded",
+                "checks": {"hub_lan_reachable": False},
+            },
+            timeout_seconds=0,
+        )
 
 
 def _read_target(command: tuple[str, ...]) -> tuple[str, str]:

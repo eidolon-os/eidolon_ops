@@ -331,12 +331,25 @@ def restore(
         if manage_services:
             _checked(
                 command,
-                ("/usr/bin/systemctl", "start", authority_reset.HUB_UNIT),
+                (
+                    "/usr/bin/systemctl",
+                    "start",
+                    authority_reset.HUB_UNIT,
+                    authority_reset.HUB_INGRESS_UNIT,
+                ),
                 operation="Hub start after Owner Authority restore",
             )
             deadline = time.monotonic() + ready_timeout_seconds
             while time.monotonic() < deadline:
-                active = command(("/usr/bin/systemctl", "is-active", authority_reset.HUB_UNIT), timeout=20)
+                active = command(
+                    (
+                        "/usr/bin/systemctl",
+                        "is-active",
+                        authority_reset.HUB_UNIT,
+                        authority_reset.HUB_INGRESS_UNIT,
+                    ),
+                    timeout=20,
+                )
                 if active.returncode == 0 and _marker(database) == expected and _anchor(anchor) == expected:
                     break
                 time.sleep(0.5)
