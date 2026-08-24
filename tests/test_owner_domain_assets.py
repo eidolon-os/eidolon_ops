@@ -83,6 +83,18 @@ def test_host_endpoint_change_advances_only_directory_revision(tmp_path: Path) -
     assert "host_id" not in second_directory
 
 
+def test_directory_advertises_the_canonical_admission_authority_route(tmp_path: Path) -> None:
+    identity = derive_host_lan_identity(b"a" * 32)
+    assets = ensure_owner_domain_assets(tmp_path / "owner-domain", identity, 8443, now=NOW)
+    endpoints = {
+        endpoint["authority"]: endpoint["uri"]
+        for endpoint in json.loads(assets.descriptor)["endpoints"]
+    }
+
+    assert endpoints["admission"].endswith("/api/admission/v1")
+    assert "/api/device-onboarding/v1" not in endpoints["admission"]
+
+
 def test_existing_descriptor_corruption_fails_closed(tmp_path: Path) -> None:
     identity = derive_host_lan_identity(b"a" * 32)
     root = tmp_path / "owner-domain"

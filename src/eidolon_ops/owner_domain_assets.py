@@ -440,7 +440,7 @@ def _directory(
         {
             "authority": "admission",
             "logical_audience": f"{owner_domain_id}:admission",
-            "uri": origin + "/api/device-onboarding/v1",
+            "uri": origin + "/api/admission/v1",
             "transport_profile": "https-json",
             "priority": 0,
         },
