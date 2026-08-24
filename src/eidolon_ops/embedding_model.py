@@ -179,9 +179,11 @@ def _materialize(root: Path, artifact: EmbeddingModelArtifact) -> Path:
 
 def _download(url: str, destination: Path) -> None:
     try:
-        with urlopen(url, timeout=_DOWNLOAD_TIMEOUT_SECONDS) as response:
-            with destination.open("wb") as handle:
-                shutil.copyfileobj(response, handle)
+        with (
+            urlopen(url, timeout=_DOWNLOAD_TIMEOUT_SECONDS) as response,
+            destination.open("wb") as handle,
+        ):
+            shutil.copyfileobj(response, handle)
     except OSError as error:
         raise OperationsError(f"could not fetch {url}: {error}") from error
 

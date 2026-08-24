@@ -189,7 +189,7 @@ class Budget:
     reads it should not have to guess which probe was the slow one.
     """
 
-    __slots__ = ("total", "_deadline")
+    __slots__ = ("_deadline", "total")
 
     def __init__(self, seconds: float) -> None:
         self.total = max(float(seconds), 0.0)

@@ -63,7 +63,7 @@ def _request(base_url: str, path: str, *, method: str, body: Mapping[str, object
              timeout: float) -> object:
     if not path.startswith("/api/admin/"):
         raise TargetError(f"refusing to call memory outside its admin API: {path}")
-    request = urllib.request.Request(  # noqa: S310 - loopback, checked below
+    request = urllib.request.Request(
         f"{base_url}{path}",
         method=method,
         data=None if body is None else json.dumps(body).encode("utf-8"),
@@ -72,7 +72,7 @@ def _request(base_url: str, path: str, *, method: str, body: Mapping[str, object
     if urlsplit(request.full_url).hostname not in {"127.0.0.1", "localhost", "::1"}:
         raise TargetError(f"memory admin API must be on this Host: {base_url}")
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
+        with urllib.request.urlopen(request, timeout=timeout) as response:
             return json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", "replace").strip()

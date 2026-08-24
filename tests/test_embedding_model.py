@@ -9,9 +9,8 @@ import pytest
 
 from eidolon_ops import embedding_model
 from eidolon_ops.embedding_model import (
-    EmbeddingModelArtifact,
     PINNED_EMBEDDING_MODEL,
-    embedding_model_digest,
+    EmbeddingModelArtifact,
     ensure_workstation_embedding_model,
     host_embedding_model_root,
 )

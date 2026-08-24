@@ -2130,7 +2130,7 @@ def test_a_backup_covers_every_authority_and_names_what_it_cannot(tmp_path, monk
     """A backup believed to be complete is worse than one known to be partial."""
 
     table = _authority_fixture(tmp_path, monkeypatch)
-    memory = _memory_fixture(monkeypatch)
+    _memory_fixture(monkeypatch)
 
     result = authorities.backup(BACKUP_PAYLOAD)
 
@@ -2150,7 +2150,7 @@ def test_a_backup_round_trips_through_a_restore(tmp_path, monkeypatch) -> None:
     """A backup nobody has restored is not known to work."""
 
     table = _authority_fixture(tmp_path, monkeypatch)
-    memory = _memory_fixture(monkeypatch)
+    _memory_fixture(monkeypatch)
     monkeypatch.setattr(host_reset, "command_stop_units", lambda units: list(units))
     monkeypatch.setattr(host_lifecycle, "lifecycle", lambda *_a: {"status": "started"})
     payload = BACKUP_PAYLOAD

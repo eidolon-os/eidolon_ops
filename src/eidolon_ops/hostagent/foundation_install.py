@@ -9,7 +9,7 @@ import tempfile
 import time
 import uuid
 from collections.abc import Iterator, Mapping
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path, PurePosixPath
 
 from . import contract, foundation, primitives
@@ -216,10 +216,8 @@ def install_journal_persistence(content: str) -> None:
     # Best effort on purpose: the drop-in is written and journald has been
     # restarted, so persistence is already in force — failing an install over
     # the timing of a migration would be refusing the fix to hurry it.
-    try:
+    with suppress(TargetError):
         primitives.run(("/usr/bin/journalctl", "--flush"), timeout=60)
-    except TargetError:
-        pass
 
 
 @contextmanager
