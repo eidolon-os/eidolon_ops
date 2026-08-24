@@ -182,8 +182,20 @@ def _load(payload: Mapping[str, object], root: Path) -> tuple[Path, dict[str, ob
 def restore(payload: Mapping[str, object], *, root: Path = Path("/")) -> dict[str, object]:
     root = root.resolve()
     path, document = _load(payload, root)
-    if document["cutover_mode"] != "reversible":
-        raise TargetError("forward-only Host configuration cannot be restored")
+    if document["cutover_mode"] == "forward-only":
+        previous_targets = document.get("previous_targets")
+        schema_migration = document.get("schema_migration")
+        if (
+            not isinstance(previous_targets, dict)
+            or previous_targets != _current_targets(root)
+            or not isinstance(schema_migration, dict)
+            or schema_migration.get("state") != "not_started"
+            or document.get("status") not in {"snapshotted", "host_restored"}
+        ):
+            raise TargetError(
+                "forward-only Host configuration crossed or cannot prove the "
+                "persistent-state barrier"
+            )
     authority_path = primitives.host_path(
         root, contract.INSTALL_INPUTS["authority-bootstrap.json"][0]
     )
@@ -248,7 +260,11 @@ def restore(payload: Mapping[str, object], *, root: Path = Path("/")) -> dict[st
     primitives.checked("Host layer rollback systemd reload", ("/usr/bin/systemctl", "daemon-reload"))
     document["status"] = "host_restored"
     primitives.atomic_json(path / "cutover.json", document)
-    return {"status": "host_cutover_restored", "host_snapshot": payload["host_snapshot"]}
+    return {
+        "status": "host_cutover_restored",
+        "host_snapshot": payload["host_snapshot"],
+        "persistent_state_barrier": "not_crossed",
+    }
 
 
 def finalize(payload: Mapping[str, object], *, root: Path = Path("/")) -> dict[str, object]:

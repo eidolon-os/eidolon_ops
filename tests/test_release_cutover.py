@@ -109,13 +109,33 @@ def test_reversible_cutover_restores_host_files_and_absence(
     assert not certificate.exists()
 
 
-def test_forward_only_cutover_cannot_restore(tmp_path: Path) -> None:
+def test_forward_only_cutover_restores_only_while_previous_graph_proves_pre_barrier(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _host(tmp_path)
     captured = cutover.snapshot(
         {"release_id": "release-9", "cutover_mode": "forward-only"}, root=tmp_path
     )
+    settings = _path(tmp_path, contract.INSTALL_INPUTS["hub.generated.yaml"][0])
+    settings.write_text("candidate\n", encoding="utf-8")
+    monkeypatch.setattr(cutover.primitives, "checked", lambda *args, **kwargs: None)
 
-    with pytest.raises(TargetError, match="forward-only"):
+    restored = cutover.restore(_payload(captured, "forward-only"), root=tmp_path)
+
+    assert restored["persistent_state_barrier"] == "not_crossed"
+    assert settings.read_text() == "previous\n"
+
+
+def test_forward_only_cutover_cannot_restore_after_component_switch(
+    tmp_path: Path,
+) -> None:
+    _host(tmp_path)
+    captured = cutover.snapshot(
+        {"release_id": "release-9", "cutover_mode": "forward-only"}, root=tmp_path
+    )
+    _switch(tmp_path)
+
+    with pytest.raises(TargetError, match="persistent-state barrier"):
         cutover.restore(_payload(captured, "forward-only"), root=tmp_path)
 
 
