@@ -40,6 +40,7 @@ console = [
 eidolon-ops = "eidolon_ops.host_cli:run"
 eidolon-ops-console = "eidolon_ops.console.server:run"
 eidolon-lan-ingress = "eidolon_ops.lan_ingress:main"
+eidolon-device-management-gate = "eidolon_ops.device_management_gate:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/eidolon_ops"]
