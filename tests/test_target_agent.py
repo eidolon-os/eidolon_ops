@@ -22,6 +22,7 @@ from eidolon_ops.hostagent import (
     contract,
     host_application,
     identities,
+    memory_realms,
     primitives,
     staging,
 )
@@ -1858,12 +1859,89 @@ def _authority_fixture(tmp_path: Path, monkeypatch):
     return table
 
 
+#: The payload every authority operation carries. Memory's address is in it
+#: because a backup asks memory for a copy of each space rather than copying a
+#: palace this agent does not understand.
+BACKUP_PAYLOAD = {
+    "units": list(contract.PRODUCT_UNITS),
+    "release_id": "r1",
+    "memory_admin_url": "http://127.0.0.1:8019",
+}
+
+
+class _FakeMemory:
+    """A supervisor that answers the two actions memory declares.
+
+    A stub rather than a mock of ``capture``: what is worth testing on this side
+    is the operator half — that the manifest is checked against what landed, and
+    that a space that cannot be copied is reported rather than dropped.
+    """
+
+    def __init__(self, *, realms: tuple[str, ...] = ("r_owner_one",)) -> None:
+        self.realms = realms
+        self.snapshotted: list[str] = []
+        self.restored: list[tuple[str, str]] = []
+        self.refuse: str | None = None
+        self.corrupt_after_snapshot = False
+
+    def __call__(self, base_url, path, *, method, body, timeout):
+        if self.refuse is not None:
+            raise TargetError(self.refuse)
+        if path == "/api/admin/realms":
+            return [{"spec": {"memory_realm_id": realm}} for realm in self.realms]
+        parts = path.strip("/").split("/")
+        realm = parts[3]
+        if parts[-1] == "snapshot":
+            return {"manifest": self._write(realm, Path(body["destination"]))}
+        if parts[-1] == "restore":
+            self.restored.append((realm, str(body["source"])))
+            return {"worker_running": True, "restored": {"taken_at": "2026-08-24T00:00:00Z"}}
+        raise AssertionError(f"unexpected call: {method} {path}")
+
+    def _write(self, realm: str, destination: Path) -> dict:
+        self.snapshotted.append(realm)
+        entries = []
+        for relative in ("palace/chroma.sqlite3", "ledgers/knowledge_graph.sqlite3"):
+            path = destination / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(f"{realm}:{relative}", encoding="utf-8")
+            entries.append(
+                {
+                    "path": relative,
+                    "method": "sqlite-vacuum-into",
+                    "sha256": primitives.file_sha256(path),
+                    "bytes": path.stat().st_size,
+                }
+            )
+        if self.corrupt_after_snapshot:
+            (destination / "palace/chroma.sqlite3").write_text("not what was copied")
+        manifest = {
+            "contract_version": "1",
+            "memory_space_id": realm,
+            "taken_at": "2026-08-24T00:00:00Z",
+            "embedder_identity": "bge_base_zh_v15",
+            "entries": entries,
+        }
+        (destination / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        return manifest
+
+
+def _memory_fixture(monkeypatch, **kwargs) -> _FakeMemory:
+    fake = _FakeMemory(**kwargs)
+    monkeypatch.setattr(memory_realms, "_request", fake)
+    # Ownership is the one thing a test cannot exercise: the accounts do not
+    # exist here, and the agent runs as root on a Host.
+    monkeypatch.setattr(memory_realms.primitives, "chown_path", lambda *_a: None)
+    return fake
+
+
 def test_a_backup_covers_every_authority_and_names_what_it_cannot(tmp_path, monkeypatch) -> None:
     """A backup believed to be complete is worse than one known to be partial."""
 
     table = _authority_fixture(tmp_path, monkeypatch)
+    memory = _memory_fixture(monkeypatch)
 
-    result = authorities.backup({"units": list(contract.PRODUCT_UNITS), "release_id": "r1"})
+    result = authorities.backup(BACKUP_PAYLOAD)
 
     assert result["status"] == "captured"
     assert {entry["authority"] for entry in result["authorities"]} == set(table)
@@ -1881,9 +1959,10 @@ def test_a_backup_round_trips_through_a_restore(tmp_path, monkeypatch) -> None:
     """A backup nobody has restored is not known to work."""
 
     table = _authority_fixture(tmp_path, monkeypatch)
+    memory = _memory_fixture(monkeypatch)
     monkeypatch.setattr(host_reset, "command_stop_units", lambda units: list(units))
     monkeypatch.setattr(host_lifecycle, "lifecycle", lambda *_a: {"status": "started"})
-    payload = {"units": list(contract.PRODUCT_UNITS), "release_id": "r1"}
+    payload = BACKUP_PAYLOAD
     manifest = authorities.backup(payload)
 
     for name, (database, _user, _group) in table.items():
@@ -1907,12 +1986,158 @@ def test_a_backup_round_trips_through_a_restore(tmp_path, monkeypatch) -> None:
             connection.close()
 
 
+def test_a_backup_carries_every_memory_space_and_says_where(tmp_path, monkeypatch) -> None:
+    """Memory is the one authority this agent does not copy itself.
+
+    A space is a palace directory whose layout belongs to MemPalace plus the
+    embedder identity its vectors were produced under, so the component makes
+    the copy and this collects it. That declaration is what took memory off the
+    uncovered list, and the backup should now be able to show it.
+    """
+
+    _authority_fixture(tmp_path, monkeypatch)
+    memory = _memory_fixture(monkeypatch, realms=("r_owner_one", "r_owner_two"))
+
+    result = authorities.backup(BACKUP_PAYLOAD)
+
+    assert memory.snapshotted == ["r_owner_one", "r_owner_two"]
+    assert "memory" not in {entry["state"] for entry in result["not_covered"]}
+    spaces = {entry["memory_space_id"]: entry for entry in result["memory_spaces"]}
+    assert set(spaces) == {"r_owner_one", "r_owner_two"}
+    for realm, entry in spaces.items():
+        # Relative to the backup, because the directory travels to a workstation
+        # and back and an absolute path from this Host would not survive it.
+        copy = Path(result["directory"]) / str(entry["directory"])
+        assert copy.is_dir() and copy.name == realm
+        assert entry["embedder_identity"] == "bge_base_zh_v15"
+        assert entry["file_count"] == 2
+
+
+def test_a_memory_copy_that_does_not_match_its_manifest_is_not_reported_as_carried(
+    tmp_path, monkeypatch
+) -> None:
+    """The operator half of the declaration is checking it.
+
+    Memory decides what a whole space is; this decides whether what landed on
+    disk is that. A manifest nobody checks describes a backup rather than being
+    one — and a copy that fails the check is named as not carried rather than
+    listed among the spaces, because the whole point of the list is that an
+    operator can restore from it.
+    """
+
+    _authority_fixture(tmp_path, monkeypatch)
+    _memory_fixture(monkeypatch).corrupt_after_snapshot = True
+
+    result = authorities.backup(BACKUP_PAYLOAD)
+
+    assert result["memory_spaces"] == []
+    reason = {entry["state"]: entry["reason"] for entry in result["not_covered"]}["memory"]
+    assert "does not match its digest" in reason
+    # And the copy that failed the check is gone: a directory nobody should
+    # restore from should not be sitting in the backup looking restorable.
+    assert not (Path(result["directory"]) / memory_realms.SPACES_DIRECTORY).exists()
+
+
+def test_a_host_whose_memory_cannot_answer_still_gets_a_backup_that_says_so(
+    tmp_path, monkeypatch
+) -> None:
+    """Its authorities are still worth copying.
+
+    A backup that refused to exist would leave the operator with nothing on the
+    day they most need something. What it must not do is stay silent — so the
+    same table that named memory while it had no declared snapshot names it
+    again, with the reason it could not be reached this time.
+    """
+
+    table = _authority_fixture(tmp_path, monkeypatch)
+    _memory_fixture(monkeypatch).refuse = "memory is not answering on http://127.0.0.1:8019"
+
+    result = authorities.backup(BACKUP_PAYLOAD)
+
+    assert {entry["authority"] for entry in result["authorities"]} == set(table)
+    assert result["memory_spaces"] == []
+    uncovered = {entry["state"]: entry for entry in result["not_covered"]}
+    assert "not answering" in uncovered["memory"]["reason"]
+    assert uncovered["memory"]["path"] == str(contract.MEMORY_STATE_ROOT)
+
+
+def test_a_backup_that_was_not_told_where_memory_is_refuses(tmp_path, monkeypatch) -> None:
+    """A missing address is this deployer's bug, not a fact about the Host.
+
+    Degrading to "memory not covered" would turn a mistake in the payload into
+    backups that quietly stop carrying anything an Eidolon remembers.
+    """
+
+    _authority_fixture(tmp_path, monkeypatch)
+    _memory_fixture(monkeypatch)
+
+    with pytest.raises(TargetError, match="memory admin URL"):
+        authorities.backup({"units": list(contract.PRODUCT_UNITS), "release_id": "r1"})
+
+
+def test_memory_spaces_go_back_only_once_the_product_is_running(
+    tmp_path, monkeypatch
+) -> None:
+    """Ordering is the whole point: only a live supervisor can take a realm's
+    runner off its palace, and one process holds a palace."""
+
+    _authority_fixture(tmp_path, monkeypatch)
+    memory = _memory_fixture(monkeypatch)
+    order: list[str] = []
+    monkeypatch.setattr(host_reset, "command_stop_units", lambda units: list(units))
+
+    def _started(*_args):
+        order.append("started")
+        return {"status": "started"}
+
+    monkeypatch.setattr(host_lifecycle, "lifecycle", _started)
+    manifest = authorities.backup(BACKUP_PAYLOAD)
+    original = memory_realms.put_back
+
+    def _watched(*args, **kwargs):
+        order.append("memory")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(memory_realms, "put_back", _watched)
+
+    result = authorities.restore({**BACKUP_PAYLOAD, "manifest": manifest})
+
+    assert order == ["started", "memory"]
+    assert [realm for realm, _source in memory.restored] == ["r_owner_one"]
+    assert result["memory_spaces"] == [
+        {
+            "memory_space_id": "r_owner_one",
+            "worker_running": True,
+            "taken_at": "2026-08-24T00:00:00Z",
+        }
+    ]
+
+
+def test_a_backup_taken_before_memory_declared_a_snapshot_is_still_restorable(
+    tmp_path, monkeypatch
+) -> None:
+    """And says which state it did not carry, rather than failing or lying."""
+
+    _authority_fixture(tmp_path, monkeypatch)
+    _memory_fixture(monkeypatch)
+    monkeypatch.setattr(host_reset, "command_stop_units", lambda units: list(units))
+    monkeypatch.setattr(host_lifecycle, "lifecycle", lambda *_a: {"status": "started"})
+    manifest = authorities.backup(BACKUP_PAYLOAD)
+    del manifest["memory_spaces"]
+
+    result = authorities.restore({**BACKUP_PAYLOAD, "manifest": manifest})
+
+    assert result["status"] == "restored"
+    assert "no memory spaces" in str(result["memory_spaces"])
+
+
 def test_a_backup_from_another_host_is_refused(tmp_path, monkeypatch) -> None:
     """Restoring it would produce a machine whose Controller grants, Hub
     identity and TLS names all describe somewhere else."""
 
     _authority_fixture(tmp_path, monkeypatch)
-    payload = {"units": list(contract.PRODUCT_UNITS), "release_id": "r1"}
+    _memory_fixture(monkeypatch)
+    payload = BACKUP_PAYLOAD
     manifest = authorities.backup(payload)
     manifest["host_id"] = "ehost-ffffffffffffffffffff"
 
@@ -1922,7 +2147,8 @@ def test_a_backup_from_another_host_is_refused(tmp_path, monkeypatch) -> None:
 
 def test_a_backup_that_no_longer_matches_its_digest_is_refused(tmp_path, monkeypatch) -> None:
     _authority_fixture(tmp_path, monkeypatch)
-    payload = {"units": list(contract.PRODUCT_UNITS), "release_id": "r1"}
+    _memory_fixture(monkeypatch)
+    payload = BACKUP_PAYLOAD
     manifest = authorities.backup(payload)
     tampered = Path(manifest["directory"]) / manifest["authorities"][0]["file"]
     tampered.write_bytes(tampered.read_bytes() + b"\x00")
@@ -1936,7 +2162,8 @@ def test_a_backup_missing_an_authority_is_refused(tmp_path, monkeypatch) -> None
     different pasts at once."""
 
     _authority_fixture(tmp_path, monkeypatch)
-    payload = {"units": list(contract.PRODUCT_UNITS), "release_id": "r1"}
+    _memory_fixture(monkeypatch)
+    payload = BACKUP_PAYLOAD
     manifest = authorities.backup(payload)
     manifest["authorities"] = manifest["authorities"][:-1]
 

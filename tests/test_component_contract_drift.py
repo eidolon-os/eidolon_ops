@@ -33,6 +33,7 @@ from eidolon_ops.config import (
     SOURCE_IDS,
 )
 from eidolon_ops.hostagent import contract as host_contract
+from eidolon_ops.hostagent import memory_realms
 from eidolon_ops.hub_assets import HUB_SETTINGS_TEMPLATE
 from eidolon_ops.private_inputs import INSTALL_DESTINATION_NAMES
 from eidolon_ops.release_matrix import HUB_SETTINGS_DESTINATION, SYSTEMD_ASSET_CONTRACTS
@@ -174,6 +175,33 @@ def test_what_the_backup_leaves_out_is_still_what_it_leaves_out(topology) -> Non
         Path("/var/lib/eidolon/deployments"),
         Path("/var/lib/eidolon/livekit"),
     }
+
+
+def test_state_a_component_copies_itself_is_asked_for_at_the_route_it_declared(
+    topology,
+) -> None:
+    """The only cross-repository call a backup makes, held against its author.
+
+    ``component-action`` state is state Ops cannot copy: memory's spaces are a
+    palace whose layout is MemPalace's and an embedder identity without which a
+    copy cannot be restored. So the component produces it, and Ops calls a route
+    it does not own. A rename on the other side would otherwise surface as a
+    404 that reads like memory being down, on the day someone needed a backup.
+    """
+
+    declared = {
+        state.component_id: (state.snapshot_action, state.restore_action)
+        for state in topology.authority
+        if state.backup == "component-action"
+    }
+
+    # One today. If a second component ever declares this, the agent needs a
+    # collector for it too, and this is where that becomes visible.
+    assert set(declared) == {"eidolon_memory"}
+    assert declared["eidolon_memory"] == (
+        memory_realms.SNAPSHOT_ACTION,
+        memory_realms.RESTORE_ACTION,
+    )
 
 
 def test_every_uncovered_path_says_what_covering_it_would_take(topology) -> None:

@@ -180,6 +180,7 @@ def backup(host_id: str) -> Plan:
         host_id=host_id,
         steps=_steps(
             ("snapshot", "snapshot every authority that declares how it is snapshotted"),
+            ("memory", "ask memory for a copy of every space it holds"),
             ("fetch", "bring the snapshot to this workstation"),
         ),
         touches=frozenset({ActionKind.DATA}),
@@ -194,6 +195,7 @@ def restore(host_id: str, *, apply: bool) -> Plan:
             ("upload", "stage the backup on the Host it came from"),
             ("replace", "stop the product and replace every authority"),
             ("start", "start the product again"),
+            ("memory", "ask memory to become each copied space again"),
         ),
         destructive=DestructiveLevel.IRREVERSIBLE,
         requires_flags=frozenset({"--apply"} if apply else set()),

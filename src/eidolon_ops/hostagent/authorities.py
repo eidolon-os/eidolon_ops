@@ -10,7 +10,7 @@ import uuid
 from collections.abc import Mapping
 from pathlib import Path
 
-from . import contract, lifecycle, primitives, reset
+from . import contract, lifecycle, memory_realms, primitives, reset
 from .primitives import TargetError
 
 
@@ -28,9 +28,16 @@ def backup(payload: Mapping[str, object]) -> dict[str, object]:
     own, which means each carries its own instant: this is a set of backups,
     not one moment of the whole Host, and it does not pretend otherwise.
 
+    Memory is the exception that proves the rule: its spaces are not a file this
+    agent understands, so it asks the component that owns them for a snapshot
+    and checks the manifest that comes back. That is what took memory off the
+    uncovered list — a declaration by its owner, not an exception here.
+
     What has no declared snapshot is named in the result rather than skipped
     quietly, because a backup believed to be complete is worse than one known
-    to be partial.
+    to be partial. So is memory, on a Host where the supervisor could not
+    answer: the authorities are still worth copying, and the operator is told
+    which state this particular copy went without.
     """
 
     contract.fixed_units(payload)
@@ -72,16 +79,35 @@ def backup(payload: Mapping[str, object]) -> dict[str, object]:
                 "taken_at": primitives.now_timestamp(),
             }
         )
+    spaces: list[dict[str, object]] = []
+    uncovered = [
+        {"state": name, "path": str(path), "reason": reason}
+        for name, (path, reason) in sorted(contract.UNCOVERED_STATE.items())
+    ]
+    # Resolved before the attempt, and outside it: a payload with no memory
+    # address is this deployer's bug and should fail loudly, while a supervisor
+    # that does not answer is a fact about the Host and belongs in the report.
+    memory_admin_url = contract.fixed_memory_admin_url(payload)
+    try:
+        spaces = memory_realms.capture(
+            memory_admin_url,
+            destination / memory_realms.SPACES_DIRECTORY,
+        )
+    except TargetError as exc:
+        # Whatever was copied before the failure goes with it. A directory
+        # holding three of four spaces while the report says memory was not
+        # carried is an invitation to restore from it anyway.
+        shutil.rmtree(destination / memory_realms.SPACES_DIRECTORY, ignore_errors=True)
+        uncovered.append(memory_realms.unavailable(str(exc)))
+        uncovered.sort(key=lambda entry: str(entry["state"]))
     return {
         "status": "captured",
         "release_id": release_id,
         "host_id": host_id_or_none(),
         "directory": str(destination),
         "authorities": authorities,
-        "not_covered": [
-            {"state": name, "path": str(path), "reason": reason}
-            for name, (path, reason) in sorted(contract.UNCOVERED_STATE.items())
-        ],
+        "memory_spaces": spaces,
+        "not_covered": uncovered,
         "consistency": (
             "each authority is snapshotted on its own instant; this is not a "
             "point-in-time image of the whole Host"
@@ -98,6 +124,12 @@ def restore(payload: Mapping[str, object]) -> dict[str, object]:
 
     Services stop for this. SQLite can be read consistently while it is being
     written; it cannot be replaced underneath a process that has it open.
+
+    Memory's spaces go back last, after the product is running again, because
+    only a live supervisor can take one realm's runner off its palace. The
+    refusals that matter there are memory's own and it makes them before it
+    writes, so a space that cannot be restored leaves that space as it was
+    rather than half of two copies.
     """
 
     contract.fixed_units(payload)
@@ -155,6 +187,20 @@ def restore(payload: Mapping[str, object]) -> dict[str, object]:
     # would have to know which units to start and in what order, which is the
     # knowledge this tool exists to hold.
     started = lifecycle.lifecycle("start", payload)
+
+    spaces = manifest_value.get("memory_spaces")
+    if spaces is None:
+        # A backup taken before memory declared a snapshot. Saying so beats
+        # both silence and a failure: the authorities did go back.
+        memory_result: object = "this backup carries no memory spaces"
+    elif not isinstance(spaces, list):
+        raise TargetError("backup manifest describes memory spaces as a non-list")
+    else:
+        memory_result = memory_realms.put_back(
+            contract.fixed_memory_admin_url(payload),
+            source_directory / memory_realms.SPACES_DIRECTORY,
+            spaces,
+        )
     return {
         "status": "restored",
         "release_id": release_id,
@@ -162,5 +208,6 @@ def restore(payload: Mapping[str, object]) -> dict[str, object]:
         "restored": restored,
         "stopped": stopped,
         "started": started.get("status"),
+        "memory_spaces": memory_result,
         "not_restored": [name for name in sorted(contract.UNCOVERED_STATE)],
     }

@@ -149,8 +149,18 @@
               "owner": {"type": "string", "pattern": "^[a-z_][a-z0-9_-]{0,31}$"},
               "group": {"type": "string", "pattern": "^[a-z_][a-z0-9_-]{0,31}$"},
               "backup": {
-                "description": "sqlite-online: snapshot consistently while the owning service keeps running. quiesce-copy: stop the units in quiesce_units, copy, start again. none: not carried, and uncovered_reason must say what would be needed.",
-                "enum": ["sqlite-online", "quiesce-copy", "none"]
+                "description": "sqlite-online: snapshot consistently while the owning service keeps running. quiesce-copy: stop the units in quiesce_units, copy, start again. component-action: this component produces the copy itself through its own admin action, because its state is not a file an operator tool can understand — snapshot_action and restore_action name the routes. none: not carried, and uncovered_reason must say what would be needed.",
+                "enum": ["sqlite-online", "quiesce-copy", "component-action", "none"]
+              },
+              "snapshot_action": {
+                "description": "Required for component-action. The route Ops calls to have one copy produced, as METHOD /path with any id in braces. Declared here so a component that renames it breaks a test rather than a backup.",
+                "type": "string",
+                "pattern": "^(GET|POST) /[^\\u0000]*$"
+              },
+              "restore_action": {
+                "description": "Required for component-action. The route Ops calls to have such a copy put back. Separate from the snapshot route because the two are not symmetric: a copy can usually be taken while the service serves, and putting one back cannot be.",
+                "type": "string",
+                "pattern": "^(GET|POST) /[^\\u0000]*$"
               },
               "quiesce_units": {"type": "array", "items": {"type": "string"}},
               "uncovered_reason": {
@@ -167,6 +177,10 @@
               {
                 "if": {"properties": {"backup": {"const": "quiesce-copy"}}, "required": ["backup"]},
                 "then": {"required": ["quiesce_units"]}
+              },
+              {
+                "if": {"properties": {"backup": {"const": "component-action"}}, "required": ["backup"]},
+                "then": {"required": ["snapshot_action", "restore_action"]}
               }
             ]
           }

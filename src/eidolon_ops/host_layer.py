@@ -24,6 +24,7 @@ from eidolon_ops.hub_assets import HubAssetError, hub_settings_template
 from eidolon_ops.paths import AppAccess
 from eidolon_ops.private_inputs import INSTALL_DESTINATION_NAMES
 from eidolon_ops.readiness import product_payload
+from eidolon_ops.source_assets import PORTS
 from eidolon_ops.transport import SSHTransport
 
 #: Everything the Host-application and install-input materializers refuse with.
@@ -79,6 +80,12 @@ class HostLayer:
         payload: dict[str, object] = {
             "units": list(self.config.units),
             "port_registry": port_registry,
+            # Where memory's supervisor answers. A backup asks it for a
+            # snapshot of each space rather than copying a palace the agent
+            # does not understand, and the injected agent carries no YAML
+            # parser to read the registry above — so the assignment is sent
+            # from the one place that owns it.
+            "memory_admin_url": f"http://127.0.0.1:{PORTS['memory_admin']}",
             # What this Host is asked to attest, and what it needs to attest
             # it. The check set has one author; a copy compiled into the
             # injected agent would be the one nobody thinks to update.

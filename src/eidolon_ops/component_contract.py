@@ -117,6 +117,11 @@ class AuthorityState:
     component_id: str
     quiesce_units: tuple[str, ...] = ()
     uncovered_reason: str | None = None
+    #: Only for ``component-action``: the routes Ops calls to have a copy made
+    #: and put back. Held here so a rename in the owning component fails a test
+    #: instead of a backup.
+    snapshot_action: str | None = None
+    restore_action: str | None = None
 
     @property
     def is_covered(self) -> bool:
@@ -173,6 +178,8 @@ class ComponentContract:
                 component_id=self.component_id,
                 quiesce_units=tuple(entry.get("quiesce_units", ())),
                 uncovered_reason=entry.get("uncovered_reason"),
+                snapshot_action=entry.get("snapshot_action"),
+                restore_action=entry.get("restore_action"),
             )
             for entry in self.document.get("state", {}).get("authority", ())
         )

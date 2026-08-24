@@ -11,6 +11,7 @@ import os
 import re
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from urllib.parse import urlparse
 
 from . import primitives
 from .primitives import TargetError
@@ -249,16 +250,20 @@ BACKED_UP_AUTHORITIES = {
     ),
 }
 
+#: Where memory keeps its spaces. Not in ``UNCOVERED_STATE`` any more: memory
+#: declares a snapshot of its own now, and the backup asks it for one rather
+#: than copying a palace this agent does not understand. The path is still named
+#: here because a backup that could not reach the supervisor says which state it
+#: went without.
+MEMORY_STATE_ROOT = Path("/var/lib/eidolon/memory")
+
 #: State a backup does not carry, named rather than quietly omitted. Each of
 #: these needs its owning component to say how it is copied and how that copy
-#: is checked; guessing at a vector index or a JetStream directory would
-#: produce a backup that restores into something subtly wrong, which is worse
-#: than one that says what it left out.
+#: is checked; guessing at a JetStream directory or a media store would produce
+#: a backup that restores into something subtly wrong, which is worse than one
+#: that says what it left out. Memory was the first entry and is now the proof
+#: that the fix is a declaration by the owning component, not an exception here.
 UNCOVERED_STATE = {
-    "memory": (
-        Path("/var/lib/eidolon/memory"),
-        "palace, vector index and knowledge graph have no declared snapshot",
-    ),
     "nats": (
         Path("/var/lib/eidolon/nats/jetstream"),
         "JetStream stores are not a file copy while the server is running",
@@ -505,6 +510,22 @@ def fixed_port_registry(payload: Mapping[str, object]) -> str:
     if not isinstance(value, str) or not value.strip():
         raise TargetError("Host port registry is missing from the operation payload")
     return value
+
+def fixed_memory_admin_url(payload: Mapping[str, object]) -> str:
+    """Where memory's supervisor answers, as the operator's registry has it.
+
+    Sent rather than derived here for the same reason the port registry is: the
+    assignment has one author on the operator side, and a copy this agent
+    computed would be the one nobody thinks to update when a port moves.
+    """
+
+    value = payload.get("memory_admin_url")
+    if not isinstance(value, str) or not value.strip():
+        raise TargetError("memory admin URL is missing from the operation payload")
+    parsed = urlparse(value.strip())
+    if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost"}:
+        raise TargetError(f"memory admin URL must be loopback http: {value}")
+    return value.strip().rstrip("/")
 
 def fixed_release_id(payload: Mapping[str, object], *, required: bool = True) -> str | None:
     value = payload.get("release_id")
