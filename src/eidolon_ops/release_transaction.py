@@ -303,6 +303,13 @@ class ReleaseTransaction:
             committed = self.bundles.reclaim(release_id, phase="commit")
             self.bundles.require_reclamation(committed, "committed")
             phases.append({"phase": "release_reclaim_commit", "result": committed})
+            phases.begin("local_bundle_cleanup")
+            phases.append(
+                {
+                    "phase": "local_bundle_cleanup",
+                    "result": self.bundles.cleanup_local_after_success(release_id),
+                }
+            )
             return {
                 "status": "activated",
                 "release_id": release_id,
@@ -662,6 +669,13 @@ class ReleaseTransaction:
         committed = self.bundles.reclaim(release_id, phase="commit")
         self.bundles.require_reclamation(committed, "committed")
         phases.append({"phase": "release_reclaim_commit", "result": committed})
+        phases.begin("local_bundle_cleanup")
+        phases.append(
+            {
+                "phase": "local_bundle_cleanup",
+                "result": self.bundles.cleanup_local_after_success(release_id),
+            }
+        )
         return {
             "status": "installed",
             "release_id": release_id,

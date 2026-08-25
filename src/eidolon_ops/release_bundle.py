@@ -9,6 +9,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
+import time
 from pathlib import Path
 
 from eidolon_ops.config import SOURCE_IDS, OperationsConfig
@@ -50,6 +52,7 @@ _UPLOAD_GUARD_STATES = {"ready_for_upload", "resume_upload", "ready_for_prepare"
 # estimate so a release cannot consume the space needed for logs and state.
 _TARGET_EXPANSION_FACTOR = 4
 _CAPACITY_RESERVE_BYTES = 1024**3
+_LOCAL_BUNDLE_RETENTION_SECONDS = 48 * 60 * 60
 
 
 class BundleTransfer:
@@ -73,6 +76,100 @@ class BundleTransfer:
         if override is not None:
             return override
         return ensure_workstation_uv(self.config.workspace.toolchain_root)
+
+    def cleanup_local_after_success(
+        self,
+        release_id: str,
+        *,
+        now: float | None = None,
+        retention_seconds: int = _LOCAL_BUNDLE_RETENTION_SECONDS,
+    ) -> dict[str, object]:
+        """Remove a terminal release output and expired resumable outputs.
+
+        This is deliberately called only after the Host has committed a
+        successful install or activation.  Failed and dry-run transactions keep
+        their bundle for ``--resume``; they become eligible for the bounded
+        fallback sweep only after the retention window.
+
+        Cleanup is best effort.  A release that is healthy on the Host must not
+        be reported as failed merely because its workstation output could not be
+        removed.
+        """
+
+        current = self._remove_local_bundle(release_id)
+        cutoff = (time.time() if now is None else now) - retention_seconds
+        expired: list[dict[str, object]] = []
+        failures: list[dict[str, str]] = []
+        if current["status"] == "cleanup_failed":
+            failures.append(
+                {"path": str(current["path"]), "error": str(current["error"])}
+            )
+        root = self.config.workspace.bundle_root
+        try:
+            candidates = tuple(root.iterdir()) if root.is_dir() else ()
+        except OSError as exc:
+            failures.append({"path": str(root), "error": str(exc)})
+            candidates = ()
+        for candidate in candidates:
+            if (
+                candidate.name == release_id
+                or candidate.name.startswith(".")
+                or candidate.name == _KEPT_DEPENDENCY_CACHE
+                or candidate.is_symlink()
+                or not candidate.is_dir()
+                or not any((candidate / name).exists() for name in _BUNDLE_SHAPE)
+            ):
+                continue
+            try:
+                newest_mtime = candidate.lstat().st_mtime
+                for path in candidate.rglob("*"):
+                    newest_mtime = max(newest_mtime, path.lstat().st_mtime)
+            except OSError as exc:
+                failures.append({"path": str(candidate), "error": str(exc)})
+                continue
+            if newest_mtime > cutoff:
+                continue
+            result = self._remove_local_bundle(candidate.name)
+            if result["status"] == "removed":
+                expired.append(result)
+            elif result["status"] == "cleanup_failed":
+                failures.append(
+                    {"path": str(result["path"]), "error": str(result["error"])}
+                )
+        return {
+            "status": "cleaned" if not failures else "cleanup_incomplete",
+            "current": current,
+            "expired": expired,
+            "retention_seconds": retention_seconds,
+            "failures": failures,
+        }
+
+    def _remove_local_bundle(self, release_id: str) -> dict[str, object]:
+        output = self.config.workspace.bundle_root / release_id
+        if output.is_symlink():
+            return {
+                "status": "cleanup_failed",
+                "path": str(output),
+                "error": "refusing to remove a symlinked bundle",
+            }
+        if not output.exists():
+            return {"status": "absent", "path": str(output), "bytes": 0}
+        if not output.is_dir():
+            return {
+                "status": "cleanup_failed",
+                "path": str(output),
+                "error": "bundle output is not a directory",
+            }
+        try:
+            size = self._bundle_bytes(output)
+            shutil.rmtree(output)
+        except OSError as exc:
+            return {
+                "status": "cleanup_failed",
+                "path": str(output),
+                "error": str(exc),
+            }
+        return {"status": "removed", "path": str(output), "bytes": size}
 
     def prepare(
         self,

@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import os
 import tarfile
 from ipaddress import IPv4Address
 from pathlib import Path
@@ -758,6 +759,34 @@ def test_deploy_defaults_to_prepare_and_dry_run(setup_controller) -> None:
     assert reclaim["phase"] == "prepare"
     assert reclaim["required_bytes"] > 0
     assert reclaim["reserve_bytes"] == 1024**3
+    assert (controller.config.workspace.bundle_root / "r1").is_dir()
+
+
+def test_successful_deploy_removes_current_and_expired_local_bundles(
+    setup_controller,
+) -> None:
+    controller, _runner, _transport = setup_controller
+    root = controller.config.workspace.bundle_root
+    expired = root / "expired-release"
+    expired.mkdir(parents=True)
+    expired_manifest = expired / "bundle.json"
+    expired_manifest.write_text("{}", encoding="utf-8")
+    os.utime(expired_manifest, (1, 1))
+    os.utime(expired, (1, 1))
+    recent = root / "recent-release"
+    recent.mkdir()
+    (recent / "bundle.json").write_text("{}", encoding="utf-8")
+
+    result = controller.deploy(release_id="r1", resume=False, activate=True)
+
+    cleanup = result["phases"][-1]
+    assert cleanup["phase"] == "local_bundle_cleanup"
+    assert cleanup["result"]["status"] == "cleaned"
+    assert cleanup["result"]["current"]["status"] == "removed"
+    assert [item["path"] for item in cleanup["result"]["expired"]] == [str(expired)]
+    assert not (root / "r1").exists()
+    assert not expired.exists()
+    assert recent.is_dir()
 
 
 def test_deploy_capacity_gate_fails_before_upload(setup_controller) -> None:
@@ -793,6 +822,7 @@ def test_deploy_resume_activate_skips_transfer(setup_controller) -> None:
         "doctor",
         "app_ready",
         "release_reclaim_commit",
+        "local_bundle_cleanup",
     ]
     assert transport.uploads == []
     assert not any(len(call) > 1 and call[1] == "bundle" for call in runner.calls)
@@ -845,6 +875,7 @@ def test_deploy_prestages_host_application_before_component_activation(
         "app_ready",
         "cutover_receipt",
         "release_reclaim_commit",
+        "local_bundle_cleanup",
     ]
 
 
@@ -1299,6 +1330,9 @@ def test_install_apply_stages_exact_files_and_cleans(setup_controller) -> None:
     result = controller.install(release_id="r1", resume=False, apply=True)
 
     assert result["status"] == "installed"
+    assert result["phases"][-1]["phase"] == "local_bundle_cleanup"
+    assert result["phases"][-1]["result"]["current"]["status"] == "removed"
+    assert not (controller.config.workspace.bundle_root / "r1").exists()
     destinations = [item[1] for item in transport.uploads if "eidolon-secrets" in item[1]]
     assert destinations == [
         "/var/tmp/eidolon-secrets-r1/data.env",
@@ -1320,6 +1354,31 @@ def test_install_apply_stages_exact_files_and_cleans(setup_controller) -> None:
     assert actions[-3:] == ["install", "cleanup-stage", "reclaim-releases"]
     assert transport.agent_calls[-1][1]["phase"] == "commit"
     assert actions[0] == "foundation-doctor"
+
+
+def test_local_bundle_cleanup_failure_does_not_change_successful_install(
+    setup_controller, monkeypatch
+) -> None:
+    controller, _runner, _transport = setup_controller
+    original = controller.bundles._remove_local_bundle
+
+    def fail_current(release_id: str):
+        if release_id == "r1":
+            return {
+                "status": "cleanup_failed",
+                "path": str(controller.config.workspace.bundle_root / release_id),
+                "error": "busy",
+            }
+        return original(release_id)
+
+    monkeypatch.setattr(controller.bundles, "_remove_local_bundle", fail_current)
+
+    result = controller.install(release_id="r1", resume=False, apply=True)
+
+    assert result["status"] == "installed"
+    cleanup = result["phases"][-1]["result"]
+    assert cleanup["status"] == "cleanup_incomplete"
+    assert cleanup["failures"][0]["error"] == "busy"
 
 
 def test_unified_pi_stage_renders_host_bound_application_assets(config) -> None:

@@ -155,6 +155,7 @@ def install(
                 ("prepare", "build the release natively on the Host"),
                 ("install", "create identities, inputs, the Data baseline and the units"),
                 ("secret_cleanup", "remove the private staging directory"),
+                ("local_bundle_cleanup", "remove terminal and expired workstation bundles"),
             ),
         ),
         destructive=(
@@ -180,6 +181,7 @@ def deploy(host_id: str, *, activate: bool) -> Plan:
             ("doctor", "require the release's own health gate"),
             ("app_ready", "require every declared App readiness fact"),
             ("health_gate_rollback", "restore the exact snapshot if a gate fails"),
+            ("local_bundle_cleanup", "remove terminal and expired workstation bundles"),
         ),
         destructive=DestructiveLevel.REVERSIBLE,
         requires_flags=frozenset({"--activate"} if activate else set()),

@@ -132,6 +132,12 @@ Python 依赖仍由各仓库的 frozen `uv.lock` 精确
 约束，但 Linux/aarch64 artifact 在 Mac 上预取、压缩、哈希后随 bundle 传输；Pi prepare 强制 offline，
 不会因弱网重复拉包。HTTPS index URL 与 uv/build-tool 版本进入 bundle 门禁，不能在目标端漂移。SSH
 强制 BatchMode、独立 key、`StrictHostKeyChecking=yes` 和显式 known_hosts。
+
+工作站 bundle 只服务于封装、断点续传和目标端 prepare：dry-run、失败和未完成事务会保留本地输出供
+`--resume` 使用；成功安装或激活在 Host 健康门禁和 release reclaim 提交后删除本次输出，并顺带清理
+超过 48 小时的旧输出。清理失败作为操作证据报告，但不会把已经成功的部署改判为失败。可复用的 uv
+cache 位于持久 toolchain root，不参与 bundle 清理。
+
 示例见 [`config/eidolon-pi.example.toml`](config/eidolon-pi.example.toml)。
 
 ## 统一路径契约
