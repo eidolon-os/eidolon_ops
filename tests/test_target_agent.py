@@ -2511,3 +2511,147 @@ def test_a_plaintext_livekit_origin_naming_somewhere_else_is_refused(monkeypatch
     ):
         with pytest.raises(TargetError, match="LiveKit origin is invalid"):
             app_contract.fixed_app({"app": _app_contract(livekit_client_url=origin)})
+
+
+def _publish_payload(address: str = "192.168.3.206") -> dict[str, object]:
+    return {"app": _app_contract(lan_ipv4=address)}
+
+
+def _hosts_file(root: Path) -> Path:
+    return root / "etc/avahi/hosts"
+
+
+def test_the_host_registers_the_hub_name_it_advertises(monkeypatch, tmp_path: Path) -> None:
+    """The advertisement and the address answer must come from one owner.
+
+    The Hub advertises an SRV target of ``eidolon-hub-<host>.local`` and
+    nothing published an address for it. A device booting fresh got no mDNS
+    answer, fell through to unicast DNS, and its router returned an unrelated
+    LAN address with port 9443 closed — after which the device reported only
+    "failed to connect", forever.
+    """
+
+    reloads: list[tuple[str, ...]] = []
+    monkeypatch.setattr(primitives, "chown_path", lambda *_a: None)
+    monkeypatch.setattr(
+        primitives,
+        "checked",
+        lambda _label, *command, **_k: reloads.append(command)
+        or subprocess.CompletedProcess((), 0, "", ""),
+    )
+
+    changed = host_application.publish_hub_hostname(_publish_payload(), root=tmp_path)
+
+    assert changed == ["/etc/avahi/hosts"]
+    assert _hosts_file(tmp_path).read_text(encoding="utf-8") == (
+        "192.168.3.206 eidolon-hub-0123456789abcdefabcd.local\n"
+    )
+    assert reloads == [(("/usr/bin/systemctl", "reload", "avahi-daemon.service"),)]
+
+
+def test_a_host_with_no_app_contract_registers_nothing(monkeypatch, tmp_path: Path) -> None:
+    """Production Hosts without the app layer have no Hub name to answer for."""
+
+    monkeypatch.setattr(
+        primitives, "checked", lambda *_a, **_k: pytest.fail("nothing to reload")
+    )
+
+    assert host_application.publish_hub_hostname({"units": []}, root=tmp_path) == []
+    assert not _hosts_file(tmp_path).exists()
+
+
+def test_registering_the_same_address_again_leaves_the_responder_alone(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(primitives, "chown_path", lambda *_a: None)
+    reloads: list[object] = []
+    monkeypatch.setattr(
+        primitives,
+        "checked",
+        lambda *_a, **_k: reloads.append(1) or subprocess.CompletedProcess((), 0, "", ""),
+    )
+
+    host_application.publish_hub_hostname(_publish_payload(), root=tmp_path)
+    again = host_application.publish_hub_hostname(_publish_payload(), root=tmp_path)
+
+    assert again == []
+    assert len(reloads) == 1
+
+
+def test_a_moved_address_replaces_the_old_answer_rather_than_joining_it(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """A stale second answer is worse than none: it points devices at whatever
+    machine now holds that address, and the TLS pin then fails opaquely."""
+
+    monkeypatch.setattr(primitives, "chown_path", lambda *_a: None)
+    monkeypatch.setattr(
+        primitives, "checked", lambda *_a, **_k: subprocess.CompletedProcess((), 0, "", "")
+    )
+    host_application.publish_hub_hostname(_publish_payload("192.168.3.206"), root=tmp_path)
+
+    host_application.publish_hub_hostname(_publish_payload("192.168.3.77"), root=tmp_path)
+
+    assert _hosts_file(tmp_path).read_text(encoding="utf-8") == (
+        "192.168.3.77 eidolon-hub-0123456789abcdefabcd.local\n"
+    )
+
+
+def test_registrations_this_host_does_not_own_are_kept(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(primitives, "chown_path", lambda *_a: None)
+    monkeypatch.setattr(
+        primitives, "checked", lambda *_a, **_k: subprocess.CompletedProcess((), 0, "", "")
+    )
+    path = _hosts_file(tmp_path)
+    path.parent.mkdir(parents=True)
+    path.write_text("10.0.0.9 something-else.local\n", encoding="utf-8")
+
+    host_application.publish_hub_hostname(_publish_payload(), root=tmp_path)
+
+    assert path.read_text(encoding="utf-8").splitlines() == [
+        "10.0.0.9 something-else.local",
+        "192.168.3.206 eidolon-hub-0123456789abcdefabcd.local",
+    ]
+
+
+
+def test_delivering_the_host_layer_registers_the_hub_name(monkeypatch, tmp_path: Path) -> None:
+    """Registration has to happen on the path that actually runs on a deploy.
+
+    Publishing correctly when called directly is not the same fact as being
+    called. Nothing asserted the second one, which is how a Host advertised a
+    name it never answered for across many deploys.
+    """
+
+    hosts = tmp_path / "avahi-hosts"
+    monkeypatch.setattr(host_application, "_AVAHI_HOSTS", hosts)
+    monkeypatch.setattr(primitives, "chown_path", lambda *_a: None)
+    monkeypatch.setattr(
+        primitives, "checked", lambda *_a, **_k: subprocess.CompletedProcess((), 0, "", "")
+    )
+    monkeypatch.setattr(contract, "ensure_host_path_contract", lambda *_a: None)
+    monkeypatch.setattr(host_application, "remove_legacy_system_assets", lambda *_a: [])
+    monkeypatch.setattr(host_application, "_validate_hub_settings_compatibility", lambda *_a: None)
+    monkeypatch.setattr(contract, "REFRESHABLE_HOST_LAYER_INPUTS", ())
+    monkeypatch.setattr(contract, "INSTALL_INPUTS", {})
+    monkeypatch.setattr(
+        contract,
+        "OPTIONAL_HOST_APPLICATION_INPUTS",
+        {"commissioning-secrets.json": (tmp_path / "absent.json", "root", "root", 0o640)},
+    )
+    stage = contract.VAR_TMP / "eidolon-secrets-r1"
+    stage.mkdir(parents=True, exist_ok=True)
+
+    result = host_application.refresh_host_application(
+        {
+            "units": list(contract.PRODUCT_UNITS),
+            "release_id": "r1",
+            "port_registry": "admin:\n  api:\n    port: 9000\n",
+            "app": _app_contract(lan_ipv4="192.168.3.206"),
+        }
+    )
+
+    assert str(hosts) in result["changed"]
+    assert hosts.read_text(encoding="utf-8") == (
+        "192.168.3.206 eidolon-hub-0123456789abcdefabcd.local\n"
+    )

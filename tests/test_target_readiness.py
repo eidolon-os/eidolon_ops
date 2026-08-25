@@ -80,6 +80,10 @@ def _materialize(monkeypatch, root: Path, app: dict[str, object]) -> None:
     monkeypatch.setattr(probe, "LOCAL_API_ENV", root / "local-api.env")
     monkeypatch.setattr(probe, "CHANNEL_ENV", root / "channel.env")
     monkeypatch.setattr(probe, "MDNS_DEFINITION", root / "hub.yaml")
+    monkeypatch.setattr(probe, "AVAHI_STATIC_HOSTS", root / "avahi-hosts")
+    (root / "avahi-hosts").write_text(
+        f"{app['lan_ipv4']} {app['hub_hostname']}\n", encoding="utf-8"
+    )
 
 
 @pytest.fixture

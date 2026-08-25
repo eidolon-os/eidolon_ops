@@ -12,8 +12,24 @@ import uuid
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
-from . import contract, primitives
+from . import app_contract, contract, primitives
 from .primitives import TargetError
+
+#: Where this Host tells its own ``.local`` responder about the Hub name.
+#:
+#: The Hub advertises ``_eidolon-owner._tcp`` with an SRV target of
+#: ``eidolon-hub-<host>.local`` — a name devices must resolve, pin TLS against,
+#: and reach. Nothing published an address for it. Clients that happened to
+#: hold a cached answer worked; a device booting fresh got no mDNS answer, fell
+#: through to unicast DNS, and its router handed back an unrelated LAN address
+#: whose port 9443 was closed. The device then reported only
+#: "failed to connect", forever.
+#:
+#: avahi-daemon owns ``.local`` on this Host, so the name is registered there,
+#: from the address this Host is observed to answer on — never from a declared
+#: value carried across from the workstation, which is how it would go stale.
+_AVAHI_HOSTS = Path("/etc/avahi/hosts")
+_AVAHI_UNIT = "avahi-daemon.service"
 
 #: The Host layer Ops owns on top of a release: it fronts the Hub on the LAN,
 #: so the Hub declares Wants= on it and nothing here starts it by hand.
@@ -153,8 +169,64 @@ def refresh_host_application(payload: Mapping[str, object]) -> dict[str, object]
             removed.append(str(destination_value))
     if changed:
         primitives.checked("systemd reload", ("/usr/bin/systemctl", "daemon-reload"), timeout=120)
+    changed.extend(publish_hub_hostname(payload))
     removed.extend(remove_legacy_system_assets())
     return {"status": "refreshed", "changed": changed, "removed": removed}
+
+
+def publish_hub_hostname(
+    payload: Mapping[str, object], root: Path = Path("/")
+) -> list[str]:
+    """Register the Hub's advertised name with this Host's ``.local`` responder.
+
+    The advertisement and the address answer are two halves of one fact — where
+    a device should send its first request — and they were owned by different
+    components: the Hub process advertised the SRV target, and nothing at all
+    answered for that name. Both halves live here now, derived from the same
+    app contract, so a Host cannot advertise a name it does not answer for.
+
+    Written from the observed address on every refresh rather than kept, so an
+    address change is corrected by the next deploy instead of persisting as a
+    confidently wrong answer.
+    """
+
+    app = app_contract.optional_app(payload)
+    if app is None:
+        return []
+    hostname = str(app["hub_hostname"])
+    address = str(app["lan_ipv4"])
+    if not hostname.endswith(".local") or "/" in hostname or " " in hostname:
+        raise TargetError(f"Hub hostname is not a bare .local name: {hostname}")
+    path = primitives.host_path(root, _AVAHI_HOSTS)
+    if path.is_symlink() or (path.exists() and not path.is_file()):
+        raise TargetError(f"static mDNS host file is unsafe: {_AVAHI_HOSTS}")
+    # Every line this Host owns is rewritten; lines for other names are kept
+    # so the file stays usable by anything else the operator put there.
+    kept: list[str] = []
+    if path.is_file():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            fields = line.split()
+            if len(fields) >= 2 and fields[1] == hostname:
+                continue
+            kept.append(line)
+    desired = "\n".join([*kept, f"{address} {hostname}"]).strip("\n") + "\n"
+    if path.is_file() and path.read_text(encoding="utf-8") == desired:
+        return []
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        temporary.write_text(desired, encoding="utf-8")
+        os.chmod(temporary, 0o644)
+        primitives.chown_path(temporary, "root", "root")
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    primitives.checked(
+        "mDNS responder reload",
+        ("/usr/bin/systemctl", "reload", _AVAHI_UNIT),
+        timeout=60,
+    )
+    return [str(_AVAHI_HOSTS)]
 
 
 def _validate_hub_settings_compatibility(stage: Path, release_id: str) -> None:

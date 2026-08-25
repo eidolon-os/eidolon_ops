@@ -73,6 +73,7 @@ class ReadinessFact(StrEnum):
     BACKEND_HEALTHY = "backend_healthy"
     LAN_ADDRESS_OBSERVED = "lan_address_observed"
     LAN_NAME_RESOLVES = "lan_name_resolves"
+    HUB_NAME_PUBLISHED_BY_HOST = "hub_name_published_by_host"
     HOST_IDENTITY_MATERIAL = "host_identity_material"
     BOOTSTRAP_PREFLIGHT = "bootstrap_preflight"
     BOOTSTRAP_CONTROL_SOCKET = "bootstrap_control_socket"
@@ -126,6 +127,16 @@ READINESS_CONTRACT: tuple[ReadinessCheck, ...] = (
     _both(
         ReadinessFact.LAN_NAME_RESOLVES,
         "the Host-bound name resolves to that address in a live mDNS query",
+    ),
+    # Declared for the Linux Host only. The fact is platform-independent — a
+    # device must get an address answer for the SRV target from the Host's own
+    # responder — but the way it is established is not: this is avahi's static
+    # host registration. The macOS product path answers to mDNSResponder and
+    # needs its own mechanism before it can attest the same thing.
+    _only(
+        HostKind.PRODUCT,
+        ReadinessFact.HUB_NAME_PUBLISHED_BY_HOST,
+        "this Host's own mDNS responder answers for the name the Hub advertises",
     ),
     _both(
         ReadinessFact.HOST_IDENTITY_MATERIAL,
