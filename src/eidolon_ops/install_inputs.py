@@ -98,6 +98,7 @@ def initialize_install_inputs(
                 "sqlite+aiosqlite:////var/lib/eidolon/eidolon-system.sqlite3"
             ),
             "EIDOLON_DATA_OBJECT_STORE_PATH": "/var/lib/eidolon/objects",
+            "EIDOLON_DATA_AUDIT_NATS_URL": "nats://127.0.0.1:4222",
         },
         "hub.env": {
             "EIDOLON_HUB_MANAGEMENT_JWT_SECRET": hub_jwt_secret,
@@ -222,6 +223,7 @@ DECLARED_ENV_KEYS: dict[str, set[str]] = {
         "EIDOLON_DATA_SQLITE_PATH",
         "EIDOLON_DATA_DATABASE_URL",
         "EIDOLON_DATA_OBJECT_STORE_PATH",
+        "EIDOLON_DATA_AUDIT_NATS_URL",
     },
     "hub.env": {
         "EIDOLON_HUB_MANAGEMENT_JWT_SECRET",
@@ -271,6 +273,15 @@ FIXED_ENV_VALUES: dict[str, str] = {
         "sqlite+aiosqlite:////var/lib/eidolon/eidolon-system.sqlite3"
     ),
     "EIDOLON_DATA_OBJECT_STORE_PATH": "/var/lib/eidolon/objects",
+    # Where the Data authority publishes governance facts for the global audit
+    # stream. A fixed local address like the others here: the bus runs on this
+    # Host and nothing about it is a secret.
+    #
+    # It matters that it is *declared*. Without it that authority publishes
+    # nothing — and, by design, purges nothing either, so the Owner's history
+    # stays readable and the failure is invisible. A silent failure that looks
+    # like working is exactly what this table exists to catch.
+    "EIDOLON_DATA_AUDIT_NATS_URL": "nats://127.0.0.1:4222",
     "EIDOLON_ADMIN_SYSTEM_DIRECTORY_UDS": "/run/eidolon/system.sock",
     "EIDOLON_LOCAL_API_ADMIN_BASE_URL": "http://127.0.0.1:9000",
     "EIDOLON_LOCAL_API_LIFECYCLE_WORKFLOW_SOCKET": "/run/eidolon-lifecycle/workflow.sock",
