@@ -546,17 +546,28 @@ class ReleaseTransaction:
     ) -> None:
         try:
             phases.begin("health_gate_rollback")
-            restored = self._remote_json(
+            restored = self._rollback_json(
                 "post-activation gate release rollback",
                 (cli, "rollback", descriptor, str(snapshot)),
-                timeout=_REMOTE_ACTIVATION_TIMEOUT_SECONDS,
             )
+            if restored.get("status") == "restored_not_ready":
+                # Two different Hosts to an operator. Here the snapshot is back
+                # and the release it went back to will not start, so the thing
+                # to look at is that release — not a Host in an unknown state.
+                phases.append({"phase": "health_gate_rollback", "result": restored})
+                raise OperationsError(
+                    f"post-activation health gate failed ({gate_error}); the exact release "
+                    "snapshot was restored, but the restored release did not become ready: "
+                    f"{restored.get('error')}"
+                )
             if restored.get("status") != "restored":
                 raise OperationsError("release rollback returned invalid recovery evidence")
+        except OperationsError:
+            raise
         except Exception as rollback_exc:
             raise OperationsError(
-                f"post-activation health gate failed ({gate_error}) and rollback failed: "
-                f"{rollback_exc}"
+                f"post-activation health gate failed ({gate_error}) and rollback failed, so the "
+                f"Host is in a state nobody has established: {rollback_exc}"
             ) from rollback_exc
         phases.append({"phase": "health_gate_rollback", "result": restored})
         raise OperationsError(
@@ -716,6 +727,23 @@ class ReleaseTransaction:
     ) -> dict[str, object]:
         result = self.transport.run(command, sudo=True, timeout=timeout, operation=operation)
         return parse_json(result.stdout, operation)
+
+    def _rollback_json(
+        self, operation: str, command: tuple[str, ...]
+    ) -> dict[str, object]:
+        """Keep the activator's receipt when it restored but could not start."""
+
+        try:
+            return self._remote_json(
+                operation, command, timeout=_REMOTE_ACTIVATION_TIMEOUT_SECONDS
+            )
+        except ProcessError as exc:
+            if exc.result.returncode != 5:
+                raise
+            receipt = parse_json(exc.result.stderr, operation)
+            if receipt.get("status") != "restored_not_ready":
+                raise
+            return receipt
 
     def _activation_json(
         self,

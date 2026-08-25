@@ -95,6 +95,7 @@ OPERATIONS: dict[str, Callable[[HostController, argparse.Namespace], object]] = 
         activate=a.activate,
         cutover_mode=a.cutover_mode,
     ),
+    "abandon": lambda controller, a: controller.abandon(release_id=a.release_id),
     "rollback": lambda controller, a: controller.rollback(
         release_id=a.release_id, snapshot=a.snapshot, apply=a.apply
     ),
@@ -269,6 +270,12 @@ def _parser() -> argparse.ArgumentParser:
     reset = operations.add_parser("reset")
     reset.add_argument("--wipe-authority-data", action="store_true")
     reset.add_argument("--apply", action="store_true")
+    abandon = operations.add_parser(
+        "abandon",
+        help="give up a prepared candidate nobody will finish (never an activated one)",
+    )
+    abandon.add_argument("--release-id", required=True)
+
     for name in ("deploy", "update"):
         deploy = operations.add_parser(name)
         deploy.add_argument("--release-id", required=True)

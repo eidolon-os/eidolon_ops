@@ -159,9 +159,7 @@ def test_reclamation_rejects_path_attacks(tmp_path: Path, attack: str) -> None:
     if attack == "release_symlink":
         (tmp_path / "opt/eidolon/releases/evil").symlink_to(outside, target_is_directory=True)
     elif attack == "staging_symlink":
-        (tmp_path / "var/tmp/eidolon-release-evil").symlink_to(
-            outside, target_is_directory=True
-        )
+        (tmp_path / "var/tmp/eidolon-release-evil").symlink_to(outside, target_is_directory=True)
     else:
         _link(tmp_path, "eidolon_kernel", "active").unlink()
         (tmp_path / "opt/eidolon/current/eidolon_kernel").symlink_to(
@@ -184,9 +182,7 @@ def test_reclamation_rejects_non_conventional_release_children(tmp_path: Path) -
 
 
 @pytest.mark.parametrize("drift", ["directory-mode", "file-mode", "symlink"])
-def test_secret_reclamation_fails_closed_on_private_stage_drift(
-    tmp_path: Path, drift: str
-) -> None:
+def test_secret_reclamation_fails_closed_on_private_stage_drift(tmp_path: Path, drift: str) -> None:
     _host(tmp_path, ("active", "candidate"))
     _link(tmp_path, "eidolon_kernel", "active")
     first = _stage(tmp_path, "secrets", "first")
@@ -318,15 +314,15 @@ def test_prepared_candidate_needs_only_operating_reserve(tmp_path: Path) -> None
 
 def test_incomplete_candidate_markers_are_rejected(tmp_path: Path) -> None:
     _host(tmp_path, ("candidate",))
-    (tmp_path / "opt/eidolon/releases/candidate/release.json").write_text(
-        "{}", encoding="utf-8"
-    )
+    (tmp_path / "opt/eidolon/releases/candidate/release.json").write_text("{}", encoding="utf-8")
 
     with pytest.raises(TargetError, match="markers"):
         reclamation.reclaim(_payload("candidate"), root=tmp_path)
 
 
-@pytest.mark.parametrize("state_shape", ["symlink", "unreadable", "other_candidate"])
+# The "another candidate" shape moved to its own test, which asserts the named
+# refusal and the way out rather than the old unnamed wording.
+@pytest.mark.parametrize("state_shape", ["symlink", "unreadable"])
 def test_reclamation_state_fails_closed(tmp_path: Path, state_shape: str) -> None:
     state = tmp_path / contract.RECLAMATION_STATE.relative_to("/")
     state.parent.mkdir(parents=True)
@@ -336,12 +332,6 @@ def test_reclamation_state_fails_closed(tmp_path: Path, state_shape: str) -> Non
     elif state_shape == "unreadable":
         state.write_text("not-json", encoding="utf-8")
         match = "unreadable"
-    else:
-        state.write_text(
-            json.dumps({"schema_version": 1, "candidate_release_id": "other"}),
-            encoding="utf-8",
-        )
-        match = "another release candidate"
 
     with pytest.raises(TargetError, match=match):
         reclamation.reclaim(_payload("candidate"), root=tmp_path)
@@ -374,3 +364,58 @@ def test_deletion_candidates_require_conventional_real_directories(tmp_path: Pat
     (tmp_path / "var/tmp/eidolon-release-!invalid").mkdir()
     with pytest.raises(TargetError, match="non-conventional"):
         reclamation.reclaim(_payload("candidate"), root=tmp_path)
+
+
+def test_a_blocking_candidate_is_named_and_the_way_out_is_stated(tmp_path: Path) -> None:
+    """A driver that dies leaves this marker, and nobody could find out which.
+
+    Every later operation was refused with "another release candidate is in
+    flight" and nothing else. Recovering the named candidate needs the
+    workspace checked out at the commit it was sealed from, so a killed deploy
+    could leave a Host with no forward move an operator could discover.
+    """
+
+    _host(tmp_path, ("old", "stranded", "wanted"))
+    _link(tmp_path, "eidolon_kernel", "old")
+    reclamation.reclaim(_payload("stranded"), root=tmp_path)
+
+    with pytest.raises(TargetError) as refused:
+        reclamation.reclaim(_payload("wanted"), root=tmp_path)
+
+    message = str(refused.value)
+    assert "stranded" in message
+    assert "wanted" in message
+    assert "abandon --release-id stranded" in message
+
+
+def test_a_stranded_candidate_can_be_abandoned_and_then_the_host_moves_on(
+    tmp_path: Path,
+) -> None:
+    """Abandoning is the forward move, and it is not a rollback.
+
+    The active release stays: the abort phase refuses to touch a candidate the
+    current links reference, so what is given up is only the prepared one.
+    """
+
+    _host(tmp_path, ("old", "stranded", "wanted"))
+    _link(tmp_path, "eidolon_kernel", "old")
+    reclamation.reclaim(_payload("stranded"), root=tmp_path)
+
+    abandoned = reclamation.reclaim(_payload("stranded", "abort"), root=tmp_path)
+    after = reclamation.reclaim(_payload("wanted"), root=tmp_path)
+
+    assert abandoned["status"] == "aborted"
+    assert after["status"] == "ready"
+    assert (tmp_path / "opt/eidolon/releases/old").is_dir()
+    assert not (tmp_path / "opt/eidolon/releases/stranded").exists()
+
+
+def test_a_marker_that_is_not_a_candidate_marker_says_so(tmp_path: Path) -> None:
+    _host(tmp_path, ("old",))
+    _link(tmp_path, "eidolon_kernel", "old")
+    state = tmp_path / contract.RECLAMATION_STATE.relative_to("/")
+    state.parent.mkdir(parents=True, exist_ok=True)
+    state.write_text(json.dumps({"schema_version": 1}), encoding="utf-8")
+
+    with pytest.raises(TargetError, match="not a candidate marker"):
+        reclamation.reclaim(_payload("old"), root=tmp_path)

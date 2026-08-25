@@ -185,6 +185,24 @@ class EidolonPiController:
     def rollback(self, **arguments) -> dict[str, object]:
         return self.releases.rollback(**arguments)
 
+    def abandon(self, *, release_id: str) -> dict[str, object]:
+        """Give up on a prepared candidate nobody is going to finish.
+
+        A driver process that dies mid-transaction leaves its candidate marker
+        on the Host, and every later operation is refused because of it. The
+        only sanctioned way out was to continue that exact candidate — which
+        requires checking the workspace out at the commit it was sealed from —
+        so a killed deploy could strand a Host with no forward move at all.
+
+        This is not a rollback: the Host agent refuses to abandon a candidate
+        the current links reference, so an activated release is never touched.
+        """
+
+        self.preflight.validate_ssh_material()
+        reclaimed = self.releases.bundles.reclaim(release_id, phase="abort")
+        self.releases.bundles.require_reclamation(reclaimed, "aborted")
+        return {"status": "abandoned", "release_id": release_id, "result": reclaimed}
+
     def local_preflight(
         self, *, require_install_files: bool, require_clean_sources: bool = True
     ) -> dict[str, object]:

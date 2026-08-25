@@ -200,6 +200,20 @@ def rollback(host_id: str, *, apply: bool) -> Plan:
     )
 
 
+def abandon(host_id: str) -> Plan:
+    """Give up a prepared candidate. Never touches an activated release."""
+
+    return Plan(
+        operation="abandon",
+        host_id=host_id,
+        steps=_steps(
+            ("abort", "reclaim one prepared candidate nobody will finish"),
+        ),
+        destructive=DestructiveLevel.REVERSIBLE,
+        touches=frozenset({ActionKind.CODE}),
+    )
+
+
 def backup(host_id: str) -> Plan:
     return Plan(
         operation="backup",

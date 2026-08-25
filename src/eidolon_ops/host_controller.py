@@ -255,6 +255,13 @@ class HostController:
         )
         return self._planned_or_applied(plan, report, applied=activate)
 
+    def abandon(self, *, release_id: str) -> Evidence:
+        plan = plans.abandon(self.profile.host_id)
+        release = self.adapter.require_release(Capability.DEPLOY)
+        return self._planned_or_applied(
+            plan, release.abandon(release_id=release_id), applied=True
+        )
+
     def rollback(self, *, release_id: str, snapshot: Path, apply: bool) -> Evidence:
         plan = plans.rollback(self.profile.host_id, apply=apply)
         release = self.adapter.require_release(Capability.ROLLBACK)

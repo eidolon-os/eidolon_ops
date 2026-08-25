@@ -189,7 +189,18 @@ def _validate_state(path: Path, release_id: str, phase: object) -> None:
         "candidate_release_id": release_id,
     }
     if document != expected:
-        raise TargetError("another release candidate is in flight")
+        # Name it. A driver process that died leaves this marker behind, and an
+        # operator who is only told "another candidate is in flight" cannot find
+        # out which one, nor that abandoning it is a supported move — the abort
+        # phase below already refuses to touch anything the current links use.
+        held = document.get("candidate_release_id") if isinstance(document, dict) else None
+        if isinstance(held, str) and held:
+            raise TargetError(
+                f"release candidate {held} is in flight and this operation names "
+                f"{release_id}; finish {held}, or abandon it with "
+                f"`eidolon-ops abandon --release-id {held}`"
+            )
+        raise TargetError("release reclamation state is not a candidate marker")
     if phase not in _PHASES:
         raise TargetError("release reclamation phase is invalid")
 
