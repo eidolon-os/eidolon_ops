@@ -239,3 +239,66 @@ def test_the_resolved_configuration_has_no_half_declared_source_left(config) -> 
     assert {source_id: source.revision for source_id, source in resolved.sources.items()} == HEADS
     # The configuration it was derived from is left alone.
     assert all(source.revision is None for source in config.sources.values())
+
+
+def test_the_refusal_separates_a_modified_file_from_an_unadded_one(config) -> None:
+    """One line of advice fitted neither case.
+
+    "Commit or stash them" is right for a tracked file whose changed version is
+    not what ``git archive`` will take, and wrong for a file nobody added: that
+    one is *missing* from the archive, and stashing it makes the omission
+    permanent instead of visible.
+    """
+
+    git = FakeGit(
+        dirty={"eidolon_sdk": " M eidolon_sdk/session.py\n?? eidolon_sdk/new_module.py\n"}
+    )
+    resolver = _resolver(config, git)
+
+    item = resolver.resolve()["eidolon_sdk"]
+    assert (item.modified_paths, item.untracked_paths) == (1, 1)
+
+    with pytest.raises(OperationsError) as failure:
+        resolver.require_clean()
+    message = str(failure.value)
+    assert "1 modified, 1 untracked" in message
+    assert "commit or stash the modified files" in message
+    assert "missing from the archive" in message
+
+
+def test_only_modified_files_do_not_mention_adding_anything(config) -> None:
+    git = FakeGit(dirty={"eidolon_sdk": " M eidolon_sdk/session.py\n"})
+    resolver = _resolver(config, git)
+
+    with pytest.raises(OperationsError) as failure:
+        resolver.require_clean()
+    message = str(failure.value)
+    assert "1 modified" in message
+    assert "untracked" not in message
+
+
+def test_a_dirty_repository_this_run_executes_out_of_is_named_as_such(config) -> None:
+    """``workspace.release_cli`` is an editable install inside one of these repos.
+
+    Everywhere else a dirty worktree is a statement about the operator's
+    expectation, because the archive is taken from a commit. In the repository
+    that holds the sealing tool it is a statement about the run: half-edited
+    code there is what computes the bundle.
+    """
+
+    resolver = _resolver(config, FakeGit())
+    assert resolver.executes_from_worktree() == frozenset({"eidolon_kernel"})
+
+    executing = _resolver(
+        config, FakeGit(dirty={"eidolon_kernel": " M eidolon_deploy/bundle.py\n"})
+    )
+    with pytest.raises(OperationsError) as failure:
+        executing.require_clean()
+    assert "executes out of that worktree" in str(failure.value)
+
+    shipped_only = _resolver(
+        config, FakeGit(dirty={"eidolon_sdk": " M eidolon_sdk/session.py\n"})
+    )
+    with pytest.raises(OperationsError) as failure:
+        shipped_only.require_clean()
+    assert "executes out of that worktree" not in str(failure.value)

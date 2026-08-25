@@ -61,6 +61,13 @@ class ResolvedSource:
     dirty: bool
     dirty_paths: int = 0
     dirty_sample: tuple[str, ...] = ()
+    #: Split out because the two call for opposite repairs. A modified tracked
+    #: file means the archive holds a *different* version of something that was
+    #: tested; an untracked file means the archive is *missing* something that
+    #: was there — most often a new module nobody added. "Commit or stash" is
+    #: advice for the first and useless for the second.
+    modified_paths: int = 0
+    untracked_paths: int = 0
     tag: str | None = None
     #: Commits reachable from HEAD but not from the shipped revision, and the
     #: reverse. Both zero unless a pin was used.
@@ -196,6 +203,28 @@ class SourceResolver:
 
     # -- the one invariant worth refusing ------------------------------------
 
+    def executes_from_worktree(self) -> frozenset[str]:
+        """Sources whose uncommitted state changes what this run *does*.
+
+        A release is sealed with ``git archive`` from a commit, so nothing
+        uncommitted can reach the Host. That makes a dirty worktree a statement
+        about the operator's expectation — "HEAD is not what you are looking
+        at" — rather than about the artifact, everywhere except here: the tool
+        that seals the bundle is named by ``workspace.release_cli``, and it is
+        an editable install living inside one of these repositories. Half-edited
+        code in that one is not merely absent from the release; it is what
+        computes the release.
+        """
+
+        release_cli = getattr(getattr(self.config, "workspace", None), "release_cli", None)
+        if release_cli is None:
+            return frozenset()
+        return frozenset(
+            source_id
+            for source_id, item in self.resolve().items()
+            if Path(release_cli).is_relative_to(item.path)
+        )
+
     def require_clean(self) -> None:
         """Refuse to ship out of a worktree that has uncommitted changes.
 
@@ -204,26 +233,54 @@ class SourceResolver:
         the single copy: a release is sealed with ``git archive``, so whatever is
         uncommitted is not in it, and the tree that was tested is not the tree
         that ships.
+
+        What the refusal says is split three ways, because one line of advice
+        fitted none of the cases well. Modified tracked files are commit-or-stash.
+        Untracked files usually are not: a file nobody added is a file the
+        archive will be missing, and "stash it" is the wrong move. And a
+        repository that this run executes out of — see
+        :meth:`executes_from_worktree` — is named as such, because there the
+        uncommitted state is not a difference in expectation.
         """
 
         dirty = [item for item in self.resolve().values() if item.dirty]
         if not dirty or self.allow_dirty:
             return
-        detail = "; ".join(
-            f"{item.source_id} ({item.dirty_paths} "
-            + ("path" if item.dirty_paths == 1 else "paths")
-            + ": "
-            + ", ".join(item.dirty_sample)
-            + (", ..." if item.dirty_paths > len(item.dirty_sample) else "")
-            + ")"
-            for item in dirty
-        )
+        executing = self.executes_from_worktree()
+        detail = "; ".join(self._dirt(item, executes=item.source_id in executing) for item in dirty)
+        remedies = ["commit or stash the modified files"]
+        if any(item.untracked_paths for item in dirty):
+            remedies.append(
+                "add the untracked ones the release needs and remove the rest — an "
+                "unadded file is missing from the archive, not merely changed in it"
+            )
         raise OperationsError(
             "a release is sealed from commits, and these worktrees hold changes that "
-            f"would not be in it: {detail}. Commit or stash them, or pass --allow-dirty "
-            "to ship the committed HEAD anyway and record the dirty state in the Host's "
-            "release evidence"
+            f"would not be in it: {detail}. " + "; ".join(remedies) + "; or pass "
+            "--allow-dirty to ship the committed HEAD anyway and record the dirty state "
+            "in the Host's release evidence"
         )
+
+    @staticmethod
+    def _dirt(item: ResolvedSource, *, executes: bool) -> str:
+        counted = ", ".join(
+            f"{count} {noun}"
+            for count, noun in (
+                (item.modified_paths, "modified"),
+                (item.untracked_paths, "untracked"),
+            )
+            if count
+        )
+        sample = ", ".join(item.dirty_sample) + (
+            ", ..." if item.dirty_paths > len(item.dirty_sample) else ""
+        )
+        note = (
+            " — and this run executes out of that worktree, so the uncommitted code "
+            "is what would seal the release"
+            if executes
+            else ""
+        )
+        return f"{item.source_id} ({counted}: {sample}){note}"
 
     def require_worktree_is_the_selection(self) -> None:
         """For a run that executes the worktree instead of sealing an archive.
@@ -294,6 +351,8 @@ class SourceResolver:
             dirty=bool(entries),
             dirty_paths=len(entries),
             dirty_sample=entries[:_DIRTY_SAMPLE],
+            untracked_paths=sum(1 for entry in entries if entry.startswith("??")),
+            modified_paths=sum(1 for entry in entries if not entry.startswith("??")),
             tag=source.tag,
         )
         if item.pinned and revision != head:
