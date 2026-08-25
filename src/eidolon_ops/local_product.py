@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import stat
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import fields
 from pathlib import Path
 from urllib.parse import urlparse
@@ -145,6 +146,114 @@ class LocalProductSource:
             "services": 15,
             "redaction": "generated credentials are not returned",
         }
+
+    # -- reset ---------------------------------------------------------------
+
+    def reset(self, *, wipe_authority_data: bool, apply: bool) -> dict[str, object]:
+        """Clear what this profile generated, and only that.
+
+        The product Host has had this since the day it could be installed, and
+        it is the missing half of a source run: Kernel and Hub both refuse to
+        migrate a database they do not recognize — deliberately, since a guessed
+        migration of an authority is worse than a refusal — so a Host that falls
+        behind the schema cannot start and cannot be repaired. The only way out
+        was to know which sqlite files to move aside by hand.
+
+        What is cleared and what is kept are different questions from the Pi's,
+        because the two Hosts hold different things in the same roles:
+
+        * The code is the operator's own worktrees, not an installed release.
+          Nothing here may touch them, and that is asserted rather than assumed.
+        * ``owner-domain-private`` is this Host's Owner root key — the workstation
+          material, which on a Pi install lives on the workstation and no reset
+          deletes. Keeping it means a reset re-derives the same Owner Domain
+          instead of quietly minting a new one that every enrolled device would
+          then fail to recognize.
+        * The Host identity under the Bootstrap roots is a separate ownership
+          boundary on both Hosts, and stays. Retiring it is what
+          ``init-inputs --new-identity`` is for.
+
+        ``wipe_authority_data`` adds the state root: the system database, Hub,
+        Kernel, Agent, Memory, NATS and the rest. That is the flag for a Host
+        behind the schema, and it is irreversible.
+        """
+
+        paths = self.profile.paths
+        generated = [
+            paths.config_root / "env",
+            paths.config_root / "settings",
+            paths.config_root / "tls",
+            paths.config_root / "owner-domain",
+            paths.config_root / "product-source.env",
+            paths.runtime_root,
+        ]
+        authority = [paths.state_root] if wipe_authority_data else []
+        targets = [*generated, *authority]
+        self._require_removable(targets)
+        present = [path for path in targets if path.exists() or path.is_symlink()]
+        report: dict[str, object] = {
+            "profile": "product-source",
+            "wipe_authority_data": wipe_authority_data,
+            "targets": [str(path) for path in targets],
+            "present": [str(path) for path in present],
+            "kept": [
+                str(self._owner_material_root()),
+                str(paths.bootstrap_state_root),
+                str(paths.bootstrap_runtime_root),
+                str(paths.log_root),
+                str(paths.cache_root),
+                *(
+                    []
+                    if wipe_authority_data
+                    else [str(paths.state_root)]
+                ),
+            ],
+            "note": (
+                "the Owner Domain private material and the Host identity are kept, so "
+                "prepare re-derives the same Owner Domain and the same Host name"
+            ),
+        }
+        if not apply:
+            return {**report, "status": "planned"}
+        for path in present:
+            if path.is_dir() and not path.is_symlink():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+        return {**report, "status": "reset", "removed": [str(path) for path in present]}
+
+    def _require_removable(self, targets: Sequence[Path]) -> None:
+        """Prove nothing here can reach code or an unrelated tree.
+
+        A source run's roots live inside the workspace that holds the eight
+        checkouts, so "under the install root" cannot be the test — it is true of
+        everything. What must hold is that no target is a source worktree, or a
+        parent of one, or a root the profile itself is anchored on.
+        """
+
+        paths = self.profile.paths
+        protected = [
+            paths.install_root,
+            paths.current_root,
+            self._owner_material_root(),
+            paths.bootstrap_state_root,
+            paths.bootstrap_runtime_root,
+            *(Path(source.path) for source in self.config.sources.values()),
+        ]
+        for target in targets:
+            for keep in protected:
+                if target == keep or keep.is_relative_to(target):
+                    raise OperationsError(
+                        f"a source-run reset would remove something it does not own: "
+                        f"{target} contains or is {keep}"
+                    )
+            if not any(
+                target == root or target.is_relative_to(root)
+                for root in (paths.config_root, paths.runtime_root, paths.state_root)
+            ):
+                raise OperationsError(
+                    f"a source-run reset target is outside this profile's roots: {target}"
+                )
 
     def _make_roots(self) -> None:
         paths = self.profile.paths

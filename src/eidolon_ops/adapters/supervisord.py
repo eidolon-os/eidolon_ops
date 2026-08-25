@@ -52,6 +52,12 @@ class SupervisordSupervisor:
                 Capability.LOGS,
                 Capability.COMMISSIONING_CODE,
                 Capability.SOURCE_PROFILE,
+                # Not a release capability here. There is no release on this
+                # Host, and the namespace a reset clears is entirely generated;
+                # what makes it necessary is that Kernel and Hub refuse to
+                # migrate an authority database they do not recognize, so a Host
+                # behind the schema had no supported way back.
+                Capability.RESET,
             }
         )
 
@@ -68,6 +74,32 @@ class SupervisordSupervisor:
 
     def app_ready(self) -> dict[str, object]:
         return self._product().app_ready()
+
+    def reset(self, *, wipe_authority_data: bool, apply: bool) -> dict[str, object]:
+        """Clear the generated namespace, after stopping what is using it.
+
+        Stopping first is not tidiness: supervisord and every child hold open
+        handles into the runtime root and read their settings from the config
+        root, so clearing those underneath a running stack leaves processes alive
+        against files that no longer exist.
+        """
+
+        product = self._product()
+        plan = product.reset(wipe_authority_data=wipe_authority_data, apply=False)
+        if not apply:
+            return plan
+        phases = Journal(self.progress)
+        phases.begin("stop")
+        stopped = self.transport.run(
+            (str(self.script()), PROFILE, "stop"),
+            timeout=300,
+            operation=f"local {PROFILE} stop",
+        )
+        phases.append({"phase": "stop", "result": {"output": stopped.stdout.strip()}})
+        phases.begin("remove")
+        removed = product.reset(wipe_authority_data=wipe_authority_data, apply=True)
+        phases.append({"phase": "remove", "result": removed})
+        return removed
 
     def lifecycle(self, action: str, *, dry_run: bool) -> dict[str, object]:
         if dry_run:

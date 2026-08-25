@@ -66,6 +66,11 @@ class SystemdSupervisor:
     def commissioning_code(self, *, ttl_seconds: int) -> dict[str, object]:
         return self.release.commissioning_code(ttl_seconds=ttl_seconds)
 
+    def reset(self, *, wipe_authority_data: bool, apply: bool) -> dict[str, object]:
+        # Unchanged behaviour, reached the way this Host's other operations are:
+        # the release installed the namespace, so the release clears it.
+        return self.release.reset(wipe_authority_data=wipe_authority_data, apply=apply)
+
 
 def unit_name(service: str | None) -> str | None:
     """Accept the component name an operator types, not only the unit name."""

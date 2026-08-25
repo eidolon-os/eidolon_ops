@@ -251,11 +251,18 @@ class HostController:
         return self._planned_or_applied(plan, report, applied=apply)
 
     def reset(self, *, wipe_authority_data: bool, apply: bool) -> Evidence:
+        # Asked of the supervisor rather than the release: on a product Host the
+        # release installed the namespace and its supervisor hands this straight
+        # to it, while a source run has no release at all and the namespace it
+        # clears is one it generated. Both Hosts answer the same question about
+        # their own namespace; only one of them got to be asked before.
         plan = plans.reset(
             self.profile.host_id, apply=apply, wipe_authority_data=wipe_authority_data
         )
-        release = self.adapter.require_release(Capability.RESET)
-        report = release.reset(wipe_authority_data=wipe_authority_data, apply=apply)
+        self.adapter.require(Capability.RESET)
+        report = self.adapter.supervisor.reset(
+            wipe_authority_data=wipe_authority_data, apply=apply
+        )
         return self._planned_or_applied(plan, report, applied=apply)
 
     def controller_reset(self, *, apply: bool) -> Evidence:

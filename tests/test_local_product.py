@@ -697,3 +697,107 @@ def test_a_new_owner_domain_asset_cannot_be_silently_dropped(tmp_path: Path) -> 
             ),
             {"descriptor": tmp_path / "descriptor.json"},
         )
+
+
+def _with_sources(product: LocalProductSource, tmp_path: Path) -> Path:
+    """Give the product a source set, which a reset has to prove it cannot reach."""
+
+    worktree = tmp_path / "workspace/eidolon_kernel"
+    worktree.mkdir(parents=True, exist_ok=True)
+    product.config = cast(Any, _FakeConfig(sources={"eidolon_kernel": _FakeSource(path=worktree)}))
+    return worktree
+
+def test_reset_clears_what_it_generated_and_keeps_what_it_did_not(tmp_path: Path) -> None:
+    product = _product(tmp_path, foundation_mode="external")
+    _with_sources(product, tmp_path)
+    paths = product.profile.paths
+    for directory in (
+        paths.config_root / "env",
+        paths.config_root / "settings",
+        paths.config_root / "owner-domain",
+        paths.runtime_root / "ops",
+        paths.state_root / "hub",
+        paths.log_root,
+        paths.bootstrap_state_root,
+    ):
+        directory.mkdir(parents=True, exist_ok=True)
+    (paths.config_root / "product-source.env").write_text("EIDOLON_X=1\n", encoding="utf-8")
+    paths.config_root.chmod(0o700)
+    product._ensure_hub_tls_identity()
+    owner_before = product._owner_domain_id()
+    identity = paths.bootstrap_state_root / "host_identity.ed25519"
+    (paths.state_root / "hub/eidolon-hub.sqlite3").write_text("db", encoding="utf-8")
+    (paths.log_root / "keep.log").write_text("log", encoding="utf-8")
+
+    planned = product.reset(wipe_authority_data=False, apply=False)
+    assert planned["status"] == "planned"
+    assert (paths.config_root / "env").is_dir()
+
+    applied = product.reset(wipe_authority_data=False, apply=True)
+
+    assert applied["status"] == "reset"
+    assert not (paths.config_root / "env").exists()
+    assert not (paths.config_root / "settings").exists()
+    assert not (paths.config_root / "owner-domain").exists()
+    assert not (paths.config_root / "product-source.env").exists()
+    assert not paths.runtime_root.exists()
+    # Authority data, logs and the Host identity are a different question.
+    assert (paths.state_root / "hub/eidolon-hub.sqlite3").is_file()
+    assert (paths.log_root / "keep.log").is_file()
+    assert identity.is_file()
+    # And the Owner root key stays, so the same Owner Domain comes back rather
+    # than a new one every enrolled device would fail to recognize.
+    assert product._owner_material_root().is_dir()
+    product._ensure_hub_tls_identity()
+    assert product._owner_domain_id() == owner_before
+
+
+def test_reset_adds_the_authority_data_only_when_asked(tmp_path: Path) -> None:
+    product = _product(tmp_path, foundation_mode="external")
+    _with_sources(product, tmp_path)
+    paths = product.profile.paths
+    (paths.state_root / "hub").mkdir(parents=True, exist_ok=True)
+    database = paths.state_root / "hub/eidolon-hub.sqlite3"
+    database.write_text("db", encoding="utf-8")
+    product._ensure_hub_tls_identity()
+    owner_before = product._owner_domain_id()
+
+    plan = product.reset(wipe_authority_data=True, apply=False)
+    assert str(paths.state_root) in plan["targets"]
+    assert str(paths.state_root) not in plan["kept"]
+
+    product.reset(wipe_authority_data=True, apply=True)
+
+    assert not database.exists()
+    # This is the recovery for a Host behind the schema, and it must not also
+    # retire the Owner: prepare has to come back to the same domain.
+    product._ensure_hub_tls_identity()
+    assert product._owner_domain_id() == owner_before
+
+
+def test_reset_refuses_to_reach_code_or_anything_outside_the_profile(tmp_path: Path) -> None:
+    """The assertion, not the current target list, is what keeps this safe.
+
+    A source run's roots live inside the workspace that holds the eight
+    checkouts, so "under the install root" is true of everything and cannot be
+    the test. What must hold is that no target is a worktree, a parent of one,
+    or a root the profile is anchored on.
+    """
+
+    product = _product(tmp_path, foundation_mode="external")
+    worktree = _with_sources(product, tmp_path)
+    paths = product.profile.paths
+
+    for target in (
+        paths.install_root,
+        paths.current_root,
+        Path(worktree),
+        Path(worktree).parent,
+        product._owner_material_root(),
+        paths.bootstrap_state_root,
+    ):
+        with pytest.raises(OperationsError, match="does not own|outside this profile"):
+            product._require_removable([target])
+
+    with pytest.raises(OperationsError, match="outside this profile"):
+        product._require_removable([tmp_path / "somewhere-else"])
