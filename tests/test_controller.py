@@ -752,6 +752,17 @@ def test_deploy_resume_activate_skips_transfer(setup_controller) -> None:
     ]
     assert transport.uploads == []
     assert not any(len(call) > 1 and call[1] == "bundle" for call in runner.calls)
+    # The operator's side must never be the first to give up on an activation.
+    # A Host can spend its 300s readiness gate and then another 300s waiting for
+    # what its rollback restores; at 600 the client gave up first, the remote
+    # kept running and kept the flock, and the Host was left holding its own
+    # upgrade lock with a candidate marker no later release could clear.
+    activate_index = next(
+        index
+        for index, (remote, _sudo) in enumerate(transport.remote_calls)
+        if "deploy" in remote and "--dry-run" not in remote
+    )
+    assert transport.remote_timeouts[activate_index] >= 1800
 
 
 def test_deploy_prestages_host_application_before_component_activation(

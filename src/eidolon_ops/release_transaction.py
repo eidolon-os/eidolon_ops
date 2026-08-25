@@ -41,6 +41,15 @@ _RESET_MUTATIONS = (
 )
 
 
+#: The transport must never be the first thing to give up on a deploy. A Host
+#: can legitimately spend its 300s readiness gate and then, if that gate fails,
+#: another 300s waiting for the release its rollback restores. Anything shorter
+#: turns a slow-but-correct Host into a stuck one: the remote keeps the flock
+#: this side can no longer see, and the candidate marker outlives the operator
+#: who could have cleared it.
+_REMOTE_ACTIVATION_TIMEOUT_SECONDS = 1800.0
+
+
 class ReleaseTransaction:
     def __init__(
         self,
@@ -153,7 +162,15 @@ class ReleaseTransaction:
             activation = self._activation_json(
                 "release activation",
                 (cli, "deploy", descriptor),
-                timeout=600,
+                # Deliberately longer than everything the Host can spend inside
+                # one deploy: a 300s readiness gate, and — when that gate fails
+                # — a rollback that waits the same 300s again for the release it
+                # restores. At 600 the operator's side was the first to give up,
+                # and a client that gives up first is worse than one that waits:
+                # the remote transaction keeps running, keeps the flock, and the
+                # Host is left holding its own upgrade lock with a candidate
+                # marker no later release can clear.
+                timeout=_REMOTE_ACTIVATION_TIMEOUT_SECONDS,
             )
             phases.append({"phase": "activate", "result": activation})
             if (
@@ -353,7 +370,7 @@ class ReleaseTransaction:
             restored = self._remote_json(
                 "post-activation gate release rollback",
                 (cli, "rollback", descriptor, str(snapshot)),
-                timeout=600,
+                timeout=_REMOTE_ACTIVATION_TIMEOUT_SECONDS,
             )
             if restored.get("status") != "restored":
                 raise OperationsError("release rollback returned invalid recovery evidence")
@@ -495,7 +512,7 @@ class ReleaseTransaction:
                 remote_descriptor(release_id),
                 str(snapshot),
             ),
-            timeout=600,
+            timeout=_REMOTE_ACTIVATION_TIMEOUT_SECONDS,
         )
         return {"status": "restored", "release_id": release_id, "result": result}
 
