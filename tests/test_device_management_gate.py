@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -160,14 +161,43 @@ def test_release_gate_fails_closed_on_repository_set_drift(tmp_path: Path) -> No
         verify_release(document, tmp_path)
 
 
-def test_capture_fails_on_git_repository_missing_from_foundation_inventory(tmp_path: Path) -> None:
+def test_capture_fails_when_the_workspace_lacks_a_repository_the_inventory_names(
+    tmp_path: Path,
+) -> None:
+    """A release cannot be captured from sources that are not there.
+
+    This replaces a test whose name said "missing" while it actually asserted
+    that an *added* repository was refused — and that assertion turned the gate
+    permanently red the first time an unrelated repository joined the
+    workspace, which is how a gate stops being read.
+    """
+
     workspace = _workspace(tmp_path)
-    extra = workspace / "unexpected-checkout"
+    named = sorted(path.name for path in workspace.iterdir() if (path / ".git").exists())
+    shutil.rmtree(workspace / named[0])
+
+    with pytest.raises(GateError, match=rf"missing=\['{named[0]}'\]"):
+        capture_template(workspace, "dm-v1")
+
+
+def test_capture_allows_a_repository_that_joined_after_the_inventory_was_frozen(
+    tmp_path: Path,
+) -> None:
+    """Growth is not drift, and participation is declared rather than inferred.
+
+    A new repository cannot silently become a release participant: the
+    participant set is declared, and the check right after this one still
+    refuses when a declared participant is absent from the inventory.
+    """
+
+    workspace = _workspace(tmp_path)
+    extra = workspace / "eidolon_something_new"
     extra.mkdir()
     _run("git", "init", "-b", "main", cwd=extra)
 
-    with pytest.raises(GateError, match=r"added=\['unexpected-checkout'\]"):
-        capture_template(workspace, "dm-v1")
+    document = capture_template(workspace, "dm-v1")
+
+    assert document["release_id"] == "dm-v1"
 
 
 def test_release_gate_fails_closed_on_dirty_source(tmp_path: Path) -> None:

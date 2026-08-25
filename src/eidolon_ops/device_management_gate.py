@@ -173,11 +173,17 @@ def _inventory(workspace: Path) -> dict[str, dict[str, object]]:
             raise GateError(f"SDK Foundation inventory contains a duplicate path: {path}")
         inventory[path] = entry
     actual = _discover(workspace)
-    if actual != set(inventory):
+    # A repository the inventory names and the workspace no longer has is real
+    # drift — a release cannot be captured from sources that are not there. A
+    # repository that appeared *after* the inventory was frozen is not: it is
+    # the project growing, and a gate that turns red on the first unrelated new
+    # repository stops being read at all. Participation is declared, and the
+    # check below already refuses when a declared participant is absent.
+    missing = sorted(set(inventory) - actual)
+    if missing:
         raise GateError(
-            "workspace repository set drifted from SDK Foundation inventory; "
-            f"added={sorted(actual - set(inventory))}, "
-            f"missing={sorted(set(inventory) - actual)}"
+            "workspace is missing repositories the SDK Foundation inventory names; "
+            f"missing={missing}, added={sorted(actual - set(inventory))}"
         )
     participant_paths = set(REPOSITORIES.values())
     missing_participants = sorted(participant_paths - set(inventory))
