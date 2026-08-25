@@ -86,6 +86,7 @@ class ReadinessFact(StrEnum):
     LOCAL_API_REACHABLE = "local_api_reachable"
     LOCAL_API_TARGETS_HUB = "local_api_targets_hub"
     LOCAL_API_MDNS_SERVICE = "local_api_mdns_service"
+    DEVICE_REMOVAL_AVAILABLE = "device_removal_available"
     LIVEKIT_CLIENT_ORIGIN = "livekit_client_origin"
     LIVEKIT_LAN_REACHABLE = "livekit_lan_reachable"
     LIVEKIT_RTC_ADVERTISED = "livekit_rtc_advertised"
@@ -195,6 +196,11 @@ READINESS_CONTRACT: tuple[ReadinessCheck, ...] = (
         HostKind.PRODUCT,
         ReadinessFact.HUB_ADMITS_DEVICES,
         "the Hub can verify a device's commissioning proof, so a device can be added",
+    ),
+    _only(
+        HostKind.PRODUCT,
+        ReadinessFact.DEVICE_REMOVAL_AVAILABLE,
+        "the lifecycle workflow is listening, so a device can be removed",
     ),
     _only(
         HostKind.PRODUCT,

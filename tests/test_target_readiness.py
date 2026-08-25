@@ -95,6 +95,19 @@ def bootstrap_socket(monkeypatch):
         listener.close()
 
 
+@pytest.fixture(autouse=True)
+def lifecycle_workflow_socket(monkeypatch):
+    """A real removal-workflow socket, so the healthy path is genuinely healthy."""
+
+    with tempfile.TemporaryDirectory(prefix="eo-lw-", dir="/tmp") as directory:
+        path = Path(directory) / "workflow.sock"
+        listener = socket.socket(socket.AF_UNIX)
+        listener.bind(str(path))
+        monkeypatch.setattr(probe, "LIFECYCLE_WORKFLOW_SOCKET", path)
+        yield path
+        listener.close()
+
+
 def _healthy_run(app: dict[str, object]):
     hub_record = (
         f"=;wlan0;IPv4;{app['owner_domain_id']};_eidolon-owner._tcp;local;"
@@ -206,10 +219,9 @@ def test_readiness_payload_fails_closed_on_a_different_check_set() -> None:
         probe.app_ready(payload)
 
 
-def test_app_ready_attests_every_declared_fact(
-    monkeypatch, tmp_path: Path, bootstrap_socket: Path
-) -> None:
-    app = _app()
+def _healthy_probe(monkeypatch, app: dict[str, object], tmp_path: Path) -> None:
+    """Every readiness input reporting health, so one test can spoil exactly one."""
+
     _materialize(monkeypatch, tmp_path / "host", app)
     monkeypatch.setattr(primitives, "private_file_check", lambda *_a, **_k: {"healthy": True})
     monkeypatch.setattr(
@@ -259,6 +271,13 @@ def test_app_ready_attests_every_declared_fact(
         primitives, "https_json",
         lambda _host, _port, _path: (200, {"status": "ready"}),
     )
+
+
+def test_app_ready_attests_every_declared_fact(
+    monkeypatch, tmp_path: Path, bootstrap_socket: Path
+) -> None:
+    app = _app()
+    _healthy_probe(monkeypatch, app, tmp_path)
 
     result = probe.app_ready(_payload(app))
 
@@ -547,3 +566,27 @@ def test_a_slow_app_ready_says_which_check_spent_the_time(
         "channel_worker_livekit_link",
     }
     assert waiting["exhausted"] is True
+
+
+def test_a_host_that_cannot_remove_a_device_is_not_ready(
+    monkeypatch, tmp_path: Path, bootstrap_socket: Path, lifecycle_workflow_socket: Path
+) -> None:
+    """Removal is the one operation with no second way to reach it.
+
+    The lifecycle workflow runs as its own uid precisely because the network-
+    facing Local API must not be able to revoke a device by itself. That
+    separation is real, and it means a workflow that is not listening removes
+    the capability from the product entirely — which is what happened: the unit
+    crash-looped at boot on a missing constructor argument, device removal was
+    unavailable for a whole session, and the readiness gate stayed green because
+    nothing here had ever asked.
+    """
+
+    app = _app()
+    _healthy_probe(monkeypatch, app, tmp_path)
+    assert probe.app_ready(_payload(app))["status"] == "app_ready"
+
+    lifecycle_workflow_socket.unlink()
+    result = probe.app_ready(_payload(app))
+    assert result["status"] != "app_ready"
+    assert [n for n, v in result["checks"].items() if not v] == ["device_removal_available"]

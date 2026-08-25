@@ -41,6 +41,7 @@ READINESS_FACTS = (
     "foundation_services",
     "hub_descriptor_published",
     "hub_admits_devices",
+    "device_removal_available",
     "hub_mdns_service",
     "local_api_mdns_service",
 )
@@ -58,6 +59,11 @@ HOST_IDENTITY = Path("/var/lib/eidolon-bootstrap/host_identity.ed25519")
 COMMISSIONING_TLS = Path("/var/lib/eidolon-bootstrap/commissioning_tls.pem")
 
 BOOTSTRAP_SOCKET = Path("/run/eidolon-bootstrap/control.sock")
+
+#: Device removal runs as its own uid so the network-facing Local API cannot
+#: revoke a device by itself. The separation is real, which is why a workflow
+#: that is not listening takes the capability out of the product entirely.
+LIFECYCLE_WORKFLOW_SOCKET = Path("/run/eidolon-lifecycle/workflow.sock")
 
 MDNS_DEFINITION = Path("/etc/avahi/services/eidolon-local-api.service")
 
@@ -448,6 +454,7 @@ def app_ready(payload: Mapping[str, object]) -> dict[str, object]:
             and isinstance(hub_descriptor.get("directory_revision"), int)
         ),
         "hub_admits_devices": (hub_ready or {}).get("status") == "ready",
+        "device_removal_available": LIFECYCLE_WORKFLOW_SOCKET.is_socket(),
         "hub_mdns_service": bool(hub_records)
         and all(
             fields[6] == hostname
