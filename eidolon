@@ -1,0 +1,322 @@
+#!/usr/bin/env bash
+# One operator-facing entry point for every Eidolon Host operation.
+#
+# The Python CLI remains the contract owner. This script only resolves a short
+# Host name to config/hosts/<name>.toml, rejects commands that Host cannot
+# perform, and delegates the exact command/argument parsing to eidolon-ops.
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROFILES_DIR="${EIDOLON_HOSTS_DIR:-${ROOT}/config/hosts}"
+UV_BIN="${EIDOLON_UV_BIN:-uv}"
+
+ALL_COMMANDS="app-ready authority-backup authority-reset authority-restore backup commissioning-code controller-reset converge-inputs debug deploy diagnose doctor init-inputs install logs provision reset restart restore rollback start status stop update"
+MAC_COMMANDS="status doctor app-ready start stop restart logs commissioning-code reset debug"
+PI_COMMANDS="status doctor app-ready start stop restart logs commissioning-code provision init-inputs converge-inputs backup restore install controller-reset authority-reset authority-backup authority-restore reset deploy update rollback diagnose"
+
+die() {
+  printf '错误：%s\n' "$*" >&2
+  exit 2
+}
+
+toml_host_value() {
+  local profile="$1" key="$2"
+  awk -v wanted="$key" '
+    /^\[host\][[:space:]]*$/ { in_host=1; next }
+    /^\[/ { in_host=0 }
+    in_host && $0 ~ "^[[:space:]]*" wanted "[[:space:]]*=" {
+      value=$0
+      sub(/^[^=]*=[[:space:]]*/, "", value)
+      sub(/[[:space:]]*#.*/, "", value)
+      gsub(/^"|"$/, "", value)
+      print value
+      exit
+    }
+  ' "$profile"
+}
+
+profiles() {
+  local profile
+  for profile in "$PROFILES_DIR"/*.toml; do
+    [[ -f "$profile" ]] || continue
+    [[ "$profile" == *.example.toml ]] && continue
+    printf '%s\n' "$profile"
+  done
+}
+
+profile_alias() {
+  local profile="$1" name
+  name="$(basename "$profile" .toml)"
+  printf '%s\n' "$name"
+}
+
+list_hosts() {
+  local found=0 profile alias host_id platform
+  printf '可用主机：\n'
+  while IFS= read -r profile; do
+    [[ -n "$profile" ]] || continue
+    found=1
+    alias="$(profile_alias "$profile")"
+    host_id="$(toml_host_value "$profile" id)"
+    platform="$(toml_host_value "$profile" platform)"
+    printf '  %-28s %-18s %-14s %s\n' "$alias" "${host_id:--}" "${platform:--}" "$profile"
+  done < <(profiles)
+  if [[ "$found" == "0" ]]; then
+    printf '  （%s 中没有可用的主机配置）\n' "$PROFILES_DIR"
+  fi
+}
+
+resolve_profile() {
+  local selector="$1" direct profile host_id match="" count=0
+
+  if [[ -f "$selector" ]]; then
+    printf '%s\n' "$(cd "$(dirname "$selector")" && pwd)/$(basename "$selector")"
+    return 0
+  fi
+
+  direct="${PROFILES_DIR}/${selector%.toml}.toml"
+  if [[ -f "$direct" && "$direct" != *.example.toml ]]; then
+    printf '%s\n' "$direct"
+    return 0
+  fi
+
+  while IFS= read -r profile; do
+    [[ -n "$profile" ]] || continue
+    host_id="$(toml_host_value "$profile" id)"
+    if [[ "$host_id" == "$selector" ]]; then
+      match="$profile"
+      count=$((count + 1))
+    fi
+  done < <(profiles)
+
+  if [[ "$count" == "1" ]]; then
+    printf '%s\n' "$match"
+    return 0
+  fi
+  if [[ "$count" -gt "1" ]]; then
+    printf '错误：主机 ID “%s” 对应多个配置，请使用左侧的配置别名：\n' "$selector" >&2
+    list_hosts >&2
+    return 2
+  fi
+  printf '错误：未知主机 “%s”。\n' "$selector" >&2
+  list_hosts >&2
+  return 2
+}
+
+commands_for_profile() {
+  local profile="$1" platform
+  platform="$(toml_host_value "$profile" platform)"
+  case "$platform" in
+    macos) printf '%s\n' "$MAC_COMMANDS" ;;
+    raspberry-pi) printf '%s\n' "$PI_COMMANDS" ;;
+    *) die "主机配置 $(profile_alias "$profile") 使用未知平台：${platform:--}" ;;
+  esac
+}
+
+contains_word() {
+  local words="$1" wanted="$2" item
+  for item in $words; do
+    [[ "$item" == "$wanted" ]] && return 0
+  done
+  return 1
+}
+
+command_summary() {
+  case "$1" in
+    status) printf '查看 Host、服务进程和健康状态' ;;
+    doctor) printf '检查本机工具链、Host 能力与发布前置条件' ;;
+    app-ready) printf '执行手机接入所需的完整 readiness 门禁' ;;
+    start) printf '启动该 Host 的完整产品后端' ;;
+    stop) printf '停止该 Host 的产品后端' ;;
+    restart) printf '完整停止后重新准备并启动产品后端' ;;
+    logs) printf '读取全部日志或指定服务日志' ;;
+    commissioning-code) printf '生成手机 Setup/Commissioning Code' ;;
+    debug) printf 'Mac source-run 的 prepare/validate/Web 诊断入口' ;;
+    provision) printf '检查或安装 Pi 基础系统依赖' ;;
+    init-inputs) printf '首次生成产品私密输入和 Host Identity' ;;
+    converge-inputs) printf '补齐新增凭据，不修改已有值' ;;
+    backup) printf '备份所有可备份的 Host 数据' ;;
+    restore) printf '从完整 Host 备份恢复' ;;
+    install) printf '向新 Pi 安装指定 release' ;;
+    deploy) printf '部署指定 release' ;;
+    update) printf 'deploy 的同义入口，用于版本更新' ;;
+    rollback) printf '回滚到指定 release 与快照' ;;
+    reset) printf '查看或执行产品运行态重置' ;;
+    controller-reset) printf '撤销全部手机管理者并重新开放认领' ;;
+    authority-reset) printf '推进 Owner Authority generation' ;;
+    authority-backup) printf '备份 Owner Authority' ;;
+    authority-restore) printf '恢复 Owner Authority' ;;
+    diagnose) printf '生成诊断报告压缩包' ;;
+    *) printf 'Eidolon Host 操作' ;;
+  esac
+}
+
+print_commands() {
+  local profile="$1" commands command
+  commands="$(commands_for_profile "$profile")"
+  printf '%s（%s）支持的命令：\n' "$(profile_alias "$profile")" "$(toml_host_value "$profile" platform)"
+  for command in $commands; do
+    printf '  %-20s %s\n' "$command" "$(command_summary "$command")"
+  done
+}
+
+print_usage() {
+  local profile
+  cat <<EOF
+Eidolon 统一运维入口
+
+用法：
+  ./eidolon hosts
+  ./eidolon commands <主机>
+  ./eidolon help [主机 [命令]]
+  ./eidolon [全局参数] <主机> <命令> [命令参数...]
+
+示例：
+  ./eidolon mac status
+  ./eidolon mac start
+  ./eidolon mac debug web-start
+  ./eidolon pi5 app-ready
+  ./eidolon pi5 install --release-id 20260807-product-1 --apply
+  ./eidolon help pi5 install
+
+全局参数：
+  --revision SOURCE=40HEX  本次操作临时固定一个源码提交；可重复
+  --allow-dirty            允许从有未提交改动的仓库封装已提交的 HEAD
+  -h, --help               显示帮助
+
+主机既可以写配置文件名（mac、pi5），也可以写唯一的 host.id 或 TOML 路径。
+具体命令参数以“./eidolon help <主机> <命令>”为准。
+
+EOF
+  list_hosts
+  printf '\n命令概览：\n'
+  while IFS= read -r profile; do
+    [[ -n "$profile" ]] || continue
+    printf '  %-28s %s\n' "$(profile_alias "$profile")" "$(commands_for_profile "$profile")"
+  done < <(profiles)
+  printf '\n每个命令的说明：./eidolon commands <主机>\n'
+  printf '每个命令的参数：./eidolon help <主机> <命令>\n'
+}
+
+run_cli() {
+  command -v "$UV_BIN" >/dev/null 2>&1 || die "找不到 uv；请先安装 uv 或设置 EIDOLON_UV_BIN"
+  cd "$ROOT"
+  exec "$UV_BIN" run eidolon-ops "$@"
+}
+
+GLOBAL_ARGS=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --revision)
+      [[ $# -ge 2 ]] || die "--revision 后需要 SOURCE=40HEX"
+      GLOBAL_ARGS+=("$1" "$2")
+      shift 2
+      ;;
+    --revision=*)
+      GLOBAL_ARGS+=("$1")
+      shift
+      ;;
+    --allow-dirty)
+      GLOBAL_ARGS+=("$1")
+      shift
+      ;;
+    *) break ;;
+  esac
+done
+
+case "${1:-}" in
+  ""|-h|--help)
+    print_usage
+    exit 0
+    ;;
+  hosts|list-hosts)
+    list_hosts
+    exit 0
+    ;;
+  commands)
+    [[ $# -ge 2 ]] || die "commands 后需要主机；运行 ./eidolon hosts 查看可用主机"
+    profile="$(resolve_profile "$2")"
+    print_commands "$profile"
+    exit 0
+    ;;
+  help)
+    if [[ $# -eq 1 ]]; then
+      print_usage
+      exit 0
+    fi
+    profile="$(resolve_profile "$2")"
+    if [[ $# -eq 2 ]]; then
+      print_commands "$profile"
+      printf '\n查看具体参数：./eidolon help %s <命令>\n' "$(profile_alias "$profile")"
+      exit 0
+    fi
+    command_name="$3"
+    commands="$(commands_for_profile "$profile")"
+    if ! contains_word "$ALL_COMMANDS" "$command_name"; then
+      printf '错误：未知命令 “%s”。\n' "$command_name" >&2
+      print_commands "$profile" >&2
+      exit 2
+    fi
+    if ! contains_word "$commands" "$command_name"; then
+      printf '错误：命令 “%s” 不适用于主机 %s。\n' "$command_name" "$(profile_alias "$profile")" >&2
+      print_commands "$profile" >&2
+      exit 2
+    fi
+    if [[ "${#GLOBAL_ARGS[@]}" -gt 0 ]]; then
+      run_cli --config "$profile" "${GLOBAL_ARGS[@]}" "$command_name" --help
+    else
+      run_cli --config "$profile" "$command_name" --help
+    fi
+    ;;
+esac
+
+host_selector="$1"
+shift
+[[ $# -gt 0 ]] || die "主机后需要命令；运行 ./eidolon commands ${host_selector} 查看支持的命令"
+profile="$(resolve_profile "$host_selector")"
+command_name="$1"
+shift
+commands="$(commands_for_profile "$profile")"
+
+if [[ "$command_name" == "help" ]]; then
+  if [[ $# -eq 0 ]]; then
+    print_commands "$profile"
+    exit 0
+  fi
+  command_name="$1"
+  shift
+  set -- --help
+fi
+
+if ! contains_word "$ALL_COMMANDS" "$command_name"; then
+  printf '错误：未知命令 “%s”。\n' "$command_name" >&2
+  print_commands "$profile" >&2
+  exit 2
+fi
+if ! contains_word "$commands" "$command_name"; then
+  printf '错误：命令 “%s” 不适用于主机 %s。\n' "$command_name" "$(profile_alias "$profile")" >&2
+  print_commands "$profile" >&2
+  exit 2
+fi
+
+# The repository entry point is for people, so status is a table by default.
+# eidolon-ops itself keeps JSON as its default machine contract, and an explicit
+# --json here passes straight through without the human view.
+if [[ "$command_name" == "status" ]]; then
+  status_format=""
+  for argument in "$@"; do
+    case "$argument" in
+      --human|--json) status_format="$argument" ;;
+    esac
+  done
+  if [[ -z "$status_format" ]]; then
+    set -- "$@" --human
+  fi
+fi
+
+if [[ "${#GLOBAL_ARGS[@]}" -gt 0 ]]; then
+  run_cli --config "$profile" "${GLOBAL_ARGS[@]}" "$command_name" "$@"
+else
+  run_cli --config "$profile" "$command_name" "$@"
+fi

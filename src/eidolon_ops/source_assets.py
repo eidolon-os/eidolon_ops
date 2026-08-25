@@ -66,6 +66,76 @@ PORTS = {
     "local_api": 9002,
 }
 
+
+def status_ports(*, hub_https_port: int | None = None) -> dict[str, list[dict[str, object]]]:
+    """Every operator-relevant listener, derived from the owned port table.
+
+    Health endpoints name only one port per service. Status has a different
+    job: show every listener an operator may need to diagnose or reach, such as
+    Agent's HTTP/Admin/gRPC trio and LiveKit's signalling/TURN/RTC surfaces.
+    """
+
+    def endpoint(
+        label: str,
+        bind: str,
+        port: int,
+        *,
+        protocol: str = "tcp",
+        end_port: int | None = None,
+    ) -> dict[str, object]:
+        value: dict[str, object] = {
+            "label": label,
+            "bind": bind,
+            "port": port,
+            "protocol": protocol,
+        }
+        if end_port is not None:
+            value["end_port"] = end_port
+        return value
+
+    hub_lan_port = hub_https_port or 8443
+    data = {
+        "admin": [endpoint("API", "127.0.0.1", PORTS["admin"])],
+        "admin-web": [endpoint("Web", "127.0.0.1", PORTS["admin_web"])],
+        "data": [endpoint("API", "127.0.0.1", PORTS["data"])],
+        "data-workspace": [
+            endpoint("Workspace API", "127.0.0.1", PORTS["data_workspace"])
+        ],
+        "hub-api": [endpoint("API", "127.0.0.1", PORTS["hub"])],
+        "hub-ingress": [endpoint("HTTPS", "0.0.0.0", hub_lan_port)],
+        "kernel": [endpoint("API", "127.0.0.1", PORTS["kernel"])],
+        "eidolond": [endpoint("System API", "127.0.0.1", PORTS["eidolond"])],
+        "local-api": [endpoint("HTTPS", "0.0.0.0", PORTS["local_api"])],
+        "memory-supervisor": [
+            endpoint("Supervisor", "127.0.0.1", PORTS["memory_admin"]),
+            endpoint("MCP base", "127.0.0.1", 10030),
+        ],
+        "memory-discovery": [
+            endpoint("Discovery", "127.0.0.1", PORTS["memory_discovery"])
+        ],
+        "agent": [
+            endpoint("HTTP", "127.0.0.1", PORTS["agent_http"]),
+            endpoint("Admin", "127.0.0.1", PORTS["agent_admin"]),
+            endpoint("gRPC", "127.0.0.1", 45051),
+        ],
+        "channel-provider": [
+            endpoint("Provider", "127.0.0.1", PORTS["channel_provider"])
+        ],
+        "channel": [endpoint("Worker", "127.0.0.1", PORTS["channel_worker"])],
+        "nats": [
+            endpoint("Client", "0.0.0.0", PORTS["nats"]),
+            endpoint("Monitoring", "0.0.0.0", PORTS["nats_http"]),
+        ],
+        "livekit": [
+            endpoint("Signalling", "0.0.0.0", PORTS["livekit"]),
+            endpoint("TURN", "0.0.0.0", 3478, protocol="udp"),
+            endpoint("RTC", "0.0.0.0", 50000, protocol="udp", end_port=60000),
+        ],
+    }
+    data["hub"] = [*data["hub-api"], *data["hub-ingress"]]
+    data["memory"] = [*data["memory-supervisor"], *data["memory-discovery"]]
+    return data
+
 #: Deliberately outside :data:`PORTS`, which is checked for equality against the
 #: ports the components declare: the browser client is not one of them. It is
 #: still an origin Admin has to admit and a port nothing else may be handed, and

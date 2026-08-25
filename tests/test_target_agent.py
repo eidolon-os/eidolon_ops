@@ -598,6 +598,7 @@ def test_status_parses_systemd_properties(monkeypatch) -> None:
 
     assert result["units"]["eidolond.service"]["ActiveState"] == "active"
     assert result["units"]["eidolond.service"]["NRestarts"] == 2
+    assert result["network"] == {"lan_ipv4": None, "addresses": []}
 
 
 def test_status_records_systemctl_failure(monkeypatch) -> None:

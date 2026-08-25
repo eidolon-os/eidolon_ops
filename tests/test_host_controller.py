@@ -91,6 +91,7 @@ def test_local_lifecycle_uses_canonical_product_source_profile(tmp_path: Path) -
     result = controller.status()
     assert result.outcome is Outcome.OBSERVED
     assert result.report["status"] == "healthy"
+    assert result.report["ports"]["admin"][0]["port"] == 9000
     command, cwd, environment = runner.calls[-1]
     assert command == (str(profile.lifecycle_script), "product-source", "status")
     assert cwd == profile.paths.current_root

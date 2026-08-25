@@ -1,8 +1,9 @@
 # eidolon-ops
 
-`eidolon-ops` 是 Mac 开发 Host 与 Raspberry Pi 产品 Host 的统一管理入口。两端使用相同的路径角色、
-生命周期命令和诊断模型；区别只在 Host profile 与执行适配器（Mac 是本地 supervisord，Pi 是远程
-systemd）。`eidolon-ops` 是唯一入口；实现级诊断收敛在 `eidolon-ops debug` 之下。
+仓库根目录的 `./eidolon` 是 Mac 开发 Host 与 Raspberry Pi 产品 Host 的统一操作入口。两端使用相同的
+路径角色、生命周期命令和诊断模型；区别只在 Host profile 与执行适配器（Mac 是本地 supervisord，Pi
+是远程 systemd）。脚本负责选择 Host 和展示该 Host 可用的命令，底层契约仍由 `eidolon-ops` CLI
+唯一实现；实现级诊断收敛在 `debug` 之下。
 
 ## 运维权威的三层分工
 
@@ -33,8 +34,7 @@ Ops 是唯一入口，不是唯一实现。三层各自拥有不可替代的事�
 Data V2 初始化、15 个产品服务启动，并要求 Host 达到手机 App commissioning 门禁：
 
 ```bash
-uv run eidolon-ops --config config/hosts/pi5.toml \
-  install --release-id 20260807-product-1 --apply
+./eidolon pi5 install --release-id 20260807-product-1 --apply
 ```
 
 “新 Pi”从 Raspberry Pi OS 已刷盘、SSH host key 已可信且操作账号具备 non-interactive sudo 开始；本工具
@@ -45,7 +45,7 @@ uv run eidolon-ops --config config/hosts/pi5.toml \
 credential、32-byte raw Ed25519 Host identity 和精确提交派生的 Pi settings：
 
 ```bash
-uv run eidolon-ops --config config/hosts/pi5.toml init-inputs
+./eidolon pi5 init-inputs
 ```
 
 该命令只读 Agent/Channel/Memory 的固定 provider key 名，不复制它们已有的内部 token；Data/Kernel、
@@ -173,6 +173,23 @@ Owner 变更的权限边界；它的 state/runtime 目录均不与产品主进�
 
 ## 唯一入口与操作
 
+日常操作不再手写 `uv run eidolon-ops --config ...`。入口脚本自动发现 `config/hosts/*.toml`（忽略
+`*.example.toml`），以配置文件名作为短主机名，并在执行前拒绝该 Host 不支持的命令：
+
+```text
+./eidolon hosts                         # 所有已配置 Host
+./eidolon commands mac                  # Mac 支持的命令
+./eidolon help pi5 install              # 指定 Host、指定命令的完整参数帮助
+./eidolon mac start|stop|restart|status
+./eidolon pi5 start|stop|restart|status
+```
+
+`status` 默认展示 Host LAN IP、全部非 loopback IPv4、每个服务的监听地址/端口、服务状态和异常建议；自动化需要完整 Evidence 时使用
+`./eidolon HOST status --json`。
+
+`deploy/dev/run_all.sh` 仍是 Mac supervisord 的内部生命周期适配器，Host profile 会调用它；它不是操作员
+入口，直接删除会破坏 Mac 生命周期。所有人工操作都从 `./eidolon` 进入。
+
 每个操作先产出一份 `Plan`（`operation`/`steps`/`destructive`/`requires_flags`/`touches`），再返回
 `Evidence`：Host 报告原样保留在顶层，旁边多出 `plan`、`outcome` 与 `steps`。退出码取自 `Outcome` 枚举，
 不再取自 CLI 里的一张“成功词”白名单——那张表让 `commissioning-code` 与 `backup` 在 Host 上成功、在这里
@@ -180,26 +197,26 @@ Owner 变更的权限边界；它的 state/runtime 目录均不与产品主进�
 port 的组合推导），所以“这台 Host 能做什么”是问出来的，不是从源码里读出来的。
 
 ```text
-eidolon-ops --config HOST.toml status|doctor
-eidolon-ops --config HOST.toml commissioning-code [--ttl-seconds 600]  # Mac Debug Host
-eidolon-ops --config HOST.toml start|stop|restart [--dry-run]
-eidolon-ops --config HOST.toml logs [--service SERVICE] [--lines N] [--since TEXT]
+./eidolon HOST status|doctor
+./eidolon HOST commissioning-code [--ttl-seconds 600]
+./eidolon HOST start|stop|restart [--dry-run]
+./eidolon HOST logs [--service SERVICE] [--lines N] [--since TEXT]
 
 # Mac implementation diagnostics (normal lifecycle uses top-level status/start/stop/restart)
-eidolon-ops --config HOST.toml debug prepare|validate|status|web-start|web-stop|web-restart|web-status
+./eidolon mac debug prepare|validate|status|web-start|web-stop|web-restart|web-status
 
 # Pi release/install capabilities
-eidolon-ops --config HOST.toml provision [--apply]
-eidolon-ops --config HOST.toml init-inputs
-eidolon-ops --config HOST.toml install --release-id ID [--resume] [--apply]
-eidolon-ops --config HOST.toml reset [--wipe-authority-data] [--apply]
-eidolon-ops --config HOST.toml controller-reset [--apply]  # lost every managing phone
-eidolon-ops --config HOST.toml install --release-id ID \
+./eidolon pi5 provision [--apply]
+./eidolon pi5 init-inputs
+./eidolon pi5 install --release-id ID [--resume] [--apply]
+./eidolon pi5 reset [--wipe-authority-data] [--apply]
+./eidolon pi5 controller-reset [--apply]  # lost every managing phone
+./eidolon pi5 install --release-id ID \
   --reset-existing --wipe-authority-data [--apply]
-eidolon-ops --config HOST.toml deploy|update --release-id ID [--resume] [--activate]
-eidolon-ops --config HOST.toml app-ready
-eidolon-ops --config HOST.toml rollback --release-id ID --snapshot /var/lib/eidolon/deployments/... [--apply]
-eidolon-ops --config HOST.toml diagnose --output /absolute/path/to/report.tar.gz
+./eidolon pi5 deploy|update --release-id ID [--resume] [--activate]
+./eidolon pi5 app-ready
+./eidolon pi5 rollback --release-id ID --snapshot /var/lib/eidolon/deployments/... [--apply]
+./eidolon pi5 diagnose --output /absolute/path/to/report.tar.gz
 ```
 
 Mac 的 Host profile 可用严格的 `source_overrides.<source>` 指向一个干净、精确提交的本地 worktree；这只

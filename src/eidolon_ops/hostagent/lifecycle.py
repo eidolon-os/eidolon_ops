@@ -60,6 +60,7 @@ def status(payload: Mapping[str, object]) -> dict[str, object]:
         "host": platform.node(),
         "system": platform.system().lower(),
         "machine": platform.machine().lower(),
+        "network": _network_status(),
         "units": {
             **{unit: primitives.unit_status(unit) for unit in units},
             **(
@@ -78,6 +79,21 @@ def status(payload: Mapping[str, object]) -> dict[str, object]:
         # was made for reported success four times running.
         "release_sources": _release_provenance(evidence),
     }
+
+
+def _network_status() -> dict[str, object]:
+    """Addresses observed on the product Host without making status fragile."""
+
+    addresses = sorted(
+        address for address in app_contract.host_addresses() if not address.startswith("127.")
+    )
+    try:
+        lan_ipv4: str | None = str(app_contract.observed_lan_address())
+    except TargetError:
+        lan_ipv4 = None
+    if lan_ipv4 is not None and lan_ipv4 not in addresses:
+        addresses.insert(0, lan_ipv4)
+    return {"lan_ipv4": lan_ipv4, "addresses": addresses}
 
 
 def _release_provenance(evidence: Path) -> list[dict[str, object]]:

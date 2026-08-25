@@ -180,6 +180,16 @@ def test_unified_cli_forwards_the_dirty_worktree_escape_hatch(capsys) -> None:
     capsys.readouterr()
 
 
+def test_status_can_render_human_output_without_changing_json_default(capsys) -> None:
+    assert host_cli.main(["--config", "/tmp/host.toml", "status", "--human"]) == 0
+    human = capsys.readouterr().out
+    assert "Eidolon Host 状态" in human
+    assert not human.lstrip().startswith("{")
+
+    assert host_cli.main(["--config", "/tmp/host.toml", "status", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "ok"
+
+
 def test_unified_cli_reports_profile_errors(monkeypatch, capsys) -> None:
     def fail(_path: Path):
         raise HostProfileError("invalid host profile")
@@ -192,6 +202,19 @@ def test_unified_cli_reports_profile_errors(monkeypatch, capsys) -> None:
         "outcome": "failed",
         "error": "invalid host profile",
     }
+
+
+def test_human_status_reports_profile_errors_without_json(monkeypatch, capsys) -> None:
+    def fail(_path: Path):
+        raise HostProfileError("invalid host profile")
+
+    monkeypatch.setattr(host_cli, "load_host_profile", fail)
+
+    assert host_cli.main(["--config", "/tmp/host.toml", "status", "--human"]) == 1
+    output = capsys.readouterr().err
+    assert "总体状态   查询失败" in output
+    assert "invalid host profile" in output
+    assert not output.lstrip().startswith("{")
 
 
 def test_the_exit_code_is_the_operations_own_verdict(capsys, monkeypatch) -> None:

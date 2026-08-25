@@ -17,6 +17,7 @@ from eidolon_ops.model import Outcome
 from eidolon_ops.paths import HostProfileError, load_host_profile
 from eidolon_ops.process import ProcessError, SubprocessRunner
 from eidolon_ops.readiness import ReadinessError
+from eidolon_ops.status_output import render_status, render_status_error
 from eidolon_ops.transport import TransportError
 
 
@@ -123,6 +124,7 @@ def _dispatch(controller: HostController, arguments: argparse.Namespace) -> obje
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _parser()
     arguments = parser.parse_args(argv)
+    human_status = arguments.operation == "status" and arguments.human
     try:
         controller = HostController(
             load_host_profile(arguments.config),
@@ -142,12 +144,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         TransportError,
         OSError,
     ) as exc:
-        _print(
-            {"status": "failed", "outcome": str(Outcome.FAILED), "error": str(exc)},
-            stream=sys.stderr,
-        )
+        if human_status:
+            print(render_status_error(str(exc), profile=arguments.config), file=sys.stderr)
+        else:
+            _print(
+                {"status": "failed", "outcome": str(Outcome.FAILED), "error": str(exc)},
+                stream=sys.stderr,
+            )
         return 1
-    _print(result.to_json())
+    if human_status:
+        print(render_status(result.to_json()))
+    else:
+        _print(result.to_json())
     # The verdict is the operation's own, not this file's guess at one. A set
     # of success words lived here and defaulted every new status string to a
     # failure — ``commissioning-code`` and ``backup`` both succeeded on the
@@ -185,7 +193,20 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
     operations = parser.add_subparsers(dest="operation", required=True)
-    operations.add_parser("status")
+    status = operations.add_parser("status")
+    status_format = status.add_mutually_exclusive_group()
+    status_format.add_argument(
+        "--human",
+        action="store_true",
+        help="render a concise Host and service table instead of JSON",
+    )
+    status_format.add_argument(
+        "--json",
+        action="store_false",
+        dest="human",
+        help="emit the complete machine-readable Evidence document (default for eidolon-ops)",
+    )
+    status.set_defaults(human=False)
     operations.add_parser("app-ready")
     doctor = operations.add_parser("doctor")
     doctor.add_argument("--release-id")

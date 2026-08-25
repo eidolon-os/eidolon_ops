@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from eidolon_ops import lan_observation
 from eidolon_ops import plans
 from eidolon_ops.errors import OperationsError
 from eidolon_ops.host import HostAdapter, build_adapter
@@ -16,6 +17,7 @@ from eidolon_ops.model import Capability, Evidence, Outcome, Plan, steps_from_ph
 from eidolon_ops.paths import HostProfile
 from eidolon_ops.process import ProcessRunner
 from eidolon_ops.progress import ProgressSink
+from eidolon_ops.source_assets import status_ports
 
 _LIFECYCLE_ACTIONS = frozenset({"start", "stop", "restart"})
 #: Flags that survived from a lifecycle model this tool no longer has. Every
@@ -58,7 +60,38 @@ class HostController:
         plan = plans.status(self.profile.host_id)
         self.adapter.require(Capability.STATUS)
         report = self.adapter.supervisor.status()
+        app = self.profile.app
+        context: dict[str, object] = {
+            "host_id": self.profile.host_id,
+            "platform": str(self.profile.platform),
+            "driver": str(self.profile.driver),
+            "ports": status_ports(hub_https_port=app.hub_https_port if app else None),
+        }
+        if app is not None and str(self.profile.platform) == "macos":
+            context["network"] = self._local_status_network()
+        report = {**report, **context}
         return self._observed(plan, report, healthy=report.get("status") != "degraded")
+
+    def _local_status_network(self) -> dict[str, object]:
+        """Current Mac addresses; status must survive a disconnected machine."""
+
+        try:
+            addresses = lan_observation.interface_addresses(self.runner)
+        except (OSError, ProcessError):
+            addresses = set()
+        app = self.profile.app
+        declared = str(app.lan_ipv4) if app is not None and app.lan_ipv4 is not None else ""
+        if declared:
+            lan_ipv4 = declared
+        else:
+            try:
+                lan_ipv4 = lan_observation.observed_lan_address(self.runner, addresses)
+            except (OSError, ProcessError):
+                lan_ipv4 = ""
+        visible = sorted(address for address in addresses if not address.startswith("127."))
+        if lan_ipv4 and lan_ipv4 not in visible:
+            visible.insert(0, lan_ipv4)
+        return {"lan_ipv4": lan_ipv4 or None, "addresses": visible}
 
     def app_ready(self) -> Evidence:
         plan = plans.app_ready(self.profile.host_id)
