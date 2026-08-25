@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives.asymmetric import ec
+from eidolon_sdk.device_foundation.v1.directory_tool import issue_descriptor
 
 from eidolon_ops.host_identity import derive_host_lan_identity
 from eidolon_ops.owner_domain_assets import (
@@ -93,6 +94,68 @@ def test_directory_advertises_the_canonical_admission_authority_route(tmp_path: 
 
     assert endpoints["admission"].endswith("/api/admission/v1")
     assert "/api/device-onboarding/v1" not in endpoints["admission"]
+
+
+def test_directory_publishes_the_route_it_is_served_from(tmp_path: Path) -> None:
+    # This Host is the only party that knows where it serves the document, so it
+    # is the only party that may state the route. Consumers used to derive it by
+    # appending "/descriptor" to the Admission base — a path no Host answers,
+    # which failed commissioning at its final step.
+    identity = derive_host_lan_identity(b"a" * 32)
+    assets = ensure_owner_domain_assets(tmp_path / "owner-domain", identity, 8443, now=NOW)
+    directory = json.loads(assets.descriptor)
+
+    assert directory["descriptor_uri"] == (
+        identity.hub_origin(8443) + "/api/device-onboarding/v1/descriptor"
+    )
+    assert all(
+        not endpoint["uri"].endswith("/descriptor")
+        for endpoint in directory["endpoints"]
+    )
+
+
+def test_stale_descriptor_route_is_reissued_at_the_next_revision(tmp_path: Path) -> None:
+    # The reuse shortcut compares the document it would issue against the one on
+    # disk. A field left out of that comparison is a field that never reaches a
+    # commissioned device: the stale document keeps being served, correctly
+    # signed, forever.
+    identity = derive_host_lan_identity(b"a" * 32)
+    root = tmp_path / "owner-domain"
+    first = ensure_owner_domain_assets(root, identity, 8443, now=NOW)
+    current = json.loads(first.descriptor)
+    stale = issue_descriptor(
+        {
+            "owner_domain_id": current["owner_domain_id"],
+            "owner_domain_generation": current["owner_domain_generation"],
+            "trust_epoch": 1,
+            "directory_revision": current["directory_revision"],
+            "descriptor_uri": "https://elsewhere.invalid/api/device-onboarding/v1/descriptor",
+            "endpoints": current["endpoints"],
+            "issued_at": current["issued_at"],
+            "expires_at": current["expires_at"],
+        },
+        owner_root_certificate_pem=(root / "owner-domain-root-ca.pem").read_text(
+            encoding="ascii"
+        ),
+        authority_signing_certificate_pem=(
+            root / "authority-signing-certificate.pem"
+        ).read_text(encoding="ascii"),
+        authority_private_key_pem=(root / "authority-signing.key.pem").read_bytes(),
+    )
+    (root / "owner-domain-descriptor.json").write_text(
+        json.dumps(stale.model_dump(mode="json"), indent=2) + "\n", encoding="utf-8"
+    )
+
+    reissued = json.loads(
+        ensure_owner_domain_assets(
+            root, identity, 8443, now=NOW + timedelta(minutes=1)
+        ).descriptor
+    )
+
+    assert reissued["descriptor_uri"] == (
+        identity.hub_origin(8443) + "/api/device-onboarding/v1/descriptor"
+    )
+    assert reissued["directory_revision"] == current["directory_revision"] + 1
 
 
 def test_existing_descriptor_corruption_fails_closed(tmp_path: Path) -> None:

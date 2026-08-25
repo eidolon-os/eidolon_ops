@@ -436,6 +436,12 @@ def _directory(
 ) -> bytes:
     path = root / _DESCRIPTOR
     origin = identity.hub_origin(port)
+    # This Host serves the document at its own onboarding route, and it is the
+    # only party that knows that route. Stating it inside the signed document is
+    # what stops a consumer from inventing a path convention: firmware used to
+    # derive one from the Admission base address, which no Host answers, so
+    # commissioning rolled back at its last step with a bare 404 nobody logged.
+    descriptor_uri = origin + "/api/device-onboarding/v1/descriptor"
     endpoints = [
         {
             "authority": "admission",
@@ -481,6 +487,7 @@ def _directory(
                 current.owner_domain_id == owner_domain_id
                 and current.owner_domain_generation == owner_domain_generation
                 and expected == endpoints
+                and current.descriptor_uri == descriptor_uri
                 and current.issued_at <= now < current.expires_at
             ):
                 _validate_directory(current, root_certificate, signer_certificate, now)
@@ -492,6 +499,7 @@ def _directory(
         "owner_domain_generation": owner_domain_generation,
         "trust_epoch": 1,
         "directory_revision": revision,
+        "descriptor_uri": descriptor_uri,
         "endpoints": endpoints,
         "issued_at": now.isoformat().replace("+00:00", "Z"),
         "expires_at": (now + timedelta(days=365)).isoformat().replace("+00:00", "Z"),
