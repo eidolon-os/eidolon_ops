@@ -13,7 +13,13 @@ connect_timeout_seconds = 10
 remote_uv = "/usr/local/bin/uv"
 
 [workspace]
-bundle_root = "/private/tmp/eidolon-release-bundles"
+# Not a temporary directory. This holds the sealed bundle a resumed install
+# continues from, the snapshot a rollback restores, and the kept uv cache that
+# exists so a cold build does not crawl through the index again. macOS deletes
+# things under /private/tmp on its own schedule, which took two prepared
+# worktrees with it once already; the same policy applies to whatever a resume
+# was going to read.
+bundle_root = "~/eidolon/release-bundles"
 release_cli = "../../eidolon_kernel/.venv/bin/eidolon-release"
 # Workstation build tool, declared rather than derived from the activator's
 # directory. Must be exactly uv 0.11.15, and it is not necessarily installed

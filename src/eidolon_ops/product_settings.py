@@ -21,6 +21,12 @@ def product_settings(
         "eidolon_agent", config.sources["eidolon_agent"].revision, "config/settings.yaml"
     )
     agent = _replace(agent, "env: dev", "env: prod", expected=1)
+    # The Agent's own template debugs itself: at DEBUG it logs every sqlite
+    # cursor close and rollback, which measured 52 KB/s on an *idle* Host —
+    # 4.5 GB/day, onto a Pi's SD card. `env: prod` above is the same decision
+    # about the same file; a product Host's log level belongs beside it rather
+    # than left at whatever value happens to help while developing the Agent.
+    agent = _replace(agent, "log_level: DEBUG", "log_level: INFO", expected=1)
     # Runtime, state, cache, and log paths are part of the component/Host
     # environment contract.  The pinned Agent template deliberately expresses
     # them through EIDOLON_*_ROOT; the systemd unit supplies the product values.

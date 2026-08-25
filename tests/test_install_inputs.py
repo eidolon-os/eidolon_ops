@@ -51,6 +51,7 @@ def _settings_reader(_source_id: str, _revision: str, path: str) -> str:
     if _source_id == "eidolon_agent":
         return """\
 env: dev
+log_level: DEBUG
 uds_path: $EIDOLON_RUNTIME_ROOT/agent/eidolon-agent.sock
 log_a: $EIDOLON_LOG_ROOT/agent
 log_b: $EIDOLON_LOG_ROOT/agent
@@ -164,6 +165,11 @@ def test_initializer_creates_one_private_consistent_input_set(config, tmp_path: 
     agent_settings = (target / "agent.yaml").read_text(encoding="utf-8")
     assert "~/eidolon" not in agent_settings
     assert agent_settings.startswith("env: prod\n")
+    # A product Host is not the machine the Agent is being debugged on: at DEBUG
+    # this component logs every sqlite cursor close, which measured 4.5 GB/day
+    # on an idle Host and lands on a Pi's SD card.
+    assert "log_level: INFO" in agent_settings
+    assert "DEBUG" not in agent_settings
     assert "uds_path: $EIDOLON_RUNTIME_ROOT/agent/eidolon-agent.sock" in agent_settings
     assert "sqlite_path: $EIDOLON_STATE_ROOT/agent/eidolon-agent.sqlite3" in agent_settings
     assert "avatar:\n  enabled: false" in (target / "channel.yaml").read_text(encoding="utf-8")
