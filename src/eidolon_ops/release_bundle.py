@@ -26,11 +26,17 @@ from eidolon_ops.transport import SSHTransport
 from eidolon_ops.workstation_toolchain import ensure_workstation_uv
 
 #: Dependencies this workstation has already fetched, kept between builds so a
-#: release costs the network only what actually changed. It sits beside the
-#: bundles rather than inside a build, because uv binds a cache to the path it
-#: was built at and a build directory does not outlive the build. Named a dot
-#: entry so it cannot be mistaken for a release id when the root is listed.
-_KEPT_DEPENDENCY_CACHE = ".uv-cache"
+#: release costs the network only what actually changed.
+#:
+#: It lives with the pinned workstation toolchain, not beside the bundles. A
+#: bundle is an output and ``bundle_root`` may legitimately be a temp directory
+#: the system sweeps -- but this is not an output, it is the thing whose whole
+#: purpose is to still be there next time, and uv binds a cache to the absolute
+#: path it was built at: every entry in it points at that root, so a cache that
+#: moves is a cache full of dangling links. Keeping it under the toolchain root,
+#: which the profile is already required to place somewhere durable, means the
+#: path it is bound to is one nothing sweeps and nothing relocates.
+_KEPT_DEPENDENCY_CACHE = "uv-cache"
 _BUNDLE_SHAPE = {
     "bundle.json",
     "prepare_target.py",
@@ -271,7 +277,7 @@ class BundleTransfer:
                     self.config.workspace.python_concurrent_downloads
                 ),
                 "EIDOLON_RELEASE_UV_CACHE": str(
-                    self.config.workspace.bundle_root / _KEPT_DEPENDENCY_CACHE
+                    self.config.workspace.toolchain_root / _KEPT_DEPENDENCY_CACHE
                 ),
             }
         )

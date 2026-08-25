@@ -131,6 +131,16 @@ class ReleaseTransaction:
         # deploy after deploy reported success. Refusing here rather than warning,
         # because a warning in a release log is a thing nobody reads twice.
         local["install_input_contract"] = self._require_declared_credentials()
+        # Said before the bundle is sealed, not after something fails.
+        #
+        # A release is defined by what the repositories hold, which removed the
+        # failure where a board ran commits nobody meant to ship. The failure it
+        # leaves is the mirror image: with several people committing to these
+        # eight repositories, HEAD is a combination that may never have run
+        # together, and nothing said so until a readiness timeout was already
+        # being explained. The same calculation that annotates that failure costs
+        # one round trip here, where the answer can still change a decision.
+        local["source_advance"] = self._advance_since_last_activation()
         phases = Journal(self.progress)
         candidate_prepared = False
         health_gates_passed = False
@@ -348,6 +358,31 @@ class ReleaseTransaction:
             f"— these sources advanced: {moved}. A release is only as consistent as the "
             "combination it was built from; suspect these before anything else."
         )
+
+    def _advance_since_last_activation(self) -> dict[str, object]:
+        """What moved since this Host last activated something, before sealing.
+
+        Best effort by construction, like the annotation it shares a calculation
+        with: a Host that cannot answer is not a reason to refuse a deploy, and a
+        Host with no history has nothing to compare against.
+        """
+
+        previous = self._last_activated_release()
+        if previous is None:
+            return {"status": "no_previous_release"}
+        release_id, sources = previous
+        advance = self.preflight.sources.advance_from(sources)
+        if not advance:
+            return {"status": "unchanged", "since": release_id}
+        return {
+            "status": "advanced",
+            "since": release_id,
+            "commits": dict(sorted(advance.items())),
+            "note": (
+                f"these sources advanced since release {release_id}, the last one this "
+                "Host activated. This combination has not run on it before."
+            ),
+        }
 
     def _last_activated_release(self) -> tuple[str, dict[str, object]] | None:
         try:

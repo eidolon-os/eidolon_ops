@@ -12,6 +12,13 @@ from pathlib import Path
 from eidolon_ops.config import OperationsConfig
 from eidolon_ops.errors import InstallInputError
 from eidolon_ops.product_settings import product_settings
+from eidolon_ops.provider_inputs import (
+    EXTERNAL_KEYS,
+    OPTIONAL_CHANNEL_KEYS,
+    parse_provider_env,
+    serialize_env,
+    usable_secret,
+)
 
 #: The one filename each install input is written under.
 INSTALL_DESTINATION_NAMES = {
@@ -121,3 +128,58 @@ def refresh_derived_settings(
             temporary.unlink(missing_ok=True)
         refreshed.append(name)
     return refreshed
+
+
+def refresh_provider_credentials(target: Path, config: OperationsConfig) -> list[str]:
+    """Carry the operator's current provider keys into the input set.
+
+    These keys have one author and one home: the operator types them into a
+    component's ``config/.env``, and the input set holds a copy so a release can
+    carry them to a Host. Both copies were required to be byte-equal, and no verb
+    reconciled them — ``converge-inputs`` is additive by design and will not
+    replace a value that is already there. So rotating a key in the file it is
+    typed into stopped every operation on both Hosts, with a message naming the
+    drift and no way to end it but editing a mode-0600 file by hand.
+
+    A copy of a fact is not a second opinion about it. This makes the component's
+    file the one place the value lives and the input set follow it, the same way
+    the derived settings beside it follow the pinned commits. What stays refused
+    is a value that is *missing* or a placeholder: nothing here can invent an LLM
+    key, and a key that authenticates to nothing is worth stopping for.
+    """
+
+    refreshed: list[str] = []
+    for source_id, keys in EXTERNAL_KEYS.items():
+        current = parse_provider_env(config.sources[source_id].path / "config/.env")
+        name = _PROVIDER_DESTINATIONS[source_id]
+        installed = parse_provider_env(target / name)
+        wanted = dict(installed)
+        for key in keys:
+            value = current.get(key)
+            if not usable_secret(value, key=key):
+                raise InstallInputError(
+                    "current provider credential is missing or a placeholder: "
+                    f"{source_id}:{key}"
+                )
+            wanted[key] = str(value)
+        if source_id == "eidolon_channel":
+            # Optional by contract: present when the operator has one, absent
+            # when they do not, and the input set must say the same either way.
+            for key in OPTIONAL_CHANNEL_KEYS:
+                value = current.get(key)
+                if usable_secret(value, key=key):
+                    wanted[key] = str(value)
+                else:
+                    wanted.pop(key, None)
+        if wanted != installed:
+            write_private_file(target / name, serialize_env(wanted))
+            refreshed.append(name)
+    return refreshed
+
+
+#: Which input file holds each component's provider keys.
+_PROVIDER_DESTINATIONS = {
+    "eidolon_agent": "agent.env",
+    "eidolon_channel": "channel.env",
+    "eidolon_memory": "memory.env",
+}

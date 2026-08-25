@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import stat
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from types import MappingProxyType
@@ -632,3 +633,107 @@ def test_a_missing_provider_credential_is_refused_rather_than_invented(
 
     with pytest.raises(InstallInputError, match="provider credentials"):
         add_missing_install_credentials(configured, apply=True)
+
+
+# --- 派生的副本跟随它的来源，而不是被拿来跟它比对 -----------------------------
+
+
+def _drifting_reader(debug_dir: str) -> Callable[[str, str, str], str]:
+    """The Agent template as a later commit carries it.
+
+    A default the product overlay does not touch, because the point is a
+    component changing its own mind — not this repository changing the overlay.
+    """
+
+    def read(source_id: str, revision: str, path: str) -> str:
+        text = _settings_reader(source_id, revision, path)
+        if source_id == "eidolon_agent":
+            return text.replace("debug_dir: $EIDOLON_CACHE_ROOT/debug/agent", debug_dir)
+        return text
+
+    return read
+
+
+def test_a_component_changing_a_default_does_not_stop_every_operation(
+    config, tmp_path: Path
+) -> None:
+    """The three settings inputs are derived, so they follow the pinned commits.
+
+    They were materialized here and then required to be byte-equal to what they
+    are derived from, with no verb on the shipping path to reconcile the two. So
+    a component committing a new default in its own ``config/settings.yaml``
+    stopped every operation on both Hosts with `product settings input drifted
+    from exact Git objects`, and the only way out was a separate command. Now
+    the copy follows, and the report says it moved.
+    """
+
+    configured = _config_for_init(config, tmp_path)
+    initialize_install_inputs(configured, _settings_reader)
+    target = next(iter(configured.install_files.values())).parent
+
+    moved = _drifting_reader("debug_dir: $EIDOLON_CACHE_ROOT/agent-debug")
+
+    # Without the flag it is still a refusal: a diagnosis must be able to report
+    # a stale copy rather than quietly end it.
+    with pytest.raises(InstallInputError, match="product settings input drifted"):
+        validate_install_input_contract(configured, moved)
+
+    report = validate_install_input_contract(configured, moved, refresh_derived=True)
+
+    assert report["status"] == "compatible"
+    assert report["refreshed"] == {"settings": ["agent.yaml"]}
+    assert "$EIDOLON_CACHE_ROOT/agent-debug" in (target / "agent.yaml").read_text(
+        encoding="utf-8"
+    )
+    # And a second run has nothing to say, because nothing moved.
+    assert validate_install_input_contract(configured, moved, refresh_derived=True)[
+        "refreshed"
+    ] == {}
+
+
+def test_rotating_a_provider_key_where_it_is_typed_is_enough(config, tmp_path: Path) -> None:
+    """An LLM key has one home: the component's own ``config/.env``.
+
+    The input set holds a copy so a release can carry it to a Host. Both were
+    required to be byte-equal and nothing reconciled them — ``converge-inputs``
+    is additive by design and will not replace a value that is already there —
+    so rotating the key in the file it is typed into stopped every operation
+    with no way out but hand-editing a mode-0600 file.
+    """
+
+    configured = _config_for_init(config, tmp_path)
+    initialize_install_inputs(configured, _settings_reader)
+    target = next(iter(configured.install_files.values())).parent
+    rotated = configured.sources["eidolon_agent"].path / "config/.env"
+    rotated.write_text('EIDOLON_AGENT_LLM_API_KEY="rotated-agent-key"\n', encoding="utf-8")
+
+    with pytest.raises(InstallInputError, match="provider credential drifted"):
+        validate_install_input_contract(configured, _settings_reader)
+
+    report = validate_install_input_contract(
+        configured, _settings_reader, refresh_derived=True
+    )
+
+    assert report["refreshed"] == {"provider_credentials": ["agent.env"]}
+    assert _env(target / "agent.env")["EIDOLON_AGENT_LLM_API_KEY"] == "rotated-agent-key"
+    # The internal secrets in the same file are untouched: only the keys whose
+    # home is the component's file follow it.
+    assert _env(target / "agent.env")["EIDOLON_MEMORY_MCP_TOKEN"] == _env(
+        target / "memory.env"
+    )["EIDOLON_MEMORY_MCP_TOKEN"]
+
+
+def test_a_provider_key_that_is_gone_is_still_a_refusal(config, tmp_path: Path) -> None:
+    """Following a source is not the same as inventing one.
+
+    Nothing here can mint an LLM key, and a key that authenticates to nothing is
+    worth stopping for. Only a *changed* value follows.
+    """
+
+    configured = _config_for_init(config, tmp_path)
+    initialize_install_inputs(configured, _settings_reader)
+    emptied = configured.sources["eidolon_agent"].path / "config/.env"
+    emptied.write_text('EIDOLON_AGENT_LLM_API_KEY="your-key-here"\n', encoding="utf-8")
+
+    with pytest.raises(InstallInputError, match="missing or a placeholder"):
+        validate_install_input_contract(configured, _settings_reader, refresh_derived=True)

@@ -74,11 +74,22 @@ _PYTHON_INDEX_URL = re.compile(r"^https://[A-Za-z0-9.-]+(?::[0-9]{1,5})?/[A-Za-z
 
 #: Directories the operating system empties on its own schedule. Anything a
 #: release must be able to find again cannot be pinned inside one.
-_EPHEMERAL_ROOTS = (
-    Path("/tmp").resolve(),
-    Path("/private/tmp").resolve(),
-    Path("/var/tmp").resolve(),
-    Path("/private/var/tmp").resolve(),
+#:
+#: Resolved, because ``/tmp`` is a symlink to ``/private/tmp`` on macOS and one
+#: directory answering to two names would otherwise be half-guarded.
+#:
+#: Known gap: macOS also sweeps ``$TMPDIR``, a per-user directory under
+#: ``/var/folders``, which is not named here. It is deliberately not added —
+#: that is also where every test builds its workspace, so including it would
+#: refuse the fixtures rather than a real operator's path. Nobody types a
+#: ``/var/folders`` path into a profile by hand; the directory an operator
+#: actually reaches for, and the one that took two prepared worktrees, is
+#: ``/tmp``.
+_EPHEMERAL_ROOTS = tuple(
+    dict.fromkeys(
+        Path(candidate).resolve()
+        for candidate in ("/tmp", "/private/tmp", "/var/tmp", "/private/var/tmp")
+    )
 )
 
 

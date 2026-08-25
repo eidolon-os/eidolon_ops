@@ -17,3 +17,8 @@ config/hosts/*.toml
 # The console's interface is a build artifact; `cd web && npm run build` makes it.
 src/eidolon_ops/console/static/
 web/node_modules/
+
+# Finder writes these anywhere a directory is opened, and an untracked file is
+# a dirty worktree: `require_clean` would refuse to seal a release because
+# somebody looked in a folder.
+.DS_Store

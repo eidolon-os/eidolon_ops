@@ -11,6 +11,7 @@ from eidolon_ops.errors import InstallInputError
 from eidolon_ops.private_inputs import (
     INSTALL_DESTINATION_NAMES,
     refresh_derived_settings,
+    refresh_provider_credentials,
     require_safe_input_directory,
     write_private_directory,
     write_private_file,
@@ -45,7 +46,7 @@ def initialize_install_inputs(
 ) -> dict[str, object]:
     """Create one private, internally consistent product input set."""
 
-    target = _target_directory(config)
+    target = target_directory(config)
     if target.exists() or target.is_symlink():
         return _validate_existing(target, config, read_exact_file)
     identity, identity_origin = _host_identity(target, new_identity=new_identity)
@@ -365,7 +366,7 @@ def add_missing_install_credentials(
     because the operator running this is holding a Host that currently works.
     """
 
-    target = _target_directory(config)
+    target = target_directory(config)
     require_safe_input_directory(target)
     # ``channel.env`` is read but never repaired: its key set is open — optional
     # provider credentials are legitimately absent — so "missing" is not a
@@ -437,11 +438,40 @@ def validate_install_input_contract(
     read_exact_file: Callable[[str, str, str], str],
     *,
     verify_provider_sources: bool = True,
+    refresh_derived: bool = False,
 ) -> dict[str, object]:
-    """Re-prove identities, token relationships and exact product settings."""
+    """Re-prove identities, token relationships and exact product settings.
 
-    target = _target_directory(config)
+    Eleven of the fourteen inputs are material a person authored: credentials,
+    the Host identity, the relationships between them. Those are compared and
+    refused, which is what this function is for.
+
+    The other three are not. ``agent.yaml``, ``channel.yaml`` and ``memory.yaml``
+    are a pure function of the pinned commits plus this repository's overlay, and
+    the provider keys inside three of the env files have their one home in a
+    component's own ``config/.env``. Comparing a derived copy to what it is
+    derived from can only ever report that a copy is stale, and this path had no
+    verb to end it: a component committing a new default, or an operator rotating
+    an LLM key in the file it is typed into, stopped every operation on both
+    Hosts with a message naming the drift. ``refresh_derived`` makes those copies
+    follow their source before the comparison, so the gate that remains is about
+    the eleven files where a difference means something.
+
+    Off by default: a diagnosis must be able to report a stale copy without
+    quietly ending it, and ``doctor`` reaches the surrounding checks.
+    """
+
+    target = target_directory(config)
     require_safe_input_directory(target)
+    refreshed: dict[str, list[str]] = {}
+    if refresh_derived:
+        settings = refresh_derived_settings(target, config, read_exact_file)
+        if settings:
+            refreshed["settings"] = settings
+        if verify_provider_sources:
+            credentials = refresh_provider_credentials(target, config)
+            if credentials:
+                refreshed["provider_credentials"] = credentials
     envs = {
         name: parse_provider_env(target / name)
         for name in (
@@ -564,6 +594,9 @@ def validate_install_input_contract(
         "status": "compatible",
         "files": sorted(INSTALL_DESTINATION_NAMES.values()),
         "contract": "pi-private-inputs-v1",
+        # Named, so following a source is visible after the fact rather than
+        # silent. Empty on the overwhelmingly common run where nothing moved.
+        "refreshed": refreshed,
         "redaction": "input values and digests are not returned",
     }
 
@@ -607,7 +640,7 @@ def _anchor_host_identity(target: Path, identity: bytes) -> None:
     write_private_file(anchor, identity)
 
 
-def _target_directory(config: OperationsConfig) -> Path:
+def target_directory(config: OperationsConfig) -> Path:
     if set(config.install_files) != set(INSTALL_FILE_NAMES):
         raise InstallInputError("install.files must contain the fixed input set")
     parents = {path.parent for path in config.install_files.values()}

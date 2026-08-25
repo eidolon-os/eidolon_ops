@@ -256,3 +256,52 @@ def test_a_nested_product_root_is_translated_before_its_parent() -> None:
         "b: /w/bootstrap-runtime/c.lock\n"
         "c: /w/install/current/d\n"
     )
+
+
+def test_the_kept_dependency_cache_does_not_live_in_an_output_directory() -> None:
+    """A cache is bound to the absolute path it was built at.
+
+    ``bundle_root`` holds outputs and is allowed to be a temp directory the
+    system sweeps. The kept uv cache is not an output — it exists to still be
+    there next time — and every entry inside it points at the root it was built
+    under, so moving it produces a cache full of dangling links rather than an
+    empty one. That happened: a cache copied to a new bundle root carried 266
+    links to the old absolute path, and the first symptom was a packaging error
+    four hundred lines away. It belongs with the toolchain, which the profile is
+    already required to place somewhere durable.
+    """
+
+    from eidolon_ops import release_bundle
+
+    source = (REPOSITORY / "src/eidolon_ops/release_bundle.py").read_text(encoding="utf-8")
+    assert "toolchain_root / _KEPT_DEPENDENCY_CACHE" in source
+    assert "bundle_root / _KEPT_DEPENDENCY_CACHE" not in source
+    # And it is not a dot entry any more: it no longer shares a directory with
+    # release ids, so hiding it from a listing buys nothing.
+    assert not release_bundle._KEPT_DEPENDENCY_CACHE.startswith(".")
+
+
+def test_the_livekit_port_contract_is_written_once_per_host_and_they_agree() -> None:
+    """Two hand-written copies of the same three ports, and nothing compared them.
+
+    A source run renders LiveKit's config from this repository's template; a
+    product Host renders it at each start from a launcher the Kernel release
+    ships. Both spell out the signalling port, the TURN port and the RTC range,
+    and a Host whose media ports disagree with the port registry is reachable
+    for signalling and silent for audio -- which is exactly what a stale config
+    on 17880 did.
+    """
+
+    from eidolon_ops import source_assets
+
+    launcher = REPOSITORY.parent / "eidolon_kernel/deploy/systemd/eidolon-livekit-launch"
+    if not launcher.is_file():
+        pytest.skip("no sibling eidolon_kernel checkout to compare against")
+    template = (source_assets.ASSETS / "livekit.yaml").read_text(encoding="utf-8")
+    shipped = launcher.read_text(encoding="utf-8")
+    for label, line in (
+        ("signalling", f"port: {source_assets.PORTS['livekit']}"),
+        ("turn", "udp_port: 3478"),
+    ):
+        assert line in template, f"{label} missing from the source-run template"
+        assert line in shipped, f"{label} missing from the product launcher"

@@ -78,10 +78,16 @@ class LocalProductSource:
     def prepare(self) -> dict[str, object]:
         self._validate_exact_worktrees()
         try:
-            validate_install_input_contract(
+            # ``refresh_derived`` because this Host tracks its checkouts' HEAD:
+            # any commit to a component's own `config/settings.yaml` moves what
+            # the three derived settings inputs should say, and comparing them to
+            # it instead of following it stopped every operation here until
+            # someone ran a Pi-only command.
+            contract = validate_install_input_contract(
                 self.sources.resolved_config(),
                 self._read_exact_file,
                 verify_provider_sources=False,
+                refresh_derived=True,
             )
         except InstallInputError as exc:
             raise OperationsError(str(exc)) from exc
@@ -105,6 +111,11 @@ class LocalProductSource:
             "status": "prepared",
             "source_count": len(self.config.sources),
             "generated_root": str(paths.config_root),
+            **(
+                {"refreshed_inputs": contract["refreshed"]}
+                if isinstance(contract, dict) and contract.get("refreshed")
+                else {}
+            ),
         }
 
     def validate(self) -> dict[str, object]:

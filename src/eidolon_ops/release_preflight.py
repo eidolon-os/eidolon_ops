@@ -374,8 +374,19 @@ class ReleasePreflight:
         """
 
         try:
+            # ``refresh_derived`` because two of the fourteen inputs are not
+            # operator material: the three settings files are a pure function of
+            # the pinned commits plus this repository's overlay, and the provider
+            # keys have their one home in a component's own `config/.env`. Both
+            # were materialized here and then required to be byte-equal to what
+            # they derive from, with no verb on this path to reconcile them -- so
+            # a component changing a default, or an operator rotating an LLM key
+            # where it is typed, stopped every operation on both Hosts. The gate
+            # still holds for the eleven files a human authored.
             return validate_install_input_contract(
-                self.sources.resolved_config(), self.read_exact_source_file
+                self.sources.resolved_config(),
+                self.read_exact_source_file,
+                refresh_derived=True,
             )
         except InstallInputError as exc:
             raise OperationsError(str(exc)) from exc
