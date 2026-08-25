@@ -918,8 +918,9 @@ do_restart() {
 # them. The dev path has done this since two projects in this workspace first
 # claimed one port; this path did not, and the symptom of a squatted port is a
 # program in an endless BACKOFF loop with the bind error buried in its own log.
-# It happened: eidolon_vision defaults to 8085, which the registry assigns to
-# Data's workspace API, and Data spent the whole run in BACKOFF.
+# It happened: eidolon_vision defaulted to 8085, which the registry assigns to
+# Data's workspace API, and Data spent the whole run in BACKOFF. Vision moved to
+# 18085 and is registered now; the audit is what makes the next one loud.
 #
 # Ops audits its own declared ports rather than delegating to Admin's dev
 # service catalogue: the set being started here is the product-source topology,

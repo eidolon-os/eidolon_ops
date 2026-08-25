@@ -62,6 +62,16 @@ livekit:
   turn_udp_port: 3478
   rtc_port_start: 50000
   rtc_port_end: 60000
+vision:
+  api:
+    host: 127.0.0.1
+    port: 18085
+  # Registered although it is not a product unit and Ops does not start it.
+  # It ran on 8085 -- Data's workspace API -- for as long as nobody ran both at
+  # once, and the day they overlapped the symptom was a supervised service in an
+  # endless restart loop, not a message about a port. A registry that only lists
+  # what Ops starts cannot answer "is this port taken", which is the question
+  # the pre-start audit asks.
 mementos:
   sidecar:
     host: 127.0.0.1
