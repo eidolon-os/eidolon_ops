@@ -453,12 +453,12 @@ def test_a_machine_can_be_retired_but_only_by_saying_so(config, tmp_path: Path) 
     assert minted != identity
     # And the machine keeps the new one from then on.
     following = initialize_install_inputs(
-        _config_for_init(config, tmp_path, directory="install-v3"),
+        _config_for_init(config, tmp_path, directory="inputs"),
         _settings_reader,
     )
     assert following["host_identity"] == "adopted"
     assert (
-        tmp_path / "operator-private/pi5/install-v3/host_identity.ed25519"
+        tmp_path / "operator-private/pi5/inputs/host_identity.ed25519"
     ).read_bytes() == minted
 
 
