@@ -50,11 +50,10 @@ def _app(address: str, *, registry: Path | None = None) -> AppAccess:
 def _registry(tmp_path: Path, *, secret: bytes = b"d" * 32, extra: bool = False) -> Path:
     path = tmp_path / "commissioning-secrets.json"
     document = {
-        "profile": "eidolon-development-hmac-commissioning-v1",
+        "profile": "eidolon-development-hmac-commissioning-v2",
         "devices": {
             "box-3-hil": {
                 "setup_secret": base64.urlsafe_b64encode(secret).rstrip(b"=").decode(),
-                "hardware_identity_ref": "hardware-box-3-hil",
             }
         },
     }
@@ -155,7 +154,7 @@ def test_development_commissioning_registry_rejects_symlink_mode_and_shape(
     legacy_flat.write_text(
         json.dumps(
             {
-                "profile": "eidolon-development-hmac-commissioning-v1",
+                "profile": "eidolon-development-hmac-commissioning-v2",
                 "devices": {
                     "box-3-hil": base64.urlsafe_b64encode(b"d" * 32)
                     .rstrip(b"=")
@@ -168,6 +167,54 @@ def test_development_commissioning_registry_rejects_symlink_mode_and_shape(
     with pytest.raises(HostApplicationError, match="invalid device entry"):
         HostApplicationMaterializer(
             config, _app("192.168.100.15", registry=legacy_flat), b"runtime"
+        ).prepare(HUB_TEMPLATE)
+
+    # A v1 entry stated a hand-typed hardware_identity_ref per device, which is
+    # how a Waveshare AMOLED board was installed as an ESP-BOX-3 forever. The
+    # installer must not stage such a file: the Hub derives that identity from
+    # the verified lookup id, and an entry asserting it would be a lie nothing
+    # downstream can check.
+    asserted_identity = _registry(tmp_path)
+    asserted_identity.write_text(
+        json.dumps(
+            {
+                "profile": "eidolon-development-hmac-commissioning-v2",
+                "devices": {
+                    "box-3-hil": {
+                        "setup_secret": base64.urlsafe_b64encode(b"d" * 32)
+                        .rstrip(b"=")
+                        .decode(),
+                        "hardware_identity_ref": "hardware-box-3-hil",
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(HostApplicationError, match="invalid device entry"):
+        HostApplicationMaterializer(
+            config, _app("192.168.100.15", registry=asserted_identity), b"runtime"
+        ).prepare(HUB_TEMPLATE)
+
+    stale_profile = _registry(tmp_path)
+    stale_profile.write_text(
+        json.dumps(
+            {
+                "profile": "eidolon-development-hmac-commissioning-v1",
+                "devices": {
+                    "box-3-hil": {
+                        "setup_secret": base64.urlsafe_b64encode(b"d" * 32)
+                        .rstrip(b"=")
+                        .decode(),
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(HostApplicationError, match="wrong profile"):
+        HostApplicationMaterializer(
+            config, _app("192.168.100.15", registry=stale_profile), b"runtime"
         ).prepare(HUB_TEMPLATE)
 
 

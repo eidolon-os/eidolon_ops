@@ -315,12 +315,9 @@ def test_development_commissioning_input_is_installed_without_a_digest_in_eviden
     encoded_secret = base64.urlsafe_b64encode(b"h" * 32).rstrip(b"=").decode()
     registry = json.dumps(
         {
-            "profile": "eidolon-development-hmac-commissioning-v1",
+            "profile": "eidolon-development-hmac-commissioning-v2",
             "devices": {
-                "box-3-hil": {
-                    "setup_secret": encoded_secret,
-                    "hardware_identity_ref": "hardware-box-3-hil",
-                }
+                "box-3-hil": {"setup_secret": encoded_secret}
             },
         }
     )
@@ -1789,12 +1786,9 @@ def test_refresh_installs_and_then_removes_the_opt_in_commissioning_registry(
     encoded_secret = base64.urlsafe_b64encode(b"h" * 32).rstrip(b"=").decode()
     registry_value = json.dumps(
         {
-            "profile": "eidolon-development-hmac-commissioning-v1",
+            "profile": "eidolon-development-hmac-commissioning-v2",
             "devices": {
-                "box-3-hil": {
-                    "setup_secret": encoded_secret,
-                    "hardware_identity_ref": "hardware-box-3-hil",
-                }
+                "box-3-hil": {"setup_secret": encoded_secret}
             },
         }
     )

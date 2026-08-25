@@ -1401,12 +1401,9 @@ def test_development_commissioning_registry_uses_only_the_private_stage(config) 
     registry.write_text(
         json.dumps(
             {
-                "profile": "eidolon-development-hmac-commissioning-v1",
+                "profile": "eidolon-development-hmac-commissioning-v2",
                 "devices": {
-                    "box-3-hil": {
-                        "setup_secret": encoded,
-                        "hardware_identity_ref": "hardware-box-3-hil",
-                    }
+                    "box-3-hil": {"setup_secret": encoded}
                 },
             }
         ),

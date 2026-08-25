@@ -6,7 +6,6 @@ import base64
 import binascii
 import json
 import os
-import re
 import stat
 from dataclasses import dataclass
 from pathlib import Path
@@ -45,7 +44,7 @@ HOST_APPLICATION_STAGE_NAMES = (
 )
 DEVELOPMENT_COMMISSIONING_STAGE_NAME = "commissioning-secrets.json"
 DEVELOPMENT_COMMISSIONING_TARGET = "/etc/eidolon/commissioning-secrets.json"
-_DEVELOPMENT_COMMISSIONING_PROFILE = "eidolon-development-hmac-commissioning-v1"
+_DEVELOPMENT_COMMISSIONING_PROFILE = "eidolon-development-hmac-commissioning-v2"
 _MINIMUM_DEVELOPMENT_SECRET_BYTES = 32
 _MAXIMUM_DEVELOPMENT_REGISTRY_BYTES = 64 * 1024
 
@@ -250,20 +249,21 @@ class HostApplicationMaterializer:
                     "development commissioning registry must contain at least one device"
                 )
             for hardware_lookup_id, entry in devices.items():
+                # An entry pre-shares a secret and states nothing else. The v1
+                # format also carried a hand-typed hardware_identity_ref, and a
+                # Waveshare AMOLED board was installed as "hardware-box3-..."
+                # for the rest of its life: an unverifiable board type welded
+                # into an immutable identity. The Hub derives that identity from
+                # the lookup id the secret is bound to, so staging a file that
+                # asserts one would ship a lie to a Host.
                 if (
                     not isinstance(hardware_lookup_id, str)
                     or not hardware_lookup_id.strip()
                     or len(hardware_lookup_id.encode()) > 128
                     or not isinstance(entry, dict)
-                    or set(entry) != {"setup_secret", "hardware_identity_ref"}
+                    or set(entry) != {"setup_secret"}
                     or not isinstance(entry["setup_secret"], str)
                     or not entry["setup_secret"]
-                    or not isinstance(entry["hardware_identity_ref"], str)
-                    or re.fullmatch(
-                        r"[A-Za-z0-9][A-Za-z0-9._:-]{2,127}",
-                        entry["hardware_identity_ref"],
-                    )
-                    is None
                 ):
                     raise HostApplicationError(
                         "development commissioning registry contains an invalid device entry"
