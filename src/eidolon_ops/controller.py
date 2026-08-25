@@ -19,7 +19,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from eidolon_ops.component_contract import read_component_contracts
-from eidolon_ops.config import SOURCE_IDS, OperationsConfig, validate_release_id
+from eidolon_ops.config import OperationsConfig, validate_release_id
 from eidolon_ops.errors import OperationsError
 from eidolon_ops.foundation import (
     FOUNDATION_PROFILE,
@@ -136,19 +136,21 @@ class EidolonPiController:
         git: str = "git",
         app: AppAccess | None = None,
         progress: ProgressSink | None = None,
+        allow_dirty: bool = False,
     ) -> None:
         self.config = config
         self.runner = runner
         self.transport = transport or SSHTransport(config.host, runner)
         self.git = git
         self.progress = progress
-        self.preflight = ReleasePreflight(config, runner, git=git)
-        self.bundles = BundleTransfer(config, runner, self.transport)
+        self.preflight = ReleasePreflight(config, runner, git=git, allow_dirty=allow_dirty)
+        self.bundles = BundleTransfer(config, runner, self.transport, self.preflight.sources)
         self.host_layer = HostLayer(
             config,
             self.transport,
             app,
             read_exact_source_file=self.preflight.read_exact_source_file,
+            source_revisions=self.preflight.sources.revisions,
         )
         self.releases = ReleaseTransaction(
             config,
@@ -183,8 +185,13 @@ class EidolonPiController:
     def rollback(self, **arguments) -> dict[str, object]:
         return self.releases.rollback(**arguments)
 
-    def local_preflight(self, *, require_install_files: bool) -> dict[str, object]:
-        return self.preflight.run(require_install_files=require_install_files)
+    def local_preflight(
+        self, *, require_install_files: bool, require_clean_sources: bool = True
+    ) -> dict[str, object]:
+        return self.preflight.run(
+            require_install_files=require_install_files,
+            require_clean_sources=require_clean_sources,
+        )
 
     # -- read-only -----------------------------------------------------------
 
@@ -205,7 +212,10 @@ class EidolonPiController:
         )
 
     def doctor(self, *, release_id: str | None = None) -> dict[str, object]:
-        local = self.preflight.run(require_install_files=False)
+        # A dirty sibling repository is reported here, not refused: this is the
+        # command an operator runs to find out what is wrong, and it must be
+        # able to answer while the workspace is mid-edit.
+        local = self.preflight.run(require_install_files=False, require_clean_sources=False)
         foundation = self.provision(apply=False)
         if foundation["status"] == "planned_bootstrap":
             return {
@@ -253,10 +263,7 @@ class EidolonPiController:
                 {
                     "target": self.config.host.target,
                     "port": self.config.host.port,
-                    "sources": {
-                        source_id: self.config.sources[source_id].revision
-                        for source_id in SOURCE_IDS
-                    },
+                    "sources": self.preflight.sources.provenance(),
                     "units": self.config.units,
                     "redaction": "Local secret paths/values and SSH key bytes omitted.",
                 },
@@ -365,7 +372,7 @@ class EidolonPiController:
         self.preflight.require_exact_commits(_SETTINGS_SOURCES)
         try:
             result = initialize_install_inputs(
-                self.config,
+                self.preflight.sources.resolved_config(),
                 self.preflight.read_exact_source_file,
                 new_identity=new_identity,
             )
@@ -391,7 +398,9 @@ class EidolonPiController:
         """
 
         try:
-            return add_missing_install_credentials(self.config, apply=apply)
+            return add_missing_install_credentials(
+                self.preflight.sources.resolved_config(), apply=apply
+            )
         except ASSET_ERRORS as exc:
             raise OperationsError(str(exc)) from exc
 

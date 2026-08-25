@@ -12,6 +12,7 @@ import pytest
 # The overlay still rewrites specific literals in three components' settings,
 # so refreshing the derived inputs must be exercised against text that actually
 # contains them. Shared with the install-inputs suite.
+from conftest import SOURCE_HEADS
 from test_install_inputs import _settings_reader as _product_settings_reader
 
 from eidolon_ops import controller as controller_module
@@ -120,13 +121,26 @@ class ControllerRunner:
         invalid_release_matrix: bool = False,
         wrong_uv_version: bool = False,
         release_contract_overrides: dict | None = None,
+        dirty: dict[str, str] | None = None,
+        heads: dict[str, str] | None = None,
     ) -> None:
         self.config = config
         self.wrong_revision = wrong_revision
         self.invalid_release_matrix = invalid_release_matrix
         self.wrong_uv_version = wrong_uv_version
         self.release_contract_overrides = release_contract_overrides or {}
+        #: What each fake checkout's HEAD answers, and what it reports dirty.
+        #: A release input is now read out of the repository rather than out of
+        #: the profile, so a fake git has to be able to say both.
+        self.heads = {**SOURCE_HEADS, **(heads or {})}
+        self.dirty = dict(dirty or {})
         self.calls: list[tuple[str, ...]] = []
+
+    def _source(self, command: tuple[str, ...]) -> str:
+        return Path(command[command.index("-C") + 1]).name
+
+    def revision(self, source_id: str) -> str:
+        return self.heads[source_id]
 
     def run(self, command, **kwargs):
         command = tuple(command)
@@ -134,6 +148,22 @@ class ControllerRunner:
         if "ls-tree" in command:
             # A synthetic eidolon_deploy tree; the digest below must agree.
             return ProcessResult(0, DEPLOY_TREE_LISTING, "")
+        if command[-2:] == ("rev-parse", "HEAD"):
+            head = self.heads[self._source(command)]
+            return ProcessResult(0, head + "\n", "")
+        if command[-1] == "--show-toplevel":
+            # The activator lives in the Kernel checkout's own virtualenv.
+            return ProcessResult(0, str(self.config.sources["eidolon_kernel"].path) + "\n", "")
+        if command[-2:] == ("branch", "--show-current"):
+            return ProcessResult(0, "main\n", "")
+        if "status" in command and "--porcelain" in command:
+            source = self._source(command)
+            if "--" in command:
+                # Scoped to eidolon_deploy: only the Kernel checkout answers.
+                return ProcessResult(0, self.dirty.get("eidolon_deploy", ""), "")
+            return ProcessResult(0, self.dirty.get(source, ""), "")
+        if "rev-list" in command:
+            return ProcessResult(0, "0\t0\n", "")
         if "rev-parse" in command:
             revision = command[-1].removesuffix("^{commit}")
             if self.wrong_revision:
@@ -196,7 +226,7 @@ class ControllerRunner:
                 records.append(
                     {
                         "source_id": source_id,
-                        "revision": self.config.sources[source_id].revision,
+                        "revision": self.revision(source_id),
                         "archive": f"sources/{source_id}.tar",
                         "sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
                     }
@@ -463,9 +493,13 @@ def test_local_preflight_proves_exact_commits(config) -> None:
 
     result = controller.local_preflight(require_install_files=True)
 
-    assert result["sources"] == {
-        source_id: config.sources[source_id].revision for source_id in SOURCE_IDS
-    }
+    # The evidence is still a full commit object per source; what changed is
+    # only where it came from. Nothing downstream — a bundle, a Host record, an
+    # audit — may be handed an abbreviation, a tag or a branch name.
+    assert result["sources"] == SOURCE_HEADS
+    assert set(result["sources"]) == set(SOURCE_IDS)
+    assert all(len(value) == 40 for value in result["sources"].values())
+    assert result["source_selection"] == {"mode": "repository_head"}
     assert result["install_prerequisites_checked"] is True
     assert result["release_tool_contract"]["tool"] == "eidolon-release"
     assert result["release_tool_contract"]["bundle_schema_version"] == 2
@@ -1054,8 +1088,16 @@ def test_deploy_app_gate_failure_restores_exact_activation_snapshot(config) -> N
 
     rollback = next(call for call, _sudo in transport.remote_calls if "rollback" in call)
     assert rollback[-1] == "/var/lib/eidolon/deployments/r1-" + "a" * 32
-    assert transport.agent_calls[-1][0] == "reclaim-releases"
-    assert transport.agent_calls[-1][1]["phase"] == "abort"
+    actions = [action for action, *_rest in transport.agent_calls]
+    # Cleanup first, explanation after: the candidate has to be released before
+    # the failure is annotated, never the other way round.
+    assert actions[-2:] == ["reclaim-releases", "release-sources"]
+    reclaim = next(
+        payload
+        for action, payload, *_rest in reversed(transport.agent_calls)
+        if action == "reclaim-releases"
+    )
+    assert reclaim["phase"] == "abort"
 
 
 def test_deploy_doctor_failure_restores_exact_activation_snapshot(config) -> None:
@@ -1240,8 +1282,13 @@ def test_input_initialization_is_local_and_exact_revision_pinned(setup_controlle
 
     assert result["status"] == "already_initialized"
     assert transport.agent_calls == []
-    settings_checks = [call for call in runner.calls if "rev-parse" in call]
-    assert len(settings_checks) == 3
+    # Every settings template is read out of a commit, and each repository is
+    # asked which commit that is exactly once: a second answer during one
+    # operation is the failure mode this replaced.
+    heads = [call for call in runner.calls if call[-2:] == ("rev-parse", "HEAD")]
+    assert len(heads) == len(set(heads)) == len(SOURCE_IDS)
+    reads = [call for call in runner.calls if "show" in call]
+    assert {call[-1].split(":", 1)[0] for call in reads} <= set(SOURCE_HEADS.values())
     # Derived settings follow the pinned commits; credentials are not reissued.
     assert result["refreshed_settings"] == ["agent.yaml", "channel.yaml", "memory.yaml"]
 
@@ -1629,8 +1676,8 @@ def test_controller_reset_rejects_invalid_target_evidence(setup_controller) -> N
 def test_preflight_refuses_an_activator_the_release_will_not_ship(config) -> None:
     """Sealing runs from the release's own activator.
 
-    A behaviour fix on the workstation does nothing unless the Kernel pin moves
-    with it, and without this check the mismatch only surfaces after a full
+    A behaviour fix on the workstation does nothing unless the commit that ships
+    contains it, and without this check the mismatch only surfaces after a full
     install has already run on the target.
     """
 
@@ -1640,11 +1687,49 @@ def test_preflight_refuses_an_activator_the_release_will_not_ship(config) -> Non
         transport=FakeTransport(),
     )
 
-    with pytest.raises(OperationsError, match="move the eidolon_kernel pin"):
+    with pytest.raises(OperationsError, match="not the one this release will ship"):
         controller.local_preflight(require_install_files=False)
 
 
-def test_preflight_refuses_a_pinned_commit_without_the_deploy_package(config) -> None:
+def test_preflight_refuses_an_activator_from_another_checkout(config) -> None:
+    """One of the two premises that used to make the digest agree by itself.
+
+    Once the shipped commit is the Kernel checkout's own HEAD, an activator
+    taken out of that checkout matches the shipped tree for free — so the check
+    has to say that it *is* that checkout rather than assume it.
+    """
+
+    class Elsewhere(ControllerRunner):
+        def run(self, command, **kwargs):
+            if tuple(command)[-1] == "--show-toplevel":
+                return ProcessResult(0, "/somewhere/else/eidolon_kernel\n", "")
+            return super().run(command, **kwargs)
+
+    controller = EidolonPiController(config, Elsewhere(config), transport=FakeTransport())
+
+    with pytest.raises(OperationsError, match="not inside the eidolon_kernel checkout"):
+        controller.local_preflight(require_install_files=False)
+
+
+def test_preflight_refuses_an_uncommitted_fix_to_the_shipped_activator(config) -> None:
+    """The other premise, and the mistake the whole check exists for.
+
+    An edit to eidolon_deploy that was never committed cannot be in the archive
+    the release is sealed from, so running it here proves nothing about what
+    will run on the board.
+    """
+
+    controller = EidolonPiController(
+        config,
+        ControllerRunner(config, dirty={"eidolon_deploy": " M eidolon_deploy/bundle.py\n"}),
+        transport=FakeTransport(),
+    )
+
+    with pytest.raises(OperationsError, match="uncommitted changes under eidolon_deploy"):
+        controller.local_preflight(require_install_files=False)
+
+
+def test_preflight_refuses_a_shipped_commit_without_the_deploy_package(config) -> None:
     class EmptyTree(ControllerRunner):
         def run(self, command, **kwargs):
             if "ls-tree" in tuple(command):
@@ -1653,7 +1738,7 @@ def test_preflight_refuses_a_pinned_commit_without_the_deploy_package(config) ->
 
     controller = EidolonPiController(config, EmptyTree(config), transport=FakeTransport())
 
-    with pytest.raises(OperationsError, match="ships no eidolon_deploy"):
+    with pytest.raises(OperationsError, match="no eidolon_deploy package"):
         controller.local_preflight(require_install_files=False)
 
 
@@ -1683,14 +1768,14 @@ def test_an_annotated_tag_must_still_name_the_pinned_commit(config) -> None:
 
     controller = EidolonPiController(tagged, MovedTag(tagged), transport=FakeTransport())
 
-    with pytest.raises(OperationsError, match="tag no longer names the pinned commit"):
+    with pytest.raises(OperationsError, match="tag no longer names the resolved commit"):
         controller.local_preflight(require_install_files=False)
 
 
 def test_a_tag_that_still_resolves_is_accepted(config) -> None:
     from dataclasses import replace as _replace
 
-    revision = config.sources["eidolon_kernel"].revision
+    revision = SOURCE_HEADS["eidolon_kernel"]
     tagged = _replace(
         config,
         sources={
@@ -2059,3 +2144,170 @@ def test_a_databases_own_sidecars_belong_to_whoever_declared_it(
     # being read. A component that declared the database declared these.
     assert authority["removed_but_unclaimed"] == []
     assert set(authority["will_be_removed"].values()) == {"eidolon_hub"}
+
+
+def _dirty_controller(config, **arguments):
+    controller = EidolonPiController(
+        config,
+        ControllerRunner(config, dirty={"eidolon_sdk": " M eidolon_sdk/session.py\n"}),
+        transport=FakeTransport(),
+        **arguments,
+    )
+    _stub_input_contract(controller)
+    return controller
+
+
+def test_a_deploy_refuses_to_seal_a_release_out_of_an_uncommitted_change(config) -> None:
+    """The one invariant a single copy of the truth still has.
+
+    A release is sealed with `git archive`, so an uncommitted change is not in
+    it: the tree that was tested is not the tree that ships. This is not the
+    old HEAD-equals-pin check renamed — that one compared two declarations.
+    """
+
+    controller = _dirty_controller(config)
+
+    with pytest.raises(OperationsError, match="sealed from commits") as failure:
+        controller.deploy(release_id="r1", resume=False, activate=False)
+    assert "eidolon_sdk" in str(failure.value)
+    assert "--allow-dirty" in str(failure.value)
+
+
+def test_a_doctor_reports_a_dirty_worktree_instead_of_refusing(config) -> None:
+    """Diagnosis reports; shipping refuses.
+
+    A doctor that will not answer because a sibling repository has an edited
+    test file cannot diagnose the thing it was asked about.
+    """
+
+    controller = _dirty_controller(config)
+
+    result = controller.doctor()
+
+    assert result["local"]["source_provenance"]["eidolon_sdk"]["dirty"] is True
+    assert result["local"]["source_provenance"]["eidolon_hub"]["dirty"] is False
+
+
+def test_allow_dirty_ships_the_committed_head_and_tells_the_host_it_did(config) -> None:
+    """The escape hatch has to leave a trace where the release lives.
+
+    The dirty bytes are not in the bundle either way; what matters afterwards
+    is being able to see that the release was sealed beside changes nobody
+    committed, and an operator's terminal is not where that survives.
+    """
+
+    controller = _dirty_controller(config, allow_dirty=True)
+    controller.host_layer.app = _app()
+    controller.host_layer.refresh = lambda release_id: {"status": "refreshed"}
+    controller.releases._app_ready = lambda: {"status": "app_ready"}
+
+    controller.deploy(release_id="r1", resume=True, activate=True)
+
+    snapshot = next(
+        payload
+        for action, payload, _python, _sudo in controller.transport.agent_calls
+        if action == "release-cutover-snapshot"
+    )
+    assert snapshot["sources"]["eidolon_sdk"]["dirty"] is True
+    assert snapshot["sources"]["eidolon_sdk"]["revision"] == SOURCE_HEADS["eidolon_sdk"]
+    assert snapshot["sources"]["eidolon_hub"]["pinned"] is False
+
+
+def test_an_install_tells_the_host_which_commits_it_is_installing(setup_controller) -> None:
+    controller, _runner, transport = setup_controller
+
+    controller.install(release_id="r1", resume=False, apply=True)
+
+    payload = next(payload for action, payload, _p, _s in transport.agent_calls if action == "install")
+    assert payload["sources"] == {
+        source_id: {
+            "revision": revision,
+            "head": revision,
+            "branch": "main",
+            "pinned": False,
+            "dirty": False,
+        }
+        for source_id, revision in SOURCE_HEADS.items()
+    }
+
+
+def test_a_failed_deploy_names_how_far_each_repository_moved(config) -> None:
+    """The incident's error was `readiness timeout: hub, kernel, local-api`.
+
+    A combination of commits that is not self-consistent cannot be detected
+    before it runs, so what has to improve is the failure: from nothing to
+    "these repositories moved since the release that worked".
+    """
+
+    class Counting(ControllerRunner):
+        def run(self, command, **kwargs):
+            command = tuple(command)
+            if "rev-list" in command:
+                counts = {"eidolon_sdk": "0\t1", "eidolon_admin": "0\t6"}
+                return ProcessResult(0, counts.get(self._source(command), "0\t0") + "\n", "")
+            return super().run(command, **kwargs)
+
+    transport = FakeTransport()
+    transport.overrides["release-sources"] = {
+        "status": "observed",
+        "releases": [
+            {
+                "release_id": "last-good",
+                "status": "activated",
+                "sources": {
+                    "eidolon_sdk": {"revision": "d" * 40},
+                    "eidolon_admin": {"revision": "e" * 40},
+                },
+            }
+        ],
+    }
+    transport.fail_remote_match = "--dry-run"
+    controller = EidolonPiController(config, Counting(config), transport=transport)
+    _stub_input_contract(controller)
+
+    with pytest.raises(OperationsError, match="since release last-good") as failure:
+        controller.deploy(release_id="r1", resume=False, activate=False)
+    message = str(failure.value)
+    assert "eidolon_admin +6" in message
+    assert "eidolon_sdk +1" in message
+    # The failure it is explaining must still be the failure.
+    assert "--dry-run" in message
+
+
+def test_a_failed_deploy_without_release_history_is_left_alone(config) -> None:
+    """A diagnostic that cannot answer must not replace the real error."""
+
+    transport = FakeTransport()
+    transport.overrides["release-sources"] = {"status": "observed", "releases": []}
+    transport.fail_remote_match = "--dry-run"
+    controller = EidolonPiController(config, ControllerRunner(config), transport=transport)
+    _stub_input_contract(controller)
+
+    with pytest.raises(RuntimeError, match="failed: --dry-run") as failure:
+        controller.deploy(release_id="r1", resume=False, activate=False)
+    assert "since release" not in str(failure.value)
+
+
+def test_resuming_a_bundle_after_a_commit_names_both_ways_out(config) -> None:
+    """A release id is one exact combination, so this refusal is correct.
+
+    It is also newly easy to hit: HEAD moves by committing, and the operator's
+    instinct on "drifted" is to delete the directory. The message has to name
+    the two things that actually continue the work.
+    """
+
+    sealed = EidolonPiController(config, ControllerRunner(config), transport=FakeTransport())
+    _stub_input_contract(sealed)
+    sealed.deploy(release_id="r1", resume=False, activate=False)
+
+    moved = EidolonPiController(
+        config,
+        ControllerRunner(config, heads={"eidolon_hub": "9" * 40}),
+        transport=FakeTransport(),
+    )
+    _stub_input_contract(moved)
+
+    with pytest.raises(OperationsError, match="sealed from a different commit of eidolon_hub") as f:
+        moved.deploy(release_id="r1", resume=True, activate=False)
+    assert "--revision eidolon_hub=" + SOURCE_HEADS["eidolon_hub"] in str(f.value)
+    assert "--release-id" in str(f.value)

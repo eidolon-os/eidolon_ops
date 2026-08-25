@@ -128,10 +128,22 @@ class WorkspaceConfig:
 @dataclass(frozen=True, slots=True)
 class SourceConfig:
     path: Path
-    revision: str
+    #: An *intentional* commit, or nothing at all.
+    #:
+    #: This field used to be required, and that requirement is what shipped a
+    #: release nobody meant to ship: a cross-repository change was written and
+    #: tested on every HEAD, ``deploy`` reported success, and the board kept
+    #: running the commits written down here — then three deploys failed
+    #: because a new release's virtualenv held the old SDK. Two copies of one
+    #: fact were kept by hand, so they were only ever accidentally equal.
+    #:
+    #: The repository HEAD is now the fact, and this is a deliberate exception
+    #: to it: writing a commit here says "reproduce this exact combination",
+    #: the same thing ``--revision`` says for one run. Nothing writes it back.
+    revision: str | None = None
     #: Optional human label for the commit. The commit is the identity — a tag
     #: is a movable reference, so it annotates the release rather than defining
-    #: it, and Ops proves it still resolves to this revision.
+    #: it, and Ops proves it still resolves to the commit that was resolved.
     tag: str | None = None
 
 
@@ -176,7 +188,8 @@ class OperationsConfig:
                 "source override contains unknown source: " + ", ".join(sorted(unknown))
             )
         for source_id, source in values.items():
-            _require_revision(source.revision, f"source override for {source_id}")
+            if source.revision is not None:
+                _require_revision(source.revision, f"source override for {source_id}")
             sources[source_id] = source
         return replace(self, sources=MappingProxyType(sources))
 
@@ -313,12 +326,14 @@ def load_config(path: Path) -> OperationsConfig:
         source_wire = _mapping(sources_wire[source_id], f"sources.{source_id}")
         _require_keys(
             source_wire,
-            required={"path", "revision"},
-            optional={"tag"},
+            required={"path"},
+            optional={"revision", "tag"},
             label=f"sources.{source_id}",
         )
-        revision = _string(source_wire["revision"], f"sources.{source_id}.revision")
-        _require_revision(revision, f"sources.{source_id}.revision")
+        revision: str | None = None
+        if "revision" in source_wire:
+            revision = _string(source_wire["revision"], f"sources.{source_id}.revision")
+            _require_revision(revision, f"sources.{source_id}.revision")
         raw_tag = source_wire.get("tag")
         tag = None if raw_tag is None else _string(raw_tag, f"sources.{source_id}.tag")
         if tag is not None and _TAG.fullmatch(tag) is None:

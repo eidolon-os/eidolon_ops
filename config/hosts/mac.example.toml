@@ -38,9 +38,12 @@ hub_https_port = 8443
 livekit_client_url = "ws://192.168.1.25:7880"
 allow_insecure_livekit = true
 
-# A Mac Host may run one reviewed source worktree without changing the Pi
-# release matrix. Both fields are required and the worktree must be clean at
-# the exact 40-hex commit. Keep this block disabled unless an override exists.
+# A Mac Host may point one source somewhere else without changing the Pi
+# release matrix — at a frozen copy, or at a separate worktree. `path` is the
+# point of this block; `revision` is optional and, because a source run
+# executes the worktree rather than an archive of it, a revision written here
+# must be that worktree's own HEAD. Keep the block disabled unless an override
+# exists.
 # [source_overrides.eidolon_admin]
 # path = "/absolute/path/to/eidolon_admin-worktree"
 # revision = "0000000000000000000000000000000000000000"

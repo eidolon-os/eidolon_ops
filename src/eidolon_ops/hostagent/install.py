@@ -41,8 +41,14 @@ class TargetInstaller:
         manage_ownership: bool = True,
         app_check: Callable[[], dict[str, object]] | None = None,
         port_registry: str = "",
+        sources: Mapping[str, object] | None = None,
     ) -> None:
         self.port_registry = port_registry
+        #: Which commit of each repository this Host was installed from. A first
+        #: install writes no cutover document, so this journal is the only place
+        #: the founding combination survives the release directory being
+        #: reclaimed.
+        self.sources = sources
         self.release = release
         self.secret_stage = secret_stage
         self.data = data
@@ -186,6 +192,10 @@ class TargetInstaller:
             "status": "running",
             "phase": "validated",
             "input_sha256": dict(inputs),
+            # Deliberately outside the identity comparison above: a resumed
+            # install is the same install, and refusing to resume because a
+            # sibling repository moved would strand a half-installed Host.
+            "sources": self.sources,
             "updated_at": int(time.time()),
         }
         primitives.atomic_json(self.journal_path, document)
@@ -441,4 +451,5 @@ def install(payload: Mapping[str, object]) -> dict[str, object]:
         host=host,
         app_check=lambda: probe.app_ready(payload),
         port_registry=contract.fixed_port_registry(payload),
+        sources=contract.optional_source_provenance(payload),
     ).install()

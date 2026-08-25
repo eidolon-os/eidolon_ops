@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import ssl
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from ipaddress import IPv4Address
 from pathlib import Path
 from types import SimpleNamespace
@@ -21,6 +23,22 @@ from eidolon_ops.probes import http_health as _http_health
 from eidolon_ops.probes import unix_http_health as _unix_http_health
 from eidolon_ops.process import ProcessResult, SubprocessRunner
 from eidolon_ops.source_schema import migrate_data_schema
+
+
+@dataclass(frozen=True)
+class _FakeSource:
+    path: Path
+    revision: str | None = None
+    tag: str | None = None
+
+
+@dataclass(frozen=True)
+class _FakeConfig:
+    """Dataclasses, not namespaces: resolution hands the settings overlay a
+    configuration with the shipped commits filled in, and that is a `replace`."""
+
+    sources: Mapping[str, _FakeSource]
+    install_files: Mapping[str, Path] = field(default_factory=dict)
 
 
 def _product(tmp_path: Path, *, foundation_mode: str) -> LocalProductSource:
@@ -137,7 +155,10 @@ def test_prepare_materializes_one_canonical_mac_product_contract(
     for source_id in source_ids:
         path = tmp_path / "sources" / source_id
         path.mkdir(parents=True)
-        sources[source_id] = SimpleNamespace(path=path, revision=revision)
+        (path / ".git").mkdir()
+        # No revision written down: a source run reads which commit its own
+        # checkout is on, the same way the release path now does.
+        sources[source_id] = _FakeSource(path=path)
     alembic = sources["eidolon_data"].path / ".venv/bin/alembic"
     alembic.parent.mkdir(parents=True)
     alembic.write_text("#!/bin/sh\n", encoding="utf-8")
@@ -178,10 +199,7 @@ def test_prepare_materializes_one_canonical_mac_product_contract(
     profile = _product(tmp_path, foundation_mode="external").profile
     livekit = cast(Path, profile.external_livekit_config)
     livekit.write_text("keys:\n  shared-key: shared-secret\n", encoding="utf-8")
-    config = SimpleNamespace(
-        sources=sources,
-        install_files={"data_env": inputs / "data.env"},
-    )
+    config = _FakeConfig(sources=sources, install_files={"data_env": inputs / "data.env"})
 
     class Runner:
         def __init__(self) -> None:
@@ -192,6 +210,12 @@ def test_prepare_materializes_one_canonical_mac_product_contract(
             self.calls.append(command)
             if command[-2:] == ("rev-parse", "HEAD"):
                 return ProcessResult(0, revision + "\n", "")
+            if command[-2:] == ("branch", "--show-current"):
+                return ProcessResult(0, "main\n", "")
+            if "status" in command and "--porcelain" in command:
+                return ProcessResult(0, "", "")
+            if "rev-parse" in command and command[-1].endswith("^{commit}"):
+                return ProcessResult(0, command[-1].removesuffix("^{commit}") + "\n", "")
             if "show" in command:
                 target = command[-1]
                 if target.endswith("config/channel-provider.yaml"):
@@ -518,36 +542,87 @@ def test_unix_health_rejects_transport_and_malformed_response(monkeypatch, tmp_p
     }
 
 
-def test_product_source_revision_and_generated_inputs_fail_closed(
-    monkeypatch, tmp_path: Path
-) -> None:
+class _WorktreeRunner:
+    """A git that answers for a worktree sitting on one commit."""
+
+    def __init__(self, head: str) -> None:
+        self.head = head
+
+    def run(self, command, **_kwargs):
+        command = tuple(command)
+        if command[-2:] == ("branch", "--show-current"):
+            return ProcessResult(0, "main\n", "")
+        if "status" in command and "--porcelain" in command:
+            return ProcessResult(0, "", "")
+        if command[-1].endswith("^{commit}"):
+            return ProcessResult(0, command[-1].removesuffix("^{commit}") + "\n", "")
+        if "rev-list" in command:
+            return ProcessResult(0, "0\t4\n", "")
+        return ProcessResult(0, self.head + "\n", "")
+
+
+def _one_source(path: Path, revision: str | None) -> Any:
+    return cast(Any, _FakeConfig(sources={"eidolon_data": _FakeSource(path, revision)}))
+
+
+def test_a_source_run_refuses_a_checkout_it_cannot_read(tmp_path: Path) -> None:
     product = _product(tmp_path, foundation_mode="external")
-    missing = tmp_path / "missing-source"
-    product.config = cast(
-        Any,
-        SimpleNamespace(sources={"eidolon_data": SimpleNamespace(path=missing, revision="a" * 40)}),
-    )
+    product.config = _one_source(tmp_path / "missing-source", None)
+
     with pytest.raises(OperationsError, match="worktree is missing"):
         product._validate_exact_worktrees()
 
+
+def test_a_source_run_ships_whatever_its_worktree_is_on(tmp_path: Path) -> None:
     source = tmp_path / "source"
-    source.mkdir()
+    (source / ".git").mkdir(parents=True)
+    product = _product(tmp_path, foundation_mode="external")
+    product.config = _one_source(source, None)
+    product.runner = cast(Any, _WorktreeRunner("b" * 40))
 
-    class DriftRunner:
-        def run(self, _command, **_kwargs):
-            return ProcessResult(0, "b" * 40 + "\n", "")
+    product._validate_exact_worktrees()
 
-    product.config = cast(
-        Any,
-        SimpleNamespace(sources={"eidolon_data": SimpleNamespace(path=source, revision="a" * 40)}),
-    )
-    product.runner = DriftRunner()
-    with pytest.raises(OperationsError, match="release pin"):
+    assert product._source_revisions() == {"eidolon_data": "b" * 40}
+
+
+def test_a_source_run_refuses_a_pin_that_is_not_what_it_would_run(tmp_path: Path) -> None:
+    """The one HEAD-equals-pin check that carries information.
+
+    A source run starts processes out of the worktree, so a pinned commit that
+    is not the worktree's HEAD does not describe what is running — it
+    contradicts it. On the release path the same comparison was two copies of a
+    declaration, and requiring them to agree was pure tax.
+    """
+
+    source = tmp_path / "source"
+    (source / ".git").mkdir(parents=True)
+    product = _product(tmp_path, foundation_mode="external")
+    product.config = _one_source(source, "a" * 40)
+    product.runner = cast(Any, _WorktreeRunner("b" * 40))
+
+    with pytest.raises(OperationsError, match="must be its HEAD"):
         product._validate_exact_worktrees()
-    with pytest.raises(OperationsError, match="revision drifted"):
-        product._read_exact_file("eidolon_data", "b" * 40, "config.yaml")
 
-    product.config = cast(Any, SimpleNamespace(sources={}))
+
+def test_product_source_revision_and_generated_inputs_fail_closed(
+    monkeypatch, tmp_path: Path
+) -> None:
+    source = tmp_path / "source"
+    (source / ".git").mkdir(parents=True)
+    product = _product(tmp_path, foundation_mode="external")
+    product.config = _one_source(source, None)
+    product.runner = cast(Any, _WorktreeRunner("b" * 40))
+
+    # Reading a file at a revision this run did not resolve must fail: the
+    # release matrix and the settings overlay both read by revision, and a
+    # silent mismatch there is a Host configured from the wrong commit.
+    with pytest.raises(OperationsError, match="revision drifted"):
+        product._read_exact_file("eidolon_data", "a" * 40, "config.yaml")
+
+    # A profile with no sources at all still has to fail on its own inputs
+    # rather than on resolution; the memo is dropped so the new config is read.
+    product.config = cast(Any, _FakeConfig(sources={}))
+    product._sources = None
     with pytest.raises(OperationsError, match="inputs are missing"):
         product.validate()
 

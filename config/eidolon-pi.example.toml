@@ -26,41 +26,48 @@ python_http_timeout_seconds = 120
 python_http_retries = 8
 python_concurrent_downloads = 4
 
+# Each source is a path. Which commit ships is read from the repository itself:
+# a release is sealed from `git rev-parse HEAD` in each of these checkouts, and
+# refused outright if a checkout has uncommitted changes (pass --allow-dirty to
+# ship the committed HEAD beside them anyway; the dirty state is then recorded
+# in the Host's release evidence).
+#
+# `revision` is optional and means one thing only: "reproduce this exact
+# commit", the same thing `--revision source=40hex` means for a single run. It
+# is not how a release is normally selected, and nothing ever writes it back.
+# Two hand-maintained copies of one commit is what shipped a release nobody
+# meant to ship: a cross-repository change was written and tested on every
+# HEAD, deploy reported success four times, and the board kept running the
+# commits that were written down here.
+#
+# `tag` is optional and annotates rather than defines: a tag is movable, so Ops
+# only proves it still resolves to the commit that was resolved.
+
 [sources.eidolon_kernel]
 path = "../../eidolon_kernel"
-revision = "fee7a99066438208b0289536a3a3d0ab5906e47f"
-# Optional human label. The commit above is the identity; a tag is a movable
-# reference, so Ops verifies it still resolves to that commit rather than
-# following it.
+# revision = "fee7a99066438208b0289536a3a3d0ab5906e47f"
 # tag = "kernel/v0.4.2"
 
 [sources.eidolon_data]
 path = "../../eidolon_data"
-revision = "746cc1121aabccd2bd6260c53f00f368cd2345a9"
 
 [sources.eidolon_hub]
 path = "../../eidolon_hub"
-revision = "c73bc4092ecb269898687963cc88d67442654777"
 
 [sources.eidolon_admin]
 path = "../../eidolon_admin"
-revision = "1e9c82c7f248ed2ec9c938385e5ab8e9c4f9580b"
 
 [sources.eidolon_agent]
 path = "../../eidolon_agent"
-revision = "44840084cbdd22071d077746a2e40232644739b2"
 
 [sources.eidolon_channel]
 path = "../../eidolon_channel"
-revision = "c70d804c2998f10f99674a551796ac9721b0fec1"
 
 [sources.eidolon_memory]
 path = "../../eidolon_memory"
-revision = "e7da3fe8703a4873e896aade771ffbdf2ca2d897"
 
 [sources.eidolon_sdk]
 path = "../../eidolon_sdk"
-revision = "2a5a7e8029f7eb3965e5ceab721f612509f4c8bb"
 
 [services]
 units = [

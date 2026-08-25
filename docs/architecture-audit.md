@@ -8,7 +8,21 @@ failed closed on a PyPI timeout before sealing/activation, so no product service
 
 ## Current code evidence
 
-The multi-repository root is not Git. The selected release commits remain explicit even when sibling HEADs advance:
+The multi-repository root is not Git.
+
+> **Overturned (2026-08-25).** This section's design intent — "the selected release commits remain explicit even when
+> sibling HEADs advance", and "current sibling branches and dirty working trees remain outside the release input" —
+> no longer holds, and the table below is a historical record rather than a description of how a release is now
+> selected. A release is sealed from each repository's HEAD; there is no second copy of the commit list to keep
+> equal. The intent was overturned because it was the direct cause of an incident: a tested cross-repository change
+> never reached the Pi, `deploy` reported success, and three subsequent deploys failed with `readiness timeout: hub,
+> kernel, local-api` — all because the explicit commits were older than the code that had been tested. Explicitness
+> survives where it carries information: `--revision`/`[sources.*].revision` reproduce an exact combination for one
+> run and label themselves as doing so. Dirty working trees are still outside the release input, and are now refused
+> rather than silently ignored (`--allow-dirty` to override, recorded in Host evidence). See `docs/runbook.md`,
+> "What a release is built from".
+
+The commits selected for the 2026-08-10 release were:
 
 | Source | Selected exact release input | Role |
 | --- | --- | --- |
@@ -26,7 +40,8 @@ workflow with the isolated FHS systemd fix. The upload preflight reads all 15 un
 their Git objects and accepted the `/etc/eidolon/host.env`, `/opt/eidolon/current/eidolon_admin/` and FHS state-path
 contracts. The 15-unit exact-object matrix and 14-file private-input contract passed locally. Bundle schema v2 also
 passed a real Mac-prefetch/compress/extract/offline-build smoke; the final new-Kernel exact bundle is not yet uploaded. Current sibling
-branches and dirty working trees remain outside the release input: Ops does not stage, overwrite or copy them. The
+branches and dirty working trees remain outside the release input: Ops does not stage, overwrite or copy them —
+though a dirty worktree is now a refusal rather than something quietly skipped past (see the note above). The
 candidate is not production-qualified until the product contract blockers below are resolved and target-native
 preparation, activation and hardware acceptance pass.
 

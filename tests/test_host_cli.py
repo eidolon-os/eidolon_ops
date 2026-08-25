@@ -14,9 +14,10 @@ from eidolon_ops.paths import HostProfileError
 class FakeHostController:
     instance: FakeHostController
 
-    def __init__(self, profile, runner, *, revision_overrides=()) -> None:
+    def __init__(self, profile, runner, *, revision_overrides=(), allow_dirty=False) -> None:
         self.calls: list[tuple[str, dict[str, object]]] = []
         self.revision_overrides = revision_overrides
+        self.allow_dirty = allow_dirty
         FakeHostController.instance = self
 
     def _result(self, name: str, **values):
@@ -167,6 +168,15 @@ def test_unified_cli_forwards_revision_overrides(capsys) -> None:
         == 0
     )
     assert FakeHostController.instance.revision_overrides == (f"eidolon_data={revision}",)
+    assert FakeHostController.instance.allow_dirty is False
+    capsys.readouterr()
+
+
+def test_unified_cli_forwards_the_dirty_worktree_escape_hatch(capsys) -> None:
+    """The refusal has to be answerable, and only from the command line."""
+
+    assert host_cli.main(["--config", "/tmp/host.toml", "--allow-dirty", "status"]) == 0
+    assert FakeHostController.instance.allow_dirty is True
     capsys.readouterr()
 
 

@@ -21,6 +21,7 @@ from eidolon_ops.embedding_model import (
 from eidolon_ops.errors import OperationsError
 from eidolon_ops.process import ProcessRunner, checked
 from eidolon_ops.progress import Journal
+from eidolon_ops.source_resolution import SourceResolver
 from eidolon_ops.transport import SSHTransport
 from eidolon_ops.workstation_toolchain import ensure_workstation_uv
 
@@ -51,10 +52,15 @@ class BundleTransfer:
         config: OperationsConfig,
         runner: ProcessRunner,
         transport: SSHTransport,
+        sources: SourceResolver | None = None,
     ) -> None:
         self.config = config
         self.runner = runner
         self.transport = transport
+        #: The same resolution preflight proved, not a second opinion about
+        #: which commits this release is. Two answers here is the whole class of
+        #: bug this replaced.
+        self.sources = sources or SourceResolver(config, runner)
 
     def _workstation_uv(self) -> Path:
         override = self.config.workspace.uv
@@ -251,7 +257,7 @@ class BundleTransfer:
             command.extend((f"--{flag}-repo", str(self.config.sources[source_id].path)))
         for source_id in SOURCE_IDS:
             flag = source_id.removeprefix("eidolon_").replace("eidolon-", "")
-            command.extend((f"--{flag}-revision", self.config.sources[source_id].revision))
+            command.extend((f"--{flag}-revision", self.sources.revision(source_id)))
         # The same uv preflight proved, not a second opinion about which one
         # this workstation has.
         command.extend(("--uv", str(self._workstation_uv())))
@@ -314,15 +320,28 @@ class BundleTransfer:
         ):
             raise OperationsError("existing bundle identity or source set is invalid")
         for source_id, item in zip(SOURCE_IDS, sources, strict=True):
-            expected_revision = self.config.sources[source_id].revision
+            expected_revision = self.sources.revision(source_id)
             if (
                 not isinstance(item, dict)
                 or item.get("source_id") != source_id
-                or item.get("revision") != expected_revision
                 or item.get("archive") != f"sources/{source_id}.tar"
                 or not isinstance(item.get("sha256"), str)
             ):
                 raise OperationsError(f"existing bundle source record drifted: {source_id}")
+            if item.get("revision") != expected_revision:
+                # Correct, and now reachable by simply committing something: a
+                # bundle is one exact combination of commits, so a resume onto a
+                # moved HEAD is a different release wearing the same id. Say
+                # both ways out, because a refusal that only says "drifted"
+                # gets answered by deleting the directory.
+                raise OperationsError(
+                    f"this release id was sealed from a different commit of {source_id} "
+                    f"({item.get('revision')}); the repository now resolves to "
+                    f"{expected_revision}. Continue the original combination with "
+                    f"--revision {source_id}={item.get('revision')} (repeat per moved "
+                    "source), or seal what the repositories hold now under a new "
+                    "--release-id"
+                )
             if file_sha256(output / str(item["archive"])) != item["sha256"]:
                 raise OperationsError(f"existing bundle source digest drifted: {source_id}")
         preparer = document.get("preparer")

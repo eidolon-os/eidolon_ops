@@ -180,7 +180,14 @@ class ReleaseTransaction:
                 phases.begin("host_cutover_snapshot")
                 host_cutover = self.transport.run_agent(
                     "release-cutover-snapshot",
-                    {"release_id": release_id, "cutover_mode": cutover_mode},
+                    {
+                        "release_id": release_id,
+                        "cutover_mode": cutover_mode,
+                        # The commits this release is, written where reclamation
+                        # cannot reach and a later question can. Also the only
+                        # place a --allow-dirty seal is still visible tomorrow.
+                        "sources": self.preflight.sources.provenance(),
+                    },
                     timeout=180,
                 )
                 host_snapshot_value = host_cutover.get("host_snapshot")
@@ -309,7 +316,53 @@ class ReleaseTransaction:
                     ) from host_restore_error
             if candidate_prepared and not health_gates_passed:
                 self._abort_candidate(release_id, phases, exc)
-            raise
+            raise self._explained(exc) from exc
+
+    def _explained(self, failure: Exception) -> Exception:
+        """Say which repositories moved since the release that last worked.
+
+        A combination of commits that is not self-consistent cannot be caught
+        before it runs — one component's new required field and another's old
+        model are both valid on their own. What can be fixed is the report: the
+        incident this comes from failed three times with `readiness timeout:
+        hub, kernel, local-api` and nothing to start from, while the actual
+        cause was one repository the release had never included.
+
+        Returns the original failure untouched when there is nothing to compare
+        against. A diagnostic that replaces the error it was explaining is
+        worse than no diagnostic.
+        """
+
+        previous = self._last_activated_release()
+        if previous is None:
+            return failure
+        release_id, sources = previous
+        advance = self.preflight.sources.advance_from(sources)
+        if not advance:
+            return failure
+        moved = ", ".join(
+            f"{source_id} +{count}" for source_id, count in sorted(advance.items())
+        )
+        return OperationsError(
+            f"{failure}\n\nsince release {release_id} — the last one this Host activated "
+            f"— these sources advanced: {moved}. A release is only as consistent as the "
+            "combination it was built from; suspect these before anything else."
+        )
+
+    def _last_activated_release(self) -> tuple[str, dict[str, object]] | None:
+        try:
+            history = self.transport.run_agent("release-sources", {}, timeout=60)
+            releases = history.get("releases")
+            newest = releases[0] if isinstance(releases, list) and releases else None
+            release_id = newest.get("release_id") if isinstance(newest, dict) else None
+            sources = newest.get("sources") if isinstance(newest, dict) else None
+        except Exception:
+            # The Host is already failing something; asking it a second question
+            # is best-effort by construction.
+            return None
+        if not isinstance(release_id, str) or not isinstance(sources, dict):
+            return None
+        return (release_id, sources)
 
     def _restore_host_cutover(
         self,
@@ -488,7 +541,11 @@ class ReleaseTransaction:
         except Exception as stage_error:
             self._abort_candidate(release_id, phases, stage_error)
             raise
-        payload = {**self.host_layer.target_payload(), "release_id": release_id}
+        payload = {
+            **self.host_layer.target_payload(),
+            "release_id": release_id,
+            "sources": self.preflight.sources.provenance(),
+        }
         primary_error: Exception | None = None
         try:
             phases.begin("install")

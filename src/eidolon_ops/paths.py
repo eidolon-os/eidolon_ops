@@ -409,15 +409,23 @@ def _source_overrides(value: object | None, *, base: Path) -> Mapping[str, Sourc
     overrides: dict[str, SourceConfig] = {}
     for source_id, raw in document.items():
         source = _table(raw, f"source_overrides.{source_id}")
-        if set(source) != {"path", "revision"}:
+        # ``path`` is the capability that has to survive: a Host profile points
+        # Memory and Channel at frozen copies whose commits the shared release
+        # matrix cannot use. ``revision`` is optional for the same reason it is
+        # optional in the operations config — the checkout named here knows
+        # which commit it is on, and asking a person to restate it is asking
+        # them to keep two copies of one fact equal by hand.
+        if "path" not in source or not set(source) <= {"path", "revision"}:
             raise HostProfileError(
-                f"source_overrides.{source_id} must contain exactly path and revision"
+                f"source_overrides.{source_id} must contain a path and may contain a revision"
             )
-        revision = _text(source["revision"], f"source_overrides.{source_id}.revision")
-        if re.fullmatch(r"[0-9a-f]{40}", revision) is None:
-            raise HostProfileError(
-                f"source_overrides.{source_id}.revision must be exactly 40 lowercase hex"
-            )
+        revision: str | None = None
+        if "revision" in source:
+            revision = _text(source["revision"], f"source_overrides.{source_id}.revision")
+            if re.fullmatch(r"[0-9a-f]{40}", revision) is None:
+                raise HostProfileError(
+                    f"source_overrides.{source_id}.revision must be exactly 40 lowercase hex"
+                )
         overrides[source_id] = SourceConfig(
             path=_local_path(source["path"], base, f"source_overrides.{source_id}.path"),
             revision=revision,

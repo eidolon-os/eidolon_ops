@@ -145,6 +145,12 @@ def snapshot(payload: Mapping[str, object], *, root: Path = Path("/")) -> dict[s
         "authority_before": _authority(authority_path),
         "host_files_before": _host_files(root, files, copy=True),
         "schema_migration": {"state": "not_started"},
+        # Which commit of each repository this release was built from. Recorded
+        # here because this directory is the one release artifact reclamation
+        # never touches: the descriptor under /opt/eidolon/releases carried the
+        # same facts and went away with the directory at commit, which is why
+        # "what was in the release from three weeks ago" had no answer at all.
+        "sources": contract.optional_source_provenance(payload),
     }
     primitives.atomic_json(destination / "cutover.json", document)
     return {

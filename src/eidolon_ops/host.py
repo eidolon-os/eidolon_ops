@@ -96,6 +96,7 @@ def build_adapter(
     runner: ProcessRunner,
     *,
     revision_overrides: tuple[str, ...] = (),
+    allow_dirty: bool = False,
     progress: ProgressSink | None = None,
 ) -> HostAdapter:
     """Assemble the adapter this profile describes."""
@@ -103,7 +104,9 @@ def build_adapter(
     platform = PLATFORM_PROFILES[profile.platform]
     if profile.driver is HostDriver.LOCAL_SUPERVISORD:
         return _source_adapter(profile, runner, platform, revision_overrides, progress)
-    return _product_adapter(profile, runner, platform, revision_overrides, progress)
+    return _product_adapter(
+        profile, runner, platform, revision_overrides, progress, allow_dirty=allow_dirty
+    )
 
 
 def _source_adapter(
@@ -139,6 +142,8 @@ def _product_adapter(
     platform: PlatformProfile,
     revision_overrides: tuple[str, ...],
     progress: ProgressSink | None = None,
+    *,
+    allow_dirty: bool = False,
 ) -> HostAdapter:
     config_path = profile.operations_config
     if config_path is None:
@@ -146,7 +151,12 @@ def _product_adapter(
     config = load_config(config_path).with_revision_overrides(revision_overrides)
     transport = SSHTransport(config.host, runner)
     release = EidolonPiController(
-        config, runner, transport=transport, app=profile.app, progress=progress
+        config,
+        runner,
+        transport=transport,
+        app=profile.app,
+        progress=progress,
+        allow_dirty=allow_dirty,
     )
     return HostAdapter(
         platform=platform,

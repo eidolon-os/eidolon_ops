@@ -537,6 +537,50 @@ def fixed_memory_admin_url(payload: Mapping[str, object]) -> str:
         raise TargetError(f"memory admin URL must be loopback http: {value}")
     return value.strip().rstrip("/")
 
+#: What a Host records about each source repository a release was built from.
+#: Five facts, fixed, because this is the only durable answer to "which commits
+#: was that release" — the release directory that carried them is deleted at
+#: commit, and the deployment evidence root is explicitly outside reclamation.
+SOURCE_PROVENANCE_KEYS = ("revision", "head", "branch", "pinned", "dirty")
+_PROVENANCE_COMMIT = re.compile(r"^[0-9a-f]{40}$")
+
+
+def optional_source_provenance(
+    payload: Mapping[str, object],
+) -> dict[str, dict[str, object]] | None:
+    """Validate the release's source provenance, or accept its absence.
+
+    Optional so a Host stays operable from a workstation that predates this
+    record. Validated so what does get stored is worth reading later: evidence
+    whose shape nobody can trust is not evidence, and this is the document an
+    audit or a rollback decision is made from.
+    """
+
+    value = payload.get("sources")
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise TargetError("release source provenance must be a table")
+    records: dict[str, dict[str, object]] = {}
+    for source_id, record in value.items():
+        label = f"release source provenance for {source_id}"
+        if not isinstance(source_id, str) or not isinstance(record, Mapping):
+            raise TargetError(f"{label} must be an object")
+        if set(record) != set(SOURCE_PROVENANCE_KEYS):
+            raise TargetError(f"{label} must state exactly {', '.join(SOURCE_PROVENANCE_KEYS)}")
+        for name in ("revision", "head"):
+            if _PROVENANCE_COMMIT.fullmatch(str(record.get(name))) is None:
+                raise TargetError(f"{label} has an invalid {name}")
+        branch = record.get("branch")
+        if branch is not None and (not isinstance(branch, str) or not branch):
+            raise TargetError(f"{label} has an invalid branch")
+        for name in ("pinned", "dirty"):
+            if not isinstance(record.get(name), bool):
+                raise TargetError(f"{label} has a non-boolean {name}")
+        records[source_id] = {name: record[name] for name in SOURCE_PROVENANCE_KEYS}
+    return records
+
+
 def fixed_release_id(payload: Mapping[str, object], *, required: bool = True) -> str | None:
     value = payload.get("release_id")
     if value is None and not required:

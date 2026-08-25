@@ -30,11 +30,13 @@ class HostController:
         runner: ProcessRunner,
         *,
         revision_overrides: tuple[str, ...] = (),
+        allow_dirty: bool = False,
         progress: ProgressSink | None = None,
     ) -> None:
         self.profile = profile
         self.runner = runner
         self.revision_overrides = revision_overrides
+        self.allow_dirty = allow_dirty
         self.progress = progress
         self._adapter: HostAdapter | None = None
 
@@ -45,6 +47,7 @@ class HostController:
                 self.profile,
                 self.runner,
                 revision_overrides=self.revision_overrides,
+                allow_dirty=self.allow_dirty,
                 progress=self.progress,
             )
         return self._adapter

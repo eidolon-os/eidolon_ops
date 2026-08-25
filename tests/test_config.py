@@ -151,8 +151,21 @@ def test_rejects_unsafe_python_resolver_fields(
         load_config(config_path)
 
 
-def test_rejects_short_revision(config_path: Path) -> None:
-    _replace(config_path, "0000000000000000000000000000000000000001", "abc")
+def test_a_source_needs_no_revision_at_all(config) -> None:
+    """The declaration is gone; the repository is the fact.
+
+    Two hand-maintained copies of one commit shipped a release nobody meant to
+    ship. What is left here is a path.
+    """
+
+    assert all(source.revision is None for source in config.sources.values())
+
+
+def test_an_explicit_revision_is_still_a_full_commit(pinned_config, config_path: Path) -> None:
+    """Writing one down is allowed, and still means exactly one commit."""
+
+    assert pinned_config.sources["eidolon_data"].revision == f"{2:040x}"
+    _replace(config_path, f'revision = "{2:040x}"', 'revision = "abc"')
 
     with pytest.raises(ConfigurationError, match="40-hex"):
         load_config(config_path)

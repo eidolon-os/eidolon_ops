@@ -3,7 +3,6 @@ from __future__ import annotations
 import ast
 import configparser
 import subprocess
-import tomllib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -20,6 +19,22 @@ from eidolon_ops.hostagent.contract import (
 
 KERNEL_ROOT = Path(__file__).resolve().parents[2] / "eidolon_kernel"
 
+#: The Kernel commit whose release contract this repository has been reviewed
+#: against.
+#:
+#: Deliberately a constant here and not a release input. It used to be read out
+#: of ``config/eidolon-pi.example.toml``, which worked only while that file
+#: declared the commits a release shipped; it no longer does, and following the
+#: Kernel's HEAD instead would aim these assertions at a moving target — every
+#: Kernel commit could turn this repository red for a change nobody here made.
+#:
+#: What this anchor buys is the opposite: a Kernel change that alters the unit,
+#: secret or system-asset contract turns *one* test red, on purpose, when
+#: somebody moves this line after reading the diff. Move it in the same commit
+#: that adapts ``hostagent/contract.py`` to whatever changed, and never to
+#: silence a failure without reading what moved.
+REVIEWED_KERNEL_CONTRACT_COMMIT = "fee7a99066438208b0289536a3a3d0ab5906e47f"
+
 pytestmark = pytest.mark.contract
 
 
@@ -27,10 +42,7 @@ pytestmark = pytest.mark.contract
 def kernel_contract() -> SimpleNamespace:
     if not (KERNEL_ROOT / ".git").exists():
         pytest.skip("sibling eidolon_kernel checkout is unavailable")
-    config = tomllib.loads(
-        (Path(__file__).resolve().parents[1] / "config/eidolon-pi.example.toml").read_text()
-    )
-    revision = config["sources"]["eidolon_kernel"]["revision"]
+    revision = REVIEWED_KERNEL_CONTRACT_COMMIT
     result = subprocess.run(
         ["git", "-C", str(KERNEL_ROOT), "show", f"{revision}:eidolon_deploy/manifest.py"],
         check=True,
@@ -95,6 +107,35 @@ def test_reset_system_asset_allowlist_matches_kernel_release_contract(kernel_con
         *(value[0] for value in HOST_APPLICATION_INPUTS.values()),
         *LEGACY_SYSTEM_ASSETS,
     }
+
+
+def test_the_reviewed_kernel_contract_commit_exists_in_this_checkout() -> None:
+    """The anchor has to name a real commit, or every assertion above is skipped.
+
+    A constant that silently stops resolving — a rebase, a pruned branch — would
+    turn this whole contract suite into an error nobody reads as a contract
+    failure.
+    """
+
+    if not (KERNEL_ROOT / ".git").exists():
+        pytest.skip("sibling eidolon_kernel checkout is unavailable")
+    resolved = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(KERNEL_ROOT),
+            "rev-parse",
+            "--verify",
+            f"{REVIEWED_KERNEL_CONTRACT_COMMIT}^{{commit}}",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert resolved.returncode == 0, (
+        "REVIEWED_KERNEL_CONTRACT_COMMIT does not exist in eidolon_kernel; point it at "
+        "the commit whose release contract this repository has actually been read against"
+    )
+    assert resolved.stdout.strip() == REVIEWED_KERNEL_CONTRACT_COMMIT
 
 
 def test_no_path_this_deployer_installs_is_also_declared_legacy() -> None:

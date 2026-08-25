@@ -178,3 +178,93 @@ def test_restore_rejects_tampered_snapshot_before_live_change(
     with pytest.raises(TargetError, match="snapshot content"):
         cutover.restore(_payload(captured), root=tmp_path)
     assert settings.read_text() == "live candidate\n"
+
+
+_PROVENANCE = {
+    "eidolon_hub": {
+        "revision": "a" * 40,
+        "head": "a" * 40,
+        "branch": "main",
+        "pinned": False,
+        "dirty": False,
+    },
+    "eidolon_sdk": {
+        "revision": "b" * 40,
+        "head": "b" * 40,
+        "branch": "feature/session",
+        "pinned": False,
+        "dirty": True,
+    },
+}
+
+
+def test_the_snapshot_records_which_commits_this_release_is(tmp_path: Path) -> None:
+    """Otherwise nobody can say what shipped three weeks ago.
+
+    The only artifact that carried commits lived in the release directory, and
+    the commit phase deletes that. This document is explicitly outside
+    reclamation, which makes it the place the answer has to live.
+    """
+
+    _host(tmp_path)
+
+    captured = cutover.snapshot(
+        {
+            "release_id": "release-9",
+            "cutover_mode": "reversible",
+            "sources": _PROVENANCE,
+        },
+        root=tmp_path,
+    )
+
+    receipt = json.loads(
+        (_path(tmp_path, Path(str(captured["host_snapshot"]))) / "cutover.json").read_text()
+    )
+    assert receipt["sources"] == _PROVENANCE
+    # A dirty worktree was allowed past the gate only with an explicit flag, so
+    # the fact that it was has to outlive the operator's terminal.
+    assert receipt["sources"]["eidolon_sdk"]["dirty"] is True
+
+
+def test_a_release_without_provenance_is_recorded_as_having_none(tmp_path: Path) -> None:
+    """An older workstation must still be able to cut over."""
+
+    _host(tmp_path)
+
+    captured = cutover.snapshot(
+        {"release_id": "release-9", "cutover_mode": "reversible"}, root=tmp_path
+    )
+
+    receipt = json.loads(
+        (_path(tmp_path, Path(str(captured["host_snapshot"]))) / "cutover.json").read_text()
+    )
+    assert receipt["sources"] is None
+
+
+@pytest.mark.parametrize(
+    "sources",
+    [
+        {"eidolon_hub": {"revision": "a" * 40}},
+        {"eidolon_hub": "not-an-object"},
+        {"eidolon_hub": {**_PROVENANCE["eidolon_hub"], "revision": "abc"}},
+        {"eidolon_hub": {**_PROVENANCE["eidolon_hub"], "dirty": "yes"}},
+        # An extra key on its own: a record with more in it than the contract
+        # says is a record written by something this Host does not understand.
+        {"eidolon_hub": {**_PROVENANCE["eidolon_hub"], "worktree": "/somewhere"}},
+        "not-a-table",
+    ],
+)
+def test_malformed_provenance_is_refused_rather_than_stored(tmp_path: Path, sources) -> None:
+    """Evidence nobody can trust the shape of is not evidence."""
+
+    _host(tmp_path)
+
+    with pytest.raises(TargetError, match="source provenance"):
+        cutover.snapshot(
+            {
+                "release_id": "release-9",
+                "cutover_mode": "reversible",
+                "sources": sources,
+            },
+            root=tmp_path,
+        )

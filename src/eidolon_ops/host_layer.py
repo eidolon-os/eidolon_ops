@@ -61,11 +61,16 @@ class HostLayer:
         app: AppAccess | None,
         *,
         read_exact_source_file,
+        source_revisions,
     ) -> None:
         self.config = config
         self.transport = transport
         self.app = app
         self._read_exact_source_file = read_exact_source_file
+        #: Asked rather than read off the configuration: which commit a source
+        #: ships is resolved once per operation, and a second reader deriving
+        #: its own answer is the shape of the bug this replaced.
+        self._source_revisions = source_revisions
 
     def target_payload(self) -> dict[str, object]:
         """Everything a Host is told about itself, in one reviewed shape."""
@@ -124,7 +129,7 @@ class HostLayer:
         materializer = self.materializer()
         try:
             template = hub_settings_template(
-                {source_id: source.revision for source_id, source in self.config.sources.items()},
+                self._source_revisions(),
                 self._read_exact_source_file,
             )
             return materializer.prepare(template.text)

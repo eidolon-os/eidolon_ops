@@ -64,6 +64,7 @@ ACTIONS: dict[str, tuple[ModuleType, str]] = {
     "release-cutover-restore": (cutover, "restore"),
     "release-cutover-finalize": (cutover, "finalize"),
     "active-release": (lifecycle, "active_release"),
+    "release-sources": (lifecycle, "release_sources"),
     "reset-plan": (reset, "reset_plan"),
     "reset-host": (reset, "reset_host"),
     "rollback-plan": (lifecycle, "rollback_plan"),

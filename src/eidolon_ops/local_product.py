@@ -36,6 +36,7 @@ from eidolon_ops.readiness import (
     ReadinessFact,
     is_ready,
 )
+from eidolon_ops.source_resolution import SourceResolver
 from eidolon_ops.source_schema import migrate_data_schema
 
 
@@ -54,6 +55,20 @@ class LocalProductSource:
         self.config = config
         self.runner = runner
         self.git = git
+        self._sources: SourceResolver | None = None
+
+    @property
+    def sources(self) -> SourceResolver:
+        """Which commit each checkout is on, resolved once for this run.
+
+        Built on first use rather than in the constructor: the Mac adapter
+        composes the profile before it has an operations config to hand, and a
+        resolver bound to nothing is worse than one bound late.
+        """
+
+        if self._sources is None:
+            self._sources = SourceResolver(self.config, self.runner, git=self.git)
+        return self._sources
 
     # -- materialization -----------------------------------------------------
 
@@ -61,7 +76,7 @@ class LocalProductSource:
         self._validate_exact_worktrees()
         try:
             validate_install_input_contract(
-                self.config,
+                self.sources.resolved_config(),
                 self._read_exact_file,
                 verify_provider_sources=False,
             )
@@ -244,7 +259,7 @@ class LocalProductSource:
                 self.profile,
                 self._read_exact_file(
                     "eidolon_kernel",
-                    self.config.sources["eidolon_kernel"].revision,
+                    self.sources.revision("eidolon_kernel"),
                     source_path,
                 ),
             ).encode("utf-8")
@@ -266,7 +281,7 @@ class LocalProductSource:
             self.profile,
             self._read_exact_file(
                 "eidolon_channel",
-                self.config.sources["eidolon_channel"].revision,
+                self.sources.revision("eidolon_channel"),
                 "config/channel-provider.yaml",
             ),
         ).encode("utf-8")
@@ -461,29 +476,41 @@ class LocalProductSource:
     # -- source and identity -------------------------------------------------
 
     def _validate_exact_worktrees(self) -> None:
-        for source_id, source in self.config.sources.items():
-            if not source.path.is_dir():
-                raise OperationsError(f"source worktree is missing: {source_id}")
-            result = checked(
-                f"Mac product source revision for {source_id}",
-                self.runner.run((self.git, "-C", str(source.path), "rev-parse", "HEAD")),
-            )
-            if result.stdout.strip() != source.revision:
-                raise OperationsError(
-                    f"Mac product source revision does not match the release pin: {source_id}"
-                )
+        """Resolve what this source run is about to execute.
+
+        This method was the other half of the same job the release path does —
+        it already resolved HEAD; it just compared the answer to a written pin
+        and called a difference an error. It now shares the release path's
+        resolution, and keeps the one comparison that means something here: a
+        source run starts processes out of the worktree, so a pinned commit that
+        is not the worktree's HEAD describes something that is not running.
+        """
+
+        self.sources.resolve()
+        self.sources.require_worktree_is_the_selection()
+        # Deliberately not requiring a clean worktree. A source run *is* the
+        # worktree, so there is no gap between what was tested and what runs —
+        # which is the only thing the release path's refusal is about. Refusing
+        # here would break the loop this profile exists for.
 
     def _read_exact_file(self, source_id: str, revision: str, path: str) -> str:
-        source = self.config.sources[source_id]
-        if source.revision != revision:
+        if self.sources.revision(source_id) != revision:
             raise OperationsError(f"source revision drifted while reading {source_id}:{path}")
         return checked(
             f"exact Mac product source file {source_id}:{path}",
-            self.runner.run((self.git, "-C", str(source.path), "show", f"{revision}:{path}")),
+            self.runner.run(
+                (
+                    self.git,
+                    "-C",
+                    str(self.config.sources[source_id].path),
+                    "show",
+                    f"{revision}:{path}",
+                )
+            ),
         ).stdout
 
     def _source_revisions(self) -> dict[str, str]:
-        return {source_id: source.revision for source_id, source in self.config.sources.items()}
+        return self.sources.revisions()
 
     def _require_app_access(self) -> AppAccess:
         if self.profile.app is None:

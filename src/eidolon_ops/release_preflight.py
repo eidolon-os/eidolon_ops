@@ -16,16 +16,15 @@ from pathlib import Path
 
 from eidolon_ops.config import (
     INSTALL_FILE_NAMES,
-    SOURCE_IDS,
     ConfigurationError,
     OperationsConfig,
-    SourceConfig,
     validate_private_local_file,
 )
 from eidolon_ops.errors import InstallInputError, OperationsError
 from eidolon_ops.install_inputs import validate_install_input_contract
 from eidolon_ops.process import ProcessRunner, checked
 from eidolon_ops.release_matrix import ReleaseMatrixError, validate_release_matrix
+from eidolon_ops.source_resolution import ResolvedSource, SourceResolver
 from eidolon_ops.workstation_toolchain import ensure_workstation_uv
 
 #: Release formats this deployer speaks. The activator reports its own versions
@@ -51,10 +50,24 @@ _PINNED_UV_VERSION = "uv 0.11.15"
 
 
 class ReleasePreflight:
-    def __init__(self, config: OperationsConfig, runner: ProcessRunner, *, git: str) -> None:
+    def __init__(
+        self,
+        config: OperationsConfig,
+        runner: ProcessRunner,
+        *,
+        git: str,
+        sources: SourceResolver | None = None,
+        allow_dirty: bool = False,
+    ) -> None:
         self.config = config
         self.runner = runner
         self.git = git
+        #: Shared with everything else in this operation that needs to know
+        #: which commit a source ships — the bundle seal, the resumed-bundle
+        #: check, the Host provenance record. One resolution, one answer.
+        self.sources = sources or SourceResolver(
+            config, runner, git=git, allow_dirty=allow_dirty
+        )
 
     def validate_ssh_material(self) -> None:
         validate_private_local_file(self.config.host.identity_file, label="host.identity_file")
@@ -87,7 +100,18 @@ class ReleasePreflight:
                 "required workstation command is missing: " + ", ".join(missing)
             )
 
-    def run(self, *, require_install_files: bool) -> dict[str, object]:
+    def run(
+        self, *, require_install_files: bool, require_clean_sources: bool = True
+    ) -> dict[str, object]:
+        """Prove this workstation can seal a release, and say what it would seal.
+
+        ``require_clean_sources`` is off for diagnosis only. A doctor that
+        refuses to answer because a sibling repository has an edited test file
+        is a doctor that cannot diagnose the thing it was asked about; the same
+        split the install-input contract already makes here. Diagnosis reports;
+        shipping refuses.
+        """
+
         self.validate_ssh_material()
         self.require_commands((self.git, "git-lfs", "ssh", "scp", "rsync"))
         release_cli = self.config.workspace.release_cli
@@ -108,8 +132,12 @@ class ReleasePreflight:
             raise OperationsError(
                 f"pinned local uv must be 0.11.15, got: {local_uv_version or 'no version'}"
             )
-        release_contract = self._release_tool_contract(release_cli)
         source_evidence = self._source_evidence()
+        if require_clean_sources:
+            self.sources.require_clean()
+        # After resolution, because it asks which commit the Kernel checkout is
+        # on and that is now a question with one answer instead of a declaration.
+        release_contract = self._release_tool_contract(release_cli)
         try:
             release_matrix = validate_release_matrix(
                 source_evidence,
@@ -126,6 +154,11 @@ class ReleasePreflight:
             "local_uv": str(local_uv),
             "local_uv_version": local_uv_version,
             "sources": source_evidence,
+            # The five facts per source, in the same shape the Host records, so
+            # the workstation's answer and the board's evidence are comparable
+            # without translating between two vocabularies.
+            "source_provenance": self.sources.provenance(),
+            "source_selection": self.sources.selection(),
             "release_matrix": release_matrix,
             "ssh": {
                 "target": self.config.host.target,
@@ -145,74 +178,34 @@ class ReleasePreflight:
         }
 
     def require_exact_commits(self, source_ids: tuple[str, ...]) -> None:
+        """Resolve these sources so a caller reading their files gets one answer.
+
+        Kept as a verb of its own because ``init-inputs`` reads component
+        settings without shipping anything, and it must read them from a commit
+        rather than from whatever the worktree currently says.
+        """
+
         for source_id in source_ids:
-            self._require_exact_commit(source_id, self.config.sources[source_id])
+            self.sources.revision(source_id)
 
     def read_exact_source_file(self, source_id: str, revision: str, path: str) -> str:
-        source = self.config.sources[source_id]
-        if source.revision != revision:
+        if self.sources.revision(source_id) != revision:
             raise OperationsError(f"release revision drifted during matrix validation: {source_id}")
         return checked(
             f"exact systemd asset verification for {source_id}:{path}",
-            self.runner.run((self.git, "-C", str(source.path), "show", f"{revision}:{path}")),
+            self.runner.run(
+                (
+                    self.git,
+                    "-C",
+                    str(self.config.sources[source_id].path),
+                    "show",
+                    f"{revision}:{path}",
+                )
+            ),
         ).stdout
 
     def _source_evidence(self) -> dict[str, str]:
-        evidence: dict[str, str] = {}
-        for source_id in SOURCE_IDS:
-            source = self.config.sources[source_id]
-            if not source.path.is_dir() or not (source.path / ".git").exists():
-                raise OperationsError(f"source repository is missing: {source_id}: {source.path}")
-            self._require_exact_commit(source_id, source)
-            self._require_tag_resolves(source_id, source)
-            evidence[source_id] = source.revision
-        return evidence
-
-    def _require_exact_commit(self, source_id: str, source: SourceConfig) -> None:
-        result = checked(
-            f"exact commit verification for {source_id}",
-            self.runner.run(
-                (
-                    self.git,
-                    "-C",
-                    str(source.path),
-                    "rev-parse",
-                    "--verify",
-                    f"{source.revision}^{{commit}}",
-                )
-            ),
-        )
-        if result.stdout.strip() != source.revision:
-            raise OperationsError(f"source revision is not the exact commit object: {source_id}")
-
-    def _require_tag_resolves(self, source_id: str, source: SourceConfig) -> None:
-        """Prove an annotated tag still names the commit this release pins.
-
-        A tag is a movable reference, so it cannot define a release. It can
-        still make one reviewable — as long as moving it is reported instead of
-        silently followed.
-        """
-
-        if source.tag is None:
-            return
-        resolved = checked(
-            f"tag resolution for {source_id}",
-            self.runner.run(
-                (
-                    self.git,
-                    "-C",
-                    str(source.path),
-                    "rev-parse",
-                    "--verify",
-                    f"{source.tag}^{{commit}}",
-                )
-            ),
-        ).stdout.strip()
-        if resolved != source.revision:
-            raise OperationsError(
-                f"tag no longer names the pinned commit: {source_id} "
-                f"{source.tag} -> {resolved[:12]}, expected {source.revision[:12]}"
-            )
+        return self.sources.revisions()
 
     def _release_tool_contract(self, release_cli: Path) -> dict[str, object]:
         """Prove the activator speaks this deployer's release formats.
@@ -254,21 +247,33 @@ class ReleasePreflight:
         """Refuse to build a release with an activator that will not ship in it.
 
         Sealing runs on the target from the release's own copy, so a fix made
-        here does nothing unless the Kernel pin moves with it. Without this
+        here does nothing unless the commit that ships contains it. Without this
         check that mismatch is invisible until an install has already run.
+
+        The check used to say "move the eidolon_kernel pin", and that advice
+        stopped existing when the shipped commit became the Kernel checkout's
+        own HEAD — worse, the digest comparison then agreed by construction,
+        because the activator lives inside the tree being archived. So the two
+        premises that made it agree are now asserted instead of assumed: the
+        activator being run really does come out of the checkout resolution
+        read, and that checkout has nothing uncommitted under the deploy
+        package. An uncommitted fix in there is precisely the mistake this
+        guards, and it now gets told what it is rather than being told to move
+        a pin that no longer exists.
         """
 
-        source = self.config.sources["eidolon_kernel"]
+        kernel = self.sources.resolve()["eidolon_kernel"]
+        self._require_activator_checkout(kernel)
         listing = checked(
-            "pinned eidolon_deploy listing",
+            "shipped eidolon_deploy listing",
             self.runner.run(
                 (
                     self.git,
                     "-C",
-                    str(source.path),
+                    str(kernel.path),
                     "ls-tree",
                     "-r",
-                    source.revision,
+                    kernel.revision,
                     "--",
                     _DEPLOY_PACKAGE,
                 )
@@ -283,14 +288,64 @@ class ReleasePreflight:
             if relative.endswith(_DEPLOY_DIGEST_SUFFIXES):
                 entries.append((relative, metadata.split()[2]))
         if not entries:
-            raise OperationsError("the pinned Kernel commit ships no eidolon_deploy package")
+            raise OperationsError("the shipped Kernel commit has no eidolon_deploy package")
         digest = hashlib.sha256()
         for relative, blob in sorted(entries):
             digest.update(f"{relative}:{blob}\n".encode())
         if reported != digest.hexdigest():
             raise OperationsError(
-                "the configured eidolon-release is not the one this release will "
-                "ship: move the eidolon_kernel pin to the commit that contains it"
+                "the configured eidolon-release is not the one this release will ship: "
+                f"it does not match {_DEPLOY_PACKAGE} at {kernel.revision[:12]}"
+                + (
+                    ", which is the commit pinned for this reproduction run; drop the "
+                    "eidolon_kernel pin or check that commit out to seal from it"
+                    if kernel.pinned
+                    else ", which is this checkout's HEAD; rebuild the activator's "
+                    "environment from it"
+                )
+            )
+
+    def _require_activator_checkout(self, kernel: ResolvedSource) -> None:
+        """Prove the activator being run is the checkout's, and nothing is uncommitted.
+
+        Two premises, both invisible until they are false. An activator taken
+        from some other clone can agree with the shipped digest by coincidence;
+        an uncommitted change under the deploy package cannot ship at all, and
+        the digest comparison alone reports that as an unexplained mismatch.
+        """
+
+        release_cli = self.config.workspace.release_cli
+        toplevel = checked(
+            "activator checkout identification",
+            self.runner.run(
+                (self.git, "-C", str(release_cli.parent), "rev-parse", "--show-toplevel")
+            ),
+        ).stdout.strip()
+        if not toplevel or Path(toplevel).resolve() != kernel.path.resolve():
+            raise OperationsError(
+                "workspace.release_cli is not inside the eidolon_kernel checkout this "
+                f"release is sealed from: {release_cli} lives in {toplevel or 'no repository'}, "
+                f"expected {kernel.path}"
+            )
+        uncommitted = checked(
+            "shipped activator worktree state",
+            self.runner.run(
+                (
+                    self.git,
+                    "-C",
+                    str(kernel.path),
+                    "status",
+                    "--porcelain",
+                    "--",
+                    _DEPLOY_PACKAGE,
+                )
+            ),
+        ).stdout.strip()
+        if uncommitted:
+            raise OperationsError(
+                f"the eidolon-release this deployer runs has uncommitted changes under "
+                f"{_DEPLOY_PACKAGE}, so they cannot be in the release it seals: commit "
+                "them in eidolon_kernel first"
             )
 
     def _validate_install_inputs(self) -> dict[str, object]:
@@ -319,6 +374,8 @@ class ReleasePreflight:
         """
 
         try:
-            return validate_install_input_contract(self.config, self.read_exact_source_file)
+            return validate_install_input_contract(
+                self.sources.resolved_config(), self.read_exact_source_file
+            )
         except InstallInputError as exc:
             raise OperationsError(str(exc)) from exc

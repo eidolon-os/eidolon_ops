@@ -128,6 +128,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             load_host_profile(arguments.config),
             SubprocessRunner(),
             revision_overrides=tuple(arguments.revision),
+            allow_dirty=arguments.allow_dirty,
         )
         result = _dispatch(controller, arguments)
     except (
@@ -169,7 +170,19 @@ def _parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         metavar="SOURCE=40HEX",
-        help="override one reviewed Pi source revision",
+        help=(
+            "reproduce one source at an exact commit for this run only; nothing is "
+            "written back to any file. Without it a source ships its repository HEAD"
+        ),
+    )
+    parser.add_argument(
+        "--allow-dirty",
+        action="store_true",
+        help=(
+            "seal a release from repositories that have uncommitted changes. The "
+            "changes are still not in it — only the committed HEAD ships — and the "
+            "dirty state is recorded in the Host's release evidence"
+        ),
     )
     operations = parser.add_subparsers(dest="operation", required=True)
     operations.add_parser("status")

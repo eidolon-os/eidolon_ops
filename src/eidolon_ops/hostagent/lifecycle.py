@@ -71,7 +71,65 @@ def status(payload: Mapping[str, object]) -> dict[str, object]:
         "current_links": links,
         "recent_receipts": receipts,
         "installations": installations,
+        # Which commits each recent release was built from. A record no command
+        # printed was a record that did not exist in practice: "which eight
+        # commits was that release" got answered by looking at sibling
+        # checkouts, which is how a release that never contained the change it
+        # was made for reported success four times running.
+        "release_sources": _release_provenance(evidence),
     }
+
+
+def _release_provenance(evidence: Path) -> list[dict[str, object]]:
+    """The source facts of recent cutovers, newest last, without their payload.
+
+    Only the four fields worth reading at a glance. A cutover document also
+    holds file digests, ownership and the previous component graph; copying
+    those into a status report would bury the answer in the recovery data.
+    """
+
+    if not evidence.is_dir():
+        return []
+    recorded: list[dict[str, object]] = []
+    for document in sorted(
+        evidence.glob("*/cutover.json"), key=lambda item: item.stat().st_mtime
+    )[-10:]:
+        try:
+            value = json.loads(document.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(value, dict):
+            recorded.append(
+                {
+                    "path": str(document),
+                    "release_id": value.get("release_id"),
+                    "status": value.get("status"),
+                    "sources": value.get("sources"),
+                }
+            )
+    return recorded
+
+
+def release_sources(payload: Mapping[str, object]) -> dict[str, object]:
+    """The commits of releases that actually activated, newest first.
+
+    Read on the failure path of a deploy, so it says nothing about the release
+    being attempted and never raises for the ordinary case of a Host that has
+    no history yet: a diagnostic that can fail is a diagnostic that replaces the
+    error it was supposed to explain.
+    """
+
+    evidence = contract.FIXED_DATA["deployment_evidence"]
+    activated = [
+        {
+            "release_id": item["release_id"],
+            "status": item["status"],
+            "sources": item["sources"],
+        }
+        for item in _release_provenance(evidence)
+        if item["status"] == "activated" and isinstance(item["sources"], dict)
+    ]
+    return {"status": "observed", "releases": list(reversed(activated))}
 
 def doctor_host(payload: Mapping[str, object]) -> dict[str, object]:
     contract.fixed_units(payload)

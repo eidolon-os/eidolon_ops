@@ -98,6 +98,17 @@ class FakeCommand:
         return subprocess.CompletedProcess(command, 0, "", "")
 
 
+INSTALL_PROVENANCE = {
+    "eidolon_hub": {
+        "revision": "a" * 40,
+        "head": "a" * 40,
+        "branch": "main",
+        "pinned": False,
+        "dirty": False,
+    }
+}
+
+
 @pytest.fixture
 def install_fixture(tmp_path: Path):
     release_id = "release-test"
@@ -135,8 +146,24 @@ def install_fixture(tmp_path: Path):
         root=tmp_path,
         command=command,
         manage_ownership=False,
+        sources=INSTALL_PROVENANCE,
     )
     return installer, host, command, stage, release, data
+
+
+def test_the_install_journal_records_which_commits_were_installed(install_fixture) -> None:
+    """A first install is the only record of what a Host started life as.
+
+    It leaves no cutover document, so without this the founding combination of
+    commits is unrecoverable the moment the release directory is reclaimed.
+    """
+
+    installer, _host, _command, _stage, _release, _data = install_fixture
+
+    installer.install()
+
+    journal = json.loads(installer.journal_path.read_text(encoding="utf-8"))
+    assert journal["sources"] == INSTALL_PROVENANCE
 
 
 def test_first_install_completes_all_phases(install_fixture) -> None:
@@ -1041,6 +1068,105 @@ def test_status_reads_recent_receipt(monkeypatch, tmp_path: Path) -> None:
             "phase": "completed",
         }
     ]
+    assert result["release_sources"] == []
+
+
+def test_status_reports_which_commits_each_release_was_built_from(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """The record is useless if no command prints it.
+
+    A Host held the commits of the release it was running in exactly one place
+    and no verb read it, so the question was answered by guessing at sibling
+    checkouts. Status answers it.
+    """
+
+    evidence = tmp_path / "evidence"
+    provenance = {
+        "eidolon_hub": {
+            "revision": "a" * 40,
+            "head": "a" * 40,
+            "branch": "main",
+            "pinned": False,
+            "dirty": False,
+        }
+    }
+    for release_id, status, sources in (
+        ("r1", "activated", provenance),
+        ("r2", "snapshotted", None),
+    ):
+        document = evidence / f"{release_id}-host-{'b' * 32}" / "cutover.json"
+        document.parent.mkdir(parents=True)
+        document.write_text(
+            json.dumps(
+                {
+                    "release_id": release_id,
+                    "status": status,
+                    "cutover_mode": "reversible",
+                    "host_transaction_id": "b" * 32,
+                    "sources": sources,
+                    "host_files_before": {"must": "not be copied"},
+                }
+            ),
+            encoding="utf-8",
+        )
+    monkeypatch.setitem(contract.FIXED_DATA, "deployment_evidence", evidence)
+    monkeypatch.setattr(
+        primitives, "run",
+        lambda command, **kwargs: subprocess.CompletedProcess(command, 0, "", ""),
+    )
+
+    result = host_lifecycle.status({"units": list(contract.PRODUCT_UNITS)})
+
+    recorded = {item["release_id"]: item for item in result["release_sources"]}
+    assert recorded["r1"]["sources"] == provenance
+    assert recorded["r1"]["status"] == "activated"
+    assert recorded["r2"]["sources"] is None
+    assert "host_files_before" not in recorded["r1"]
+
+
+def test_release_sources_reports_newest_activated_release_first(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """What a failed deploy is compared against.
+
+    A combination of commits that is not self-consistent cannot be caught
+    before it runs. What can be fixed is the failure naming the repositories
+    that moved since the last release that worked.
+    """
+
+    evidence = tmp_path / "evidence"
+    for index, (release_id, status) in enumerate(
+        (("old", "activated"), ("broken", "snapshotted"), ("last-good", "activated"))
+    ):
+        document = evidence / f"{release_id}-host-{'c' * 32}" / "cutover.json"
+        document.parent.mkdir(parents=True)
+        document.write_text(
+            json.dumps(
+                {
+                    "release_id": release_id,
+                    "status": status,
+                    "sources": {
+                        "eidolon_hub": {
+                            "revision": f"{index:040x}",
+                            "head": f"{index:040x}",
+                            "branch": "main",
+                            "pinned": False,
+                            "dirty": False,
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        os.utime(document, (1000 + index, 1000 + index))
+    monkeypatch.setitem(contract.FIXED_DATA, "deployment_evidence", evidence)
+
+    result = host_lifecycle.release_sources({})
+
+    assert result["status"] == "observed"
+    assert [item["release_id"] for item in result["releases"]] == ["last-good", "old"]
+    assert result["releases"][0]["sources"]["eidolon_hub"]["revision"] == f"{2:040x}"
 
 
 @pytest.mark.parametrize(

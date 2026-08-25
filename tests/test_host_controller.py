@@ -199,10 +199,20 @@ def test_pi_adapter_delegates_every_remote_capability(monkeypatch, tmp_path: Pat
         host = SimpleNamespace()
 
     class Pi:
-        def __init__(self, config, runner, *, transport=None, app=None, progress=None) -> None:
+        def __init__(
+            self,
+            config,
+            runner,
+            *,
+            transport=None,
+            app=None,
+            progress=None,
+            allow_dirty=False,
+        ) -> None:
             assert isinstance(config, Config)
             assert app is None
             assert progress is None
+            calls.append(("allow_dirty", {"value": allow_dirty}))
 
         def _result(self, name, values=None):
             calls.append((name, values or {}))
@@ -262,7 +272,10 @@ def test_pi_adapter_delegates_every_remote_capability(monkeypatch, tmp_path: Pat
         host_module, "SSHTransport", lambda host, runner: SimpleNamespace(kind="ssh")
     )
     controller = HostController(
-        _pi_profile(tmp_path), Runner(), revision_overrides=("eidolon_data=" + "f" * 40,)
+        _pi_profile(tmp_path),
+        Runner(),
+        revision_overrides=("eidolon_data=" + "f" * 40,),
+        allow_dirty=True,
     )
 
     assert controller.status().outcome is Outcome.OBSERVED
@@ -284,6 +297,9 @@ def test_pi_adapter_delegates_every_remote_capability(monkeypatch, tmp_path: Pat
     controller.logs(service="eidolond", lines=5, since=None)
 
     assert any(name == "revisions" for name, _values in calls)
+    # The escape hatch has to reach the thing that would refuse, not stop at
+    # the CLI: a flag that is parsed and dropped reads as a working flag.
+    assert ("allow_dirty", {"value": True}) in calls
     log_values = [values for name, values in calls if name == "logs"]
     assert log_values == [
         {"unit": "eidolon-agent.service", "lines": 5, "since": "today"},

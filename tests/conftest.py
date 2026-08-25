@@ -6,6 +6,11 @@ import pytest
 
 from eidolon_ops.config import SOURCE_IDS, load_config
 
+#: What each fake source repository's HEAD resolves to. The operator profile no
+#: longer writes commits down, so the fixture and every fake git that answers
+#: for it agree on this map instead of on a file.
+SOURCE_HEADS = {source_id: f"{index:040x}" for index, source_id in enumerate(SOURCE_IDS, start=1)}
+
 
 @pytest.fixture
 def config_path(tmp_path: Path) -> Path:
@@ -38,12 +43,10 @@ def config_path(tmp_path: Path) -> Path:
         path = install_dir / name
         path.write_text(f"test-{name}\n", encoding="utf-8")
         path.chmod(0o600)
-    revisions: dict[str, str] = {}
-    for index, source_id in enumerate(SOURCE_IDS, start=1):
+    for source_id in SOURCE_IDS:
         repository = tmp_path / source_id
         repository.mkdir()
         (repository / ".git").mkdir()
-        revisions[source_id] = f"{index:040x}"
     release_cli = tmp_path / "eidolon_kernel/.venv/bin/eidolon-release"
     release_cli.parent.mkdir(parents=True)
     release_cli.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
@@ -77,7 +80,7 @@ python_http_timeout_seconds = 120
 python_http_retries = 8
 python_concurrent_downloads = 4
 
-{_source_tables(tmp_path, revisions)}
+{_source_tables(tmp_path)}
 [services]
 units = [
   "eidolon-bootstrapd.service",
@@ -130,8 +133,26 @@ def config(config_path: Path):
     return load_config(config_path)
 
 
-def _source_tables(root: Path, revisions: dict[str, str]) -> str:
+@pytest.fixture
+def pinned_config_path(config_path: Path) -> Path:
+    """The same profile with an explicit reproduction commit for every source."""
+
+    text = config_path.read_text(encoding="utf-8")
+    for source_id, revision in SOURCE_HEADS.items():
+        text = text.replace(
+            f'[sources.{source_id}]\npath = "',
+            f'[sources.{source_id}]\nrevision = "{revision}"\npath = "',
+        )
+    config_path.write_text(text, encoding="utf-8")
+    return config_path
+
+
+@pytest.fixture
+def pinned_config(pinned_config_path: Path):
+    return load_config(pinned_config_path)
+
+
+def _source_tables(root: Path) -> str:
     return "".join(
-        f'[sources.{source_id}]\npath = "{root / source_id}"\nrevision = "{revision}"\n\n'
-        for source_id, revision in revisions.items()
+        f'[sources.{source_id}]\npath = "{root / source_id}"\n\n' for source_id in SOURCE_IDS
     )

@@ -93,9 +93,43 @@ opts into development LAN transport; product WSS remains a release gate. Never d
 the Host SPKI, or disable Mobile/ESP certificate verification. mDNS carries routing hints while Local API carries the
 verified Hub certificate pin.
 
+## What a release is built from
+
+A release is sealed from `git rev-parse HEAD` in each of the eight source repositories the operations config names.
+There is nothing to edit before a deploy: commit in the repositories, then deploy. The operator profile lists paths,
+not commits.
+
+This replaced a model where each `[sources.*]` table also declared a 40-hex `revision`, and it was replaced because
+that model shipped a release nobody meant to ship — a cross-repository change was written and tested on every HEAD,
+`deploy` reported success, and the Pi went on running the commits in the file. Three later deploys failed for the same
+reason and said only `readiness timeout: hub, kernel, local-api`. Requiring the two copies to *agree* was considered
+and rejected: it keeps the duplicate and turns it into a prompt to edit a file, which is a tax that carries no
+information. So does rewriting the file automatically, which would leave a "declaration" that declares nothing.
+
+Two things are still explicit, and only two:
+
+- **Reproduction.** `--revision source=40hex` (repeatable), or a `revision` written in a `[sources.*]` table, ships
+  that exact commit for that source. Nothing is written back to any file. The run's output labels itself a
+  reproduction deployment and states how many commits behind HEAD each pinned source is — an operator who did not
+  mean to reproduce anything has to be able to see that they are.
+- **Uncommitted changes are refused.** A release is sealed with `git archive`, so anything uncommitted is not in it:
+  the tree that was tested would not be the tree that ships. `--allow-dirty` overrides this; it still ships only the
+  committed HEAD, and the dirty state is recorded in the Host's release evidence so it is visible afterwards.
+  `doctor` reports a dirty worktree instead of refusing — diagnosis reports, shipping refuses.
+
+`status` prints, per recent release, the commit / branch / HEAD / pinned / dirty facts of every source it was built
+from, read from `/var/lib/eidolon/deployments/*/cutover.json` — which reclamation never touches, unlike the release
+descriptor that used to be the only place these facts existed. A failed deploy additionally names how many commits
+each source advanced since the last release this Host activated. That prevents nothing: a combination of commits that
+is not self-consistent cannot be detected before it runs. It replaces "debug from zero" with "suspect these three".
+
+`--resume` re-proves the sealed bundle against the commits the repositories resolve to *now*, so a resume after a
+commit is refused. That is correct — a release id names one exact combination — and the refusal names both ways out:
+`--revision` to continue the original combination, or a new `--release-id`.
+
 ## Daily update
 
-1. Change only reviewed 40-hex revisions (or pass `--revision source=40hex`).
+1. Commit in the source repositories. Nothing in the operator profile needs editing.
 2. Prepare and inspect without service switch:
 
    ```bash
