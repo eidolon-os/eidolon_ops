@@ -277,28 +277,24 @@ def test_only_modified_files_do_not_mention_adding_anything(config) -> None:
     assert "untracked" not in message
 
 
-def test_a_dirty_repository_this_run_executes_out_of_is_named_as_such(config) -> None:
-    """``workspace.release_cli`` is an editable install inside one of these repos.
+def test_the_refusal_does_not_restate_the_activator_guard(config) -> None:
+    """The repository holding the sealing tool is somebody else's check.
 
-    Everywhere else a dirty worktree is a statement about the operator's
-    expectation, because the archive is taken from a commit. In the repository
-    that holds the sealing tool it is a statement about the run: half-edited
-    code there is what computes the bundle.
+    ``ReleasePreflight._require_activator_checkout`` refuses any uncommitted
+    change under ``eidolon_deploy`` on its own -- before this runs, and with no
+    ``--allow-dirty`` to get past it -- and the digest beside it proves the
+    activator being run is byte-identical to the one the shipped commit
+    contains. A second, vaguer sentence here would be one more copy of a fact
+    already held somewhere sharper, which is the thing this module exists to
+    stop doing.
     """
 
-    resolver = _resolver(config, FakeGit())
-    assert resolver.executes_from_worktree() == frozenset({"eidolon_kernel"})
-
-    executing = _resolver(
+    resolver = _resolver(
         config, FakeGit(dirty={"eidolon_kernel": " M eidolon_deploy/bundle.py\n"})
     )
-    with pytest.raises(OperationsError) as failure:
-        executing.require_clean()
-    assert "executes out of that worktree" in str(failure.value)
 
-    shipped_only = _resolver(
-        config, FakeGit(dirty={"eidolon_sdk": " M eidolon_sdk/session.py\n"})
-    )
     with pytest.raises(OperationsError) as failure:
-        shipped_only.require_clean()
-    assert "executes out of that worktree" not in str(failure.value)
+        resolver.require_clean()
+    message = str(failure.value)
+    assert "eidolon_kernel (1 modified" in message
+    assert "seal the release" not in message
