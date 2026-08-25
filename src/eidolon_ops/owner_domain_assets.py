@@ -463,23 +463,33 @@ def _directory(
         try:
             current = OwnerDomainDescriptor.model_validate_json(path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
+            # A document this Host wrote before the contract grew a field is not
+            # invalid — it is older, and the answer to older is to reissue it at
+            # the next revision. Refusing instead stops every deploy on a Host
+            # that has ever been provisioned, which is every Host in the field:
+            # adding `descriptor_uri` did exactly that until this read said so.
+            #
+            # What still cannot be salvaged is a document that does not name this
+            # Owner Domain, or that has no revision to continue from. Reissuing
+            # over either of those would either seize another Owner's directory
+            # or restart a revision line devices have already seen.
             try:
-                legacy = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, ValueError) as legacy_exc:
+                superseded = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as unreadable:
                 raise OwnerDomainAssetError(
-                    "existing Owner Domain descriptor is invalid"
-                ) from legacy_exc
+                    "existing Owner Domain descriptor is unreadable"
+                ) from unreadable
             if (
-                not isinstance(legacy, dict)
-                or "owner_domain_generation" in legacy
-                or legacy.get("owner_domain_id") != owner_domain_id
-                or not isinstance(legacy.get("directory_revision"), int)
-                or legacy["directory_revision"] < 1
+                not isinstance(superseded, dict)
+                or superseded.get("owner_domain_id") != owner_domain_id
+                or not isinstance(superseded.get("directory_revision"), int)
+                or superseded["directory_revision"] < 1
             ):
                 raise OwnerDomainAssetError(
-                    "existing Owner Domain descriptor is invalid"
+                    "existing Owner Domain descriptor names another Owner Domain "
+                    "or has no revision to continue"
                 ) from exc
-            revision = legacy["directory_revision"] + 1
+            revision = superseded["directory_revision"] + 1
             current = None
         if current is not None:
             expected = [item.model_dump(mode="json") for item in current.endpoints]

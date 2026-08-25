@@ -158,13 +158,53 @@ def test_stale_descriptor_route_is_reissued_at_the_next_revision(tmp_path: Path)
     assert reissued["directory_revision"] == current["directory_revision"] + 1
 
 
+def test_a_descriptor_older_than_the_contract_is_reissued_not_refused(
+    tmp_path: Path,
+) -> None:
+    """The field this contract grew is a reason to reissue, never to stop.
+
+    Every Host that has ever been provisioned has a descriptor on disk. When the
+    signed document gained `descriptor_uri`, that stored copy stopped satisfying
+    the model, and this read reported it as invalid — so `deploy` failed on every
+    such Host, which is every Host in the field. The revision line is what must
+    be continued; which fields the previous document happened to carry is not.
+    """
+
+    identity = derive_host_lan_identity(b"a" * 32)
+    root = tmp_path / "owner-domain"
+    path = root / "owner-domain-descriptor.json"
+    ensure_owner_domain_assets(root, identity, 8443, now=NOW)
+
+    stored = json.loads(path.read_text(encoding="utf-8"))
+    superseded_revision = stored["directory_revision"]
+    del stored["descriptor_uri"]
+    path.write_text(json.dumps(stored), encoding="utf-8")
+
+    reissued = json.loads(
+        ensure_owner_domain_assets(
+            root, identity, 8443, now=NOW + timedelta(minutes=1)
+        ).descriptor
+    )
+    assert reissued["descriptor_uri"] == (
+        identity.hub_origin(8443) + "/api/device-onboarding/v1/descriptor"
+    )
+    assert reissued["directory_revision"] == superseded_revision + 1
+
+
 def test_existing_descriptor_corruption_fails_closed(tmp_path: Path) -> None:
     identity = derive_host_lan_identity(b"a" * 32)
     root = tmp_path / "owner-domain"
     ensure_owner_domain_assets(root, identity, 8443, now=NOW)
     (root / "owner-domain-descriptor.json").write_text("{}", encoding="utf-8")
 
-    with pytest.raises(OwnerDomainAssetError, match="descriptor is invalid"):
+    # No Owner Domain named and no revision to continue: reissuing over this
+    # would either seize another Owner's directory or restart a revision line
+    # devices have already been told about.
+    with pytest.raises(OwnerDomainAssetError, match="another Owner Domain"):
+        ensure_owner_domain_assets(root, identity, 8443, now=NOW)
+
+    (root / "owner-domain-descriptor.json").write_text("not json", encoding="utf-8")
+    with pytest.raises(OwnerDomainAssetError, match="unreadable"):
         ensure_owner_domain_assets(root, identity, 8443, now=NOW)
 
 
