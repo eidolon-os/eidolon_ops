@@ -160,3 +160,44 @@ def test_supervisor_does_not_enable_livekit_dev_credentials() -> None:
 
     assert "--dev" not in config
     assert "eidolon_ensure_livekit_credentials" in run_all
+
+
+def test_admin_admits_the_web_client_as_a_browser_origin() -> None:
+    """A generated copy of a component's registry must not narrow it.
+
+    Admin's own registry allow-lists the web client's origin; this generated
+    one listed only the operator console, so on a source run the browser
+    refused every request the web client made before Admin ever saw it. The
+    generated file exists to state this profile's topology, not to hold a
+    smaller opinion about what Admin accepts.
+    """
+
+    from eidolon_ops import source_assets
+
+    rendered = source_assets.admin_services_yaml()
+    for origin in (
+        f"http://127.0.0.1:{source_assets.CLIENT_WEB_PORT}",
+        f"http://localhost:{source_assets.CLIENT_WEB_PORT}",
+        f"http://127.0.0.1:{source_assets.PORTS['admin_web']}",
+        f"http://localhost:{source_assets.PORTS['admin_web']}",
+    ):
+        assert f"    - {origin}\n" in rendered, origin
+
+
+def test_the_product_source_profile_renders_livekit_before_running_it() -> None:
+    """LiveKit's config is produced at start, not found on disk.
+
+    Running the binary straight against a persisted path meant the server used
+    whatever an earlier run had left: for months, a config on port 17880 with a
+    stale rtc.node_ip, while every consumer of that server expected 7880. The
+    product Host renders this file at each start; this profile now does too.
+    """
+
+    profile = (ROOT / "deploy/supervisor/product-source.conf").read_text(encoding="utf-8")
+    block = profile.split("[program:livekit-server]", 1)[1].split("[program:", 1)[0]
+    command = next(line for line in block.splitlines() if line.startswith("command="))
+    assert "wrappers/livekit-dev.sh" in command
+    assert "EIDOLON_LIVEKIT_GENERATED_CONFIG" not in command
+    # The renderer needs the server credentials, which live in the profile's
+    # own env root rather than in any settings file.
+    assert "livekit.env" in command

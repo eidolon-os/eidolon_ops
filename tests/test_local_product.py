@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import ssl
+import stat
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from ipaddress import IPv4Address
@@ -18,6 +20,7 @@ from eidolon_ops.environment import EnvironmentFileError
 from eidolon_ops.errors import OperationsError
 from eidolon_ops.hub_assets import HUB_SETTINGS_TEMPLATE
 from eidolon_ops.local_product import LocalProductSource
+from eidolon_ops.owner_domain_assets import OwnerDomainAssets
 from eidolon_ops.paths import AppAccess, HostDriver, HostPaths, HostPlatform, HostProfile
 from eidolon_ops.probes import http_health as _http_health
 from eidolon_ops.probes import unix_http_health as _unix_http_health
@@ -260,9 +263,16 @@ def test_prepare_materializes_one_canonical_mac_product_contract(
     assert f"path: {profile.paths.state_root}/hub/eidolon-hub.sqlite3" in (
         root / "settings/hub.yaml"
     ).read_text(encoding="utf-8")
-    assert (root / "env/channel.env").read_text(encoding="utf-8").count(
-        "LIVEKIT_API_KEY=shared-key"
-    ) == 1
+    # The key pair travels install inputs -> env files -> the server Ops starts.
+    # It used to be read back out of whatever LiveKit config happened to be on
+    # disk, which made a clean Host unpreparable and let a months-old file decide
+    # what Channel and Hub authenticated with.
+    channel_env = (root / "env/channel.env").read_text(encoding="utf-8")
+    assert channel_env.count("LIVEKIT_API_KEY=sealed-key") == 1
+    assert "shared-key" not in channel_env
+    assert "LIVEKIT_API_KEY=sealed-key\n" in (root / "env/livekit.env").read_text(
+        encoding="utf-8"
+    )
     identity = profile.paths.bootstrap_state_root / "host_identity.ed25519"
     assert identity.read_bytes() == b"i" * 32
     assert any(call[0] == str(alembic) for call in runner.calls)
@@ -635,3 +645,55 @@ def test_product_source_revision_and_generated_inputs_fail_closed(
     )
     with pytest.raises(OperationsError, match="sealed input rejected"):
         product.prepare()
+
+
+def test_owner_domain_material_reaches_the_host_including_hub_bootstrap(tmp_path: Path) -> None:
+    """Every byte the issuer produces is placed, and Hub's capability with it.
+
+    ``authority-bootstrap.json`` is what lets Hub initialize an empty authority
+    database. The product install has always sent it; this path issued it and
+    dropped it, so a source run could start Hub from neither an empty database
+    (no capability) nor a stale one (no migrations). Both failures happened at
+    Hub startup, long after prepare reported success.
+    """
+
+    product = _product(tmp_path, foundation_mode="external")
+    product.profile.paths.state_root.mkdir(parents=True, exist_ok=True)
+
+    product._ensure_hub_tls_identity()
+
+    bootstrap = product._authority_bootstrap_path()
+    assert bootstrap.is_file()
+    assert stat.S_IMODE(bootstrap.stat().st_mode) == 0o600
+    document = json.loads(bootstrap.read_text(encoding="utf-8"))
+    assert document["operation"] == "owner-authority.bootstrap"
+    assert document["owner_domain_id"] == product._owner_domain_id()
+    assert document["owner_domain_generation"] == product._owner_domain_generation()
+    assert document["state_id"].startswith("authority-state_")
+    # The generated Hub settings must name this same file, or Hub looks
+    # somewhere else and the capability is placed for nobody.
+    assert str(bootstrap) == str(
+        product.profile.paths.state_root / "hub/authority-bootstrap.json"
+    )
+
+
+def test_a_new_owner_domain_asset_cannot_be_silently_dropped(tmp_path: Path) -> None:
+    """The completeness rule, not the current list, is what prevents recurrence."""
+
+    product = _product(tmp_path, foundation_mode="external")
+    with pytest.raises(OperationsError, match="issued but never placed"):
+        product._require_every_owner_domain_asset_is_placed(
+            OwnerDomainAssets(
+                owner_domain_id="owner-x",
+                owner_domain_generation=1,
+                authority_state_id="authority-state_x",
+                bootstrap_pending=True,
+                authority_bootstrap=b"{}",
+                descriptor=b"{}",
+                owner_root_certificate=b"pem",
+                authority_signing_certificate=b"pem",
+                tls_certificate=b"pem",
+                tls_private_key=b"pem",
+            ),
+            {"descriptor": tmp_path / "descriptor.json"},
+        )

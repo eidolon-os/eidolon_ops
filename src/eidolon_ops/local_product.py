@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import os
 import stat
+from collections.abc import Mapping
+from dataclasses import fields
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -124,6 +126,7 @@ class LocalProductSource:
             self._owner_descriptor_path(),
             self._owner_root_certificate_path(),
             self._authority_signing_certificate_path(),
+            self._authority_bootstrap_path(),
         ]
         missing = [str(path) for path in required if not path.is_file() or path.is_symlink()]
         if missing:
@@ -185,17 +188,14 @@ class LocalProductSource:
             value = source_assets.translate_fhs(
                 self.profile, source_inputs.joinpath(name).read_text(encoding="utf-8")
             )
-            if self.profile.foundation_mode == "external" and name in {
-                "channel.env",
-                "livekit.env",
-            }:
-                value = environment.replace(
-                    value,
-                    source_assets.external_livekit_credentials(
-                        self.profile.external_livekit_config
-                    ),
-                    label="generated environment",
-                )
+            # Channel and LiveKit used to have their key pair replaced here with
+            # whatever the already-running LiveKit had issued itself, because a
+            # source run shared a server it did not start. Ops starts it now, and
+            # renders its config from `livekit.env` at every start, so the pair
+            # travels one way: install inputs -> env files -> server. Reading it
+            # back out of the file Ops just wrote would be a cycle, and it made
+            # the whole profile depend on that file already existing — which on a
+            # clean Host it does not.
             if name == "local-api.env":
                 value = environment.merge(
                     value,
@@ -558,6 +558,16 @@ class LocalProductSource:
     def _authority_signing_certificate_path(self) -> Path:
         return self.profile.paths.config_root / "owner-domain/authority_signing_certificate.pem"
 
+    def _authority_bootstrap_path(self) -> Path:
+        """Where Hub looks for its first-install capability, on either Host.
+
+        The same relative location the product template names, so this is the
+        path the generated ``hub.yaml`` already points at rather than a second
+        opinion about it.
+        """
+
+        return self.profile.paths.state_root / "hub/authority-bootstrap.json"
+
     def _owner_domain_id(self) -> str:
         try:
             value = json.loads(self._owner_descriptor_path().read_text(encoding="utf-8"))
@@ -587,18 +597,49 @@ class LocalProductSource:
             )
         except OwnerDomainAssetError as exc:
             raise OperationsError(f"Mac Owner Domain material is {exc}") from exc
-        for path, value in (
-            (self._hub_certificate_path(), assets.tls_certificate),
-            (self._hub_private_key_path(), assets.tls_private_key),
-            (self._owner_descriptor_path(), assets.descriptor),
-            (self._owner_root_certificate_path(), assets.owner_root_certificate),
-            (
-                self._authority_signing_certificate_path(),
-                assets.authority_signing_certificate,
-            ),
-        ):
-            atomic_private_file(path, value)
+        targets = {
+            "tls_certificate": self._hub_certificate_path(),
+            "tls_private_key": self._hub_private_key_path(),
+            "descriptor": self._owner_descriptor_path(),
+            "owner_root_certificate": self._owner_root_certificate_path(),
+            "authority_signing_certificate": self._authority_signing_certificate_path(),
+            # Hub refuses to initialize an empty authority database without
+            # this, and refuses to migrate a stale one — so a source run that
+            # did not place it could not start Hub at all, from either state.
+            # The product install has always sent it (one of
+            # ``HOST_APPLICATION_STAGE_NAMES``); this path simply never did.
+            "authority_bootstrap": self._authority_bootstrap_path(),
+        }
+        self._require_every_owner_domain_asset_is_placed(assets, targets)
+        for name, path in targets.items():
+            atomic_private_file(path, getattr(assets, name))
         return assets
+
+    @staticmethod
+    def _require_every_owner_domain_asset_is_placed(
+        assets: OwnerDomainAssets, targets: Mapping[str, Path]
+    ) -> None:
+        """Fail closed when the issuer produces material this Host drops.
+
+        The product install path states its asset set by name and refuses to
+        proceed if what it built is not exactly that set. This path listed its
+        writes inline instead, so when ``authority-bootstrap.json`` joined the
+        Owner Domain bundle, nothing here noticed it had been left on the floor.
+        A missing capability is not a smaller version of the feature; it is a
+        Host that cannot start. The next asset added must break this instead.
+        """
+
+        issued = {
+            field.name
+            for field in fields(assets)
+            if isinstance(getattr(assets, field.name), bytes)
+        }
+        dropped = issued.difference(targets)
+        if dropped:
+            raise OperationsError(
+                "Mac Owner Domain material is issued but never placed: "
+                + ", ".join(sorted(dropped))
+            )
 
     # Kept as an internal call alias until the local-product tests complete the
     # same coordinated cutover; it now issues Owner-scoped material, never a

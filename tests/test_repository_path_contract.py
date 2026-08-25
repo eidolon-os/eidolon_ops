@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -181,3 +182,77 @@ def test_every_asset_ops_reads_at_run_time_travels_with_the_package() -> None:
     # Not an Ops asset: this one is read out of each component's own checkout,
     # which is the point of it.
     assert not COMPONENT_CONTRACT_PATH.is_absolute()
+
+
+def test_a_source_run_translates_every_role_in_the_product_layout() -> None:
+    """The product layout and its translation are one table, not two.
+
+    They were two. ``translate_fhs`` restated the layout as a list of literals
+    and left out ``config_root``, so every Hub settings file a Mac source run
+    generated kept pointing at ``/etc/eidolon/owner-domain`` — a directory that
+    does not exist on a Mac and that Ops had already written the real material
+    into somewhere else. Generation succeeded; Hub failed at startup on every
+    single run. A role that a future template starts using must not be able to
+    reintroduce that by being absent from a hand-written list.
+    """
+
+    from eidolon_ops import source_assets
+    from eidolon_ops.paths import PRODUCT_PATHS, HostPaths
+
+    host = HostPaths(
+        install_root=Path("/w/install"),
+        current_root=Path("/w/current"),
+        config_root=Path("/w/config"),
+        state_root=Path("/w/state"),
+        runtime_root=Path("/w/runtime"),
+        log_root=Path("/w/log"),
+        cache_root=Path("/w/cache"),
+        bootstrap_state_root=Path("/w/bootstrap-state"),
+        bootstrap_runtime_root=Path("/w/bootstrap-runtime"),
+    )
+    profile = SimpleNamespace(paths=host)
+    for role, product_path in PRODUCT_PATHS.items():
+        expected = str(getattr(host, role))
+        for written in (str(product_path), f"${source_assets._ENVIRONMENT_NAMES[role]}"):
+            translated = source_assets.translate_fhs(profile, f"path: {written}/thing\n")
+            assert translated == f"path: {expected}/thing\n", f"{role} via {written}"
+
+    # Every role the layout names is a role a template may write, so the
+    # variable table has to answer for all of them too.
+    assert set(source_assets._ENVIRONMENT_NAMES) == set(PRODUCT_PATHS)
+
+
+def test_a_nested_product_root_is_translated_before_its_parent() -> None:
+    """``/var/lib/eidolon-bootstrap`` is not ``/var/lib/eidolon`` plus a suffix.
+
+    Bootstrap keeps a separate state domain precisely so its ownership boundary
+    survives a reset, and three of the nine roots are prefixes of another one.
+    Replacing the parent first would silently relocate the child under it.
+    """
+
+    from eidolon_ops import source_assets
+    from eidolon_ops.paths import HostPaths
+
+    host = HostPaths(
+        install_root=Path("/w/install"),
+        current_root=Path("/w/install/current"),
+        config_root=Path("/w/config"),
+        state_root=Path("/w/state"),
+        runtime_root=Path("/w/runtime"),
+        log_root=Path("/w/log"),
+        cache_root=Path("/w/cache"),
+        bootstrap_state_root=Path("/w/bootstrap-state"),
+        bootstrap_runtime_root=Path("/w/bootstrap-runtime"),
+    )
+    profile = SimpleNamespace(paths=host)
+    translated = source_assets.translate_fhs(
+        profile,
+        "a: /var/lib/eidolon-bootstrap/b.sqlite3\n"
+        "b: /run/eidolon-bootstrap/c.lock\n"
+        "c: /opt/eidolon/current/d\n",
+    )
+    assert translated == (
+        "a: /w/bootstrap-state/b.sqlite3\n"
+        "b: /w/bootstrap-runtime/c.lock\n"
+        "c: /w/install/current/d\n"
+    )

@@ -14,7 +14,7 @@ from pathlib import Path
 from eidolon_ops import environment
 from eidolon_ops.config import OperationsConfig
 from eidolon_ops.errors import OperationsError
-from eidolon_ops.paths import HostProfile
+from eidolon_ops.paths import PRODUCT_PATHS, HostProfile
 from eidolon_ops.readiness import CHANNEL_WORKER_PORT, LIVEKIT_SIGNALLING_PORT
 
 ENV_NAMES = (
@@ -66,6 +66,14 @@ PORTS = {
     "local_api": 9002,
 }
 
+#: Deliberately outside :data:`PORTS`, which is checked for equality against the
+#: ports the components declare: the browser client is not one of them. It is
+#: still an origin Admin has to admit and a port nothing else may be handed, and
+#: three places used to write ``3001`` for it — the registry, the external
+#: service list, and (not at all) Admin's CORS allow-list, which is how the web
+#: client ended up refused by the browser on every source run.
+CLIENT_WEB_PORT = 3001
+
 _MEMORY_SUPERVISOR_ANCHOR = "supervisor:\n  eager_init: true"
 
 
@@ -82,21 +90,40 @@ def translate_fhs(profile: HostProfile, value: str) -> str:
     Host because both export it. Both are translated: a settings file an
     operator opens should say which directory it means, rather than leave the
     answer to whichever environment the service happened to inherit.
+
+    Every role in :data:`eidolon_ops.paths.PRODUCT_PATHS` is translated, and the
+    substitutions are derived from that table rather than restated here. The
+    restated version omitted ``config_root``, so Hub's settings template — whose
+    three Owner Domain paths are under ``/etc/eidolon`` — reached a Mac source
+    run still pointing at a directory that does not exist on it. Nothing failed
+    at generation time; Hub failed at startup, on every run, for weeks.
     """
 
     paths = profile.paths
-    replacements = (
-        ("$EIDOLON_STATE_ROOT", str(paths.state_root)),
-        ("/var/lib/eidolon-bootstrap", str(paths.bootstrap_state_root)),
-        ("/run/eidolon-bootstrap", str(paths.bootstrap_runtime_root)),
-        ("/var/lib/eidolon", str(paths.state_root)),
-        ("/var/log/eidolon", str(paths.log_root)),
-        ("/var/cache/eidolon", str(paths.cache_root)),
-        ("/run/eidolon", str(paths.runtime_root)),
-    )
+    replacements: list[tuple[str, str]] = []
+    for role, product_path in PRODUCT_PATHS.items():
+        host_path = str(getattr(paths, role))
+        replacements.append((str(product_path), host_path))
+        replacements.append((f"${_ENVIRONMENT_NAMES[role]}", host_path))
     for old, new in replacements:
         value = value.replace(old, new)
     return translate_ports(value)
+
+
+#: The variable a component writes when it defers a root to the Host, per role.
+#: Taken from the same export table the services are started with, so a template
+#: may say either the product path or the variable and mean one thing.
+_ENVIRONMENT_NAMES = {
+    "install_root": "EIDOLON_INSTALL_ROOT",
+    "current_root": "EIDOLON_WORKSPACE_ROOT",
+    "config_root": "EIDOLON_CONFIG_ROOT",
+    "state_root": "EIDOLON_STATE_ROOT",
+    "runtime_root": "EIDOLON_RUNTIME_ROOT",
+    "log_root": "EIDOLON_LOG_ROOT",
+    "cache_root": "EIDOLON_CACHE_ROOT",
+    "bootstrap_state_root": "EIDOLON_BOOTSTRAP_STATE_ROOT",
+    "bootstrap_runtime_root": "EIDOLON_BOOTSTRAP_RUNTIME_ROOT",
+}
 
 
 def translate_ports(value: str) -> str:
@@ -214,7 +241,7 @@ memory:
   supervisor_http: {{host: 127.0.0.1, port: {PORTS["memory_admin"]}}}
 channel:
   worker: {{port: {PORTS["channel_worker"]}}}
-client_web: {{port: 3001}}
+client_web: {{port: {CLIENT_WEB_PORT}}}
 nats: {{port: {PORTS["nats"]}, http_port: {PORTS["nats_http"]}}}
 livekit:
   port: {PORTS["livekit"]}
@@ -268,11 +295,16 @@ _MANAGED_SERVICES = (
 _EXTERNAL_SERVICES = (
     ("nats", "NATS (external)", "http://127.0.0.1:{nats_http}/varz"),
     ("livekit", "LiveKit (external)", "http://127.0.0.1:{livekit}/"),
-    ("client-web", "Eidolon Client Web (external)", "http://127.0.0.1:3001/"),
+    ("client-web", "Eidolon Client Web (external)", f"http://127.0.0.1:{CLIENT_WEB_PORT}/"),
 )
 
 
 def admin_services_yaml() -> str:
+    # The browser origins Admin admits. Admin's own registry allow-lists the
+    # web client too; this generated copy listed only the operator console, so
+    # on a source run every request the web client made was refused by the
+    # browser before Admin saw it. A component's own file is the reference for
+    # what that component accepts, even where Ops states the topology.
     lines = [
         "admin:",
         "  host: 127.0.0.1",
@@ -280,6 +312,8 @@ def admin_services_yaml() -> str:
         "  cors_origins:",
         f"    - http://127.0.0.1:{PORTS['admin_web']}",
         f"    - http://localhost:{PORTS['admin_web']}",
+        f"    - http://127.0.0.1:{CLIENT_WEB_PORT}",
+        f"    - http://localhost:{CLIENT_WEB_PORT}",
         "services:",
     ]
     for service_id, name, group, programs, health in _MANAGED_SERVICES:

@@ -236,6 +236,16 @@ configure_supervisor_profile() {
       local profile_env="${EIDOLON_CONFIG_ROOT}/product-source.env"
       if [[ ! -f "$profile_env" || -L "$profile_env" ]]; then
         error "product-source profile is not prepared: $profile_env"
+        # The likely cause is running this script directly. Its own default for
+        # EIDOLON_CONFIG_ROOT is this repository's config directory, while the
+        # profile's generated config lives under the Host's config root -- which
+        # only eidolon-ops knows, and exports when it invokes this script.
+        if [[ "$EIDOLON_CONFIG_ROOT" == "${OPS_ROOT}/config" ]]; then
+          error "  EIDOLON_CONFIG_ROOT is this script's default, not a Host's config root."
+          error "  Go through the single entry point, which exports the whole path set:"
+          error "    uv run eidolon-ops --config config/hosts/<host>.toml debug status"
+          error "  A supervisorctl passthrough is 'debug' too; see --help."
+        fi
         exit 1
       fi
       local name value
@@ -904,18 +914,89 @@ do_restart() {
   do_start
 }
 
+# Audit the ports this topology is about to bind, before supervisord binds
+# them. The dev path has done this since two projects in this workspace first
+# claimed one port; this path did not, and the symptom of a squatted port is a
+# program in an endless BACKOFF loop with the bind error buried in its own log.
+# It happened: eidolon_vision defaults to 8085, which the registry assigns to
+# Data's workspace API, and Data spent the whole run in BACKOFF.
+#
+# Ops audits its own declared ports rather than delegating to Admin's dev
+# service catalogue: the set being started here is the product-source topology,
+# and a port belonging to some other profile is not this run's business.
+do_product_source_port_audit() {
+  local busy=0 name port holder
+  for name in \
+    EIDOLON_PRODUCT_DATA_PORT EIDOLON_PRODUCT_DATA_WORKSPACE_PORT \
+    EIDOLON_PRODUCT_HUB_PORT EIDOLON_PRODUCT_KERNEL_PORT \
+    EIDOLON_PRODUCT_EIDOLOND_PORT EIDOLON_PRODUCT_LOCAL_API_PORT \
+    EIDOLON_PRODUCT_MEMORY_DISCOVERY_PORT EIDOLON_PRODUCT_MEMORY_ADMIN_PORT \
+    EIDOLON_PRODUCT_AGENT_HTTP_PORT EIDOLON_PRODUCT_AGENT_ADMIN_PORT \
+    EIDOLON_PRODUCT_CHANNEL_PROVIDER_PORT EIDOLON_PRODUCT_CHANNEL_WORKER_PORT \
+    EIDOLON_PRODUCT_LIVEKIT_PORT EIDOLON_ADMIN_API_PORT
+  do
+    port="${!name:-}"
+    [[ -z "$port" ]] && continue
+    # A program this supervisord already owns is not a conflict; it is the
+    # thing being restarted. Only a listener from outside this profile is.
+    holder="$(lsof -nP -iTCP:"$port" -sTCP:LISTEN -F pc 2>/dev/null \
+      | awk '/^p/{pid=substr($0,2)} /^c/{print pid" "substr($0,2)}' | head -1)"
+    [[ -z "$holder" ]] && continue
+    if supervised_descendant "${holder%% *}"; then
+      continue
+    fi
+    error "port $port ($name) is held by: $holder"
+    busy=1
+  done
+  if (( busy )); then
+    error "refusing to start: a declared port is held by a process this profile does not own"
+    error "  Stop it, or move it off the port registry (src/eidolon_ops/assets/ports.yaml)."
+    return 1
+  fi
+  info "all declared ports are free or already ours"
+  return 0
+}
+
+# Is this pid part of the supervisord tree we are about to reuse? SV_PID is
+# the pidfile path, so the running supervisord's pid is read out of it.
+supervised_descendant() {
+  local pid="$1" guard=0 supervisor
+  supervisor="$(cat "${SV_PID:-/nonexistent}" 2>/dev/null | tr -d ' ')"
+  [[ -z "$supervisor" ]] && return 1
+  while [[ -n "$pid" && "$pid" != "1" && $guard -lt 20 ]]; do
+    [[ "$pid" == "$supervisor" ]] && return 0
+    pid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')"
+    guard=$((guard + 1))
+  done
+  return 1
+}
+
 do_product_source_start() {
   configure_supervisor_profile product-source
   ensure_product_source_deps
+  header "declared ports are free"
+  do_product_source_port_audit || return 1
   header "external NATS gate"
-  "${OPS_ROOT}/deploy/supervisor/wrappers/wait-tcp.sh" \
-    --host 127.0.0.1 --port 4222 --timeout 3 -- /usr/bin/true
+  if ! "${OPS_ROOT}/deploy/supervisor/wrappers/wait-tcp.sh" \
+    --host 127.0.0.1 --port 4222 --timeout 3 -- /usr/bin/true; then
+    error "no NATS is listening on 127.0.0.1:4222"
+    error "  This Host's foundation is external (see system-services.yaml:"
+    error "  nats has 'supervisord: external'), so Ops does not own the"
+    error "  process. Start one and retry:"
+    error "    nats-server -js -sd ${EIDOLON_STATE_ROOT}/nats/jetstream \\"
+    error "      --port 4222 --http_port 8222"
+    return 1
+  fi
   if [[ -z "$EIDOLON_LIVEKIT_BIN" || ! -x "$EIDOLON_LIVEKIT_BIN" ]]; then
     error "livekit-server is not on PATH"
     return 1
   fi
-  if [[ ! -f "$EIDOLON_LIVEKIT_GENERATED_CONFIG" || -L "$EIDOLON_LIVEKIT_GENERATED_CONFIG" ]]; then
-    error "external LiveKit config is missing or unsafe"
+  # The template, not the rendered config: the wrapper writes the latter at
+  # every start, so requiring it here would only prove that some earlier run
+  # left a file behind -- which is exactly how a config for port 17880
+  # survived months of starts.
+  if [[ ! -f "$EIDOLON_LIVEKIT_TEMPLATE_CONFIG" || -L "$EIDOLON_LIVEKIT_TEMPLATE_CONFIG" ]]; then
+    error "generated LiveKit template is missing or unsafe: $EIDOLON_LIVEKIT_TEMPLATE_CONFIG"
     return 1
   fi
   header "supervisord product-source (Mac source topology)"

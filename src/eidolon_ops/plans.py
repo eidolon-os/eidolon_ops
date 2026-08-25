@@ -315,12 +315,22 @@ def diagnose(host_id: str) -> Plan:
 
 
 def lifecycle(host_id: str, action: str, *, dry_run: bool) -> Plan:
+    """Start, stop or restart the product.
+
+    ``requires_flags`` stays empty either way. Elsewhere it records the flags
+    that authorized this run, and the console prints them as the equivalent
+    command line; ``start``/``stop``/``restart`` take no ``--apply``, so naming
+    one produced a command nobody can run. The confirmation this operation asks
+    for comes from ``destructive`` and ``touches``, which are unchanged: a
+    lifecycle action still says it moves the Host.
+    """
+
     return Plan(
         operation=action,
         host_id=host_id,
         steps=_steps((action, f"{action} the product as one boundary action")),
         destructive=DestructiveLevel.REVERSIBLE,
-        requires_flags=frozenset() if dry_run else frozenset({"--apply"}),
+        requires_flags=frozenset({"--dry-run"}) if dry_run else frozenset(),
         touches=frozenset({ActionKind.LIFECYCLE}),
     )
 

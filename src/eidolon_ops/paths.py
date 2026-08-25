@@ -55,6 +55,28 @@ _PLATFORM_DRIVERS = {
 }
 _FOUNDATION_MODES = {"external"}
 _IPV4_LITERAL = re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}$")
+#: The product Host's layout, stated once. A Pi profile is required to be
+#: exactly this (see :func:`_require_paths`), and a workstation profile is the
+#: same set of roles at different locations — which is why a template written
+#: for the product can be pointed at a source run by substituting these
+#: literals. Both of those uses read this table, because two hand-maintained
+#: copies of one layout are only ever accidentally equal: the translation table
+#: used to be written out separately and silently omitted ``config_root``, so
+#: every Hub settings file a Mac generated pointed at ``/etc/eidolon``.
+#: Ordered longest-literal-first so a nested root is replaced before its parent.
+PRODUCT_PATHS: Mapping[str, Path] = MappingProxyType(
+    {
+        "current_root": Path("/opt/eidolon/current"),
+        "bootstrap_state_root": Path("/var/lib/eidolon-bootstrap"),
+        "bootstrap_runtime_root": Path("/run/eidolon-bootstrap"),
+        "install_root": Path("/opt/eidolon"),
+        "config_root": Path("/etc/eidolon"),
+        "state_root": Path("/var/lib/eidolon"),
+        "runtime_root": Path("/run/eidolon"),
+        "log_root": Path("/var/log/eidolon"),
+        "cache_root": Path("/var/cache/eidolon"),
+    }
+)
 _PATH_FIELDS = (
     "install_root",
     "current_root",
@@ -290,18 +312,7 @@ def _validate_paths(paths: HostPaths, *, platform: HostPlatform) -> None:
     if paths.bootstrap_runtime_root == paths.runtime_root:
         raise HostProfileError("Bootstrap runtime must remain a distinct ownership boundary")
     if platform is HostPlatform.RASPBERRY_PI:
-        expected = {
-            "install_root": Path("/opt/eidolon"),
-            "current_root": Path("/opt/eidolon/current"),
-            "config_root": Path("/etc/eidolon"),
-            "state_root": Path("/var/lib/eidolon"),
-            "runtime_root": Path("/run/eidolon"),
-            "log_root": Path("/var/log/eidolon"),
-            "cache_root": Path("/var/cache/eidolon"),
-            "bootstrap_state_root": Path("/var/lib/eidolon-bootstrap"),
-            "bootstrap_runtime_root": Path("/run/eidolon-bootstrap"),
-        }
-        for name, value in expected.items():
+        for name, value in PRODUCT_PATHS.items():
             if getattr(paths, name) != value:
                 raise HostProfileError(f"Pi paths.{name} must be {value}")
 
