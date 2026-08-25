@@ -25,6 +25,7 @@ from . import (
     probe,
     reclamation,
     reset,
+    secret_inputs,
     staging,
 )
 from .primitives import TargetError, decode_payload
@@ -45,6 +46,7 @@ ACTIONS: dict[str, tuple[ModuleType, str]] = {
     "embedding-model-state": (staging, "embedding_model_state"),
     "install-embedding-model": (staging, "install_embedding_model"),
     "install": (install, "install"),
+    "converge-secret-inputs": (secret_inputs, "converge_secret_inputs"),
     "ensure-service-identities": (identities, "ensure_service_identities"),
     "controller-reset": (lifecycle, "controller_reset"),
     "commissioning-code": (lifecycle, "commissioning_code"),

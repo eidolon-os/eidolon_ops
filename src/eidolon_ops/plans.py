@@ -88,6 +88,30 @@ def initialize_inputs(host_id: str, *, new_identity: bool = False) -> Plan:
     )
 
 
+def converge_inputs(host_id: str, *, apply: bool = False) -> Plan:
+    """Add the credentials the product declares and this Host is missing.
+
+    Declared ``NONE`` on the destructive scale, and that is a statement rather
+    than an omission: convergence only ever *adds* a key neither side has, and
+    refuses outright when a staged value would replace one the Host already
+    holds. Rotation is a different operation with a different blast radius, and
+    keeping them apart is what makes this safe to run on a working Host — the
+    only kind anybody runs it on.
+    """
+
+    return Plan(
+        operation="converge-inputs",
+        host_id=host_id,
+        steps=_steps(
+            ("workstation", "add declared keys this machine's input set lacks"),
+            ("host", "add declared keys the Host lacks, never replacing one"),
+        ),
+        destructive=DestructiveLevel.NONE,
+        requires_flags=frozenset({"--apply"} if apply else set()),
+        touches=frozenset({ActionKind.SECRET, ActionKind.CONFIG}),
+    )
+
+
 def commissioning_code(host_id: str) -> Plan:
     return Plan(
         operation="commissioning-code",

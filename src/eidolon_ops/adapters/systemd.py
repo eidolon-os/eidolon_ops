@@ -32,6 +32,7 @@ class SystemdSupervisor:
                 Capability.LOG_HISTORY,
                 Capability.COMMISSIONING_CODE,
                 Capability.INIT_INPUTS,
+                Capability.CONVERGE_INPUTS,
                 Capability.INSTALL,
                 Capability.DEPLOY,
                 Capability.ROLLBACK,
@@ -52,6 +53,9 @@ class SystemdSupervisor:
 
     def app_ready(self) -> dict[str, object]:
         return self.release.app_ready()
+
+    def converge_inputs(self, *, apply: bool) -> dict[str, object]:
+        return self.release.converge_inputs(apply=apply)
 
     def lifecycle(self, action: str, *, dry_run: bool) -> dict[str, object]:
         return self.release.lifecycle(action, dry_run=dry_run)

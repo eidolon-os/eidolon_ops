@@ -300,6 +300,24 @@ class ReleasePreflight:
             validate_private_local_file(
                 self.config.install_files[name], label=f"install.files.{name}"
             )
+        return self.validate_input_contract()
+
+    def validate_input_contract(self) -> dict[str, object]:
+        """Prove the input set still holds what the product declares.
+
+        Split out from the install-only checks above so the deploy path can run
+        it without the rest. The permissions and ownership of each private file
+        are an install concern; whether the set is *complete* is a concern of
+        anything that expects the Host to work afterwards — and gating this on
+        the install path is why a Host spent two weeks two credentials short
+        while release after release reported green.
+
+        Deliberately not called from ``run``: ``doctor`` goes through there, and
+        a doctor that refuses to answer because the input set is short is a
+        doctor that cannot diagnose the one thing it was asked about. Diagnosis
+        reports; shipping refuses.
+        """
+
         try:
             return validate_install_input_contract(self.config, self.read_exact_source_file)
         except InstallInputError as exc:

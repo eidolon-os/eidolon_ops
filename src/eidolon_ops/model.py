@@ -84,6 +84,12 @@ class Capability(StrEnum):
     COMMISSIONING_CODE = "commissioning-code"
     PROVISION = "provision"
     INIT_INPUTS = "init-inputs"
+    #: Bring a Host that is already installed up to the credential set the
+    #: product declares. Its own capability rather than a flag on INSTALL,
+    #: because install refuses when an input on the Host differs from the
+    #: staged one — which is right for a resume and is exactly why a
+    #: credential added after installation had no way to arrive.
+    CONVERGE_INPUTS = "converge-inputs"
     INSTALL = "install"
     DEPLOY = "deploy"
     ROLLBACK = "rollback"

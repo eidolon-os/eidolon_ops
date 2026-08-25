@@ -30,6 +30,8 @@ from eidolon_ops.provider_inputs import (
 
 __all__ = [
     "INSTALL_DESTINATION_NAMES",
+    "add_missing_install_credentials",
+    "declared_secret_env_keys",
     "initialize_install_inputs",
     "validate_install_input_contract",
 ]
@@ -310,6 +312,28 @@ PROVIDER_ENV_KEYS: tuple[tuple[str, str], ...] = (
     ("channel.env", "BAILIAN_TTS_API_KEY"),
     ("memory.env", "EIDOLON_MEMORY_LLM_API_KEY"),
 )
+
+def declared_secret_env_keys() -> dict[str, list[str]]:
+    """What every environment file on a Host must hold, for the agent to apply.
+
+    Derived from :data:`DECLARED_ENV_KEYS` rather than restated, so "what the
+    product requires" has one author. It is sent to the Host in the convergence
+    payload instead of being known there: the agent is a mechanism, and an agent
+    carrying its own copy of the requirement would be a second opinion that
+    drifts — which is the whole shape of the failure this exists to close.
+
+    ``channel.env`` is excluded, as it is from the repair: its key set is
+    deliberately open, so "missing" is not a decidable question there. Files with
+    nothing declared are excluded too, because a declaration of nothing is not a
+    thing to converge to.
+    """
+
+    return {
+        name: sorted(keys)
+        for name, keys in sorted(DECLARED_ENV_KEYS.items())
+        if keys and name != "channel.env"
+    }
+
 
 def add_missing_install_credentials(
     config: OperationsConfig,

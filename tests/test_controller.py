@@ -379,6 +379,16 @@ class FakeTransport:
                 "digest": embedding_model_digest(PINNED_EMBEDDING_MODEL),
             },
             "install-embedding-model": {"status": "installed"},
+            # A Host that already holds every declared credential. Deploy asks
+            # before it ships anything; a Host that answered otherwise is
+            # covered by its own test below.
+            "converge-secret-inputs": {
+                "status": "already_current",
+                "added": {},
+                "missing": {},
+                "absent": [],
+                "applied": False,
+            },
         }
         return values[action]
 
@@ -1136,6 +1146,69 @@ def test_deploy_refuses_existing_local_bundle(config) -> None:
 
     with pytest.raises(OperationsError, match="already exists"):
         controller.deploy(release_id="r1", resume=False, activate=False)
+
+
+def test_deploy_refuses_a_host_short_of_a_declared_credential(
+    setup_controller,
+) -> None:
+    """The gate that was missing, and the two weeks it would have saved.
+
+    Two credentials were added to the product on 2026-08-25. The Host installed
+    on 2026-08-10 could not be given them, so every memory and conversation
+    feature answered 503 — while releases kept shipping onto it and reporting
+    success, because nothing on the deploy path ever asked whether the Host held
+    what the code it was receiving required.
+
+    Refused before anything is prepared or transferred, and the message names
+    the verb that fixes it: a gate that refuses without saying what to run is a
+    gate people learn to route around.
+    """
+
+    controller, _runner, transport = setup_controller
+    transport.overrides["converge-secret-inputs"] = {
+        "status": "planned",
+        "added": {},
+        "missing": {
+            "admin.env": ["EIDOLON_ADMIN_MEMORY_API_SERVICE_TOKEN"],
+            "memory.env": ["EIDOLON_MEMORY_API_TOKEN"],
+        },
+        "absent": [],
+        "applied": False,
+    }
+
+    with pytest.raises(OperationsError) as refused:
+        controller.deploy(release_id="r1", resume=False, activate=True)
+
+    message = str(refused.value)
+    assert "EIDOLON_ADMIN_MEMORY_API_SERVICE_TOKEN" in message
+    assert "EIDOLON_MEMORY_API_TOKEN" in message
+    assert "converge-inputs --apply" in message
+    # Nothing was moved. The refusal is the whole operation.
+    assert not any(
+        call[0] in {"guard-upload", "finalize-upload"} for call in transport.agent_calls
+    )
+
+
+def test_deploy_asks_the_host_rather_than_the_workstation(setup_controller) -> None:
+    """What decides whether this release works is what is in /etc/eidolon.
+
+    The workstation's input set is the source a Host is converged *from*, and it
+    is checked where it is written and where it is repaired. Checking it here
+    instead would pass on a machine whose files were fixed and whose Host was
+    never given them — which is precisely the state that produced the outage.
+    """
+
+    controller, _runner, transport = setup_controller
+    controller.deploy(release_id="r1", resume=False, activate=False)
+
+    asked = [call for call in transport.agent_calls if call[0] == "converge-secret-inputs"]
+    assert len(asked) == 1
+    payload = asked[0][1]
+    assert payload["apply"] is False, "a gate must not write"
+    assert "admin.env" in payload["declared"]
+    assert (
+        "EIDOLON_ADMIN_MEMORY_API_SERVICE_TOKEN" in payload["declared"]["admin.env"]
+    )
 
 
 def test_deploy_stops_after_prepare_failure(setup_controller) -> None:

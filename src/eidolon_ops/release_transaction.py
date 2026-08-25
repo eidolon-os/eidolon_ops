@@ -14,6 +14,7 @@ from pathlib import Path
 from eidolon_ops.config import OperationsConfig, validate_release_id
 from eidolon_ops.errors import OperationsError
 from eidolon_ops.host_layer import HostLayer
+from eidolon_ops.install_inputs import declared_secret_env_keys
 from eidolon_ops.process import ProcessError
 from eidolon_ops.progress import Journal, ProgressSink
 from eidolon_ops.readiness import describe_failures
@@ -74,6 +75,43 @@ class ReleaseTransaction:
         self._app_ready = app_ready
         self.progress = progress
 
+    def _require_declared_credentials(self) -> dict[str, object]:
+        """Refuse to ship onto a Host that is short a declared credential.
+
+        Asks the *Host*, not the workstation. The workstation's input set is the
+        source a Host is converged from and is checked when it is written and
+        when it is repaired; what decides whether this release will work is what
+        is in ``/etc/eidolon`` on the machine receiving it. Those two drift
+        independently — repairing the input set and delivering it are separate
+        operations — and the gap between them is where a fixed workstation and a
+        broken Host sat together for two weeks.
+
+        Names the verb that fixes it. A gate that refuses without saying what to
+        run is a gate people learn to work around.
+        """
+
+        # Only what the question needs. A read of which keys a Host holds does
+        # not need the Host-layer payload, and asking for it would make this gate
+        # depend on deriving the Host identity — which is a different failure to
+        # report and one this check has no business raising.
+        host = self.transport.run_agent(
+            "converge-secret-inputs",
+            {"declared": declared_secret_env_keys(), "apply": False},
+            timeout=120,
+        )
+        outstanding = host.get("missing") or {}
+        if outstanding:
+            short = ", ".join(
+                f"{name} is missing {', '.join(keys)}"
+                for name, keys in sorted(outstanding.items())
+            )
+            raise OperationsError(
+                "this Host does not hold every credential the product declares "
+                f"({short}); run `converge-inputs --apply`, then `restart`, "
+                "before shipping a release that expects them"
+            )
+        return {"host": host}
+
     def deploy(
         self,
         *,
@@ -85,6 +123,14 @@ class ReleaseTransaction:
     ) -> dict[str, object]:
         release_id = validate_release_id(release_id)
         local = self.preflight.run(require_install_files=False)
+        # Before anything is prepared or moved. A release that needs a credential
+        # the Host does not hold is a release that ships green and does not work,
+        # which is exactly what happened: two credentials were added to the
+        # product on 2026-08-25 and the Host installed on 2026-08-10 could not be
+        # given them, so every memory and conversation feature answered 503 while
+        # deploy after deploy reported success. Refusing here rather than warning,
+        # because a warning in a release log is a thing nobody reads twice.
+        local["install_input_contract"] = self._require_declared_credentials()
         phases = Journal(self.progress)
         candidate_prepared = False
         health_gates_passed = False

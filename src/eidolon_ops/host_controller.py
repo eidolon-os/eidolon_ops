@@ -156,6 +156,26 @@ class HostController:
         release = self.adapter.require_release(Capability.INIT_INPUTS)
         return self._applied(plan, release.initialize_inputs(new_identity=new_identity))
 
+    def converge_inputs(self, *, apply: bool = False) -> Evidence:
+        """Give an already-installed Host the credentials the product grew since.
+
+        This method's absence is worth recording. The verb existed in the CLI and
+        the implementation existed on the release executor, and the only thing
+        missing was this — the line that connects them — so running it raised
+        ``AttributeError: 'HostController' object has no attribute
+        'add_missing_input_credentials'``. The one supported way to fix a Host
+        with a missing credential could not be invoked at all, on any Host, and
+        nothing failed until somebody typed it.
+
+        A dispatch table and a gate over it now make that unrepresentable; see
+        ``host_cli.OPERATIONS`` and ``tests/test_cli_operations.py``.
+        """
+
+        plan = plans.converge_inputs(self.profile.host_id, apply=apply)
+        release = self.adapter.require_release(Capability.CONVERGE_INPUTS)
+        report = release.converge_inputs(apply=apply)
+        return self._planned_or_applied(plan, report, applied=apply)
+
     def install(
         self,
         *,

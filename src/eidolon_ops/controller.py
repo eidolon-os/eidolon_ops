@@ -31,6 +31,7 @@ from eidolon_ops.host_layer import ASSET_ERRORS, HostLayer
 from eidolon_ops.hostagent.contract import RESET_AUTHORITY_ROOTS
 from eidolon_ops.install_inputs import (
     add_missing_install_credentials,
+    declared_secret_env_keys,
     initialize_install_inputs,
 )
 from eidolon_ops.owner_domain_assets import (
@@ -56,6 +57,15 @@ __all__ = ["EidolonPiController", "OperationsError"]
 #: Sources whose settings templates the private input set is derived from.
 _SETTINGS_SOURCES = ("eidolon_agent", "eidolon_channel", "eidolon_memory")
 _LIFECYCLE_ACTIONS = frozenset({"start", "stop", "restart"})
+
+#: The staging directory credential convergence uses.
+#:
+#: A fixed name rather than a release id, because convergence is not tied to
+#: a release: it delivers what the *product* declares, and a Host converges to
+#: that whether or not anything is being shipped. Fixed also means a second
+#: run cleans up after the first rather than accumulating directories of
+#: secrets on the Host.
+_CONVERGENCE_STAGE_ID = "credential-convergence"
 
 
 #: What SQLite leaves beside a database it owns. A component that declared the
@@ -384,6 +394,61 @@ class EidolonPiController:
             return add_missing_install_credentials(self.config, apply=apply)
         except ASSET_ERRORS as exc:
             raise OperationsError(str(exc)) from exc
+
+    def converge_inputs(self, *, apply: bool = False) -> dict[str, object]:
+        """Make this Host hold the credential set the product declares.
+
+        One operation rather than two, because two is how the gap stayed open.
+        There was a verb that repaired the *workstation's* input set and no verb
+        that delivered the result, so a Host installed before a credential
+        existed could be diagnosed and never fixed: ``install`` refuses when an
+        input on the Host differs from the staged one, and ``refresh`` carries
+        only the two Host-bound files. The repair was reachable, correct, and
+        pointless on its own.
+
+        Both halves, in order:
+
+        1. the local input set gains the keys the declaration says it is missing
+           — copied from the file that already holds the other side of a shared
+           secret, minted once for the pair when neither side has it;
+        2. the Host gains the keys *it* is missing, from those files.
+
+        Additive at both ends. Nothing already present is read, replaced, or
+        rotated, which is what makes this safe to run on a Host that works —
+        the only kind anybody runs it on.
+
+        Dry unless asked. The report names keys, never values.
+        """
+
+        local = self.add_missing_input_credentials(apply=apply)
+        payload: dict[str, object] = {
+            "declared": declared_secret_env_keys(),
+            "apply": apply,
+        }
+        if apply:
+            # Staged with the Host layer's own renderer, so a Host-bound file
+            # offers the values this Host should have rather than the template's.
+            stage = f"/var/tmp/eidolon-secrets-{_CONVERGENCE_STAGE_ID}"
+            self.host_layer.stage_install_files(_CONVERGENCE_STAGE_ID, stage)
+            payload["release_id"] = _CONVERGENCE_STAGE_ID
+        host = self.transport.run_agent(
+            "converge-secret-inputs", payload, timeout=120
+        )
+        applied = bool(local.get("applied")) or bool(host.get("applied"))
+        return {
+            "status": "converged" if applied else "planned",
+            "workstation": local,
+            "host": host,
+            # Named rather than performed: an env file is read at start, so the
+            # units that read a changed file have to be restarted — and deciding
+            # *when* a Host restarts is the operator's call, not this verb's.
+            "restart_required": sorted(host.get("added") or {}),
+            "next": (
+                "run `restart` so the services read their new credentials"
+                if applied
+                else "rerun with --apply to write what is listed"
+            ),
+        }
 
     # -- boundary actions ----------------------------------------------------
 

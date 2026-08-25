@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from eidolon_ops.config import ConfigurationError
@@ -20,6 +20,106 @@ from eidolon_ops.readiness import ReadinessError
 from eidolon_ops.transport import TransportError
 
 
+def _lifecycle(controller: HostController, arguments: argparse.Namespace) -> object:
+    return controller.lifecycle(
+        arguments.operation,
+        dry_run=arguments.dry_run,
+        force_cleanup=getattr(arguments, "force_cleanup", False),
+        strict=getattr(arguments, "strict", False),
+        wait_ready=not getattr(arguments, "no_wait_ready", False),
+    )
+
+
+#: Every verb this CLI offers, and the controller call it is.
+#:
+#: A table rather than a chain of ``elif``, because the chain let a verb name a
+#: method that did not exist: ``add-input-credentials`` was parsed, accepted, and
+#: dispatched to ``controller.add_missing_input_credentials`` — which lives on
+#: the release executor and was never ported to the facade. It raised
+#: ``AttributeError`` on every Host, and it was the only supported way to give a
+#: Host a credential the product had grown. Nothing caught it because nothing
+#: compared the two lists.
+#:
+#: ``tests/test_cli_operations.py`` now does: every subcommand must appear here,
+#: every entry here must be a subcommand, and every handler must resolve against
+#: ``HostController``. A verb with no implementation is a failing test rather
+#: than a stack trace in somebody's terminal.
+OPERATIONS: dict[str, Callable[[HostController, argparse.Namespace], object]] = {
+    "status": lambda controller, _: controller.status(),
+    "app-ready": lambda controller, _: controller.app_ready(),
+    "doctor": lambda controller, a: controller.doctor(release_id=a.release_id),
+    "provision": lambda controller, a: controller.provision(apply=a.apply),
+    "init-inputs": lambda controller, a: controller.initialize_inputs(
+        new_identity=a.new_identity
+    ),
+    "converge-inputs": lambda controller, a: controller.converge_inputs(
+        apply=a.apply
+    ),
+    "backup": lambda controller, a: controller.backup(output=a.output),
+    "restore": lambda controller, a: controller.restore(
+        source=a.source, apply=a.apply
+    ),
+    "commissioning-code": lambda controller, a: controller.commissioning_code(
+        ttl_seconds=a.ttl_seconds
+    ),
+    "install": lambda controller, a: controller.install(
+        release_id=a.release_id,
+        resume=a.resume,
+        apply=a.apply,
+        reset_existing=a.reset_existing,
+        wipe_authority_data=a.wipe_authority_data,
+    ),
+    "controller-reset": lambda controller, a: controller.controller_reset(
+        apply=a.apply
+    ),
+    "authority-reset": lambda controller, a: controller.authority_reset(apply=a.apply),
+    "authority-backup": lambda controller, a: controller.authority_backup(
+        output=a.output
+    ),
+    "authority-restore": lambda controller, a: controller.authority_restore(
+        source=a.source, apply=a.apply
+    ),
+    "reset": lambda controller, a: controller.reset(
+        wipe_authority_data=a.wipe_authority_data, apply=a.apply
+    ),
+    "deploy": lambda controller, a: controller.deploy(
+        release_id=a.release_id,
+        resume=a.resume,
+        activate=a.activate,
+        cutover_mode=a.cutover_mode,
+    ),
+    "update": lambda controller, a: controller.deploy(
+        release_id=a.release_id,
+        resume=a.resume,
+        activate=a.activate,
+        cutover_mode=a.cutover_mode,
+    ),
+    "rollback": lambda controller, a: controller.rollback(
+        release_id=a.release_id, snapshot=a.snapshot, apply=a.apply
+    ),
+    "diagnose": lambda controller, a: controller.diagnose(output=a.output),
+    # One handler, named three times: the three verbs differ only in the word
+    # they pass on, and three bodies would be three places to fix a flag.
+    "start": _lifecycle,
+    "stop": _lifecycle,
+    "restart": _lifecycle,
+    "debug": lambda controller, a: controller.local_profile(
+        "product-source", a.profile_operation
+    ),
+    "logs": lambda controller, a: controller.logs(
+        service=a.service, lines=a.lines, since=a.since
+    ),
+}
+
+
+def _dispatch(controller: HostController, arguments: argparse.Namespace) -> object:
+    try:
+        handler = OPERATIONS[arguments.operation]
+    except KeyError as exc:  # pragma: no cover - argparse rejects these first
+        raise OperationsError(f"unknown operation: {arguments.operation}") from exc
+    return handler(controller, arguments)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _parser()
     arguments = parser.parse_args(argv)
@@ -29,78 +129,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             SubprocessRunner(),
             revision_overrides=tuple(arguments.revision),
         )
-        if arguments.operation == "status":
-            result = controller.status()
-        elif arguments.operation == "app-ready":
-            result = controller.app_ready()
-        elif arguments.operation == "doctor":
-            result = controller.doctor(release_id=arguments.release_id)
-        elif arguments.operation == "provision":
-            result = controller.provision(apply=arguments.apply)
-        elif arguments.operation == "init-inputs":
-            result = controller.initialize_inputs(new_identity=arguments.new_identity)
-        elif arguments.operation == "add-input-credentials":
-            result = controller.add_missing_input_credentials(apply=arguments.apply)
-        elif arguments.operation == "backup":
-            result = controller.backup(output=arguments.output)
-        elif arguments.operation == "restore":
-            result = controller.restore(source=arguments.source, apply=arguments.apply)
-        elif arguments.operation == "commissioning-code":
-            result = controller.commissioning_code(ttl_seconds=arguments.ttl_seconds)
-        elif arguments.operation == "install":
-            result = controller.install(
-                release_id=arguments.release_id,
-                resume=arguments.resume,
-                apply=arguments.apply,
-                reset_existing=arguments.reset_existing,
-                wipe_authority_data=arguments.wipe_authority_data,
-            )
-        elif arguments.operation == "controller-reset":
-            result = controller.controller_reset(apply=arguments.apply)
-        elif arguments.operation == "authority-reset":
-            result = controller.authority_reset(apply=arguments.apply)
-        elif arguments.operation == "authority-backup":
-            result = controller.authority_backup(output=arguments.output)
-        elif arguments.operation == "authority-restore":
-            result = controller.authority_restore(
-                source=arguments.source, apply=arguments.apply
-            )
-        elif arguments.operation == "reset":
-            result = controller.reset(
-                wipe_authority_data=arguments.wipe_authority_data,
-                apply=arguments.apply,
-            )
-        elif arguments.operation in {"deploy", "update"}:
-            result = controller.deploy(
-                release_id=arguments.release_id,
-                resume=arguments.resume,
-                activate=arguments.activate,
-                cutover_mode=arguments.cutover_mode,
-            )
-        elif arguments.operation == "rollback":
-            result = controller.rollback(
-                release_id=arguments.release_id,
-                snapshot=arguments.snapshot,
-                apply=arguments.apply,
-            )
-        elif arguments.operation == "diagnose":
-            result = controller.diagnose(output=arguments.output)
-        elif arguments.operation in {"start", "stop", "restart"}:
-            result = controller.lifecycle(
-                arguments.operation,
-                dry_run=arguments.dry_run,
-                force_cleanup=getattr(arguments, "force_cleanup", False),
-                strict=getattr(arguments, "strict", False),
-                wait_ready=not getattr(arguments, "no_wait_ready", False),
-            )
-        elif arguments.operation == "debug":
-            result = controller.local_profile("product-source", arguments.profile_operation)
-        else:
-            result = controller.logs(
-                service=arguments.service,
-                lines=arguments.lines,
-                since=arguments.since,
-            )
+        result = _dispatch(controller, arguments)
     except (
         ConfigurationError,
         EnvironmentFileError,
@@ -155,15 +184,14 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="retire this machine's Host identity and mint a new one",
     )
-    add_input_credentials = operations.add_parser(
-        "add-input-credentials",
+    converge_inputs = operations.add_parser(
+        "converge-inputs",
         help=(
-            "add credentials this machine's input set is missing because the "
-            "product grew them after it was installed; existing values are never "
-            "touched"
+            "give this machine and the Host the credentials the product declares "
+            "and they are missing; existing values are never touched"
         ),
     )
-    add_input_credentials.add_argument("--apply", action="store_true")
+    converge_inputs.add_argument("--apply", action="store_true")
     backup = operations.add_parser(
         "backup",
         help="snapshot every authority that can be snapshotted, and fetch it here",
