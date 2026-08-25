@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ipaddress
 import socket
+from types import SimpleNamespace
 
 import pytest
 
@@ -172,3 +173,51 @@ def test_the_wire_wins_when_both_links_claim_a_link_local_address() -> None:
     # means anything. Taking the first match would pick by luck.
     assert endpoints[0].bind_interface == "en7"
     assert endpoints[0].link == "wired"
+
+
+def test_the_upload_says_which_link_it_is_about_to_take() -> None:
+    """Choosing the wire is automatic; saying so was not.
+
+    The Host is configured by name, its addresses are resolved per run, and
+    wired candidates rank first — so whoever deploys already gets the fast path
+    without knowing it exists. The gap was that only ``status`` reported the
+    choice. The operation where the difference is felt moves about a gigabyte,
+    and a cable that is not in looked exactly like a slow afternoon.
+    """
+
+    from eidolon_ops.release_transaction import ReleaseTransaction
+
+    class FakeTransport:
+        def __init__(self, endpoint: HostEndpoint | None) -> None:
+            self._endpoint = endpoint
+            self.described = 0
+
+        @property
+        def endpoint(self) -> HostEndpoint | None:
+            return self._endpoint
+
+        def describe(self) -> str:
+            self.described += 1
+            return "resolved"
+
+    def report(endpoint: HostEndpoint | None) -> dict:
+        transaction = object.__new__(ReleaseTransaction)
+        transaction.transport = FakeTransport(endpoint)
+        transaction.preflight = SimpleNamespace(
+            config=SimpleNamespace(host=SimpleNamespace(hostname="eidolon-pi5.local"))
+        )
+        return ReleaseTransaction._link_report(transaction)
+
+    wired = report(HostEndpoint(address="169.254.181.137", interface="en7", link="wired"))
+    assert wired["status"] == "wired"
+    assert wired["endpoint"] == "169.254.181.137 (wired via en7)"
+    # Nothing to warn about: this is the link the ranking exists to pick.
+    assert "note" not in wired
+
+    wireless = report(HostEndpoint(address="192.168.3.40", interface="en0", link="wireless"))
+    assert wireless["status"] == "wireless"
+    assert "cable" in wireless["note"]
+
+    # A Host that answers on neither is a different failure, and the upload
+    # itself will report it. This says what it knows and does not invent a link.
+    assert report(None)["status"] == "unresolved"

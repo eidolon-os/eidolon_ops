@@ -141,6 +141,7 @@ class ReleaseTransaction:
         # being explained. The same calculation that annotates that failure costs
         # one round trip here, where the answer can still change a decision.
         local["source_advance"] = self._advance_since_last_activation()
+        local["link"] = self._link_report()
         phases = Journal(self.progress)
         candidate_prepared = False
         health_gates_passed = False
@@ -359,6 +360,43 @@ class ReleaseTransaction:
             "combination it was built from; suspect these before anything else."
         )
 
+    def _link_report(self) -> dict[str, object]:
+        """Which link this upload is about to take, said before it takes it.
+
+        Choosing it is already automatic: the Host is configured by name, the
+        addresses behind that name are resolved per run, and wired candidates
+        are ranked first because on this Pi the wire measured 120MB in 2s
+        against 205s over Wi-Fi. What was missing is that only ``status``
+        reported the choice. The operation where the difference is felt — this
+        one, which moves about a gigabyte — did not, so a cable that is not in
+        looks exactly like a slow afternoon.
+
+        Reported, not refused. A Host that is genuinely only on Wi-Fi still has
+        to be deployable; what it must not do is be slow silently.
+        """
+
+        endpoint = self.transport.endpoint
+        if endpoint is None:
+            # Touch the transport so the choice exists to report. It resolves
+            # once per session, so this is the same answer the upload will use.
+            self.transport.describe()
+            endpoint = self.transport.endpoint
+        if endpoint is None:
+            return {"status": "unresolved", "hostname": self.preflight.config.host.hostname}
+        report: dict[str, object] = {
+            "status": endpoint.link,
+            "endpoint": endpoint.describe(),
+            "hostname": self.preflight.config.host.hostname,
+        }
+        if endpoint.link != "wired":
+            report["note"] = (
+                f"this release is about to be uploaded over the {endpoint.link} link. "
+                "The wire measured 120MB in 2s against 205s over Wi-Fi on this Host, "
+                "and a bundle is around a gigabyte. If the cable is meant to be in, "
+                "it is not the link this Host is answering on."
+            )
+        return report
+
     def _advance_since_last_activation(self) -> dict[str, object]:
         """What moved since this Host last activated something, before sealing.
 
@@ -551,6 +589,7 @@ class ReleaseTransaction:
                 "next": "rerun with --apply after reviewing every planned mutation",
             }
         local = self.preflight.run(require_install_files=True)
+        local["link"] = self._link_report()
         phases = Journal(self.progress)
         if reset_existing:
             phases.begin("reset_existing")
