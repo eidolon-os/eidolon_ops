@@ -124,6 +124,7 @@ def initialize_install_inputs(
             # one secret is how they come to disagree.
             "EIDOLON_AGENT_ADMIN_API_TOKEN": agent_admin_token,
             "EIDOLON_ADMIN_SYSTEM_DIRECTORY_UDS": "/run/eidolon/system.sock",
+            "EIDOLON_ADMIN_AUDIT_NATS_URL": "nats://127.0.0.1:4222",
         },
         "local-api.env": {
             "EIDOLON_LOCAL_API_ADMIN_BASE_URL": "http://127.0.0.1:9000",
@@ -242,6 +243,7 @@ DECLARED_ENV_KEYS: dict[str, set[str]] = {
         "EIDOLON_ADMIN_MEMORY_API_SERVICE_TOKEN",
         "EIDOLON_AGENT_ADMIN_API_TOKEN",
         "EIDOLON_ADMIN_SYSTEM_DIRECTORY_UDS",
+        "EIDOLON_ADMIN_AUDIT_NATS_URL",
     },
     "local-api.env": {
         "EIDOLON_LOCAL_API_ADMIN_BASE_URL",
@@ -282,6 +284,11 @@ FIXED_ENV_VALUES: dict[str, str] = {
     # stays readable and the failure is invisible. A silent failure that looks
     # like working is exactly what this table exists to catch.
     "EIDOLON_DATA_AUDIT_NATS_URL": "nats://127.0.0.1:4222",
+    # The consuming end of the same stream. Admin keeps the index, so the loop
+    # that fills it runs there — one address declared for both ends, because a
+    # producer pointed at a bus its consumer is not on looks exactly like
+    # working.
+    "EIDOLON_ADMIN_AUDIT_NATS_URL": "nats://127.0.0.1:4222",
     "EIDOLON_ADMIN_SYSTEM_DIRECTORY_UDS": "/run/eidolon/system.sock",
     "EIDOLON_LOCAL_API_ADMIN_BASE_URL": "http://127.0.0.1:9000",
     "EIDOLON_LOCAL_API_LIFECYCLE_WORKFLOW_SOCKET": "/run/eidolon-lifecycle/workflow.sock",
