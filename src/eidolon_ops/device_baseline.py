@@ -324,12 +324,13 @@ OBSERVERS: dict[str, Observer] = {
     "commissioning_started": _device_says(
         "commissioning_started", r"WifiConfiguring|DeviceProvisioningService|provisioning started"
     ),
-    "proposal_observed": _unautomated(
-        "proposal_observed", "the phone's pending-enrollment list is not read yet"
-    ),
-    "approval_recorded": _unautomated(
-        "approval_recorded", "approving from the phone is not driven yet"
-    ),
+    # Read off the admission screen. The needles are the app's own sentences,
+    # copied from its source rather than invented here — an assertion about
+    # what a person sees can only be written in the words they see, so if the
+    # app rewords them this fails and points at the harness, which is the right
+    # place for that argument to happen.
+    "proposal_observed": _phone_shows("proposal_observed", "明确批准这次 Enrollment"),
+    "approval_recorded": _phone_shows("approval_recorded", "已批准，等待设备领取 Grant"),
     "grant_ack_observed": _device_says("grant_ack_observed", r"claim-grants:collect|ClaimGrant"),
     "claim_active_observed": _phone_shows("claim_active_observed", "已接入"),
     "mount_active_observed": _phone_shows("mount_active_observed", "挂载 revision"),
@@ -346,10 +347,12 @@ OBSERVERS: dict[str, Observer] = {
     "online_remove_requested": _unautomated(
         "online_remove_requested", "removing from the phone is not driven yet"
     ),
-    "platform_revoked_observed": _unautomated(
-        "platform_revoked_observed", "the phone's revoked projection is not read yet"
+    "platform_revoked_observed": _phone_shows("platform_revoked_observed", "已失去访问"),
+    "unmount_observed": _unautomated(
+        "unmount_observed",
+        "the phone reports mount_removed as a condition, but no screen states it "
+        "in words this can read",
     ),
-    "unmount_observed": _unautomated("unmount_observed", "Kernel's unmount is not observed yet"),
     "online_erase_ack_observed": _unautomated(
         "online_erase_ack_observed", "the device has no real secure-erase adapter yet"
     ),
@@ -363,15 +366,15 @@ OBSERVERS: dict[str, Observer] = {
     "offline_remove_requested": _unautomated(
         "offline_remove_requested", "removing from the phone is not driven yet"
     ),
-    "offline_platform_revoked_observed": _unautomated(
-        "offline_platform_revoked_observed", "the phone's revoked projection is not read yet"
+    "offline_platform_revoked_observed": _phone_shows(
+        "offline_platform_revoked_observed", "已失去访问"
     ),
     "offline_unmount_observed": _unautomated(
         "offline_unmount_observed", "Kernel's unmount is not observed yet"
     ),
-    "erase_pending_observed": _unautomated(
-        "erase_pending_observed", "the phone's erase-pending condition is not read yet"
-    ),
+    # The fact the dead-device fix turns on: removal is complete while the
+    # local erase is still unconfirmed, and the phone says both.
+    "erase_pending_observed": _phone_shows("erase_pending_observed", "尚未确认擦除"),
     "device_reconnected": _device_says("device_reconnected", r"lifecycle HUB -> REGISTER"),
     "offline_erase_ack_observed": _unautomated(
         "offline_erase_ack_observed", "the device has no real secure-erase adapter yet"

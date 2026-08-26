@@ -69,9 +69,13 @@ def test_the_harness_states_its_own_coverage_and_covers_the_whole_sequence() -> 
 
 
 def test_a_step_with_no_observer_fails_rather_than_passing_or_skipping(tmp_path: Path) -> None:
-    document = run(_surfaces(tmp_path), _release(), _DEVICE, steps=["proposal_observed"])
+    # A step that still has no observer today. If this one gains one, pick
+    # another from coverage()["unobserved"] rather than deleting the test:
+    # what it pins is that "nobody taught the harness this yet" fails.
+    without = coverage()["unobserved"][0]
+    document = run(_surfaces(tmp_path), _release(), _DEVICE, steps=[without])
 
-    step = next(item for item in document["steps"] if item["id"] == "proposal_observed")
+    step = next(item for item in document["steps"] if item["id"] == without)
     assert step["status"] == "failed"
     evidence = json.loads(Path(step["evidence_path"]).read_text(encoding="utf-8"))
     # And it says which observer is missing, not just that something failed.
