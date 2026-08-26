@@ -71,11 +71,14 @@ def reset_plan(
     contract.fixed_data(payload)
     wipe_authority_data = reset_wipes_authority_data(payload)
     root = root.resolve()
-    detected = [
+    detected = sorted(
         str(path)
-        for path in reset_paths(wipe_authority_data=wipe_authority_data)
+        for path in (
+            *reset_paths(wipe_authority_data=wipe_authority_data),
+            contract.RECLAMATION_STATE,
+        )
         if (primitives.host_path(root, path).exists() or primitives.host_path(root, path).is_symlink())
-    ]
+    )
     contents = (
         authority_contents(root) if wipe_authority_data else ()
     )
@@ -198,6 +201,17 @@ def reset_host(
         for value in reset_paths(wipe_authority_data=wipe_authority_data):
             if remove_reset_path(primitives.host_path(root, value), display=value):
                 removed.append(str(value))
+        # The candidate marker names a release directory under a root this
+        # reset just removed, so after it there is nothing left for it to
+        # refer to — but it lives in /run/lock, outside every root, and a
+        # driver process that died leaves one behind. It then refuses the very
+        # next install by name, on a Host that no longer holds a byte of what
+        # it names, until somebody abandons a release that is already gone.
+        if remove_reset_path(
+            primitives.host_path(root, contract.RECLAMATION_STATE),
+            display=contract.RECLAMATION_STATE,
+        ):
+            removed.append(str(contract.RECLAMATION_STATE))
         staging = primitives.host_path(root, contract.VAR_TMP)
         if staging.is_dir() and not staging.is_symlink():
             for path in sorted(staging.iterdir()):

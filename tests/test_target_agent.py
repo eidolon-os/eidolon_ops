@@ -465,6 +465,34 @@ def test_reset_can_explicitly_wipe_all_authority_data_for_clean_install(tmp_path
         assert not (tmp_path / value.relative_to("/")).exists()
 
 
+def test_reset_clears_the_candidate_marker_it_would_otherwise_strand(
+    tmp_path: Path,
+) -> None:
+    """A driver process that died leaves this marker outside every reset root.
+
+    It names a release directory under a root the reset removes, so afterwards
+    there is nothing left for it to refer to — but it refuses the very next
+    install by that name, on a Host that no longer holds a byte of it.
+    """
+
+    _materialize_reset_fixture(tmp_path)
+    marker = tmp_path / contract.RECLAMATION_STATE.relative_to("/")
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(
+        json.dumps({"schema_version": 1, "candidate_release_id": "r-dead"}),
+        encoding="utf-8",
+    )
+
+    plan = host_reset.reset_plan(_reset_payload(wipe_authority_data=True), root=tmp_path)
+    result = host_reset.reset_host(
+        _reset_payload(wipe_authority_data=True), root=tmp_path, manage_services=False
+    )
+
+    assert str(contract.RECLAMATION_STATE) in plan["detected"]
+    assert str(contract.RECLAMATION_STATE) in result["removed"]
+    assert not marker.exists()
+
+
 def test_reset_stops_the_manager_before_the_workers_it_would_restore(tmp_path: Path) -> None:
     """systemd orders a transaction by dependencies, not by argument order.
 
