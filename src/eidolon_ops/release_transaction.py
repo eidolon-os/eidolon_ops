@@ -40,6 +40,12 @@ _RESET_MUTATIONS = (
     "stop and remove the existing Eidolon deployment",
     "permanently wipe Eidolon and Bootstrap authority data",
 )
+#: Named separately because it is the one mutation an operator cannot undo by
+#: reinstalling: the Owner Domain's anti-rollback fence moves, and every Claim,
+#: credential and Authority backup issued under the old generation is void.
+_AUTHORITY_REBUILD_MUTATIONS = (
+    "advance owner_domain_generation and void every existing device Claim",
+)
 
 
 #: The transport must never be the first thing to give up on a deploy. A Host
@@ -63,6 +69,8 @@ class ReleaseTransaction:
         provision: Callable[..., dict[str, object]],
         reset: Callable[..., dict[str, object]],
         app_ready: Callable[[], dict[str, object]],
+        authority_capability: Callable[..., dict[str, object] | None],
+        commit_authority_capability: Callable[..., dict[str, object] | None],
         progress: ProgressSink | None = None,
     ) -> None:
         self.config = config
@@ -73,6 +81,8 @@ class ReleaseTransaction:
         self._provision = provision
         self._reset = reset
         self._app_ready = app_ready
+        self._authority_capability = authority_capability
+        self._commit_authority_capability = commit_authority_capability
         self.progress = progress
 
     def _require_declared_credentials(self) -> dict[str, object]:
@@ -592,22 +602,36 @@ class ReleaseTransaction:
                 "clean reinstall requires both --reset-existing and --wipe-authority-data"
             )
         if not apply:
+            local = self.preflight.run(require_install_files=False)
+            foundation = self._provision(apply=False)
+            reset = self._reset(wipe_authority_data=True, apply=False) if reset_existing else None
+            authority = self._authority_capability(will_wipe=reset_existing, apply=False)
             return {
                 "status": "planned",
                 "release_id": release_id,
-                "local": self.preflight.run(require_install_files=False),
-                "foundation": self._provision(apply=False),
-                "reset": (
-                    self._reset(wipe_authority_data=True, apply=False) if reset_existing else None
-                ),
+                "local": local,
+                "foundation": foundation,
+                "reset": reset,
+                "authority": authority,
                 "mutations": [
                     *(_RESET_MUTATIONS if reset_existing else ()),
+                    *(
+                        _AUTHORITY_REBUILD_MUTATIONS
+                        if authority is not None
+                        and authority.get("decision") == "advance_generation"
+                        else ()
+                    ),
                     *_INSTALL_MUTATIONS,
                 ],
                 "next": "rerun with --apply after reviewing every planned mutation",
             }
         local = self.preflight.run(require_install_files=True)
         local["link"] = self._link_report()
+        # Decided before the Host is touched, and before a single asset is
+        # rendered from the Owner material: the descriptor, the bootstrap
+        # capability and local-api.env all name whichever generation this
+        # returns.
+        authority = self._authority_capability(will_wipe=reset_existing, apply=True)
         phases = Journal(self.progress)
         if reset_existing:
             phases.begin("reset_existing")
@@ -639,19 +663,16 @@ class ReleaseTransaction:
             "sources": self.preflight.sources.provenance(),
         }
         primary_error: Exception | None = None
+        installed: dict[str, object] | None = None
         try:
             phases.begin("install")
-            phases.append(
-                {
-                    "phase": "install",
-                    "result": self.transport.run_agent(
-                        "install",
-                        payload,
-                        python=f"/opt/eidolon/releases/{release_id}/{RELEASE_INTERPRETER}",
-                        timeout=1200,
-                    ),
-                }
+            installed = self.transport.run_agent(
+                "install",
+                payload,
+                python=f"/opt/eidolon/releases/{release_id}/{RELEASE_INTERPRETER}",
+                timeout=1200,
             )
+            phases.append({"phase": "install", "result": installed})
         except Exception as exc:
             primary_error = exc
         try:
@@ -676,6 +697,9 @@ class ReleaseTransaction:
             if candidate_prepared:
                 self._abort_candidate(release_id, phases, primary_error)
             raise primary_error
+        # Only now, and only against the Host's own account of what Hub
+        # established, is the one-shot capability recorded as spent.
+        authority_consumed = self._commit_authority_capability(authority, installed)
         phases.begin("release_reclaim_commit")
         committed = self.bundles.reclaim(release_id, phase="commit")
         self.bundles.require_reclamation(committed, "committed")
@@ -692,6 +716,8 @@ class ReleaseTransaction:
             "release_id": release_id,
             "foundation": foundation,
             "local": local,
+            "authority": authority,
+            "authority_bootstrap": authority_consumed,
             "phases": phases,
         }
 

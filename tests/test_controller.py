@@ -342,6 +342,14 @@ class FakeTransport:
                 "removed": ["/opt/eidolon"],
             },
             "install": {"status": "installed"},
+            # An unowned Host: no Hub database, so no Authority lineage. Tests
+            # that need a Host which has already established one override it.
+            "authority-lineage": {
+                "status": "observed",
+                "marker": None,
+                "anchor": None,
+                "established": None,
+            },
             "ensure-service-identities": {
                 "status": "service_identities_ready",
                 "uids": {
@@ -2367,3 +2375,304 @@ def test_resuming_a_bundle_after_a_commit_names_both_ways_out(config) -> None:
         moved.deploy(release_id="r1", resume=True, activate=False)
     assert "--revision eidolon_hub=" + SOURCE_HEADS["eidolon_hub"] in str(f.value)
     assert "--release-id" in str(f.value)
+
+
+# -- the Owner Authority capability an install carries -------------------------
+#
+# The bootstrap capability is one-shot: Hub takes it only into an empty
+# database and deletes it on use. What an install ships is therefore a
+# decision, and for a long time nobody made one — the install copied whatever
+# the Owner material last said. On any Host whose Hub had ever started, that
+# said `owner-authority.bootstrap-consumed`, so `--reset-existing
+# --wipe-authority-data` emptied the database and then handed it a capability
+# Hub is right to refuse. No supported sequence could reinstall such a Host.
+
+
+def _authority_controller(config, transport=None) -> EidolonPiController:
+    identity = config.install_files["host_identity"]
+    identity.write_bytes(b"a" * 32)
+    identity.chmod(0o600)
+    config.install_files["local_api_env"].write_text(
+        "EIDOLON_LOCAL_API_ADMIN_BASE_URL=http://127.0.0.1:9000\n", encoding="utf-8"
+    )
+    config.install_files["channel_env"].write_text(
+        "EIDOLON_LIVEKIT_CLIENT_URL=ws://127.0.0.1:7880\n", encoding="utf-8"
+    )
+    controller = EidolonPiController(
+        config,
+        ControllerRunner(config),
+        transport=transport if transport is not None else FakeTransport(),
+        app=_app(),
+    )
+    _stub_input_contract(controller)
+    return controller
+
+
+def _material_state(controller: EidolonPiController) -> dict[str, object]:
+    path = controller.host_layer.materializer().material_root / "owner-domain-state.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _lineage_of(controller: EidolonPiController) -> dict[str, object]:
+    owner = controller.host_layer.materializer().owner_assets()
+    return {
+        "contract_version": 1,
+        "owner_domain_id": owner.owner_domain_id,
+        "owner_domain_generation": owner.owner_domain_generation,
+        "state_id": owner.authority_state_id,
+    }
+
+
+def _host_has_established(controller: EidolonPiController, transport: FakeTransport) -> None:
+    """Say the Host's Hub started on the capability the controller now holds."""
+
+    lineage = _lineage_of(controller)
+    transport.overrides["authority-lineage"] = {
+        "status": "observed",
+        "marker": lineage,
+        "anchor": lineage,
+        "established": lineage,
+    }
+
+
+def _consume(controller: EidolonPiController) -> dict[str, object]:
+    """Bring the Owner material to the state a started Hub leaves behind."""
+
+    lineage = _lineage_of(controller)
+    controller_module.mark_authority_bootstrapped(
+        controller.host_layer.materializer().material_root,
+        owner_domain_id=str(lineage["owner_domain_id"]),
+        owner_domain_generation=int(lineage["owner_domain_generation"]),
+        authority_state_id=str(lineage["state_id"]),
+    )
+    return lineage
+
+
+def test_wiping_a_started_host_rebuilds_the_authority_at_a_new_generation(config) -> None:
+    transport = FakeTransport()
+    controller = _authority_controller(config, transport)
+    spent = _consume(controller)
+    _host_has_established(controller, transport)
+
+    capability = controller.authority_capability(will_wipe=True, apply=True)
+
+    assert capability is not None
+    assert capability["decision"] == "advance_generation"
+    assert capability["generation_advanced"] is True
+    assert capability["previous_generation"] == spent["owner_domain_generation"]
+    assert capability["owner_domain_generation"] == spent["owner_domain_generation"] + 1
+    # The whole point: what this install now carries is a capability an empty
+    # Hub will accept, at a generation that fences every Claim the destroyed
+    # database issued.
+    owner = controller.host_layer.materializer().owner_assets()
+    assert json.loads(owner.authority_bootstrap) == {
+        "contract_version": 1,
+        "operation": "owner-authority.bootstrap",
+        "owner_domain_id": spent["owner_domain_id"],
+        "owner_domain_generation": spent["owner_domain_generation"] + 1,
+        "state_id": capability["lineage"]["state_id"],
+    }
+    assert capability["lineage"]["state_id"] != spent["state_id"]
+
+
+def test_retrying_a_failed_wipe_does_not_mint_a_second_generation(config) -> None:
+    transport = FakeTransport()
+    controller = _authority_controller(config, transport)
+    _consume(controller)
+    _host_has_established(controller, transport)
+    first = controller.authority_capability(will_wipe=True, apply=True)
+    assert first is not None
+    # The wipe ran; the install then failed. The Host holds no lineage at all.
+    transport.overrides.pop("authority-lineage")
+
+    second = controller.authority_capability(will_wipe=True, apply=True)
+
+    assert second is not None
+    assert second["decision"] == "carry_pending_capability"
+    assert second["generation_advanced"] is False
+    assert second["lineage"] == first["lineage"]
+
+
+def test_an_ordinary_install_keeps_the_generation_the_host_established(config) -> None:
+    transport = FakeTransport()
+    controller = _authority_controller(config, transport)
+    spent = _consume(controller)
+    _host_has_established(controller, transport)
+
+    capability = controller.authority_capability(will_wipe=False, apply=True)
+
+    assert capability is not None
+    assert capability["decision"] == "keep_established_lineage"
+    assert capability["generation_advanced"] is False
+    assert capability["lineage"] == spent
+    assert _material_state(controller)["owner_domain_generation"] == (
+        spent["owner_domain_generation"]
+    )
+
+
+def test_a_host_whose_hub_names_another_authority_is_refused_not_overwritten(
+    config,
+) -> None:
+    transport = FakeTransport()
+    controller = _authority_controller(config, transport)
+    spent = _consume(controller)
+    stranger = {**spent, "state_id": "authority-state_someone-else"}
+    transport.overrides["authority-lineage"] = {
+        "status": "observed",
+        "marker": stranger,
+        "anchor": stranger,
+        "established": stranger,
+    }
+
+    with pytest.raises(OperationsError, match="AuthorityRecoveryRequired"):
+        controller.authority_capability(will_wipe=False, apply=True)
+
+
+def test_a_capability_the_host_proved_it_used_is_not_read_as_unconsumed(config) -> None:
+    """The window between Hub consuming the capability and this side recording it.
+
+    Reading a capability the Host has demonstrably spent as "still pending"
+    would hand a wiped Host the very state id its destroyed database carried —
+    a new, empty Authority behind the same anti-rollback fence.
+    """
+
+    transport = FakeTransport()
+    controller = _authority_controller(config, transport)
+    established = _lineage_of(controller)
+    assert _material_state(controller)["bootstrap_pending"] is True
+    _host_has_established(controller, transport)
+
+    capability = controller.authority_capability(will_wipe=True, apply=True)
+
+    assert capability is not None
+    assert capability["decision"] == "advance_generation"
+    assert capability["previous_generation"] == established["owner_domain_generation"]
+    assert capability["lineage"]["state_id"] != established["state_id"]
+
+
+def test_an_install_plan_names_the_generation_it_would_advance_without_advancing(
+    config,
+) -> None:
+    transport = FakeTransport()
+    controller = _authority_controller(config, transport)
+    spent = _consume(controller)
+
+    plan = controller.install(
+        release_id="r1",
+        resume=False,
+        apply=False,
+        reset_existing=True,
+        wipe_authority_data=True,
+    )
+
+    authority = plan["authority"]
+    assert authority["decision"] == "advance_generation"
+    assert authority["generation_advanced"] is False
+    assert authority["owner_domain_generation"] == spent["owner_domain_generation"] + 1
+    assert (
+        "advance owner_domain_generation and void every existing device Claim"
+        in plan["mutations"]
+    )
+    state = _material_state(controller)
+    assert state["owner_domain_generation"] == spent["owner_domain_generation"]
+    assert state["authority_state_id"] == spent["state_id"]
+    assert state["bootstrap_pending"] is False
+
+
+def test_an_install_records_the_capability_as_spent_against_the_hosts_own_proof(
+    config,
+) -> None:
+    """Nothing used to do this, so `bootstrap_pending` stayed true forever."""
+
+    transport = FakeTransport()
+    controller = _authority_controller(config, transport)
+    shipped = _lineage_of(controller)
+    transport.overrides["install"] = {"status": "installed", "authority": shipped}
+
+    result = controller.install(release_id="r1", resume=False, apply=True)
+
+    assert result["authority"]["decision"] == "carry_pending_capability"
+    assert result["authority_bootstrap"] == {
+        "status": "authority_bootstrap_consumed",
+        "authority": shipped,
+    }
+    assert _material_state(controller)["bootstrap_pending"] is False
+
+
+def test_an_install_refuses_to_spend_a_capability_the_host_did_not_use(config) -> None:
+    transport = FakeTransport()
+    controller = _authority_controller(config, transport)
+    shipped = _lineage_of(controller)
+    transport.overrides["install"] = {
+        "status": "installed",
+        "authority": {**shipped, "owner_domain_generation": 99},
+    }
+
+    with pytest.raises(OperationsError, match="did not establish the Owner Authority"):
+        controller.install(release_id="r1", resume=False, apply=True)
+
+    assert _material_state(controller)["bootstrap_pending"] is True
+
+
+def test_a_wiped_host_is_reinstalled_end_to_end_with_a_fresh_capability(config) -> None:
+    """The sequence that had no supported path at all.
+
+    A Host whose Hub has started, wiped and reinstalled in one operation: the
+    generation advances once, the Host is handed a capability an empty Hub
+    accepts, and only the Host's own proof retires it.
+    """
+
+    class LineageTransport(FakeTransport):
+        def __init__(self, lineage) -> None:
+            super().__init__()
+            self.lineage = lineage
+            self.staged: dict[str, bytes] = {}
+
+        def run_agent(self, action, payload, **keywords):
+            if action == "install":
+                self.agent_calls.append((action, dict(payload), "", True))
+                # Hub started on whatever capability the install shipped.
+                return {"status": "installed", "authority": self.lineage()}
+            return super().run_agent(action, payload, **keywords)
+
+        def upload(self, source, destination, *, recursive=False):
+            super().upload(source, destination, recursive=recursive)
+            if not recursive:
+                self.staged[destination] = Path(source).read_bytes()
+
+    held: list[EidolonPiController] = []
+    transport = LineageTransport(lambda: _lineage_of(held[0]))
+    controller = _authority_controller(config, transport)
+    held.append(controller)
+    spent = _consume(controller)
+    _host_has_established(controller, transport)
+
+    result = controller.install(
+        release_id="r1",
+        resume=False,
+        apply=True,
+        reset_existing=True,
+        wipe_authority_data=True,
+    )
+
+    assert result["status"] == "installed"
+    assert result["authority"]["decision"] == "advance_generation"
+    assert result["authority"]["generation_advanced"] is True
+    staged = json.loads(
+        transport.staged["/var/tmp/eidolon-secrets-r1/authority-bootstrap.json"]
+    )
+    assert staged["operation"] == "owner-authority.bootstrap"
+    assert staged["owner_domain_generation"] == spent["owner_domain_generation"] + 1
+    assert result["authority_bootstrap"] == {
+        "status": "authority_bootstrap_consumed",
+        "authority": {
+            key: value for key, value in staged.items() if key != "operation"
+        },
+    }
+    assert _material_state(controller) == {
+        "contract_version": 1,
+        "owner_domain_id": spent["owner_domain_id"],
+        "owner_domain_generation": spent["owner_domain_generation"] + 1,
+        "authority_state_id": staged["state_id"],
+        "bootstrap_pending": False,
+    }

@@ -37,6 +37,7 @@ from eidolon_ops.install_inputs import (
 from eidolon_ops.owner_domain_assets import (
     OWNER_DOMAIN_MATERIAL_NAMES,
     OwnerDomainAssetError,
+    OwnerDomainAssets,
     ensure_owner_domain_assets,
     mark_authority_bootstrapped,
 )
@@ -72,6 +73,29 @@ _CONVERGENCE_STAGE_ID = "credential-convergence"
 #: database has declared these; listing them as unclaimed would bury the one
 #: entry that genuinely belongs to nobody under seven that obviously do not.
 _SQLITE_SIDECARS = ("-shm", "-wal", ".lock", "-journal")
+
+
+def _lineage(assets: OwnerDomainAssets) -> dict[str, object]:
+    """The Authority marker a Hub writes when it accepts this capability."""
+
+    return {
+        "contract_version": 1,
+        "owner_domain_id": assets.owner_domain_id,
+        "owner_domain_generation": assets.owner_domain_generation,
+        "state_id": assets.authority_state_id,
+    }
+
+
+def _authority_recovery_required(
+    marker: object, lineage: dict[str, object]
+) -> str:
+    return (
+        "AuthorityRecoveryRequired: this Host's Hub database identifies "
+        f"{marker}, and this controller's Owner material identifies {lineage}. "
+        "An install must not ship past that. Restore the matching Authority "
+        "backup, or rebuild deliberately with authority-reset --apply or "
+        "install --reset-existing --wipe-authority-data --apply."
+    )
 
 
 def _same_state(entry: str, declared: str) -> bool:
@@ -161,6 +185,8 @@ class EidolonPiController:
             provision=self._nested_provision,
             reset=self.reset,
             app_ready=self.app_ready,
+            authority_capability=self.authority_capability,
+            commit_authority_capability=self.commit_authority_capability,
             progress=progress,
         )
 
@@ -658,6 +684,181 @@ class EidolonPiController:
                 if not state.is_covered
             ),
         }
+
+    # -- Owner Authority capability an install carries -------------------------
+
+    def _observed_authority_lineage(self) -> dict[str, object]:
+        """What the Host holds today, asked before anything is shipped to it."""
+
+        observed = self.transport.run_agent(
+            "authority-lineage", self.host_layer.target_payload(), timeout=120
+        )
+        if observed.get("status") != "observed" or set(observed) != {
+            "status",
+            "marker",
+            "anchor",
+            "established",
+        }:
+            raise OperationsError("Owner Authority lineage observation is invalid")
+        return observed
+
+    def authority_capability(
+        self, *, will_wipe: bool, apply: bool
+    ) -> dict[str, object] | None:
+        """Decide which Owner Authority capability an install must carry.
+
+        The bootstrap capability in an install is one-shot: Hub accepts it only
+        into an empty database, and deletes it on use.  The controller records
+        that use in its own Owner material, so what an install ships is a
+        *decision*, not a copy of a file — and until now nobody made it.  An
+        install shipped whatever the material root last said, which after any
+        successful Hub start is ``owner-authority.bootstrap-consumed``.  A Host
+        whose Hub had ever come up could therefore never be wiped and
+        reinstalled: the reset emptied the database and the install handed it a
+        capability Hub is right to refuse.
+
+        The decision is made from evidence, never from the flags alone:
+
+        * the capability is unconsumed — reuse it.  A pending generation is a
+          durable retry journal (see ``authority_reset``); retrying a failed
+          wipe must not mint a second generation.
+        * the capability is consumed and the Host holds no Hub database — the
+          Authority state is gone and cannot be restored, so this is a
+          ``ResetAuthority`` in fact and **must** advance
+          ``owner_domain_generation``.  《设备生命周期状态机与恢复边》§3.6.1
+          allows exactly two recovery modes and no guessed middle one: minting
+          a second, empty Authority state at an unchanged generation would put
+          a new authority behind the same anti-rollback fence every prior
+          Claim, credential and database backup was issued under.
+        * the capability is consumed and the Host holds the matching database —
+          nothing happened.  Ship it unchanged; Hub ignores a spent capability
+          once its database is populated.
+        * anything else — the Host and this controller do not describe the same
+          Authority, which is the one case an install must not paper over.
+
+        ``will_wipe`` is not a fourth rule.  It only says the database this
+        observation found is about to be removed, so the decision is made
+        against the Host as it will be, not as it is.
+        """
+
+        if self.app is None:
+            return None
+        materializer = self.host_layer.materializer()
+        try:
+            current = materializer.owner_assets()
+        except OwnerDomainAssetError as exc:
+            raise OperationsError(str(exc)) from exc
+        observed = self._observed_authority_lineage()
+        lineage = _lineage(current)
+        # A capability the Host can prove it used, but whose use this
+        # controller never got to record, is consumed. Reading it as pending
+        # would hand a wiped Host the state id its destroyed database carried.
+        if current.bootstrap_pending and observed["established"] == lineage:
+            try:
+                mark_authority_bootstrapped(
+                    materializer.material_root,
+                    owner_domain_id=current.owner_domain_id,
+                    owner_domain_generation=current.owner_domain_generation,
+                    authority_state_id=current.authority_state_id,
+                )
+                current = materializer.owner_assets()
+            except OwnerDomainAssetError as exc:
+                raise OperationsError(str(exc)) from exc
+            lineage = _lineage(current)
+        marker = None if will_wipe else observed["marker"]
+        if current.bootstrap_pending:
+            if marker is not None and marker != lineage:
+                raise OperationsError(_authority_recovery_required(marker, lineage))
+            return {
+                "decision": "carry_pending_capability",
+                "owner_domain_id": current.owner_domain_id,
+                "owner_domain_generation": current.owner_domain_generation,
+                "generation_advanced": False,
+                "observed": observed,
+                "lineage": lineage,
+            }
+        if marker is not None:
+            if marker != lineage:
+                raise OperationsError(_authority_recovery_required(marker, lineage))
+            return {
+                "decision": "keep_established_lineage",
+                "owner_domain_id": current.owner_domain_id,
+                "owner_domain_generation": current.owner_domain_generation,
+                "generation_advanced": False,
+                "observed": observed,
+                "lineage": lineage,
+            }
+        if not apply:
+            return {
+                "decision": "advance_generation",
+                "owner_domain_id": current.owner_domain_id,
+                "owner_domain_generation": current.owner_domain_generation + 1,
+                "previous_generation": current.owner_domain_generation,
+                "generation_advanced": False,
+                "observed": observed,
+                "lineage": None,
+                "next": (
+                    "this install rebuilds an Authority whose state is gone; "
+                    "every existing device Claim and credential becomes void"
+                ),
+            }
+        try:
+            # Same CAS primitive as authority-reset: the new lineage evidence is
+            # persisted before any descriptor or capability naming it is
+            # rendered, let alone shipped.
+            advance_owner_authority(
+                materializer.material_root,
+                expected_owner_domain_id=current.owner_domain_id,
+                expected_generation=current.owner_domain_generation,
+            )
+            advanced = materializer.owner_assets()
+        except OwnerDomainAssetError as exc:
+            raise OperationsError(str(exc)) from exc
+        if not advanced.bootstrap_pending:
+            raise OperationsError(
+                "Owner Authority rebuild has no pending bootstrap capability"
+            )
+        return {
+            "decision": "advance_generation",
+            "owner_domain_id": advanced.owner_domain_id,
+            "owner_domain_generation": advanced.owner_domain_generation,
+            "previous_generation": current.owner_domain_generation,
+            "generation_advanced": True,
+            "observed": observed,
+            "lineage": _lineage(advanced),
+        }
+
+    def commit_authority_capability(
+        self, capability: dict[str, object] | None, installed: object
+    ) -> dict[str, object] | None:
+        """Record the one-shot capability as spent, against the Host's proof.
+
+        Nothing else does this.  A first install left the controller saying
+        ``bootstrap_pending`` forever, which is why ``authority-backup``
+        refused every Host that had only ever been installed, and why the
+        decision above could not have been made from the material root alone.
+        """
+
+        if capability is None:
+            return None
+        expected = capability["lineage"]
+        reported = installed.get("authority") if isinstance(installed, dict) else None
+        if reported != expected:
+            raise OperationsError(
+                "the installed Host did not establish the Owner Authority lineage this "
+                f"install carried: expected {expected}, Host reported {reported}"
+            )
+        materializer = self.host_layer.materializer()
+        try:
+            mark_authority_bootstrapped(
+                materializer.material_root,
+                owner_domain_id=str(expected["owner_domain_id"]),
+                owner_domain_generation=int(expected["owner_domain_generation"]),
+                authority_state_id=str(expected["state_id"]),
+            )
+        except OwnerDomainAssetError as exc:
+            raise OperationsError(str(exc)) from exc
+        return {"status": "authority_bootstrap_consumed", "authority": expected}
 
     def controller_reset(self, *, apply: bool) -> dict[str, object]:
         """Return a claimed Host to unclaimed so a new phone can manage it.

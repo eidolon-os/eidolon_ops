@@ -2688,3 +2688,87 @@ def test_delivering_the_host_layer_registers_the_hub_name(monkeypatch, tmp_path:
     assert hosts.read_text(encoding="utf-8") == (
         "192.168.3.206 eidolon-hub-0123456789abcdefabcd.local\n"
     )
+
+
+def _establish_lineage(root: Path, *, anchor: bool = True) -> dict[str, object]:
+    lineage = {
+        "contract_version": 1,
+        "owner_domain_id": "owner-0123456789abcdefabcd",
+        "owner_domain_generation": 4,
+        "state_id": "authority-state_0123456789abcdef",
+    }
+    database = root / authority_reset.HUB_DATABASE.relative_to("/")
+    database.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(database)
+    connection.execute(
+        "CREATE TABLE hub_authority_state ("
+        "singleton_id INTEGER PRIMARY KEY, owner_domain_id TEXT, "
+        "owner_domain_generation INTEGER, state_id TEXT)"
+    )
+    connection.execute(
+        "INSERT INTO hub_authority_state VALUES (1, ?, ?, ?)",
+        (
+            lineage["owner_domain_id"],
+            lineage["owner_domain_generation"],
+            lineage["state_id"],
+        ),
+    )
+    connection.commit()
+    connection.close()
+    if anchor:
+        (root / authority_reset.AUTHORITY_ANCHOR.relative_to("/")).write_text(
+            json.dumps(lineage), encoding="utf-8"
+        )
+    return lineage
+
+
+def test_authority_lineage_reports_an_unowned_host_as_holding_nothing(
+    tmp_path: Path,
+) -> None:
+    observed = authority_reset.authority_lineage(
+        {"units": list(contract.PRODUCT_UNITS)}, root=tmp_path
+    )
+
+    assert observed == {
+        "status": "observed",
+        "marker": None,
+        "anchor": None,
+        "established": None,
+    }
+
+
+def test_authority_lineage_reports_what_a_started_hub_established(tmp_path: Path) -> None:
+    lineage = _establish_lineage(tmp_path)
+
+    observed = authority_reset.authority_lineage(
+        {"units": list(contract.PRODUCT_UNITS)}, root=tmp_path
+    )
+
+    assert observed == {
+        "status": "observed",
+        "marker": lineage,
+        "anchor": lineage,
+        "established": lineage,
+    }
+
+
+def test_a_database_without_its_anchor_is_reported_but_not_called_established(
+    tmp_path: Path,
+) -> None:
+    """The controller must not mistake a recovery case for an empty Host.
+
+    A Hub database whose external lineage anchor is gone is recoverable in
+    place. A caller that only looked at ``established`` would read it as "this
+    Host holds nothing" and mint a generation over a database still sitting
+    there.
+    """
+
+    lineage = _establish_lineage(tmp_path, anchor=False)
+
+    observed = authority_reset.authority_lineage(
+        {"units": list(contract.PRODUCT_UNITS)}, root=tmp_path
+    )
+
+    assert observed["marker"] == lineage
+    assert observed["anchor"] is None
+    assert observed["established"] is None

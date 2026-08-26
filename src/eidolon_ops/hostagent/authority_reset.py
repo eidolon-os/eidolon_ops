@@ -135,6 +135,43 @@ def _validate_new_inputs(root: Path, expected: Mapping[str, object]) -> None:
         raise TargetError("Owner Authority bootstrap capability does not match reset")
 
 
+def established_lineage(*, root: Path = Path("/")) -> dict[str, object]:
+    """Report the Owner Authority lineage this Host actually holds.
+
+    Read-only, and deliberately separate from the reset request shape: the
+    controller has to know what a Host holds *before* it decides which
+    capability to ship, and on the path that matters most the answer is
+    "nothing at all" — an empty namespace has no request to validate against.
+
+    ``established`` is the lineage the Host can prove twice over. ``marker``
+    is reported on its own because a database whose external anchor is missing
+    is a recovery case, not an empty Host, and a caller that only looked at
+    ``established`` would mistake one for the other and mint a generation over
+    a database that is still there.
+    """
+
+    root = root.resolve()
+    marker = _marker(primitives.host_path(root, HUB_DATABASE))
+    anchor = _read_json(
+        primitives.host_path(root, AUTHORITY_ANCHOR),
+        label="Owner Authority lineage anchor",
+    )
+    return {
+        "marker": marker,
+        "anchor": anchor,
+        "established": marker if marker is not None and marker == anchor else None,
+    }
+
+
+def authority_lineage(
+    payload: Mapping[str, object], *, root: Path = Path("/")
+) -> dict[str, object]:
+    """The read-only op behind ``established_lineage``."""
+
+    contract.fixed_units(payload)
+    return {"status": "observed", **established_lineage(root=root)}
+
+
 def authority_reset_plan(
     payload: Mapping[str, object], *, root: Path = Path("/")
 ) -> dict[str, object]:

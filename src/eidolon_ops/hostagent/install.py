@@ -14,7 +14,7 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
-from . import contract, host_application, primitives, probe
+from . import authority_reset, contract, host_application, primitives, probe
 from .primitives import TargetError
 
 
@@ -77,6 +77,7 @@ class TargetInstaller:
                     "status": "already_installed",
                     "release_id": self.release_id,
                     "app": self._require_app_ready(),
+                    "authority": self._established_lineage(),
                     **result,
                 }
             phase = str(journal["phase"])
@@ -117,6 +118,11 @@ class TargetInstaller:
                     "release_id": self.release_id,
                     "phase": phase,
                     "app": app_result,
+                    # What Hub actually established, read back rather than
+                    # assumed. The controller holds a one-shot Authority
+                    # bootstrap capability and may only record it as consumed
+                    # against proof from the Host that used it.
+                    "authority": self._established_lineage(),
                     **result,
                 }
             except Exception as exc:
@@ -137,6 +143,9 @@ class TargetInstaller:
                 )
                 primitives.atomic_json(self.journal_path, journal)
                 raise
+
+    def _established_lineage(self) -> dict[str, object] | None:
+        return authority_reset.established_lineage(root=self.root)["established"]
 
     def _require_app_ready(self) -> dict[str, object] | None:
         if self.app_check is None:
