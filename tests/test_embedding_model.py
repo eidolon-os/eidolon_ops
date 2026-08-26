@@ -180,3 +180,63 @@ def test_a_host_learns_a_path_that_did_not_exist_when_it_was_installed(
 
     assert host_env.read_text(encoding="utf-8") == contract.HOST_ENV_VALUE
     assert "EIDOLON_MEMORY_EMBEDDING_MODEL_DIR" in host_env.read_text(encoding="utf-8")
+
+
+def test_carrying_a_model_in_reports_the_digest_of_what_is_now_held(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The success path, which nothing exercised until a Host was wiped.
+
+    The only test this function had went through the refusal branch — a
+    destination outside the model root — and returned before anything was
+    written. So the line after the move was never run, and it read the digest
+    record through a path into the staging directory that the move had just
+    taken away. A first install on a Host with no encoder yet therefore failed
+    with FileNotFoundError, having already put the weights correctly in place.
+
+    ``os.chown`` is stubbed because the agent runs as root on the Host and this
+    test does not; the ownership call is not what is under test, and leaving it
+    real would only mean this path stays untested for another reason.
+    """
+
+    monkeypatch.setattr(contract, "HOST_EMBEDDING_MODEL_ROOT", tmp_path / "models")
+    monkeypatch.setattr(staging.os, "chown", lambda *args, **kwargs: None)
+
+    staged = tmp_path / "eidolon-encoder-abc"
+    (staged / "onnx").mkdir(parents=True)
+    (staged / "onnx" / "model.onnx").write_bytes(b"weights")
+    (staged / contract.EMBEDDING_DIGEST_RECORD).write_text("d1\n", encoding="utf-8")
+    destination = tmp_path / "models" / "bge-base-zh"
+
+    result = staging.install_embedding_model(
+        {"staging": str(staged), "destination": str(destination)}
+    )
+
+    assert result == {
+        "status": "installed",
+        "destination": str(destination),
+        "digest": "d1",
+    }
+    # Moved, not copied: a staging directory left behind is what the next
+    # install would find half-written.
+    assert not staged.exists()
+    assert (destination / "onnx" / "model.onnx").read_bytes() == b"weights"
+    # And the Host now answers the same digest when asked what it holds.
+    assert staging.embedding_model_state({"destination": str(destination)}) == {
+        "status": "held",
+        "destination": str(destination),
+        "digest": "d1",
+    }
+
+
+def test_both_sides_spell_the_digest_record_the_same_way() -> None:
+    """The agent ships to the Host alone, so it cannot import the name.
+
+    Two copies of one string, and the failure when they drift is not loud: the
+    operator writes a record the Host then refuses to find, and every carried
+    model is rejected as having no digest.
+    """
+
+    from eidolon_ops.embedding_model import EMBEDDING_DIGEST_RECORD
+
+    assert contract.EMBEDDING_DIGEST_RECORD == EMBEDDING_DIGEST_RECORD

@@ -378,6 +378,14 @@ HOST_PORTS_PATH = Path("/etc/eidolon/generated/ports.yaml")
 #: another, so the weights have to outlive the release that carried them.
 HOST_EMBEDDING_MODEL_ROOT = Path("/var/lib/eidolon/models")
 
+#: What a carried encoder directory calls the record of its own contents.
+#:
+#: Spelled here as well as on the operator side (`embedding_model.py`) because
+#: this package is shipped to the Host alone and may not import upward. A test
+#: asserts the two spellings are the same string, which is the only thing that
+#: keeps a rename from making the Host quietly refuse every carried model.
+EMBEDDING_DIGEST_RECORD = ".files-sha256"
+
 HOST_ENV_VALUE = (
     "EIDOLON_INSTALL_ROOT=/opt/eidolon\n"
     "EIDOLON_WORKSPACE_ROOT=/opt/eidolon/current\n"

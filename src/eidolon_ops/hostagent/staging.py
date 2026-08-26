@@ -155,7 +155,7 @@ def embedding_model_state(payload: Mapping[str, object]) -> dict[str, object]:
     destination = payload.get("destination")
     if not isinstance(destination, str):
         raise TargetError("embedding model destination is required")
-    record = Path(destination) / ".files-sha256"
+    record = Path(destination) / contract.EMBEDDING_DIGEST_RECORD
     if not record.is_file():
         return {"status": "absent", "destination": destination}
     return {
@@ -185,7 +185,7 @@ def install_embedding_model(payload: Mapping[str, object]) -> dict[str, object]:
         raise TargetError(f"embedding model destination is outside the model root: {target}")
     if not source.is_dir() or source.is_symlink():
         raise TargetError("carried embedding model is missing")
-    record = source / ".files-sha256"
+    record = source / contract.EMBEDDING_DIGEST_RECORD
     if not record.is_file():
         raise TargetError("carried embedding model has no digest record")
 
@@ -196,8 +196,14 @@ def install_embedding_model(payload: Mapping[str, object]) -> dict[str, object]:
     for path in (target, *target.rglob("*")):
         os.chown(path, 0, 0)
         os.chmod(path, 0o755 if path.is_dir() else 0o644)
+    # Read from where the record now is, not from where it was. `record` points
+    # into the staging directory, and the move above took that directory away —
+    # reading it afterwards raised FileNotFoundError and failed an install whose
+    # weights were already correctly in place. Reading the installed copy also
+    # says the truer thing: this digest is what the Host now holds.
+    installed_record = target / contract.EMBEDDING_DIGEST_RECORD
     return {
         "status": "installed",
         "destination": str(target),
-        "digest": record.read_text(encoding="utf-8").strip(),
+        "digest": installed_record.read_text(encoding="utf-8").strip(),
     }
