@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
+from eidolon_sdk.device_foundation.v1.testing import named_device_instance_id
 
 from eidolon_ops import device_baseline
 from eidolon_ops.device_baseline import (
@@ -23,7 +24,8 @@ from eidolon_ops.device_management_gate import (
 pytestmark = pytest.mark.component
 
 _IDENTITY = "a" * 64
-_DEVICE = "device-instance-" + "b" * 48
+# 48 hex characters was never a device instance id; the digest is 64.
+_DEVICE = named_device_instance_id("baseline-device")
 
 
 def _surfaces(tmp_path: Path) -> Surfaces:

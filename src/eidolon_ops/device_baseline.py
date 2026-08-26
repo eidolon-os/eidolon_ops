@@ -321,8 +321,13 @@ def _unautomated(step_id: str, what_is_missing: str) -> Observer:
 
 OBSERVERS: dict[str, Observer] = {
     "release_identity_proven": _host_is_ready("release_identity_proven"),
+    # What the firmware actually says. The first guess at this pattern named
+    # things the current CommissioningRuntime does not log, so the step would
+    # have failed on a device that was commissioning correctly — a harness that
+    # is wrong about the words is a harness that reports the wrong fact.
     "commissioning_started": _device_says(
-        "commissioning_started", r"WifiConfiguring|DeviceProvisioningService|provisioning started"
+        "commissioning_started",
+        r"CommissioningRuntime: Confirmed state=advertising|Provisioning session open as",
     ),
     # Read off the admission screen. The needles are the app's own sentences,
     # copied from its source rather than invented here — an assertion about
