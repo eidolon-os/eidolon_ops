@@ -362,6 +362,39 @@ def test_first_install_refuses_unowned_existing_namespace(install_fixture, confl
         installer.install()
 
 
+def test_first_install_does_not_refuse_the_encoder_it_just_carried_in(
+    install_fixture,
+) -> None:
+    """The one thing under /var/lib/eidolon that a first install put there.
+
+    The encoder is carried in a step *before* this guard runs, into a path the
+    contract declares, so a Host never has to reach the model hub itself.
+    Counting it as a stranger's leftover deadlocked exactly the case the guard
+    exists for — a genuinely fresh Host — which is why nobody hit it until one
+    was wiped: on every other run the weights were already held and the carry
+    step wrote nothing.
+
+    Kept next to the refusal cases above rather than replacing any of them: the
+    guard must still refuse a real stranger sitting in the same directory, and
+    the assertion below says so in the same breath.
+    """
+
+    installer, _host, _command, _stage, _release, _data = install_fixture
+    models = installer.root / contract.HOST_EMBEDDING_MODEL_ROOT.relative_to("/")
+    (models / "bge-base-zh").mkdir(parents=True)
+    (models / "bge-base-zh" / contract.EMBEDDING_DIGEST_RECORD).write_text(
+        "d1", encoding="utf-8"
+    )
+
+    installer._assert_clean_namespace()
+
+    stranger = installer.root / "var/lib/eidolon/objects/legacy-object"
+    stranger.parent.mkdir(parents=True, exist_ok=True)
+    stranger.write_text("existing", encoding="utf-8")
+    with pytest.raises(TargetError, match="unowned namespace"):
+        installer._assert_clean_namespace()
+
+
 def _reset_payload(*, wipe_authority_data: bool = False) -> dict[str, object]:
     return {
         "units": list(contract.PRODUCT_UNITS),

@@ -202,6 +202,20 @@ class TargetInstaller:
         return document
 
     def _assert_clean_namespace(self) -> None:
+        """Refuse to install over somebody else's Eidolon — and only that.
+
+        What makes a namespace "unowned" is that this install did not put it
+        there. The encoder is the exception, and it is not a loophole: the same
+        operation carries it in a step *before* this one, into a path the
+        contract declares, precisely so a Host never has to reach the model hub
+        itself. Counting it as a stranger's leftover deadlocked the one case
+        this guard exists to protect — a genuinely fresh Host — because the
+        install could not proceed past weights it had just placed correctly.
+        """
+
+        carried = {
+            primitives.host_path(self.root, contract.HOST_EMBEDDING_MODEL_ROOT)
+        }
         conflicts: list[str] = []
         for component in self.release.components:
             link = primitives.host_path(self.root, component.current_link)
@@ -223,7 +237,9 @@ class TargetInstaller:
             Path("/etc/eidolon"),
         ):
             path = primitives.host_path(self.root, namespace)
-            if path.is_dir() and any(path.iterdir()):
+            if path.is_dir() and any(
+                entry for entry in path.iterdir() if entry not in carried
+            ):
                 conflicts.append(f"{namespace}/*")
         if conflicts:
             raise TargetError(
