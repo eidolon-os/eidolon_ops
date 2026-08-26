@@ -145,3 +145,21 @@ def test_the_default_location_is_beside_the_profile_and_overridable(
 
     monkeypatch.setenv("EIDOLON_OPS_RUN_LEDGER", str(tmp_path / "elsewhere.jsonl"))
     assert RunLedger.for_profile(profile).path == tmp_path / "elsewhere.jsonl"
+
+
+def test_a_host_composition_is_not_mistaken_for_a_filename() -> None:
+    """`macos-dev/supervisord/none` is an identity worth grouping by.
+
+    The key exists to be read by a person ranking gates, and a substitution that
+    swallowed anything containing a slash turned a capability refusal into
+    `deploy is not available on this host (macos-dev<path>)` — losing the one
+    detail that says which kind of Host refused.
+    """
+
+    assert fingerprint("deploy is not available on this Host (macos-dev/supervisord/none)") == (
+        "deploy is not available on this host (macos-dev/supervisord/none)"
+    )
+    # An absolute path is still per-run noise and still goes.
+    assert fingerprint("inputs are missing: /Users/someone/eidolon/state/hub/x.json") == (
+        "inputs are missing: <path>"
+    )

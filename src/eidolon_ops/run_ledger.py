@@ -47,8 +47,11 @@ _LEDGER_ENV = "EIDOLON_OPS_RUN_LEDGER"
 _FINGERPRINT_LENGTH = 96
 
 _SUBSTITUTIONS = (
-    # Order matters: paths before the digits inside them.
-    (re.compile(r"/[^\s,;:'\"()]{2,}"), "<path>"),
+    # Order matters: paths before the digits inside them. Anchored at a real
+    # absolute path, so `macos-dev/supervisord/none` -- a Host's composition,
+    # which is exactly the kind of thing worth grouping by -- survives instead
+    # of being read as a filename.
+    (re.compile(r"(?<![\w.-])/[^\s,;:'\"()]{2,}"), "<path>"),
     (re.compile(r"\b[0-9a-f]{40}\b"), "<commit>"),
     (re.compile(r"\b[0-9a-f]{7,}\b"), "<hex>"),
     (re.compile(r"\d+"), "<n>"),
