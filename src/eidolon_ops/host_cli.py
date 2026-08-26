@@ -17,6 +17,7 @@ from eidolon_ops.model import Outcome
 from eidolon_ops.paths import HostProfileError, load_host_profile
 from eidolon_ops.process import ProcessError, SubprocessRunner
 from eidolon_ops.readiness import ReadinessError
+from eidolon_ops.run_ledger import RunLedger
 from eidolon_ops.status_output import render_status, render_status_error
 from eidolon_ops.transport import TransportError
 
@@ -126,12 +127,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = _parser()
     arguments = parser.parse_args(argv)
     human_status = arguments.operation == "status" and arguments.human
+    # Counts what stops a run. Every gate here is individually justified and
+    # nothing counts them, so which ones fire often has only ever been argued
+    # from whichever two failures the arguer remembered. It is the progress sink
+    # as well, because phase timings already arrive through that seam.
+    ledger = RunLedger.for_profile(Path(arguments.config))
     try:
         controller = HostController(
             load_host_profile(arguments.config),
             SubprocessRunner(),
             revision_overrides=tuple(arguments.revision),
             allow_dirty=arguments.allow_dirty,
+            progress=ledger,
         )
         result = _dispatch(controller, arguments)
     except (
@@ -152,6 +159,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 {"status": "failed", "outcome": str(Outcome.FAILED), "error": str(exc)},
                 stream=sys.stderr,
             )
+        ledger.record(
+            operation=arguments.operation, outcome=str(Outcome.FAILED), error=str(exc)
+        )
         return 1
     if human_status:
         print(render_status(result.to_json()))
@@ -161,6 +171,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     # of success words lived here and defaulted every new status string to a
     # failure — ``commissioning-code`` and ``backup`` both succeeded on the
     # Host and exited non-zero because nobody thought to extend it.
+    ledger.record(
+        operation=arguments.operation,
+        outcome=str(result.outcome),
+        report=result.report,
+    )
     return 0 if result.outcome.successful else 1
 
 

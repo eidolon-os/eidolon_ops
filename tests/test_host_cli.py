@@ -14,10 +14,17 @@ from eidolon_ops.paths import HostProfileError
 class FakeHostController:
     instance: FakeHostController
 
-    def __init__(self, profile, runner, *, revision_overrides=(), allow_dirty=False) -> None:
+    def __init__(
+        self, profile, runner, *, revision_overrides=(), allow_dirty=False, progress=None
+    ) -> None:
         self.calls: list[tuple[str, dict[str, object]]] = []
         self.revision_overrides = revision_overrides
         self.allow_dirty = allow_dirty
+        # The CLI hands every run a progress sink now: it is the run ledger,
+        # which times the phases it is told about and records what stopped the
+        # run. A double that refused it would only be asserting that the CLI
+        # does not pass one.
+        self.progress = progress
         FakeHostController.instance = self
 
     def _result(self, name: str, **values):

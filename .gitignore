@@ -12,6 +12,11 @@ __pycache__/
 diagnostics/
 config/eidolon-pi.toml
 config/hosts/*.toml
+# One operator's record of their own runs, beside the profile it belongs to.
+# Ignored for the same reason the profiles are, plus one this repository learned
+# the hard way: an untracked file is a dirty worktree, and a dirty worktree is
+# something `require_clean` refuses to seal a release from.
+config/hosts/runs/
 !config/hosts/*.example.toml
 
 # The console's interface is a build artifact; `cd web && npm run build` makes it.
