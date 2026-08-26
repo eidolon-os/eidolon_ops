@@ -9,13 +9,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from eidolon_ops import lan_observation
-from eidolon_ops import plans
+from eidolon_ops import lan_observation, plans
 from eidolon_ops.errors import OperationsError
 from eidolon_ops.host import HostAdapter, build_adapter
 from eidolon_ops.model import Capability, Evidence, Outcome, Plan, steps_from_phases
 from eidolon_ops.paths import HostProfile
-from eidolon_ops.process import ProcessRunner
+from eidolon_ops.process import ProcessError, ProcessRunner
 from eidolon_ops.progress import ProgressSink
 from eidolon_ops.source_assets import status_ports
 
