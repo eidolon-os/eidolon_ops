@@ -17,7 +17,7 @@ import uuid
 from collections.abc import Mapping
 from pathlib import Path
 
-from . import contract, primitives
+from . import authority_reset, contract, primitives
 from .primitives import TargetError
 
 _SCHEMA_VERSION = 1
@@ -50,32 +50,33 @@ def _snapshot_path(payload: Mapping[str, object], root: Path) -> Path:
     return path if root == Path("/") else evidence / path.name
 
 
-def _authority(path: Path) -> dict[str, object]:
-    if path.is_symlink() or not path.is_file():
-        raise TargetError("Authority lineage marker is missing from Host configuration")
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise TargetError("Authority lineage marker is invalid") from exc
-    required = {
-        "contract_version",
-        "operation",
-        "owner_domain_id",
-        "owner_domain_generation",
-        "state_id",
-    }
-    if (
-        not isinstance(value, dict)
-        or set(value) != required
-        or value.get("contract_version") != 1
-        or value.get("operation")
-        not in {"owner-authority.bootstrap", "owner-authority.bootstrap-consumed"}
-        or not isinstance(value.get("owner_domain_id"), str)
-        or type(value.get("owner_domain_generation")) is not int
-        or not isinstance(value.get("state_id"), str)
-    ):
-        raise TargetError("Authority lineage marker is invalid")
-    return value
+def _authority(root: Path) -> dict[str, object]:
+    """The Owner Authority lineage this Host holds, read from durable evidence.
+
+    Deliberately not ``authority-bootstrap.json``.  That file is a one-shot
+    capability: Hub accepts it only into an empty database and deletes it on
+    use, so on any Host whose Hub has ever started it is simply gone.  Reading
+    it here meant a Host could be installed exactly once and then never
+    deployed to again — the only way to ship newer code was a wipe that
+    destroyed the Owner, the Companions and the Claims.
+
+    《设备生命周期状态机与恢复边》§3.6.1 names the Host's own evidence for a
+    lineage as the Hub database marker together with the external lineage
+    anchor, and that is what ``controller.authority_capability`` already
+    decides against.  A spent capability was never evidence of anything, and a
+    cutover could not have used it as such in any case: the capability file is
+    a refreshable Host layer input, so this transaction re-ships that very
+    file between the ``before`` and ``after`` readings.
+    """
+
+    observed = authority_reset.established_lineage(root=root)
+    established = observed["established"]
+    if not isinstance(established, dict):
+        raise TargetError(
+            "Host holds no established Owner Authority lineage; a release cutover "
+            "requires a Hub database marker and lineage anchor that agree"
+        )
+    return established
 
 
 def _current_targets(root: Path) -> dict[str, str]:
@@ -129,9 +130,6 @@ def snapshot(payload: Mapping[str, object], *, root: Path = Path("/")) -> dict[s
     destination.mkdir(mode=0o700)
     files = destination / "host-files"
     files.mkdir(mode=0o700)
-    authority_path = primitives.host_path(
-        root, contract.INSTALL_INPUTS["authority-bootstrap.json"][0]
-    )
     previous_targets = _current_targets(root)
     if set(previous_targets) != set(contract.CURRENT_LINKS):
         raise TargetError("release cutover requires a complete previous component graph")
@@ -142,7 +140,7 @@ def snapshot(payload: Mapping[str, object], *, root: Path = Path("/")) -> dict[s
         "host_transaction_id": transaction_id,
         "status": "snapshotted",
         "previous_targets": previous_targets,
-        "authority_before": _authority(authority_path),
+        "authority_before": _authority(root),
         "host_files_before": _host_files(root, files, copy=True),
         "schema_migration": {"state": "not_started"},
         # Which commit of each repository this release was built from. Recorded
@@ -202,10 +200,7 @@ def restore(payload: Mapping[str, object], *, root: Path = Path("/")) -> dict[st
                 "forward-only Host configuration crossed or cannot prove the "
                 "persistent-state barrier"
             )
-    authority_path = primitives.host_path(
-        root, contract.INSTALL_INPUTS["authority-bootstrap.json"][0]
-    )
-    if _authority(authority_path) != document.get("authority_before"):
+    if _authority(root) != document.get("authority_before"):
         raise TargetError("Authority lineage changed during release cutover")
     records = document.get("host_files_before")
     if not isinstance(records, dict) or set(records) != set(contract.REFRESHABLE_HOST_LAYER_INPUTS):
@@ -289,10 +284,7 @@ def finalize(payload: Mapping[str, object], *, root: Path = Path("/")) -> dict[s
         or (status == "forward_fix_required" and mode != "forward-only")
     ):
         raise TargetError("component activation receipt does not match Host cutover")
-    authority_path = primitives.host_path(
-        root, contract.INSTALL_INPUTS["authority-bootstrap.json"][0]
-    )
-    authority_after = _authority(authority_path)
+    authority_after = _authority(root)
     if authority_after != document.get("authority_before"):
         raise TargetError("Authority lineage changed during release cutover")
     active_targets = _current_targets(root)
