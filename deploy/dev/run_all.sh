@@ -1027,20 +1027,32 @@ do_product_source_commissioning_code() {
   configure_supervisor_profile product-source
   ensure_product_source_deps
   local ttl=600
-  if [[ "${1:-}" == "--ttl" ]]; then
-    ttl="${2:-}"
-  elif [[ $# -ne 0 ]]; then
-    error "usage: $0 product-source commissioning-code [--ttl SECONDS]"
-    return 2
-  fi
+  local code=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --ttl)  ttl="${2:-}"; shift 2 ;;
+      # Passed straight to bootstrapctl: the Host owns the rule about what a
+      # usable code is, and a second opinion here could only disagree with it.
+      --code) code="${2:-}"; shift 2 ;;
+      *)
+        error "usage: $0 product-source commissioning-code [--ttl SECONDS] [--code DIGITS]"
+        return 2
+        ;;
+    esac
+  done
   if [[ ! "$ttl" =~ ^[0-9]+$ || "$ttl" -lt 60 || "$ttl" -gt 86400 ]]; then
     error "commissioning code TTL must be between 60 and 86400 seconds"
     return 2
   fi
+  local -a code_argument=()
+  if [[ -n "$code" ]]; then
+    code_argument=(--code "$code")
+  fi
   "${OPS_ROOT}/deploy/supervisor/wrappers/with-env.sh" \
     "$EIDOLON_SOURCE_ADMIN" \
     "${EIDOLON_PRODUCT_ENV_ROOT}/bootstrap.env" \
-    -- "$EIDOLON_SOURCE_ADMIN/.venv/bin/eidolon-bootstrapctl" commissioning-code --ttl "$ttl"
+    -- "$EIDOLON_SOURCE_ADMIN/.venv/bin/eidolon-bootstrapctl" commissioning-code \
+       --ttl "$ttl" "${code_argument[@]}"
 }
 
 do_product_source_sv() {

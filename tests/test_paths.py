@@ -117,6 +117,90 @@ def test_mac_profile_rejects_unsafe_source_override(
         load_host_profile(_write_mac_profile(tmp_path, script=script, overrides=body))
 
 
+def test_a_profile_may_pin_the_setup_code_it_already_knows(tmp_path: Path) -> None:
+    """Pinning the value is the whole of what it does.
+
+    Nothing else about commissioning changes: the Host still opens one ordinary
+    session for it. What goes away is looking a code up — the command becomes
+    one an operator fires without reading its output.
+    """
+
+    script = tmp_path / "run.sh"
+    script.write_text("#!/bin/sh\n", encoding="utf-8")
+    path = _write_mac_profile(
+        tmp_path, script=script, overrides='setup_code = "99999990"'
+    )
+
+    profile = load_host_profile(path)
+
+    assert profile.app is not None
+    assert profile.app.setup_code == "99999990"
+
+
+def test_a_profile_without_a_pinned_code_lets_the_host_draw_one(
+    tmp_path: Path,
+) -> None:
+    script = tmp_path / "run.sh"
+    script.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    profile = load_host_profile(_write_mac_profile(tmp_path, script=script))
+
+    assert profile.app is not None
+    assert profile.app.setup_code is None
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        '"1234567"',  # too short
+        '"999999900"',  # too long
+        '"9999999a"',  # not digits
+        '"11111111"',  # every digit the same
+        '"01234567"',  # the plain run up
+        '"76543210"',  # and down
+        "99999990",  # a TOML integer, which would also lose the leading zeros
+    ],
+)
+def test_a_pinned_code_is_refused_here_rather_than_three_hops_away(
+    tmp_path: Path,
+    code: str,
+) -> None:
+    """Caught while reading the file, not on the machine.
+
+    The Host re-checks it and stays the authority; this only moves the error to
+    where the value was written.
+    """
+
+    script = tmp_path / "run.sh"
+    script.write_text("#!/bin/sh\n", encoding="utf-8")
+    path = _write_mac_profile(
+        tmp_path, script=script, overrides=f"setup_code = {code}"
+    )
+
+    with pytest.raises(HostProfileError, match="setup_code"):
+        load_host_profile(path)
+
+
+def test_the_pi_example_documents_the_pinned_code_without_pinning_one() -> None:
+    """Read from the tracked example, never from an operator's own profile.
+
+    ``config/hosts/*.toml`` is gitignored — those are local operator files, so a
+    test that read one would pass here and fail on every other checkout. The
+    example is what the repository actually promises, and what it promises is
+    the shape: documented, and commented out, because a code in a tracked file
+    is a code everybody has.
+    """
+
+    profile = load_host_profile(REPOSITORY_ROOT / "config/hosts/pi5.example.toml")
+
+    assert profile.app is not None
+    assert profile.app.setup_code is None
+    text = (REPOSITORY_ROOT / "config/hosts/pi5.example.toml").read_text(
+        encoding="utf-8"
+    )
+    assert "# setup_code = " in text
+
+
 def test_mac_example_uses_the_ops_owned_source_lifecycle() -> None:
     profile = load_host_profile(REPOSITORY_ROOT / "config/hosts/mac.example.toml")
 

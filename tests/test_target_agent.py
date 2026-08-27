@@ -1737,6 +1737,55 @@ def test_a_setup_code_is_issued_through_the_hosts_own_control_socket(monkeypatch
     assert result["expires_at"] == "2026-08-12T01:00:00Z"
 
 
+def test_a_named_setup_code_reaches_the_host_unexamined(monkeypatch, tmp_path) -> None:
+    """This hop forwards the value and does not judge it.
+
+    The Host owns the rule about what a usable code is, so a second opinion
+    here could only ever disagree with it — and the disagreement would surface
+    three hops from where the value was written.
+    """
+
+    monkeypatch.setattr(host_lifecycle, "BOOTSTRAP_CTL", tmp_path / "eidolon-bootstrapctl")
+    host_lifecycle.BOOTSTRAP_CTL.write_text("#!/bin/sh\n", encoding="utf-8")
+    host_lifecycle.BOOTSTRAP_CTL.chmod(0o755)
+    calls: list[tuple[str, ...]] = []
+
+    def run(command, **_kwargs):
+        calls.append(tuple(command))
+        return SimpleNamespace(
+            returncode=0,
+            stdout=(
+                "Setup code: 99999990\n"
+                "Host: ehost-0123456789abcdefabcd\n"
+                "Commissioning: 123e4567-e89b-42d3-a456-426614174000\n"
+                "Expires: 2026-08-12T01:00:00Z\n"
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(primitives, "run", run)
+
+    result = host_lifecycle.commissioning_code(
+        {
+            "units": list(contract.PRODUCT_UNITS),
+            "ttl_seconds": 600,
+            "setup_code": "99999990",
+        }
+    )
+
+    assert calls[0][1:] == ("commissioning-code", "--ttl", "600", "--code", "99999990")
+    assert result["setup_code"] == "99999990"
+
+    with pytest.raises(TargetError, match="setup_code must be a string"):
+        host_lifecycle.commissioning_code(
+            {
+                "units": list(contract.PRODUCT_UNITS),
+                "ttl_seconds": 600,
+                "setup_code": 99999990,
+            }
+        )
+
+
 def test_a_setup_code_request_without_a_sane_lifetime_is_refused(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(host_lifecycle, "BOOTSTRAP_CTL", tmp_path / "eidolon-bootstrapctl")
     for ttl in (0, 59, 86401, "600", True, None):

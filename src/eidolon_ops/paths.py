@@ -143,6 +143,17 @@ class AppAccess:
     allow_insecure_livekit: bool
     development_commissioning_registry: Path | None = None
 
+    #: The Setup code ``commissioning-code`` names instead of letting the Host
+    #: draw one. A development loop pins it so the operator never has to look a
+    #: code up: the command becomes one you fire without reading its output,
+    #: and the digits you type on the phone are the same every time.
+    #:
+    #: The Host stays the authority — it re-checks the value and refuses one it
+    #: would not have drawn itself. Nothing about the mechanism changes: the
+    #: code still opens one ordinary session that expires, is spent once, dies
+    #: after five wrong tries, and supersedes any window before it.
+    setup_code: str | None = None
+
 
 @dataclass(frozen=True, slots=True)
 class HostProfile:
@@ -337,16 +348,32 @@ def _member(enumeration: type[Any], value: object, label: str) -> Any:
         raise HostProfileError(f"{label} must be one of {allowed}") from exc
 
 
+#: Kept beside the rule that uses it. The Host owns the real definition
+#: (``eidolon_admin_server.bootstrap.domain``); ops cannot import across the
+#: repo boundary, so it restates the rule rather than guessing at it.
+SETUP_CODE_DIGITS = 8
+
+
+def _is_usable_setup_code(value: str) -> bool:
+    if len(value) != SETUP_CODE_DIGITS or not value.isdigit() or not value.isascii():
+        return False
+    if len(set(value)) == 1:
+        return False
+    ascending = "".join(str(digit % 10) for digit in range(SETUP_CODE_DIGITS))
+    return value not in {ascending, ascending[::-1]}
+
+
 def _app_access(value: object | None, *, platform: HostPlatform) -> AppAccess | None:
     if value is None:
         return None
     document = _table(value, "app")
     required = {"hub_https_port", "livekit_client_url", "allow_insecure_livekit"}
-    optional = {"lan_ipv4", "development_commissioning_registry"}
+    optional = {"lan_ipv4", "development_commissioning_registry", "setup_code"}
     if not required <= set(document) or not set(document) <= (required | optional):
         raise HostProfileError(
             f"app must contain exactly {', '.join(sorted(required))}, with only "
-            "lan_ipv4 and development_commissioning_registry optional"
+            + ", ".join(sorted(optional))
+            + " optional"
         )
     address: IPv4Address | None = None
     if "lan_ipv4" in document:
@@ -399,12 +426,25 @@ def _app_access(value: object | None, *, platform: HostPlatform) -> AppAccess | 
             raise HostProfileError(
                 "app.development_commissioning_registry must be a safe absolute local path"
             )
+    setup_code: str | None = None
+    if "setup_code" in document:
+        setup_code = _text(document["setup_code"], "app.setup_code")
+        # Mirrored from the Host's own rule so a bad value is caught while
+        # reading this file rather than three hops away on the machine. The
+        # Host re-checks it and stays the authority.
+        if not _is_usable_setup_code(setup_code):
+            raise HostProfileError(
+                "app.setup_code must be a code the Host would have drawn: "
+                f"{SETUP_CODE_DIGITS} digits, not all the same, and not the "
+                "plain run up or down"
+            )
     return AppAccess(
         lan_ipv4=address,
         hub_https_port=port,
         livekit_client_url=livekit_url.rstrip("/"),
         allow_insecure_livekit=allow_insecure,
         development_commissioning_registry=development_registry,
+        setup_code=setup_code,
     )
 
 

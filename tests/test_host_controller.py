@@ -182,6 +182,17 @@ def test_local_controller_issues_bounded_commissioning_code(tmp_path: Path) -> N
     with pytest.raises(OperationsError, match="TTL"):
         controller.commissioning_code(ttl_seconds=30)
 
+    # A named code travels as the same flag on this Host as on a remote one.
+    controller.commissioning_code(ttl_seconds=300, setup_code="99999990")
+    assert controller.runner.calls[-1][0][-6:] == (
+        "product-source",
+        "commissioning-code",
+        "--ttl",
+        "300",
+        "--code",
+        "99999990",
+    )
+
 
 def test_local_controller_rejects_missing_script_and_unavailable_capability(
     tmp_path: Path,

@@ -69,7 +69,9 @@ class Supervisor(Protocol):
 
     def logs(self, *, service: str | None, lines: int, since: str | None) -> dict[str, object]: ...
 
-    def commissioning_code(self, *, ttl_seconds: int) -> dict[str, object]: ...
+    def commissioning_code(
+        self, *, ttl_seconds: int, setup_code: str | None = None
+    ) -> dict[str, object]: ...
 
 
 @runtime_checkable

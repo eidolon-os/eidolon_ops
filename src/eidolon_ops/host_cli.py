@@ -62,7 +62,7 @@ OPERATIONS: dict[str, Callable[[HostController, argparse.Namespace], object]] = 
         source=a.source, apply=a.apply
     ),
     "commissioning-code": lambda controller, a: controller.commissioning_code(
-        ttl_seconds=a.ttl_seconds
+        ttl_seconds=a.ttl_seconds, setup_code=a.code
     ),
     "install": lambda controller, a: controller.install(
         release_id=a.release_id,
@@ -255,6 +255,14 @@ def _parser() -> argparse.ArgumentParser:
     restore.add_argument("--apply", action="store_true")
     commissioning_code = operations.add_parser("commissioning-code")
     commissioning_code.add_argument("--ttl-seconds", type=int, default=600)
+    commissioning_code.add_argument(
+        "--code",
+        default=None,
+        help=(
+            "name the code for this one run; without it the profile's "
+            "app.setup_code is used, and without that the Host draws one"
+        ),
+    )
     install = operations.add_parser("install")
     install.add_argument("--release-id", required=True)
     install.add_argument("--resume", action="store_true")

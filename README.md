@@ -202,9 +202,19 @@ Owner 变更的权限边界；它的 state/runtime 目录均不与产品主进�
 退出非零。`doctor` 会列出该 Host 的 capability 集合（由 platform + transport/supervisor/packages 三个
 port 的组合推导），所以“这台 Host 能做什么”是问出来的，不是从源码里读出来的。
 
+`commissioning-code` 可以**指名**要签的码，而不是让 Host 自己抽：命令行 `--code`，或者在 profile 里
+写 `app.setup_code`（`pi5.toml` 现在钉的是 `99999990`）。钉住的只有取值——Host 照样开一个普通
+session：会过期、只能用一次、错五次吊销、并把之前的窗口作废。它买到的是**不用再查码**：命令变成一条
+不必读输出的命令，手机上敲的永远是同一串数字。Host 仍然是权威，会拒绝一个它自己不会抽出来的码
+（八位数字、不能全同、不能是顺子或倒顺子），profile 解析时也先按同一条规则挡一遍，好让错误出现在写
+下这个值的地方而不是三跳之外。
+
+这条路径上**没有任何 mode 判断**，这是有意的：出厂 Host 将来要把印在盒子上的码写进自己，那正是同一个
+动作。参见 `eidolon_admin` 的 ADR-0006。
+
 ```text
 ./eidolon HOST status|doctor
-./eidolon HOST commissioning-code [--ttl-seconds 600]
+./eidolon HOST commissioning-code [--ttl-seconds 600] [--code DIGITS]
 ./eidolon HOST start|stop|restart [--dry-run]
 ./eidolon HOST logs [--service SERVICE] [--lines N] [--since TEXT]
 

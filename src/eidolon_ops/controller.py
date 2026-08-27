@@ -517,20 +517,41 @@ class EidolonPiController:
             timeout=300,
         )
 
-    def commissioning_code(self, *, ttl_seconds: int) -> dict[str, object]:
+    def commissioning_code(
+        self,
+        *,
+        ttl_seconds: int,
+        setup_code: str | None = None,
+    ) -> dict[str, object]:
         """Mint the one-time Setup code a phone types to claim this Host.
 
         SSH to the Host is what authorises this, the same way it authorises
         controller-reset: both reach a root-owned local socket, and issuing a
         code is the lesser of the two acts.
+
+        A profile may pin the value (``app.setup_code``) so the operator never
+        has to look one up. Only the value is pinned: the Host still opens one
+        ordinary session for it, which expires, is spent once, and supersedes
+        any window before it.
         """
 
         self.preflight.validate_ssh_material()
+        named = setup_code if setup_code is not None else self._configured_setup_code()
+        payload: dict[str, object] = {
+            **self.host_layer.target_payload(),
+            "ttl_seconds": ttl_seconds,
+        }
+        if named is not None:
+            payload["setup_code"] = named
         return self.transport.run_agent(
             "commissioning-code",
-            {**self.host_layer.target_payload(), "ttl_seconds": ttl_seconds},
+            payload,
             timeout=180,
         )
+
+    def _configured_setup_code(self) -> str | None:
+        app = self.app
+        return None if app is None else app.setup_code
 
     def reset(self, *, wipe_authority_data: bool, apply: bool) -> dict[str, object]:
         """Plan or remove only the fixed Eidolon Host deployment namespace."""

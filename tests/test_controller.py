@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import base64
 import hashlib
 import json
@@ -2006,6 +2008,27 @@ def test_a_restore_names_what_it_will_replace_before_it_replaces_it(
     assert applied["status"] == "restored"
     assert (source, "/var/tmp/eidolon-backup-r1", True) in transport.uploads
     assert any("eidolon-backup-r1" in " ".join(call[0]) for call in transport.remote_calls)
+
+
+def test_which_setup_code_gets_named(setup_controller) -> None:
+    """Explicit beats the profile, the profile beats nothing, nothing means
+    the Host draws one.
+
+    Pinning the value is the whole of what a profile code does — the Host still
+    opens one ordinary session for it — so what matters here is only which of
+    the three values travels.
+    """
+
+    controller, _runner, _transport = setup_controller
+
+    controller.app = None
+    assert controller._configured_setup_code() is None  # noqa: SLF001
+
+    controller.app = replace(_app(), setup_code=None)
+    assert controller._configured_setup_code() is None  # noqa: SLF001
+
+    controller.app = replace(_app(), setup_code="99999990")
+    assert controller._configured_setup_code() == "99999990"  # noqa: SLF001
 
 
 def test_a_setup_code_and_a_boundary_action_reach_the_host(setup_controller) -> None:

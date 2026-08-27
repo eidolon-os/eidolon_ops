@@ -63,8 +63,12 @@ class SystemdSupervisor:
     def logs(self, *, service: str | None, lines: int, since: str | None) -> dict[str, object]:
         return self.release.logs(unit=unit_name(service), lines=lines, since=since)
 
-    def commissioning_code(self, *, ttl_seconds: int) -> dict[str, object]:
-        return self.release.commissioning_code(ttl_seconds=ttl_seconds)
+    def commissioning_code(
+        self, *, ttl_seconds: int, setup_code: str | None = None
+    ) -> dict[str, object]:
+        return self.release.commissioning_code(
+            ttl_seconds=ttl_seconds, setup_code=setup_code
+        )
 
     def reset(self, *, wipe_authority_data: bool, apply: bool) -> dict[str, object]:
         # Unchanged behaviour, reached the way this Host's other operations are:
