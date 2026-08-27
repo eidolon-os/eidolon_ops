@@ -77,6 +77,31 @@ _CONVERGENCE_STAGE_ID = "credential-convergence"
 #: entry that genuinely belongs to nobody under seven that obviously do not.
 _SQLITE_SIDECARS = ("-shm", "-wal", ".lock", "-journal")
 
+#: How many commits or edited paths a source names before the list is elided.
+#: Enough to recognize the work, bounded so one busy repository cannot bury the
+#: other seven.
+_PENDING_SUBJECTS = 5
+
+
+def _pending_detail(
+    active: str,
+    total: int,
+    behind: Mapping[str, object],
+    uncommitted: Mapping[str, object],
+) -> str:
+    """One sentence, naming both ways work fails to be on a Host."""
+
+    parts = []
+    if behind:
+        parts.append(f"{total} commit(s) in {len(behind)} source(s) are not on this Host")
+    if uncommitted:
+        parts.append(
+            f"{len(uncommitted)} source(s) hold uncommitted work, which no release can carry"
+        )
+    if not parts:
+        return f"the Host runs {active} and every source matches it"
+    return "; ".join(parts)
+
 
 def _authority_recovery_required(
     marker: object, lineage: dict[str, object]
@@ -285,12 +310,17 @@ class EidolonPiController:
                 ),
             }
         behind: dict[str, object] = {}
+        uncommitted: dict[str, object] = {}
         for source_id, source in sorted(self.config.sources.items()):
+            path = Path(source.path)
             recorded = shipped.get(source_id)
             revision = recorded.get("revision") if isinstance(recorded, Mapping) else None
-            entry = self._distance_from_head(Path(source.path), revision)
+            entry = self._distance_from_head(path, revision)
             if entry is not None:
                 behind[source_id] = entry
+            edits = self._uncommitted(path)
+            if edits is not None:
+                uncommitted[source_id] = edits
         total = sum(
             value["commits"]
             for value in behind.values()
@@ -300,11 +330,13 @@ class EidolonPiController:
             "active_release": active,
             "pending": behind,
             "pending_commits": total,
-            "detail": (
-                f"the Host runs {active} and every source matches it"
-                if not behind
-                else f"{total} commit(s) in {len(behind)} source(s) are not on this Host"
-            ),
+            # A separate fact, deliberately not folded into the count above.
+            # Committed work is on its way to the Host and merely has not been
+            # sent; uncommitted work cannot be sent at all, because a release is
+            # sealed with `git archive` from a commit. Adding them together
+            # would give one number that means neither thing.
+            "uncommitted": uncommitted,
+            "detail": _pending_detail(active, total, behind, uncommitted),
         }
 
     @staticmethod
@@ -364,11 +396,56 @@ class EidolonPiController:
             else None
         )
         entry: dict[str, object] = {"shipped": revision, "head": current, "commits": commits}
+        if commits:
+            entry["subjects"] = self._subjects(path, revision, current)
         if commits is None:
             # The Host is running something this checkout does not contain: a
             # release built elsewhere, or history that was rewritten here.
             entry["reason"] = "the shipped commit is not in this checkout"
         return entry
+
+    def _subjects(self, path: Path, revision: str, head: str) -> list[str]:
+        """The commits themselves, because a count does not say which one is missing."""
+
+        listed = self.runner.run(
+            (
+                self.git,
+                "-C",
+                str(path),
+                "log",
+                "--no-decorate",
+                "--format=%h %s",
+                f"-{_PENDING_SUBJECTS + 1}",
+                f"{revision}..{head}",
+            )
+        )
+        if listed.returncode != 0:
+            return []
+        lines = [line for line in listed.stdout.splitlines() if line.strip()]
+        if len(lines) > _PENDING_SUBJECTS:
+            return [*lines[:_PENDING_SUBJECTS], "…"]
+        return lines
+
+    def _uncommitted(self, path: Path) -> dict[str, object] | None:
+        """Work that cannot reach the Host at all until it is committed.
+
+        A release is sealed with ``git archive`` from a commit, so an edit that
+        is not committed is not merely unsent — it is unsendable, and `deploy`
+        refuses rather than shipping around it. Someone asking why their change
+        is not on the board deserves to be told that here, next to the commits
+        that simply have not gone yet.
+        """
+
+        listed = self.runner.run((self.git, "-C", str(path), "status", "--porcelain"))
+        if listed.returncode != 0:
+            return None
+        entries = [line.strip() for line in listed.stdout.splitlines() if line.strip()]
+        if not entries:
+            return None
+        return {
+            "paths": len(entries),
+            "sample": entries[:_PENDING_SUBJECTS],
+        }
 
     def app_ready(self) -> dict[str, object]:
         self.preflight.validate_ssh_material()

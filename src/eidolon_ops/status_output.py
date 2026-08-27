@@ -283,3 +283,71 @@ def _status_is_good(raw: object) -> bool:
 
 def _mapping(raw: object) -> Mapping[str, object]:
     return raw if isinstance(raw, Mapping) else {}
+
+
+def render_pending(document: Mapping[str, object]) -> str:
+    """Render the gap between these checkouts and the Host, for a person.
+
+    The same view-over-the-contract rule as the status renderers above: the JSON
+    stays the machine answer, and this exists because the question — "is my
+    commit on the board" — is asked by someone who wants to read the answer, not
+    parse it.
+    """
+
+    active = document.get("active_release")
+    pending = _mapping(document.get("pending"))
+    uncommitted = _mapping(document.get("uncommitted"))
+    lines = [
+        "本机与 Host 的差距",
+        "==================",
+        f"主机        {document.get('host_id') or _mapping(document.get('plan')).get('host_id') or '-'}",
+        f"链路        {document.get('endpoint') or '-'}",
+        f"运行中      {active or '未知'}",
+    ]
+    if not pending and not uncommitted:
+        lines.extend(("", f"每个源都与 {active} 一致，没有未部署的提交。"))
+        return "\n".join(lines)
+
+    if pending:
+        rows = []
+        for source_id, entry in sorted(pending.items()):
+            values = _mapping(entry)
+            commits = values.get("commits")
+            rows.append(
+                (
+                    source_id,
+                    str(commits) if isinstance(commits, int) else "?",
+                    str(values.get("shipped") or "-")[:12],
+                    str(values.get("head") or "-")[:12],
+                    str(values.get("reason") or ""),
+                )
+            )
+        lines.extend(
+            ("", "未部署的提交", _table(("源", "提交数", "Host 上", "本机 HEAD", "说明"), rows))
+        )
+        for source_id, entry in sorted(pending.items()):
+            subjects = _mapping(entry).get("subjects")
+            if isinstance(subjects, list) and subjects:
+                lines.append(f"  {source_id}:")
+                lines.extend(f"    {subject!s}" for subject in subjects)
+
+    if uncommitted:
+        rows = [
+            (source_id, str(_mapping(entry).get("paths") or "?"))
+            for source_id, entry in sorted(uncommitted.items())
+        ]
+        lines.extend(
+            (
+                "",
+                "未提交的改动（任何 release 都带不走，deploy 会直接拒绝）",
+                _table(("源", "文件数"), rows),
+            )
+        )
+        for source_id, entry in sorted(uncommitted.items()):
+            sample = _mapping(entry).get("sample")
+            if isinstance(sample, list) and sample:
+                lines.append(f"  {source_id}:")
+                lines.extend(f"    {item!s}" for item in sample)
+
+    lines.extend(("", str(document.get("detail") or "")))
+    return "\n".join(lines)

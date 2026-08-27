@@ -26,9 +26,18 @@ _MOVED = "b" * 40
 class _Git:
     """Answers only what the comparison asks: where HEAD is, and how far."""
 
-    def __init__(self, heads: dict[str, str], counts: dict[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        heads: dict[str, str],
+        counts: dict[str, str] | None = None,
+        *,
+        subjects: dict[str, list[str]] | None = None,
+        dirty: dict[str, str] | None = None,
+    ) -> None:
         self.heads = heads
         self.counts = counts or {}
+        self.subjects = subjects or {}
+        self.dirty = dirty or {}
 
     def run(self, command, **_kwargs):
         command = tuple(command)
@@ -43,6 +52,10 @@ class _Git:
             if answer is None:
                 return ProcessResult(128, "", "bad revision")
             return ProcessResult(0, answer + "\n", "")
+        if "log" in command:
+            return ProcessResult(0, "\n".join(self.subjects.get(source, [])) + "\n", "")
+        if "status" in command and "--porcelain" in command:
+            return ProcessResult(0, self.dirty.get(source, ""), "")
         raise AssertionError(command)
 
 
@@ -85,6 +98,7 @@ def test_a_host_running_every_current_commit_has_nothing_pending(config) -> None
     assert answer["active_release"] == "r1"
     assert answer["pending"] == {}
     assert answer["pending_commits"] == 0
+    assert answer["uncommitted"] == {}
     assert "every source matches" in answer["detail"]
 
 
@@ -95,7 +109,12 @@ def test_a_source_committed_to_since_the_release_is_named_with_its_distance(
     heads = {Path(source.path).name: _SHIPPED for source in config.sources.values()}
     heads["eidolon_agent"] = _MOVED
 
-    answer = _controller(config, _Git(heads, {"eidolon_agent": "2"}))._pending_commits(
+    git = _Git(
+        heads,
+        {"eidolon_agent": "2"},
+        subjects={"eidolon_agent": ["b08f1bc live turn handover", "0ebc134 floor from the host"]},
+    )
+    answer = _controller(config, git)._pending_commits(
         _report(config, release_id="r1", shipped=shipped)
     )
 
@@ -104,6 +123,9 @@ def test_a_source_committed_to_since_the_release_is_named_with_its_distance(
         "shipped": _SHIPPED,
         "head": _MOVED,
         "commits": 2,
+        # The count says how far; these say which. "2 commits behind" sends
+        # someone to `git log`; naming them ends the question here.
+        "subjects": ["b08f1bc live turn handover", "0ebc134 floor from the host"],
     }
     assert answer["pending_commits"] == 2
     assert answer["detail"] == "2 commit(s) in 1 source(s) are not on this Host"
@@ -169,3 +191,49 @@ def test_a_source_the_release_never_carried_is_named_as_absent(config) -> None:
     )
 
     assert answer["pending"]["eidolon_sdk"]["reason"] == "not in the release"
+
+
+def test_uncommitted_work_is_a_separate_fact_from_being_behind(config) -> None:
+    """Committed work is unsent; uncommitted work is unsendable.
+
+    A release is sealed with `git archive` from a commit, so an edit nobody
+    committed cannot travel at all — `deploy` refuses rather than shipping
+    around it. Folding the two into one number would produce a count that means
+    neither, which is the shape of mistake this whole command exists to undo.
+    """
+
+    shipped = {source_id: _SHIPPED for source_id in config.sources}
+    heads = {Path(source.path).name: _SHIPPED for source in config.sources.values()}
+
+    git = _Git(heads, dirty={"eidolon_hub": " M hub/composition/app.py\n?? scratch.py\n"})
+    answer = _controller(config, git)._pending_commits(
+        _report(config, release_id="r1", shipped=shipped)
+    )
+
+    # Not behind by a single commit, and still not reflecting what is here.
+    assert answer["pending"] == {}
+    assert answer["pending_commits"] == 0
+    assert answer["uncommitted"] == {
+        "eidolon_hub": {
+            "paths": 2,
+            "sample": ["M hub/composition/app.py", "?? scratch.py"],
+        }
+    }
+    assert "no release can carry" in answer["detail"]
+
+
+def test_a_long_list_is_elided_rather_than_allowed_to_bury_the_others(config) -> None:
+    shipped = {source_id: _SHIPPED for source_id in config.sources}
+    heads = {Path(source.path).name: _SHIPPED for source in config.sources.values()}
+    heads["eidolon_admin"] = _MOVED
+    many = [f"{index:07x} commit {index}" for index in range(9)]
+
+    git = _Git(heads, {"eidolon_admin": "9"}, subjects={"eidolon_admin": many})
+    answer = _controller(config, git)._pending_commits(
+        _report(config, release_id="r1", shipped=shipped)
+    )
+
+    subjects = answer["pending"]["eidolon_admin"]["subjects"]
+    assert len(subjects) == 6
+    assert subjects[-1] == "…"
+    assert answer["pending_commits"] == 9

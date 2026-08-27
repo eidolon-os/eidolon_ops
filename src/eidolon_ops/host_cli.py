@@ -18,7 +18,7 @@ from eidolon_ops.paths import HostProfileError, load_host_profile
 from eidolon_ops.process import ProcessError, SubprocessRunner
 from eidolon_ops.readiness import ReadinessError
 from eidolon_ops.run_ledger import RunLedger
-from eidolon_ops.status_output import render_status, render_status_error
+from eidolon_ops.status_output import render_pending, render_status, render_status_error
 from eidolon_ops.transport import TransportError
 
 
@@ -127,7 +127,11 @@ def _dispatch(controller: HostController, arguments: argparse.Namespace) -> obje
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _parser()
     arguments = parser.parse_args(argv)
-    human_status = arguments.operation == "status" and arguments.human
+    # Two operations have a human view. Both keep JSON as the machine default;
+    # the repository's own entry point is the one that asks for the table.
+    human = getattr(arguments, "human", False)
+    human_status = arguments.operation == "status" and human
+    human_pending = arguments.operation == "pending" and human
     # Counts what stops a run. Every gate here is individually justified and
     # nothing counts them, so which ones fire often has only ever been argued
     # from whichever two failures the arguer remembered. It is the progress sink
@@ -153,7 +157,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         TransportError,
         OSError,
     ) as exc:
-        if human_status:
+        if human_status or human_pending:
             print(render_status_error(str(exc), profile=arguments.config), file=sys.stderr)
         else:
             _print(
@@ -166,6 +170,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
     if human_status:
         print(render_status(result.to_json()))
+    elif human_pending:
+        print(render_pending(result.to_json()))
     else:
         _print(result.to_json())
     # The verdict is the operation's own, not this file's guess at one. A set
@@ -225,10 +231,23 @@ def _parser() -> argparse.ArgumentParser:
     )
     status.set_defaults(human=False)
     operations.add_parser("app-ready")
-    operations.add_parser(
+    pending = operations.add_parser(
         "pending",
         help="which commits this workstation holds that the Host is not running",
     )
+    pending_format = pending.add_mutually_exclusive_group()
+    pending_format.add_argument(
+        "--human",
+        action="store_true",
+        help="render the gap as a table instead of JSON",
+    )
+    pending_format.add_argument(
+        "--json",
+        action="store_false",
+        dest="human",
+        help="emit the complete machine-readable Evidence document (default for eidolon-ops)",
+    )
+    pending.set_defaults(human=False)
     doctor = operations.add_parser("doctor")
     doctor.add_argument("--release-id")
     provision = operations.add_parser("provision")

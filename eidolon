@@ -303,10 +303,10 @@ if ! contains_word "$commands" "$command_name"; then
   exit 2
 fi
 
-# The repository entry point is for people, so status is a table by default.
-# eidolon-ops itself keeps JSON as its default machine contract, and an explicit
-# --json here passes straight through without the human view.
-if [[ "$command_name" == "status" ]]; then
+# The repository entry point is for people, so these read-only questions answer
+# with a table by default. eidolon-ops itself keeps JSON as its machine
+# contract, and an explicit --json here passes straight through.
+if [[ "$command_name" == "status" || "$command_name" == "pending" ]]; then
   status_format=""
   for argument in "$@"; do
     case "$argument" in
