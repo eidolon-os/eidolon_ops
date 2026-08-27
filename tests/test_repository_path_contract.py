@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -9,10 +10,43 @@ import pytest
 REPOSITORY = Path(__file__).resolve().parents[1]
 
 
+def _shippable(root: Path) -> set[Path] | None:
+    """Every file under ``root`` that git would carry, or ``None`` if git cannot say.
+
+    ``--cached --others --exclude-standard`` is tracked files plus untracked
+    ones git is not ignoring, so an asset added but not yet committed is still
+    held to the contract. What it leaves out is precisely the operator-local
+    material: the workstation profiles and the per-Host run ledgers beside
+    them, which record real local paths because that is what they are for.
+    """
+
+    try:
+        listing = subprocess.run(
+            (
+                "git",
+                "-C",
+                str(root),
+                "ls-files",
+                "-z",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+            ),
+            capture_output=True,
+            check=True,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return {root / name for name in listing.decode().split("\0") if name}
+
+
 def _files(root: Path, patterns: tuple[str, ...]) -> list[Path]:
     result: set[Path] = set()
     for pattern in patterns:
         result.update(path for path in root.glob(pattern) if path.is_file())
+    shippable = _shippable(root)
+    if shippable is not None:
+        result &= shippable
     return sorted(result)
 
 
@@ -33,16 +67,14 @@ def test_ops_owns_mac_host_lifecycle_assets() -> None:
 def test_product_runtime_assets_do_not_reintroduce_legacy_host_paths() -> None:
     patterns = ("src/**/*.py", "deploy/**/*", "config/**/*")
     forbidden = ("/srv/eidolon", "/Users/manson", "%(ENV_HOME)s/eidolon")
+    # `_files` has already dropped what git ignores, which is where the
+    # operator-local material lives: `config/eidolon-pi.toml`, the host
+    # profiles beside it, and the run ledgers under `config/hosts/runs/` each
+    # invocation appends to. Those describe one workstation's view of one Host,
+    # and naming a local path is what they are for. Everything left ships, and
+    # a workstation path in it is the defect this test names.
     violations: list[str] = []
     for path in _files(REPOSITORY, patterns):
-        # Operator-local, and gitignored for that reason: `config/eidolon-pi.toml`
-        # and the host profiles beside it describe one workstation's view of one
-        # Host. Naming a local path is what they are for. Everything else here
-        # ships, and a workstation path in it is the defect this test names.
-        if path == REPOSITORY / "config/eidolon-pi.toml":
-            continue
-        if path.parent == REPOSITORY / "config/hosts" and path.suffix == ".toml":
-            continue
         text = path.read_text(encoding="utf-8", errors="replace")
         for value in forbidden:
             if value in text:
@@ -252,9 +284,7 @@ def test_a_nested_product_root_is_translated_before_its_parent() -> None:
         "c: /opt/eidolon/current/d\n",
     )
     assert translated == (
-        "a: /w/bootstrap-state/b.sqlite3\n"
-        "b: /w/bootstrap-runtime/c.lock\n"
-        "c: /w/install/current/d\n"
+        "a: /w/bootstrap-state/b.sqlite3\nb: /w/bootstrap-runtime/c.lock\nc: /w/install/current/d\n"
     )
 
 
