@@ -90,24 +90,42 @@ def test_a_failed_run_records_where_it_stopped_and_which_gate(tmp_path: Path) ->
     assert entry["profile"] == "pi5"
 
 
-def test_the_two_facts_that_explain_a_slow_run_are_carried_when_present(
+def test_the_facts_that_explain_a_run_are_found_where_operations_put_them(
     tmp_path: Path,
 ) -> None:
+    """A deploy puts them in its preflight block, not at the top of the report.
+
+    The first version of this file read only the top level, so every real deploy
+    recorded `link=None` and no advance -- and said nothing about it. An absent
+    field that exists to explain slow runs is worse than no field: nine deploys
+    on the board looked like they had been asked and had nothing to report.
+    """
+
     ledger = RunLedger(tmp_path / "pi5.jsonl")
     ledger.record(
         operation="deploy",
         outcome="applied",
         report={
-            "link": {"status": "wireless", "endpoint": "192.168.3.40 (wireless via en0)"},
-            "source_advance": {"eidolon_hub": 3},
-            "release_matrix": {"unrelated": "not carried"},
+            "status": "activated",
+            "release_id": "20260827-owner-view",
+            "local": {
+                "link": {"status": "wireless", "endpoint": "192.168.3.40 (wireless via en0)"},
+                "source_advance": {"eidolon_hub": 3},
+                "release_matrix": {"unrelated": "not carried"},
+            },
         },
     )
 
     entry = _lines(ledger.path)[0]
+    assert entry["release_id"] == "20260827-owner-view"
     assert entry["link"]["status"] == "wireless"
     assert entry["source_advance"] == {"eidolon_hub": 3}
     assert "release_matrix" not in entry
+
+    # A flat report still works: the top level is looked at first.
+    flat = RunLedger(tmp_path / "mac.jsonl")
+    flat.record(operation="status", outcome="observed", report={"link": {"status": "wired"}})
+    assert _lines(flat.path)[0]["link"] == {"status": "wired"}
 
 
 def test_the_ledger_is_private_and_never_fails_the_operation(tmp_path: Path) -> None:

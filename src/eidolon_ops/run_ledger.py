@@ -74,6 +74,32 @@ def fingerprint(message: str) -> str:
     return value[:_FINGERPRINT_LENGTH].strip()
 
 
+#: Facts worth carrying out of a report, and where an operation puts them.
+#:
+#: ``link`` and ``source_advance`` are produced by the release path and land in
+#: its preflight block, not at the top of the report — which the first version of
+#: this file did not know, so it wrote ``link=None`` for every deploy on the
+#: board and said nothing about it. An absent field that was supposed to explain
+#: slow runs is worse than no field: the ledger looked like it had answered.
+_CARRIED = ("release_id", "link", "source_advance")
+_NESTED = "local"
+
+
+def _carried(report: Mapping[str, object]) -> dict[str, object]:
+    """Read the carried facts from the report, or from its preflight block."""
+
+    nested = report.get(_NESTED)
+    scopes = [report, nested] if isinstance(nested, Mapping) else [report]
+    found: dict[str, object] = {}
+    for key in _CARRIED:
+        for scope in scopes:
+            value = scope.get(key)
+            if value:
+                found[key] = value
+                break
+    return found
+
+
 class RunLedger:
     """One line per run, and the progress sink that times its phases.
 
@@ -154,12 +180,7 @@ class RunLedger:
             entry["gate"] = fingerprint(error)
             entry["error"] = error
         if report is not None:
-            # The two facts a slow or surprising run is usually explained by,
-            # already computed by the operations that have them.
-            for key in ("link", "source_advance"):
-                value = report.get(key)
-                if value:
-                    entry[key] = value
+            entry.update(_carried(report))
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
             with open(
