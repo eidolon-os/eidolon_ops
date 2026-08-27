@@ -126,6 +126,13 @@ def initialize_install_inputs(
             # variable (``config/services.yaml``, agent entry), and two names for
             # one secret is how they come to disagree.
             "EIDOLON_AGENT_ADMIN_API_TOKEN": agent_admin_token,
+            # The channel provider's credential, unprefixed for the same reason
+            # as the Agent's above: the service registry names this exact
+            # variable. Admin reads one route on that surface — which bodies are
+            # on their channel — because nothing else on this Host observes
+            # presence: Hub publishes existence and refuses liveness by
+            # contract, and the runtime blackboard's reader was withdrawn.
+            "EIDOLON_CHANNEL_PROVIDER_TOKEN": hub_provider_token,
             "EIDOLON_ADMIN_SYSTEM_DIRECTORY_UDS": "/run/eidolon/system.sock",
             "EIDOLON_ADMIN_AUDIT_NATS_URL": "nats://127.0.0.1:4222",
         },
@@ -209,6 +216,7 @@ SHARED_CREDENTIALS: tuple[tuple[str, str, str, str, str], ...] = (
     ("agent.env", "EIDOLON_MEMORY_MCP_TOKEN", "memory.env", "EIDOLON_MEMORY_MCP_TOKEN", "Agent/Memory MCP token"),
     ("admin.env", "EIDOLON_ADMIN_MEMORY_API_SERVICE_TOKEN", "memory.env", "EIDOLON_MEMORY_API_TOKEN", "Admin/Memory API service token"),
     ("admin.env", "EIDOLON_AGENT_ADMIN_API_TOKEN", "agent.env", "EIDOLON_AGENT_ADMIN_API_TOKEN", "Admin/Agent admin API token"),
+    ("admin.env", "EIDOLON_CHANNEL_PROVIDER_TOKEN", "channel.env", "EIDOLON_CHANNEL_PROVIDER_TOKEN", "Admin/Channel Provider token"),
     ("channel.env", "LIVEKIT_API_KEY", "livekit.env", "LIVEKIT_API_KEY", "Channel/LiveKit key"),
     ("channel.env", "LIVEKIT_API_SECRET", "livekit.env", "LIVEKIT_API_SECRET", "Channel/LiveKit secret"),
 )
@@ -245,6 +253,7 @@ DECLARED_ENV_KEYS: dict[str, set[str]] = {
         "EIDOLON_ADMIN_LOCAL_API_SERVICE_TOKEN",
         "EIDOLON_ADMIN_MEMORY_API_SERVICE_TOKEN",
         "EIDOLON_AGENT_ADMIN_API_TOKEN",
+        "EIDOLON_CHANNEL_PROVIDER_TOKEN",
         "EIDOLON_ADMIN_SYSTEM_DIRECTORY_UDS",
         "EIDOLON_ADMIN_AUDIT_NATS_URL",
     },

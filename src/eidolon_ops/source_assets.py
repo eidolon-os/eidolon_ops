@@ -311,6 +311,7 @@ memory:
   supervisor_http: {{host: 127.0.0.1, port: {PORTS["memory_admin"]}}}
 channel:
   worker: {{port: {PORTS["channel_worker"]}}}
+  provider: {{port: {PORTS["channel_provider"]}}}
 client_web: {{port: {CLIENT_WEB_PORT}}}
 nats: {{port: {PORTS["nats"]}, http_port: {PORTS["nats_http"]}}}
 livekit:
