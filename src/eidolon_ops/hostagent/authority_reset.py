@@ -135,32 +135,43 @@ def _validate_new_inputs(root: Path, expected: Mapping[str, object]) -> None:
         raise TargetError("Owner Authority bootstrap capability does not match reset")
 
 
-def established_lineage(*, root: Path = Path("/")) -> dict[str, object]:
-    """Report the Owner Authority lineage this Host actually holds.
+def lineage_evidence(*, database: Path, anchor: Path) -> dict[str, object]:
+    """Report the Owner Authority lineage a Hub at these two paths can prove.
 
     Read-only, and deliberately separate from the reset request shape: the
-    controller has to know what a Host holds *before* it decides which
-    capability to ship, and on the path that matters most the answer is
-    "nothing at all" — an empty namespace has no request to validate against.
+    caller has to know what a Host holds *before* it decides which capability
+    to ship, and on the path that matters most the answer is "nothing at all" —
+    an empty namespace has no request to validate against.
 
     ``established`` is the lineage the Host can prove twice over. ``marker``
     is reported on its own because a database whose external anchor is missing
     is a recovery case, not an empty Host, and a caller that only looked at
     ``established`` would mistake one for the other and mint a generation over
     a database that is still there.
+
+    The two paths are arguments rather than constants because a Mac source run
+    holds the same pair under its own state root, and it needs the same
+    evidence for the same decision. The product locations are the default, in
+    :func:`established_lineage`.
     """
 
-    root = root.resolve()
-    marker = _marker(primitives.host_path(root, HUB_DATABASE))
-    anchor = _read_json(
-        primitives.host_path(root, AUTHORITY_ANCHOR),
-        label="Owner Authority lineage anchor",
-    )
+    found = _marker(database)
+    recorded = _read_json(anchor, label="Owner Authority lineage anchor")
     return {
-        "marker": marker,
-        "anchor": anchor,
-        "established": marker if marker is not None and marker == anchor else None,
+        "marker": found,
+        "anchor": recorded,
+        "established": found if found is not None and found == recorded else None,
     }
+
+
+def established_lineage(*, root: Path = Path("/")) -> dict[str, object]:
+    """The product Host's lineage evidence, at the product locations."""
+
+    root = root.resolve()
+    return lineage_evidence(
+        database=primitives.host_path(root, HUB_DATABASE),
+        anchor=primitives.host_path(root, AUTHORITY_ANCHOR),
+    )
 
 
 def authority_lineage(

@@ -18,6 +18,8 @@ from eidolon_ops import environment, lan_observation, probes, source_assets
 from eidolon_ops.config import OperationsConfig
 from eidolon_ops.errors import InstallInputError, OperationsError
 from eidolon_ops.host_identity import HostIdentityError, HostLanIdentity, derive_host_lan_identity
+from eidolon_ops.hostagent.authority_reset import lineage_evidence
+from eidolon_ops.hostagent.primitives import TargetError
 from eidolon_ops.hub_assets import (
     hub_settings_are_bound,
     hub_settings_template,
@@ -25,9 +27,17 @@ from eidolon_ops.hub_assets import (
 )
 from eidolon_ops.install_inputs import validate_install_input_contract
 from eidolon_ops.owner_domain_assets import (
+    AuthorityDecision,
     OwnerDomainAssetError,
     OwnerDomainAssets,
+    authority_lineage,
+    authority_recovery_required,
+    decide_owner_authority,
     ensure_owner_domain_assets,
+    mark_authority_bootstrapped,
+)
+from eidolon_ops.owner_domain_assets import (
+    reset_owner_authority as advance_owner_authority,
 )
 from eidolon_ops.paths import AppAccess, HostProfile
 from eidolon_ops.private_files import atomic_private_file
@@ -187,6 +197,15 @@ class LocalProductSource:
         ``wipe_authority_data`` adds the state root: the system database, Hub,
         Kernel, Agent, Memory, NATS and the rest. That is the flag for a Host
         behind the schema, and it is irreversible.
+
+        Irreversible in one more way than the file list shows. The state root is
+        where this Host keeps both halves of its Owner Authority lineage
+        evidence, so wiping it *is* a ``ResetAuthority``, and the next
+        ``prepare`` advances ``owner_domain_generation`` accordingly — see
+        ``_decided_owner_authority``. Every Claim and running credential issued
+        under the destroyed generation is thereby void, which is the point of
+        advancing rather than the cost of it: fenced off, they cannot be
+        mistaken for the new authority's.
         """
 
         paths = self.profile.paths
@@ -222,6 +241,13 @@ class LocalProductSource:
             "note": (
                 "the Owner Domain private material and the Host identity are kept, so "
                 "prepare re-derives the same Owner Domain and the same Host name"
+                + (
+                    "; the Authority state behind them is destroyed, so prepare "
+                    "advances owner_domain_generation and every existing device "
+                    "Claim and credential becomes void"
+                    if wipe_authority_data
+                    else ""
+                )
             ),
         }
         if not apply:
@@ -709,14 +735,7 @@ class LocalProductSource:
         return generation
 
     def _ensure_owner_domain_assets(self) -> OwnerDomainAssets:
-        try:
-            assets = ensure_owner_domain_assets(
-                self._owner_material_root(),
-                self._host_lan_identity(),
-                self._require_app_access().hub_https_port,
-            )
-        except OwnerDomainAssetError as exc:
-            raise OperationsError(f"Mac Owner Domain material is {exc}") from exc
+        assets = self._decided_owner_authority(self._issue_owner_domain_assets())
         targets = {
             "tls_certificate": self._hub_certificate_path(),
             "tls_private_key": self._hub_private_key_path(),
@@ -734,6 +753,169 @@ class LocalProductSource:
         for name, path in targets.items():
             atomic_private_file(path, getattr(assets, name))
         return assets
+
+    def _issue_owner_domain_assets(self) -> OwnerDomainAssets:
+        """Read or mint this Host's Owner material, placing none of it."""
+
+        try:
+            return ensure_owner_domain_assets(
+                self._owner_material_root(),
+                self._host_lan_identity(),
+                self._require_app_access().hub_https_port,
+            )
+        except OwnerDomainAssetError as exc:
+            raise OperationsError(f"Mac Owner Domain material is {exc}") from exc
+
+    # -- Owner Authority lineage ---------------------------------------------
+
+    def _hub_database_path(self) -> Path:
+        """The database Hub's generated settings name, so the same file is read.
+
+        Both this and the anchor below are the product locations resolved
+        against this profile's state root, which is what ``translate_fhs``
+        makes of Hub's own ``$EIDOLON_STATE_ROOT`` template. A second opinion
+        about either would read a file no Hub writes.
+        """
+
+        return self.profile.paths.state_root / "hub/eidolon-hub.sqlite3"
+
+    def _authority_anchor_path(self) -> Path:
+        return self.profile.paths.state_root / "hub/authority-lineage.json"
+
+    def _observed_authority_lineage(self) -> dict[str, object]:
+        """What this Host's Hub holds today, read before anything is placed."""
+
+        try:
+            return lineage_evidence(
+                database=self._hub_database_path(),
+                anchor=self._authority_anchor_path(),
+            )
+        except TargetError as exc:
+            raise OperationsError(f"Mac Owner Authority lineage is unreadable: {exc}") from exc
+
+    def _decided_owner_authority(self, current: OwnerDomainAssets) -> OwnerDomainAssets:
+        """Advance the Owner Authority generation when this Host's state is gone.
+
+        ``reset --wipe-authority-data`` destroys the state root, which is where
+        this Host keeps both halves of its Authority lineage evidence — the Hub
+        database marker and the external anchor — while deliberately keeping the
+        Owner material that issued them. That combination is a
+        ``ResetAuthority`` in fact, and nothing here used to say so: the Owner
+        material stayed ``bootstrap_pending`` at generation 1 forever, so every
+        wipe-and-start re-derived a byte-identical capability and an empty Hub
+        wrote back the very marker that had just been destroyed. 《设备生命周期
+        状态机与恢复边》§3.6.1 forbids exactly that — a second, empty Authority
+        state behind the anti-rollback fence every prior Claim, credential and
+        database backup was issued under — and says so for any operation that
+        destroys Hub Authority state, whatever the command is called.
+
+        The rules are the ones :func:`decide_owner_authority` states for every
+        such operation. Only two of them do work here, and both do it before a
+        descriptor or capability naming the result is rendered, let alone
+        placed: recording a capability this Host can prove it used, and
+        advancing past one whose state is gone. There is no ``will_wipe`` on
+        this path — a source run wipes and starts as two commands, so by the
+        time this runs the database really is absent rather than doomed.
+        """
+
+        observed = self._observed_authority_lineage()
+        decision = decide_owner_authority(
+            current, marker=observed["marker"], established=observed["established"]
+        )
+        if decision is AuthorityDecision.RECORD_CONSUMED:
+            current = self._recorded_authority_bootstrap(current)
+            decision = decide_owner_authority(
+                current, marker=observed["marker"], established=observed["established"]
+            )
+        if decision is AuthorityDecision.RECOVERY_REQUIRED:
+            raise OperationsError(
+                self._authority_recovery_required(observed["marker"], current)
+            )
+        if decision is not AuthorityDecision.ADVANCE_GENERATION:
+            return current
+        try:
+            # The same CAS primitive authority-reset uses: the new lineage is
+            # persisted before anything naming it is issued.
+            advance_owner_authority(
+                self._owner_material_root(),
+                expected_owner_domain_id=current.owner_domain_id,
+                expected_generation=current.owner_domain_generation,
+            )
+        except OwnerDomainAssetError as exc:
+            raise OperationsError(f"Mac Owner Authority reset failed: {exc}") from exc
+        advanced = self._issue_owner_domain_assets()
+        if not advanced.bootstrap_pending:
+            raise OperationsError(
+                "Mac Owner Authority rebuild has no pending bootstrap capability"
+            )
+        return advanced
+
+    def commit_owner_authority(self) -> dict[str, object]:
+        """Record the one-shot capability as spent, against this Host's proof.
+
+        The other half of the decision above, and not optional: consumption has
+        to be recorded when it happens, because it is the only thing that later
+        tells a wipe apart from a retry. Without it a first ``start`` leaves the
+        Owner material ``bootstrap_pending`` — which is the state
+        ``authority-backup`` refuses — and the next ``reset
+        --wipe-authority-data`` reads that pending capability as a failed
+        bootstrap to retry and hands the empty Hub the destroyed state id back.
+
+        Evidence-driven, so it is safe to call after any start: a Host that
+        cannot prove the lineage twice over has nothing to record, and the next
+        ``prepare`` will make the same decision from the same pair of files.
+        Advancing a generation is not done here — only ``prepare`` can render
+        the inputs a new generation needs.
+        """
+
+        current = self._issue_owner_domain_assets()
+        observed = self._observed_authority_lineage()
+        decision = decide_owner_authority(
+            current, marker=observed["marker"], established=observed["established"]
+        )
+        if decision is AuthorityDecision.RECOVERY_REQUIRED:
+            raise OperationsError(
+                self._authority_recovery_required(observed["marker"], current)
+            )
+        if decision is not AuthorityDecision.RECORD_CONSUMED:
+            return {
+                "status": "authority_bootstrap_unproven",
+                "decision": str(decision),
+                "observed": observed,
+            }
+        consumed = self._recorded_authority_bootstrap(current)
+        return {
+            "status": "authority_bootstrap_consumed",
+            "authority": authority_lineage(consumed),
+            "observed": observed,
+        }
+
+    def _recorded_authority_bootstrap(self, current: OwnerDomainAssets) -> OwnerDomainAssets:
+        try:
+            mark_authority_bootstrapped(
+                self._owner_material_root(),
+                owner_domain_id=current.owner_domain_id,
+                owner_domain_generation=current.owner_domain_generation,
+                authority_state_id=current.authority_state_id,
+            )
+        except OwnerDomainAssetError as exc:
+            raise OperationsError(
+                f"Mac Owner Authority bootstrap cannot be recorded: {exc}"
+            ) from exc
+        return self._issue_owner_domain_assets()
+
+    @staticmethod
+    def _authority_recovery_required(marker: object, current: OwnerDomainAssets) -> str:
+        return authority_recovery_required(
+            marker,
+            authority_lineage(current),
+            remedy=(
+                "A source run must not start past that. Restore the matching Hub "
+                "state, or rebuild deliberately with reset --wipe-authority-data "
+                "--apply, which advances the Owner Authority generation at the "
+                "next start."
+            ),
+        )
 
     @staticmethod
     def _require_every_owner_domain_asset_is_placed(

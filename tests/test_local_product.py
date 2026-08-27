@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import ssl
 import stat
 from collections.abc import Mapping
@@ -699,6 +700,203 @@ def test_a_new_owner_domain_asset_cannot_be_silently_dropped(tmp_path: Path) -> 
         )
 
 
+def _authority_state(product: LocalProductSource) -> dict[str, object]:
+    """The controller-side Authority record, read the way this Host stores it."""
+
+    return json.loads(
+        (product._owner_material_root() / "owner-domain-state.json").read_text(encoding="utf-8")
+    )
+
+
+def _established_hub_authority(product: LocalProductSource) -> dict[str, object]:
+    """Do to the state root exactly what a Hub start does, and no more.
+
+    Hub accepts the one-shot capability only into an empty database, writes the
+    marker and the external lineage anchor, and then *deletes* the capability —
+    that unlink is a deliberate contract its own suite pins, and the reason no
+    operation here may treat the file's presence as evidence. The pair this
+    leaves behind is the Host's only lineage evidence, which is also the pair a
+    ``reset --wipe-authority-data`` destroys.
+    """
+
+    capability = json.loads(
+        product._authority_bootstrap_path().read_text(encoding="utf-8")
+    )
+    assert capability["operation"] == "owner-authority.bootstrap"
+    lineage = {
+        "contract_version": 1,
+        "owner_domain_id": capability["owner_domain_id"],
+        "owner_domain_generation": capability["owner_domain_generation"],
+        "state_id": capability["state_id"],
+    }
+    _write_hub_marker(product, lineage)
+    product._authority_anchor_path().write_text(
+        json.dumps(lineage) + "\n", encoding="utf-8"
+    )
+    product._authority_bootstrap_path().unlink()
+    return lineage
+
+
+def _write_hub_marker(product: LocalProductSource, lineage: Mapping[str, object]) -> None:
+    database = product._hub_database_path()
+    database.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(database)
+    try:
+        connection.execute(
+            "CREATE TABLE IF NOT EXISTS hub_authority_state ("
+            "singleton_id INTEGER PRIMARY KEY, owner_domain_id TEXT, "
+            "owner_domain_generation INTEGER, state_id TEXT)"
+        )
+        connection.execute("DELETE FROM hub_authority_state")
+        connection.execute(
+            "INSERT INTO hub_authority_state VALUES (1,?,?,?)",
+            (
+                lineage["owner_domain_id"],
+                lineage["owner_domain_generation"],
+                lineage["state_id"],
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+
+def _started_source_run(product: LocalProductSource) -> dict[str, object]:
+    """One ``start``: prepare places the capability, Hub uses it, Ops records it.
+
+    The three steps a Mac ``start`` really performs, in the order the adapter
+    performs them — ``prepare`` decides and places the Owner Domain assets, the
+    supervisord stack brings Hub up, and the adapter records the capability
+    against what Hub left behind.
+    """
+
+    product._ensure_hub_tls_identity()
+    lineage = _established_hub_authority(product)
+    recorded = product.commit_owner_authority()
+    assert recorded["status"] == "authority_bootstrap_consumed"
+    assert recorded["authority"] == lineage
+    return lineage
+
+
+def test_a_wiped_source_run_rebuilds_its_authority_at_a_new_generation(
+    tmp_path: Path,
+) -> None:
+    """``reset --wipe-authority-data`` + ``start`` is a ResetAuthority.
+
+    It destroys the Hub database and the lineage anchor while keeping the Owner
+    material that issued them, and nothing on this path used to say so. The
+    Owner material stayed ``bootstrap_pending`` at generation 1 forever, so
+    every wipe re-derived a byte-identical capability — same generation, same
+    state id — and the empty Hub wrote back the very marker just destroyed.
+    《设备生命周期状态机与恢复边》§3.6.1 forbids exactly that: a second, empty
+    Authority state behind the anti-rollback fence every prior Claim,
+    credential and database backup was issued under, indistinguishable from the
+    new authority.
+
+    The Owner Domain itself must survive all of it — the workstation root key is
+    deliberately kept — so what has to move is the generation and the state id,
+    and only those.
+    """
+
+    product = _product(tmp_path, foundation_mode="external")
+    _with_sources(product, tmp_path)
+    product.profile.paths.config_root.mkdir(parents=True, exist_ok=True)
+    product.profile.paths.config_root.chmod(0o700)
+
+    first = _started_source_run(product)
+    product.reset(wipe_authority_data=True, apply=True)
+    second = _started_source_run(product)
+    product.reset(wipe_authority_data=True, apply=True)
+    third = _started_source_run(product)
+
+    rebuilt = (first, second, third)
+    assert len({lineage["owner_domain_id"] for lineage in rebuilt}) == 1
+    assert [lineage["owner_domain_generation"] for lineage in rebuilt] == [1, 2, 3]
+    assert len({lineage["state_id"] for lineage in rebuilt}) == 3
+    # And the generation the Host is actually told about moved with it: the
+    # signed descriptor, not just the controller-side journal.
+    assert product._owner_domain_generation() == 3
+    assert product._owner_domain_id() == first["owner_domain_id"]
+
+
+def test_a_bootstrapped_source_run_is_not_left_pending_a_reset_authority(
+    tmp_path: Path,
+) -> None:
+    """Consumption is recorded when it happens, which nothing here used to do.
+
+    ``authority-backup`` opens with ``if owner.bootstrap_pending: raise
+    AUTHORITY_RESTORE_INCOMPLETE`` — a pending ResetAuthority is a state whose
+    Authority cannot be captured, because it is not the one the Host holds. A
+    source run reached that state on its very first ``start`` and never left it.
+    It is also the state that made the wipe above indistinguishable from a
+    retry, so this is the same defect seen from the other end.
+    """
+
+    product = _product(tmp_path, foundation_mode="external")
+    product.profile.paths.config_root.mkdir(parents=True, exist_ok=True)
+    product.profile.paths.config_root.chmod(0o700)
+
+    product._ensure_hub_tls_identity()
+    assert _authority_state(product)["bootstrap_pending"] is True
+
+    _established_hub_authority(product)
+    product.commit_owner_authority()
+
+    assert _authority_state(product)["bootstrap_pending"] is False
+    # The capability the next prepare places says so too, so a Hub that reads it
+    # against a populated database has nothing to accept.
+    product._ensure_hub_tls_identity()
+    placed = json.loads(product._authority_bootstrap_path().read_text(encoding="utf-8"))
+    assert placed["operation"] == "owner-authority.bootstrap-consumed"
+
+
+def test_a_bootstrap_the_host_never_completed_retries_the_same_generation(
+    tmp_path: Path,
+) -> None:
+    """A pending generation is a durable retry journal, not a fresh decision.
+
+    A ``start`` whose Hub never came up leaves no marker and no anchor. Minting
+    a second generation for the retry would fence off an Authority that was
+    never established, and burn a generation per failed attempt.
+    """
+
+    product = _product(tmp_path, foundation_mode="external")
+    product.profile.paths.config_root.mkdir(parents=True, exist_ok=True)
+    product.profile.paths.config_root.chmod(0o700)
+
+    product._ensure_hub_tls_identity()
+    first = json.loads(product._authority_bootstrap_path().read_text(encoding="utf-8"))
+    unproven = product.commit_owner_authority()
+
+    assert unproven["status"] == "authority_bootstrap_unproven"
+    assert unproven["decision"] == "carry_pending_capability"
+
+    product._ensure_hub_tls_identity()
+    assert json.loads(product._authority_bootstrap_path().read_text(encoding="utf-8")) == first
+
+
+def test_a_source_run_refuses_to_start_over_an_authority_it_cannot_account_for(
+    tmp_path: Path,
+) -> None:
+    """The one case neither recovery mode covers, and the only safe answer.
+
+    A Hub database whose marker names a lineage this Owner material never issued
+    is either a restored backup from another generation or another Owner's
+    state. Starting anyway would put this Host's Authority behind a fence it
+    cannot prove it is on the right side of.
+    """
+
+    product = _product(tmp_path, foundation_mode="external")
+    product.profile.paths.config_root.mkdir(parents=True, exist_ok=True)
+    product.profile.paths.config_root.chmod(0o700)
+    lineage = _started_source_run(product)
+
+    _write_hub_marker(product, {**lineage, "state_id": "authority-state_someone-else"})
+
+    with pytest.raises(OperationsError, match="AuthorityRecoveryRequired"):
+        product._ensure_hub_tls_identity()
+
+
 def _with_sources(product: LocalProductSource, tmp_path: Path) -> Path:
     """Give the product a source set, which a reset has to prove it cannot reach."""
 
@@ -726,7 +924,7 @@ def test_reset_clears_what_it_generated_and_keeps_what_it_did_not(tmp_path: Path
     product._ensure_hub_tls_identity()
     owner_before = product._owner_domain_id()
     identity = paths.bootstrap_state_root / "host_identity.ed25519"
-    (paths.state_root / "hub/eidolon-hub.sqlite3").write_text("db", encoding="utf-8")
+    established = _established_hub_authority(product)
     (paths.log_root / "keep.log").write_text("log", encoding="utf-8")
 
     planned = product.reset(wipe_authority_data=False, apply=False)
@@ -750,16 +948,20 @@ def test_reset_clears_what_it_generated_and_keeps_what_it_did_not(tmp_path: Path
     assert product._owner_material_root().is_dir()
     product._ensure_hub_tls_identity()
     assert product._owner_domain_id() == owner_before
+    # A reset that keeps the Authority state is not a ResetAuthority: the Host
+    # still holds this lineage, so the generation must not move either.
+    assert product._owner_domain_generation() == established["owner_domain_generation"]
 
 
 def test_reset_adds_the_authority_data_only_when_asked(tmp_path: Path) -> None:
     product = _product(tmp_path, foundation_mode="external")
     _with_sources(product, tmp_path)
     paths = product.profile.paths
-    (paths.state_root / "hub").mkdir(parents=True, exist_ok=True)
-    database = paths.state_root / "hub/eidolon-hub.sqlite3"
-    database.write_text("db", encoding="utf-8")
+    paths.config_root.mkdir(parents=True, exist_ok=True)
+    paths.config_root.chmod(0o700)
     product._ensure_hub_tls_identity()
+    _established_hub_authority(product)
+    database = product._hub_database_path()
     owner_before = product._owner_domain_id()
 
     plan = product.reset(wipe_authority_data=True, apply=False)

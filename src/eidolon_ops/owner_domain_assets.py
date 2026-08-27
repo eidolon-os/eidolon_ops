@@ -13,6 +13,7 @@ import secrets
 import stat
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from enum import StrEnum
 from pathlib import Path
 from typing import TypedDict, cast
 
@@ -243,6 +244,88 @@ def mark_authority_bootstrapped(
     write_private_file(
         material_root / _STATE,
         (json.dumps(state, sort_keys=True, separators=(",", ":")) + "\n").encode(),
+    )
+
+
+class AuthorityDecision(StrEnum):
+    """What an operation must do with the one-shot bootstrap capability."""
+
+    RECORD_CONSUMED = "record_consumed_capability"
+    CARRY_PENDING = "carry_pending_capability"
+    KEEP_ESTABLISHED = "keep_established_lineage"
+    ADVANCE_GENERATION = "advance_generation"
+    RECOVERY_REQUIRED = "recovery_required"
+
+
+def authority_lineage(assets: OwnerDomainAssets) -> dict[str, object]:
+    """The Authority marker a Hub writes when it accepts this capability."""
+
+    return {
+        "contract_version": 1,
+        "owner_domain_id": assets.owner_domain_id,
+        "owner_domain_generation": assets.owner_domain_generation,
+        "state_id": assets.authority_state_id,
+    }
+
+
+def decide_owner_authority(
+    assets: OwnerDomainAssets, *, marker: object, established: object
+) -> AuthorityDecision:
+    """Which capability an operation about to (re)start a Hub must carry.
+
+    Stated once, here, because every operation that can destroy Hub Authority
+    state has to reach the same answer and there is more than one such
+    operation: ``authority-reset``, a Pi ``install --reset-existing
+    --wipe-authority-data``, and a Mac source run's ``reset
+    --wipe-authority-data`` followed by ``start``.  《设备生命周期状态机与恢复边》
+    §3.6.1 admits exactly two recovery modes and no guessed middle one, so the
+    decision is made from Host evidence — the Hub database marker and the
+    external lineage anchor — never from the flags a command was given:
+
+    * unconsumed and the Host proves it established exactly this lineage — the
+      Host used the capability and nothing recorded it.  Record it, then decide
+      again; reading it as pending would later hand a wiped Host the state id
+      its destroyed database carried.
+    * unconsumed otherwise — reuse it.  A pending generation is a durable retry
+      journal: retrying a failed wipe must not mint a second generation.
+    * consumed and the Host holds no Hub Authority marker — that state is gone
+      and cannot be restored, so this is a ``ResetAuthority`` in fact and the
+      generation **must** advance.  Minting a second, empty Authority state at
+      an unchanged generation would put a new authority behind the same
+      anti-rollback fence every prior Claim, credential and database backup was
+      issued under.
+    * consumed and the Host holds this same lineage — nothing happened.  Carry
+      it unchanged; Hub ignores a spent capability once its database exists.
+    * anything else — the Host and this Owner material do not describe the same
+      Authority, which is the one case no operation may paper over.
+
+    ``marker`` is the caller's, not the Host's, in one respect: an operation
+    that is about to destroy the database this observation found passes ``None``
+    so the decision is made against the Host as it will be.  ``established``
+    stays as observed, because a capability's use is a fact about the past.
+    """
+
+    lineage = authority_lineage(assets)
+    if assets.bootstrap_pending:
+        if established == lineage:
+            return AuthorityDecision.RECORD_CONSUMED
+        if marker is None or marker == lineage:
+            return AuthorityDecision.CARRY_PENDING
+        return AuthorityDecision.RECOVERY_REQUIRED
+    if marker is None:
+        return AuthorityDecision.ADVANCE_GENERATION
+    if marker == lineage:
+        return AuthorityDecision.KEEP_ESTABLISHED
+    return AuthorityDecision.RECOVERY_REQUIRED
+
+
+def authority_recovery_required(marker: object, lineage: object, *, remedy: str) -> str:
+    """The refusal :func:`decide_owner_authority` never lets an operation skip."""
+
+    return (
+        "AuthorityRecoveryRequired: this Host's Hub database identifies "
+        f"{marker}, and this controller's Owner material identifies {lineage}. "
+        f"{remedy}"
     )
 
 

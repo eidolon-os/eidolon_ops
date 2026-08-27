@@ -142,6 +142,16 @@ class SupervisordSupervisor:
         the health wait afterwards. The journal is local because this report
         has no ``phases`` key to add them to; announcing them is still what
         turns a two-minute silence into three named waits.
+
+        A fourth part is not a wait. An operation that started this Host's Hub
+        has to record the one-shot Owner Authority capability Hub just used,
+        against the evidence Hub left behind — the product install does this
+        from its own transaction, and this path is where a source run's
+        equivalent belongs, because it is the only place that knows the stack
+        has been started and settled. Skipping it is not a missing report: the
+        next ``reset --wipe-authority-data`` would read the still-pending
+        capability as a failed bootstrap to retry, and rebuild the destroyed
+        Authority at its own generation and state id.
         """
 
         script = self.script()
@@ -178,6 +188,11 @@ class SupervisordSupervisor:
                 "healthy" if health["status"] == "healthy" and not unhealthy_process else "degraded"
             )
             phases.append({"phase": "health", "result": health})
+        if operation in _PREPARING_OPERATIONS:
+            phases.begin("authority")
+            authority = product.commit_owner_authority()
+            response["authority"] = authority
+            phases.append({"phase": "authority", "result": authority})
         return response
 
     def script(self) -> Path:

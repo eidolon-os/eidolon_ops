@@ -36,8 +36,11 @@ from eidolon_ops.install_inputs import (
 )
 from eidolon_ops.owner_domain_assets import (
     OWNER_DOMAIN_MATERIAL_NAMES,
+    AuthorityDecision,
     OwnerDomainAssetError,
-    OwnerDomainAssets,
+    authority_lineage,
+    authority_recovery_required,
+    decide_owner_authority,
     ensure_owner_domain_assets,
     mark_authority_bootstrapped,
 )
@@ -75,26 +78,17 @@ _CONVERGENCE_STAGE_ID = "credential-convergence"
 _SQLITE_SIDECARS = ("-shm", "-wal", ".lock", "-journal")
 
 
-def _lineage(assets: OwnerDomainAssets) -> dict[str, object]:
-    """The Authority marker a Hub writes when it accepts this capability."""
-
-    return {
-        "contract_version": 1,
-        "owner_domain_id": assets.owner_domain_id,
-        "owner_domain_generation": assets.owner_domain_generation,
-        "state_id": assets.authority_state_id,
-    }
-
-
 def _authority_recovery_required(
     marker: object, lineage: dict[str, object]
 ) -> str:
-    return (
-        "AuthorityRecoveryRequired: this Host's Hub database identifies "
-        f"{marker}, and this controller's Owner material identifies {lineage}. "
-        "An install must not ship past that. Restore the matching Authority "
-        "backup, or rebuild deliberately with authority-reset --apply or "
-        "install --reset-existing --wipe-authority-data --apply."
+    return authority_recovery_required(
+        marker,
+        lineage,
+        remedy=(
+            "An install must not ship past that. Restore the matching Authority "
+            "backup, or rebuild deliberately with authority-reset --apply or "
+            "install --reset-existing --wipe-authority-data --apply."
+        ),
     )
 
 
@@ -717,26 +711,13 @@ class EidolonPiController:
         reinstalled: the reset emptied the database and the install handed it a
         capability Hub is right to refuse.
 
-        The decision is made from evidence, never from the flags alone:
+        The decision is made from Host evidence, never from the flags alone.
+        The rules are stated once, in
+        :func:`eidolon_ops.owner_domain_assets.decide_owner_authority`, because
+        an install is not the only operation that reaches this fork: a Mac
+        source run reaches it from its own ``reset --wipe-authority-data``.
 
-        * the capability is unconsumed — reuse it.  A pending generation is a
-          durable retry journal (see ``authority_reset``); retrying a failed
-          wipe must not mint a second generation.
-        * the capability is consumed and the Host holds no Hub database — the
-          Authority state is gone and cannot be restored, so this is a
-          ``ResetAuthority`` in fact and **must** advance
-          ``owner_domain_generation``.  《设备生命周期状态机与恢复边》§3.6.1
-          allows exactly two recovery modes and no guessed middle one: minting
-          a second, empty Authority state at an unchanged generation would put
-          a new authority behind the same anti-rollback fence every prior
-          Claim, credential and database backup was issued under.
-        * the capability is consumed and the Host holds the matching database —
-          nothing happened.  Ship it unchanged; Hub ignores a spent capability
-          once its database is populated.
-        * anything else — the Host and this controller do not describe the same
-          Authority, which is the one case an install must not paper over.
-
-        ``will_wipe`` is not a fourth rule.  It only says the database this
+        ``will_wipe`` is not one of those rules.  It only says the database this
         observation found is about to be removed, so the decision is made
         against the Host as it will be, not as it is.
         """
@@ -749,11 +730,17 @@ class EidolonPiController:
         except OwnerDomainAssetError as exc:
             raise OperationsError(str(exc)) from exc
         observed = self._observed_authority_lineage()
-        lineage = _lineage(current)
         # A capability the Host can prove it used, but whose use this
         # controller never got to record, is consumed. Reading it as pending
         # would hand a wiped Host the state id its destroyed database carried.
-        if current.bootstrap_pending and observed["established"] == lineage:
+        if (
+            decide_owner_authority(
+                current,
+                marker=observed["marker"],
+                established=observed["established"],
+            )
+            is AuthorityDecision.RECORD_CONSUMED
+        ):
             try:
                 mark_authority_bootstrapped(
                     materializer.material_root,
@@ -764,24 +751,19 @@ class EidolonPiController:
                 current = materializer.owner_assets()
             except OwnerDomainAssetError as exc:
                 raise OperationsError(str(exc)) from exc
-            lineage = _lineage(current)
+        lineage = authority_lineage(current)
         marker = None if will_wipe else observed["marker"]
-        if current.bootstrap_pending:
-            if marker is not None and marker != lineage:
-                raise OperationsError(_authority_recovery_required(marker, lineage))
+        decision = decide_owner_authority(
+            current, marker=marker, established=observed["established"]
+        )
+        if decision is AuthorityDecision.RECOVERY_REQUIRED:
+            raise OperationsError(_authority_recovery_required(marker, lineage))
+        if decision in {
+            AuthorityDecision.CARRY_PENDING,
+            AuthorityDecision.KEEP_ESTABLISHED,
+        }:
             return {
-                "decision": "carry_pending_capability",
-                "owner_domain_id": current.owner_domain_id,
-                "owner_domain_generation": current.owner_domain_generation,
-                "generation_advanced": False,
-                "observed": observed,
-                "lineage": lineage,
-            }
-        if marker is not None:
-            if marker != lineage:
-                raise OperationsError(_authority_recovery_required(marker, lineage))
-            return {
-                "decision": "keep_established_lineage",
+                "decision": str(decision),
                 "owner_domain_id": current.owner_domain_id,
                 "owner_domain_generation": current.owner_domain_generation,
                 "generation_advanced": False,
@@ -825,7 +807,7 @@ class EidolonPiController:
             "previous_generation": current.owner_domain_generation,
             "generation_advanced": True,
             "observed": observed,
-            "lineage": _lineage(advanced),
+            "lineage": authority_lineage(advanced),
         }
 
     def commit_authority_capability(

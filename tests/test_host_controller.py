@@ -82,9 +82,15 @@ def test_local_lifecycle_uses_canonical_product_source_profile(tmp_path: Path) -
     runner = Runner()
     controller = HostController(profile, runner)
     prepared: list[bool] = []
+    committed: list[bool] = []
     product = SimpleNamespace(
         prepare=lambda: prepared.append(True) or {"status": "prepared"},
         health=lambda **_kwargs: {"status": "healthy"},
+        # An operation that starts this Host's Hub also records the one-shot
+        # Owner Authority capability Hub just used; the adapter owes the
+        # product that call, so the stub owes it too.
+        commit_owner_authority=lambda: committed.append(True)
+        or {"status": "authority_bootstrap_consumed"},
     )
     _with_product(controller, product)
 
@@ -106,8 +112,11 @@ def test_local_lifecycle_uses_canonical_product_source_profile(tmp_path: Path) -
         "restart",
     ]
     assert len(runner.calls) == 1
-    assert controller.lifecycle("start").report["status"] == "healthy"
+    started = controller.lifecycle("start").report
+    assert started["status"] == "healthy"
+    assert started["authority"] == {"status": "authority_bootstrap_consumed"}
     assert prepared == [True]
+    assert committed == [True]
     assert runner.calls[-1][0][-2:] == ("product-source", "start")
     with pytest.raises(OperationsError, match="legacy Mac lifecycle flags"):
         controller.lifecycle("start", force_cleanup=True, strict=True, wait_ready=False)
