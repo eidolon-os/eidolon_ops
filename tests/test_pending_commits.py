@@ -38,9 +38,11 @@ class _Git:
         self.counts = counts or {}
         self.subjects = subjects or {}
         self.dirty = dirty or {}
+        self.seen: list[tuple[str, ...]] = []
 
     def run(self, command, **_kwargs):
         command = tuple(command)
+        self.seen.append(command)
         source = Path(command[command.index("-C") + 1]).name
         if command[-2:] == ("rev-parse", "HEAD"):
             head = self.heads.get(source)
@@ -237,3 +239,69 @@ def test_a_long_list_is_elided_rather_than_allowed_to_bury_the_others(config) ->
     assert len(subjects) == 6
     assert subjects[-1] == "…"
     assert answer["pending_commits"] == 9
+
+
+def test_status_carries_the_gap_as_counts_without_reading_every_commit(config) -> None:
+    """Status is asked constantly; the detail view is asked when something is wrong.
+
+    The Host facts this needs are already in the status report, so the summary
+    costs local git and no second round trip — but naming each commit would add
+    a `git log` per source to a command people run all day. Counts here, subjects
+    in `pending`.
+    """
+
+    shipped = {source_id: _SHIPPED for source_id in config.sources}
+    heads = {Path(source.path).name: _SHIPPED for source in config.sources.values()}
+    heads["eidolon_agent"] = _MOVED
+    git = _Git(
+        heads,
+        {"eidolon_agent": "2"},
+        subjects={"eidolon_agent": ["b08f1bc one", "2105122 two"]},
+        dirty={"eidolon_hub": " M hub/app.py\n"},
+    )
+    controller = _controller(config, git)
+
+    summary = controller._pending_summary(_report(config, release_id="r1", shipped=shipped))
+
+    assert summary["pending_commits"] == 2
+    assert summary["sources"] == ["eidolon_agent"]
+    assert summary["uncommitted"] == {"eidolon_hub": {"paths": 1}}
+    # No commit was read, and no edited path was listed: the two reads the
+    # detail view adds are exactly what this one skips.
+    assert not any("log" in call for call in git.seen)
+    assert all("sample" not in value for value in summary["uncommitted"].values())
+
+
+def test_a_source_that_cannot_be_read_does_not_fail_a_health_report(config) -> None:
+    """A footnote must not take the report down with it."""
+
+    class Broken:
+        def run(self, command, **_kwargs):
+            raise OSError("no git here")
+
+    summary = _controller(config, Broken())._pending_summary(
+        _report(config, release_id="r1", shipped={})
+    )
+
+    assert summary == {}
+
+
+def test_the_status_line_says_both_kinds_of_gap_or_says_nothing() -> None:
+    from eidolon_ops.status_output import _behind_summary
+
+    assert _behind_summary({}) == "-"
+    assert _behind_summary({"behind": {"pending_commits": 0, "sources": []}}) == "与 Host 一致"
+
+    line = _behind_summary(
+        {
+            "behind": {
+                "pending_commits": 7,
+                "sources": ["eidolon_admin", "eidolon_agent"],
+                "uncommitted": {"eidolon_hub": {"paths": 2}},
+            }
+        }
+    )
+    assert "领先 7 个提交" in line
+    assert "eidolon_admin, eidolon_agent" in line
+    assert "1 个源有未提交改动" in line
+    assert "pending" in line

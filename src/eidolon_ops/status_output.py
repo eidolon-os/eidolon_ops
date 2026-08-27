@@ -141,6 +141,7 @@ def _render_pi(document: Mapping[str, object], units: Mapping[str, object]) -> s
             f"当前版本    {', '.join(releases) if releases else '未发现 active release'}",
             f"最近发布    {latest_receipt}",
             f"服务        {healthy_count}/{len(rows)} 正常",
+            f"代码差距    {_behind_summary(document)}",
             "",
             _table(("Systemd Unit", "状态", "监听地址 / 端口", "详情"), rows),
         )
@@ -154,6 +155,30 @@ def _render_pi(document: Mapping[str, object], units: Mapping[str, object]) -> s
             )
         )
     return "\n".join(lines)
+
+
+def _behind_summary(document: Mapping[str, object]) -> str:
+    """One line for the question status cannot otherwise answer.
+
+    A Host can be entirely healthy and still not be running what was committed
+    an hour ago, and every service reading 正常 is exactly when nobody thinks to
+    check. Counts only; `pending` names the commits.
+    """
+
+    behind = _mapping(document.get("behind"))
+    if not behind:
+        return "-"
+    commits = behind.get("pending_commits")
+    sources = behind.get("sources")
+    uncommitted = _mapping(behind.get("uncommitted"))
+    parts = []
+    if isinstance(commits, int) and commits and isinstance(sources, list):
+        parts.append(f"本机领先 {commits} 个提交（{', '.join(str(item) for item in sources)}）")
+    if uncommitted:
+        parts.append(f"{len(uncommitted)} 个源有未提交改动")
+    if not parts:
+        return "与 Host 一致"
+    return " · ".join(parts) + " —— 详情见 pending"
 
 
 def _render_generic(document: Mapping[str, object]) -> str:

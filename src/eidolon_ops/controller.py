@@ -264,7 +264,35 @@ class EidolonPiController:
         # Which link this ran over decides whether the next release takes two
         # seconds or three minutes, so the operator gets told rather than
         # having to infer it from how long they waited.
-        return {**report, "endpoint": self.transport.describe()}
+        #
+        # The gap between these checkouts and the Host rides along because the
+        # Host facts it needs are already in this report: asking costs local git
+        # and no second round trip. Counts only — naming each commit is what
+        # `pending` is for, and status is asked far more often than it is read
+        # in full.
+        return {
+            **report,
+            "endpoint": self.transport.describe(),
+            "behind": self._pending_summary(report),
+        }
+
+    def _pending_summary(self, report: Mapping[str, object]) -> dict[str, object]:
+        """How far this workstation is ahead of the Host, in one line's worth.
+
+        Never raises: it is a footnote on a health report, and a Host that is
+        answering must not be reported as unreachable because a sibling checkout
+        could not be read.
+        """
+
+        try:
+            answer = self._pending_commits(report, verbose=False)
+        except Exception:  # pragma: no cover - a footnote must not fail a report
+            return {}
+        return {
+            key: answer[key]
+            for key in ("active_release", "pending_commits", "uncommitted", "detail")
+            if key in answer
+        } | {"sources": sorted(answer.get("pending") or {})}
 
     def pending(self) -> dict[str, object]:
         """Which commits exist here and are not on the Host.
@@ -293,7 +321,9 @@ class EidolonPiController:
             **self._pending_commits(report),
         }
 
-    def _pending_commits(self, report: Mapping[str, object]) -> dict[str, object]:
+    def _pending_commits(
+        self, report: Mapping[str, object], *, verbose: bool = True
+    ) -> dict[str, object]:
         active = self._active_release_from_links(report)
         if active is None:
             return {
@@ -315,10 +345,10 @@ class EidolonPiController:
             path = Path(source.path)
             recorded = shipped.get(source_id)
             revision = recorded.get("revision") if isinstance(recorded, Mapping) else None
-            entry = self._distance_from_head(path, revision)
+            entry = self._distance_from_head(path, revision, verbose=verbose)
             if entry is not None:
                 behind[source_id] = entry
-            edits = self._uncommitted(path)
+            edits = self._uncommitted(path, verbose=verbose)
             if edits is not None:
                 uncommitted[source_id] = edits
         total = sum(
@@ -376,7 +406,9 @@ class EidolonPiController:
                 return sources
         return None
 
-    def _distance_from_head(self, path: Path, revision: object) -> dict[str, object] | None:
+    def _distance_from_head(
+        self, path: Path, revision: object, *, verbose: bool = True
+    ) -> dict[str, object] | None:
         """How far this checkout has moved past what the Host is running."""
 
         if not isinstance(revision, str) or not revision:
@@ -396,7 +428,7 @@ class EidolonPiController:
             else None
         )
         entry: dict[str, object] = {"shipped": revision, "head": current, "commits": commits}
-        if commits:
+        if commits and verbose:
             entry["subjects"] = self._subjects(path, revision, current)
         if commits is None:
             # The Host is running something this checkout does not contain: a
@@ -426,7 +458,7 @@ class EidolonPiController:
             return [*lines[:_PENDING_SUBJECTS], "…"]
         return lines
 
-    def _uncommitted(self, path: Path) -> dict[str, object] | None:
+    def _uncommitted(self, path: Path, *, verbose: bool = True) -> dict[str, object] | None:
         """Work that cannot reach the Host at all until it is committed.
 
         A release is sealed with ``git archive`` from a commit, so an edit that
@@ -442,10 +474,10 @@ class EidolonPiController:
         entries = [line.strip() for line in listed.stdout.splitlines() if line.strip()]
         if not entries:
             return None
-        return {
-            "paths": len(entries),
-            "sample": entries[:_PENDING_SUBJECTS],
-        }
+        edits: dict[str, object] = {"paths": len(entries)}
+        if verbose:
+            edits["sample"] = entries[:_PENDING_SUBJECTS]
+        return edits
 
     def app_ready(self) -> dict[str, object]:
         self.preflight.validate_ssh_material()
