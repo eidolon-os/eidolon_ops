@@ -33,6 +33,19 @@ def app_ready(host_id: str) -> Plan:
     )
 
 
+def pending(host_id: str) -> Plan:
+    """What this workstation holds that the Host is not running."""
+
+    return Plan(
+        operation="pending",
+        host_id=host_id,
+        steps=_steps(
+            ("observe", "read what the Host runs and which commits it shipped"),
+            ("compare", "subtract that from each checkout's current HEAD"),
+        ),
+    )
+
+
 def doctor(host_id: str) -> Plan:
     return Plan(
         operation="doctor",

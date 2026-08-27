@@ -15,7 +15,7 @@ import stat
 import tarfile
 import tempfile
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from eidolon_ops.component_contract import read_component_contracts
@@ -240,6 +240,135 @@ class EidolonPiController:
         # seconds or three minutes, so the operator gets told rather than
         # having to infer it from how long they waited.
         return {**report, "endpoint": self.transport.describe()}
+
+    def pending(self) -> dict[str, object]:
+        """Which commits exist here and are not on the Host.
+
+        A release ships each checkout's HEAD as it stood when the run began, and
+        several people commit to these repositories all day. So a commit made
+        while a deploy was in flight — the window measured three to six minutes
+        on this board — is simply in the next release, and a commit made after
+        one is not on the Host at all. Neither is lost, and both look exactly
+        like "my change is missing" if nothing says so.
+
+        Both halves of the answer already existed and nothing put them together:
+        the Host records the commits every activation shipped, and the local
+        repositories know where they are now. This subtracts them.
+
+        Read-only, and tolerant on purpose. It is the command someone runs when
+        they already suspect something is wrong, so a source it cannot account
+        for is reported as unknown rather than raising.
+        """
+
+        self.preflight.validate_ssh_material()
+        report = self.transport.run_agent("status", self.host_layer.target_payload())
+        return {
+            "status": "observed",
+            "endpoint": self.transport.describe(),
+            **self._pending_commits(report),
+        }
+
+    def _pending_commits(self, report: Mapping[str, object]) -> dict[str, object]:
+        active = self._active_release_from_links(report)
+        if active is None:
+            return {
+                "active_release": None,
+                "detail": "the Host publishes no component links, so nothing says what it runs",
+            }
+        shipped = self._shipped_sources(report, active)
+        if shipped is None:
+            return {
+                "active_release": active,
+                "detail": (
+                    f"the Host runs {active} but has no recorded provenance for it, so what "
+                    "it shipped cannot be compared with what is here"
+                ),
+            }
+        behind: dict[str, object] = {}
+        for source_id, source in sorted(self.config.sources.items()):
+            recorded = shipped.get(source_id)
+            revision = recorded.get("revision") if isinstance(recorded, Mapping) else None
+            entry = self._distance_from_head(Path(source.path), revision)
+            if entry is not None:
+                behind[source_id] = entry
+        total = sum(
+            value["commits"]
+            for value in behind.values()
+            if isinstance(value, Mapping) and isinstance(value.get("commits"), int)
+        )
+        return {
+            "active_release": active,
+            "pending": behind,
+            "pending_commits": total,
+            "detail": (
+                f"the Host runs {active} and every source matches it"
+                if not behind
+                else f"{total} commit(s) in {len(behind)} source(s) are not on this Host"
+            ),
+        }
+
+    @staticmethod
+    def _active_release_from_links(report: Mapping[str, object]) -> str | None:
+        """The release the Host's own component links point at.
+
+        Not the newest receipt: a receipt records that an activation happened,
+        and the links record which one is being served. They disagree while a
+        candidate is prepared and not activated, which is exactly the state this
+        command exists to make visible.
+        """
+
+        links = report.get("current_links")
+        if not isinstance(links, Mapping) or not links:
+            return None
+        names = {
+            str(value).split("/releases/")[1].split("/")[0]
+            for value in links.values()
+            if isinstance(value, str) and "/releases/" in value
+        }
+        if len(names) != 1:
+            return None
+        return next(iter(names))
+
+    @staticmethod
+    def _shipped_sources(
+        report: Mapping[str, object], release_id: str
+    ) -> Mapping[str, object] | None:
+        history = report.get("release_sources")
+        if not isinstance(history, list):
+            return None
+        for item in history:
+            if not isinstance(item, Mapping) or item.get("release_id") != release_id:
+                continue
+            sources = item.get("sources")
+            if isinstance(sources, Mapping):
+                return sources
+        return None
+
+    def _distance_from_head(self, path: Path, revision: object) -> dict[str, object] | None:
+        """How far this checkout has moved past what the Host is running."""
+
+        if not isinstance(revision, str) or not revision:
+            return {"shipped": None, "head": None, "commits": None, "reason": "not in the release"}
+        head = self.runner.run((self.git, "-C", str(path), "rev-parse", "HEAD"))
+        if head.returncode != 0:
+            return {"shipped": revision, "head": None, "commits": None, "reason": "unreadable"}
+        current = head.stdout.strip()
+        if current == revision:
+            return None
+        counted = self.runner.run(
+            (self.git, "-C", str(path), "rev-list", "--count", f"{revision}..{current}")
+        )
+        commits = (
+            int(counted.stdout.strip())
+            if counted.returncode == 0 and counted.stdout.strip().isdigit()
+            else None
+        )
+        entry: dict[str, object] = {"shipped": revision, "head": current, "commits": commits}
+        if commits is None:
+            # The Host is running something this checkout does not contain: a
+            # release built elsewhere, or history that was rewritten here.
+            entry["reason"] = "the shipped commit is not in this checkout"
+        return entry
 
     def app_ready(self) -> dict[str, object]:
         self.preflight.validate_ssh_material()

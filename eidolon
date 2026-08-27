@@ -11,9 +11,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROFILES_DIR="${EIDOLON_HOSTS_DIR:-${ROOT}/config/hosts}"
 UV_BIN="${EIDOLON_UV_BIN:-uv}"
 
-ALL_COMMANDS="abandon app-ready authority-backup authority-reset authority-restore backup commissioning-code controller-reset converge-inputs debug deploy diagnose doctor init-inputs install logs provision reset restart restore rollback start status stop update"
+ALL_COMMANDS="abandon app-ready pending authority-backup authority-reset authority-restore backup commissioning-code controller-reset converge-inputs debug deploy diagnose doctor init-inputs install logs provision reset restart restore rollback start status stop update"
 MAC_COMMANDS="status doctor app-ready start stop restart logs commissioning-code reset debug"
-PI_COMMANDS="abandon status doctor app-ready start stop restart logs commissioning-code provision init-inputs converge-inputs backup restore install controller-reset authority-reset authority-backup authority-restore reset deploy update rollback diagnose"
+PI_COMMANDS="abandon status pending doctor app-ready start stop restart logs commissioning-code provision init-inputs converge-inputs backup restore install controller-reset authority-reset authority-backup authority-restore reset deploy update rollback diagnose"
 
 die() {
   printf '错误：%s\n' "$*" >&2
@@ -127,6 +127,7 @@ command_summary() {
     status) printf '查看 Host、服务进程和健康状态' ;;
     doctor) printf '检查本机工具链、Host 能力与发布前置条件' ;;
     app-ready) printf '执行手机接入所需的完整 readiness 门禁' ;;
+    pending) printf '本机有哪些提交还没部署到这台 Host 上' ;;
     start) printf '启动该 Host 的完整产品后端' ;;
     stop) printf '停止该 Host 的产品后端' ;;
     restart) printf '完整停止后重新准备并启动产品后端' ;;
@@ -178,6 +179,7 @@ Eidolon 统一运维入口
   ./eidolon mac start
   ./eidolon mac debug web-start
   ./eidolon pi5 app-ready
+  ./eidolon pi5 pending
   ./eidolon pi5 install --release-id 20260807-product-1 --apply
   ./eidolon help pi5 install
 

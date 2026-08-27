@@ -49,6 +49,7 @@ def _lifecycle(controller: HostController, arguments: argparse.Namespace) -> obj
 OPERATIONS: dict[str, Callable[[HostController, argparse.Namespace], object]] = {
     "status": lambda controller, _: controller.status(),
     "app-ready": lambda controller, _: controller.app_ready(),
+    "pending": lambda controller, _: controller.pending(),
     "doctor": lambda controller, a: controller.doctor(release_id=a.release_id),
     "provision": lambda controller, a: controller.provision(apply=a.apply),
     "init-inputs": lambda controller, a: controller.initialize_inputs(
@@ -224,6 +225,10 @@ def _parser() -> argparse.ArgumentParser:
     )
     status.set_defaults(human=False)
     operations.add_parser("app-ready")
+    operations.add_parser(
+        "pending",
+        help="which commits this workstation holds that the Host is not running",
+    )
     doctor = operations.add_parser("doctor")
     doctor.add_argument("--release-id")
     provision = operations.add_parser("provision")

@@ -98,6 +98,19 @@ class HostController:
         report = self.adapter.supervisor.app_ready()
         return self._observed(plan, report, healthy=report.get("status") == "app_ready")
 
+    def pending(self) -> Evidence:
+        """Which commits are here and not on the Host.
+
+        Gated on ``DEPLOY`` rather than a capability of its own: a Host that
+        receives releases is exactly a Host that can be behind one, and a source
+        run has nothing to be behind — it executes the checkouts themselves.
+        """
+
+        plan = plans.pending(self.profile.host_id)
+        release = self.adapter.require_release(Capability.DEPLOY)
+        report = release.pending()
+        return self._observed(plan, report, healthy=not report.get("pending"))
+
     def doctor(self, *, release_id: str | None = None) -> Evidence:
         plan = plans.doctor(self.profile.host_id)
         adapter = self.adapter
