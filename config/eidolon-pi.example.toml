@@ -11,6 +11,9 @@ identity_file = "/absolute/path/to/id_ed25519_eidolon_pi"
 known_hosts_file = "/absolute/path/to/eidolon_pi_known_hosts"
 connect_timeout_seconds = 10
 remote_uv = "/usr/local/bin/uv"
+# Fail before sealing or upload if endpoint discovery did not select a wired
+# interface. Read-only and maintenance operations may still use Wi-Fi.
+require_wired_release_upload = true
 
 [workspace]
 # Not a temporary directory. This holds the sealed bundle a resumed install

@@ -24,6 +24,7 @@ def test_loads_strict_config(config_path: Path) -> None:
     assert config.host.target == "pi@pi.example"
     assert config.foundation_profile == FOUNDATION_PROFILE
     assert config.host.port == 2222
+    assert config.host.require_wired_release_upload is False
     assert config.workspace.python_index_url == "https://pypi.org/simple"
     assert config.workspace.python_http_timeout_seconds == 120
     assert config.workspace.python_http_retries == 8
@@ -304,6 +305,27 @@ def test_a_host_may_state_how_long_its_services_need(config_path: Path) -> None:
              "connect_timeout_seconds = 7\nreadiness_timeout_seconds = 600")
 
     assert load_config(config_path).host.readiness_timeout_seconds == 600
+
+
+def test_a_host_may_require_release_uploads_to_use_a_wire(config_path: Path) -> None:
+    _replace(
+        config_path,
+        "connect_timeout_seconds = 7",
+        "connect_timeout_seconds = 7\nrequire_wired_release_upload = true",
+    )
+
+    assert load_config(config_path).host.require_wired_release_upload is True
+
+
+def test_wired_release_policy_must_be_boolean(config_path: Path) -> None:
+    _replace(
+        config_path,
+        "connect_timeout_seconds = 7",
+        'connect_timeout_seconds = 7\nrequire_wired_release_upload = "yes"',
+    )
+
+    with pytest.raises(ConfigurationError, match="require_wired_release_upload must be a boolean"):
+        load_config(config_path)
 
 
 def test_a_readiness_deadline_outside_reason_is_refused(config_path: Path) -> None:

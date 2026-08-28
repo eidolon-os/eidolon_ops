@@ -151,7 +151,7 @@ class ReleaseTransaction:
         # being explained. The same calculation that annotates that failure costs
         # one round trip here, where the answer can still change a decision.
         local["source_advance"] = self._advance_since_last_activation()
-        local["link"] = self._link_report()
+        local["link"] = self._release_link_report()
         phases = Journal(self.progress)
         candidate_prepared = False
         health_gates_passed = False
@@ -414,6 +414,26 @@ class ReleaseTransaction:
             )
         return report
 
+    def _release_link_report(self) -> dict[str, object]:
+        """Report the selected endpoint and enforce the Host's upload policy.
+
+        The check happens before a bundle is sealed or a target staging area is
+        created. A failed wired lookup therefore cannot turn into an expensive
+        wireless/VPN upload merely because that endpoint is still reachable.
+        """
+
+        report = self._link_report()
+        if (
+            self.preflight.config.host.require_wired_release_upload
+            and report["status"] != "wired"
+        ):
+            raise OperationsError(
+                "release upload requires a wired endpoint, but the selected link is "
+                f"{report['status']!r}. Connect the USB Ethernet link and retry; "
+                "the release was not sealed or uploaded."
+            )
+        return report
+
     def _advance_since_last_activation(self) -> dict[str, object]:
         """What moved since this Host last activated something, before sealing.
 
@@ -626,7 +646,7 @@ class ReleaseTransaction:
                 "next": "rerun with --apply after reviewing every planned mutation",
             }
         local = self.preflight.run(require_install_files=True)
-        local["link"] = self._link_report()
+        local["link"] = self._release_link_report()
         # Decided before the Host is touched, and before a single asset is
         # rendered from the Owner material: the descriptor, the bootstrap
         # capability and local-api.env all name whichever generation this

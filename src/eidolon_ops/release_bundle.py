@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import shutil
+import tempfile
 import time
 from pathlib import Path
 
@@ -39,10 +40,11 @@ from eidolon_ops.workstation_toolchain import ensure_workstation_uv
 #: which the profile is already required to place somewhere durable, means the
 #: path it is bound to is one nothing sweeps and nothing relocates.
 _KEPT_DEPENDENCY_CACHE = "uv-cache"
+_RELEASE_ARTIFACT_STORE = "release-artifacts-v1"
 _BUNDLE_SHAPE = {
     "bundle.json",
     "prepare_target.py",
-    "python-dependencies.tar.gz",
+    "artifacts",
     "sources",
 }
 _UPLOAD_GUARD_STATES = {"ready_for_upload", "resume_upload", "ready_for_prepare"}
@@ -240,7 +242,9 @@ class BundleTransfer:
             remote_bundle = f"/var/tmp/eidolon-release-{release_id}"
             phases.begin("upload_finalize")
             if guard.get("status") != "ready_for_prepare":
-                self.transport.upload_directory_resumable(output, remote_bundle)
+                self.transport.upload_directory_resumable(
+                    output, remote_bundle, exclude=("artifacts",)
+                )
             finalized = self.transport.run_agent(
                 "finalize-upload",
                 {"release_id": release_id, "transfer_id": transfer_id},
@@ -249,6 +253,13 @@ class BundleTransfer:
             if finalized.get("status") not in {"finalized", "already_finalized"}:
                 raise OperationsError("remote upload finalization returned invalid evidence")
             phases.append({"phase": "upload_finalize", "result": finalized})
+            phases.begin("release_artifacts")
+            phases.append(
+                {
+                    "phase": "release_artifacts",
+                    "result": self._carry_release_artifacts(output, transfer_id),
+                }
+            )
             phases.begin("embedding_model")
             phases.append({"phase": "embedding_model", "result": self._carry_embedding_model()})
             phases.begin("prepare")
@@ -345,6 +356,87 @@ class BundleTransfer:
         )
         return {"status": "carried", "model": artifact.model_id}
 
+    def _carry_release_artifacts(self, output: Path, transfer_id: str) -> dict[str, object]:
+        """Install only content-addressed objects this Host does not hold.
+
+        The release manifest binds every object by digest and size.  The Host
+        answers from bytes it re-hashes, not from names, and finalization repeats
+        that proof before an object becomes visible in the durable store.
+        """
+
+        artifacts = self._artifact_records(output)
+        identities = [
+            {"sha256": item["sha256"], "size": item["size"]} for item in artifacts
+        ]
+        state = self.transport.run_agent(
+            "release-artifact-state", {"artifacts": identities}, timeout=300
+        )
+        missing_wire = state.get("missing")
+        if state.get("status") not in {"complete", "missing"} or not isinstance(
+            missing_wire, list
+        ):
+            raise OperationsError("Host returned invalid release artifact state")
+        missing = {value for value in missing_wire if isinstance(value, str)}
+        if len(missing) != len(missing_wire):
+            raise OperationsError("Host returned invalid missing artifact identity")
+        by_digest = {str(item["sha256"]): item for item in artifacts}
+        if not missing <= set(by_digest):
+            raise OperationsError("Host requested an artifact outside the release manifest")
+        if not missing:
+            return {
+                "status": "already_held",
+                "objects": len(artifacts),
+                "bytes": 0,
+            }
+
+        wanted = [
+            {"sha256": digest, "size": by_digest[digest]["size"]}
+            for digest in sorted(missing)
+        ]
+        guard = self.transport.run_agent(
+            "guard-release-artifacts",
+            {"transfer_id": transfer_id, "artifacts": wanted},
+            sudo=False,
+        )
+        if guard.get("status") not in {"ready_for_upload", "resume_upload"}:
+            raise OperationsError("release artifact upload guard returned invalid evidence")
+        remote = f"/var/tmp/eidolon-artifacts-{transfer_id[:16]}"
+        with tempfile.TemporaryDirectory(prefix="eidolon-release-artifacts-") as raw:
+            root = Path(raw)
+            object_root = root / "sha256"
+            object_root.mkdir()
+            for digest in sorted(missing):
+                record = by_digest[digest]
+                source = output / str(record["bundle_path"])
+                destination = object_root / digest
+                try:
+                    os.link(source, destination)
+                except OSError:
+                    shutil.copyfile(source, destination)
+            self.transport.upload_directory_resumable(root, remote)
+        finalized = self.transport.run_agent(
+            "finalize-release-artifacts",
+            {"transfer_id": transfer_id, "artifacts": wanted},
+            timeout=1800,
+        )
+        if finalized.get("status") not in {"installed", "already_installed"}:
+            raise OperationsError("release artifact finalization returned invalid evidence")
+        return {
+            "status": finalized["status"],
+            "objects": len(wanted),
+            "bytes": sum(int(item["size"]) for item in wanted),
+        }
+
+    @staticmethod
+    def _artifact_records(output: Path) -> list[dict[str, object]]:
+        document = parse_json((output / "bundle.json").read_text(encoding="utf-8"), "bundle")
+        artifacts = document.get("artifacts")
+        if not isinstance(artifacts, list) or not all(
+            isinstance(item, dict) for item in artifacts
+        ):
+            raise OperationsError("bundle artifact manifest is invalid")
+        return artifacts
+
     def _seal(
         self, output: Path, release_id: str, *, cutover_mode: str
     ) -> dict[str, object]:
@@ -375,6 +467,9 @@ class BundleTransfer:
                 ),
                 "EIDOLON_RELEASE_UV_CACHE": str(
                     self.config.workspace.toolchain_root / _KEPT_DEPENDENCY_CACHE
+                ),
+                "EIDOLON_RELEASE_ARTIFACT_STORE": str(
+                    self.config.workspace.toolchain_root / _RELEASE_ARTIFACT_STORE
                 ),
             }
         )
@@ -455,17 +550,77 @@ class BundleTransfer:
             or file_sha256(output / "prepare_target.py") != preparer["sha256"]
         ):
             raise OperationsError("existing bundle preparer digest drifted")
+        artifacts = document.get("artifacts")
+        if not isinstance(artifacts, list) or len(artifacts) != 9:
+            raise OperationsError("existing bundle artifact set drifted")
+        artifact_ids: set[str] = set()
+        artifact_digests: set[str] = set()
+        channel_paths: set[str] = set()
+        for item in artifacts:
+            if (
+                not isinstance(item, dict)
+                or set(item)
+                != {
+                    "artifact_id",
+                    "kind",
+                    "sha256",
+                    "size",
+                    "bundle_path",
+                    "install_path",
+                }
+                or not isinstance(item.get("artifact_id"), str)
+                or item["artifact_id"] in artifact_ids
+                or item.get("kind") not in {"dependency-cache", "channel-model"}
+                or not isinstance(item.get("sha256"), str)
+                or len(item["sha256"]) != 64
+                or not isinstance(item.get("size"), int)
+                or isinstance(item.get("size"), bool)
+                or item["size"] < 0
+                or item.get("bundle_path") != f"artifacts/sha256/{item['sha256']}"
+                or not isinstance(item.get("install_path"), str)
+            ):
+                raise OperationsError("existing bundle artifact record drifted")
+            if item["kind"] == "dependency-cache":
+                if item["artifact_id"] != "python-dependencies" or item["install_path"] != "":
+                    raise OperationsError("existing dependency artifact record drifted")
+            else:
+                if (
+                    not item["install_path"]
+                    or item["artifact_id"] != f"channel-model:{item['install_path']}"
+                    or item["install_path"] in channel_paths
+                ):
+                    raise OperationsError("existing Channel artifact record drifted")
+                channel_paths.add(item["install_path"])
+            path = output / item["bundle_path"]
+            if (
+                not path.is_file()
+                or path.is_symlink()
+                or path.stat().st_size != item["size"]
+                or file_sha256(path) != item["sha256"]
+            ):
+                raise OperationsError(
+                    f"existing bundle artifact bytes drifted: {item['artifact_id']}"
+                )
+            artifact_ids.add(item["artifact_id"])
+            artifact_digests.add(item["sha256"])
+        artifact_root = output / "artifacts/sha256"
+        if (
+            "python-dependencies" not in artifact_ids
+            or len(channel_paths) != 8
+            or not artifact_root.is_dir()
+            or artifact_root.is_symlink()
+            or {path.name for path in artifact_root.iterdir()} != artifact_digests
+        ):
+            raise OperationsError("existing bundle artifact directory drifted")
         dependencies = document.get("python_dependencies")
         if (
-            document.get("schema_version") != 2
+            document.get("schema_version") != 3
             or not isinstance(dependencies, dict)
-            or dependencies.get("path") != "python-dependencies.tar.gz"
+            or dependencies.get("artifact_id") != "python-dependencies"
             or dependencies.get("uv_version") != "0.11.15"
             or dependencies.get("python_version") != "3.13"
             or dependencies.get("platform") != "aarch64-manylinux_2_40"
             or dependencies.get("index_url") != self.config.workspace.python_index_url
-            or not isinstance(dependencies.get("sha256"), str)
-            or file_sha256(output / "python-dependencies.tar.gz") != dependencies["sha256"]
         ):
             raise OperationsError("existing bundle Python dependency cache drifted")
         return file_sha256(manifest)

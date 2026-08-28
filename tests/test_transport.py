@@ -163,6 +163,21 @@ def test_resumable_directory_upload_uses_strict_rsync(config, tmp_path: Path) ->
     )
 
 
+def test_resumable_bundle_upload_can_exclude_locally_held_artifacts(
+    config, tmp_path: Path
+) -> None:
+    source = tmp_path / "bundle"
+    source.mkdir()
+    runner = RecordingRunner([ProcessResult(0, "", "")])
+    transport = SSHTransport(config.host, runner, endpoints=_no_endpoints)
+
+    transport.upload_directory_resumable(
+        source, "/var/tmp/eidolon-release-r1", exclude=("artifacts",)
+    )
+
+    assert "--exclude=/artifacts" in runner.calls[0]["command"]
+
+
 def test_resumable_upload_rejects_symlink_source(config, tmp_path: Path) -> None:
     source = tmp_path / "bundle"
     source.mkdir()

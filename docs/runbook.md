@@ -39,7 +39,8 @@ validate Mac commands, SSH files, 8 repos/commits, 14 private inputs
   -> foundation platform/capacity/package/artifact/service doctor
   -> if needed: Python bootstrap -> apt -> hash-pinned NATS/LiveKit/uv/Node -> BlueZ/NM/Avahi
   -> exact Foundation evidence outside the product authority namespace
-  -> exact 8-commit bundle -> digest-guarded resumable SSH/rsync staging
+  -> require wired release endpoint -> exact 8-commit thin bundle
+  -> query Pi CAS -> transfer only missing digest-guarded artifacts by resumable SSH/rsync
   -> explicit HTTPS Python index + bounded timeout/retries -> frozen Pi-native prepare/seal
   -> private staging -> exclusive first-install lock -> clean namespace proof
   -> identities/directories -> exact 14 input bytes -> fresh Data V2 baseline
@@ -128,6 +129,10 @@ commit is refused. That is correct — a release id names one exact combination 
 `--revision` to continue the original combination, or a new `--release-id`.
 
 ## Daily update
+
+正式 Pi profile 默认要求有线 release upload。若 USB Ethernet 未连接或 endpoint discovery 选中 Wi-Fi，
+命令会在 seal 和上传前失败；不要关闭该门禁来绕过故障。连接线缆后重试即可。相同 lock 与 Channel 模型
+已存在于 Pi CAS 时，日常更新只传 source/manifest 和真正变化的大对象。
 
 1. Commit in the source repositories. Nothing in the operator profile needs editing.
 2. Prepare and inspect without service switch:

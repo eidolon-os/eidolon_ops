@@ -763,14 +763,13 @@ def test_guard_upload_resumes_only_matching_owned_transfer(monkeypatch, tmp_path
 def test_upload_finalization_hands_one_closed_bundle_to_kernel(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(contract, "VAR_TMP", tmp_path)
     release_id = "closed-bundle"
-    manifest_bytes = b'{"schema_version":2}\n'
+    manifest_bytes = b'{"schema_version":3}\n'
     transfer_id = hashlib.sha256(manifest_bytes).hexdigest()
     payload = {"release_id": release_id, "transfer_id": transfer_id}
     staging.guard_upload(payload)
     bundle = tmp_path / f"eidolon-release-{release_id}"
     (bundle / "bundle.json").write_bytes(manifest_bytes)
     (bundle / "prepare_target.py").write_text("preparer", encoding="utf-8")
-    (bundle / "python-dependencies.tar.gz").write_bytes(b"dependencies")
     (bundle / "sources").mkdir()
 
     result = staging.finalize_upload(payload)
@@ -828,7 +827,6 @@ def test_upload_finalization_rejects_marker_shape_and_digest_drift(
 
     (bundle / "bundle.json").write_text("wrong", encoding="utf-8")
     (bundle / "prepare_target.py").write_text("preparer", encoding="utf-8")
-    (bundle / "python-dependencies.tar.gz").write_bytes(b"dependencies")
     (bundle / "sources").mkdir()
     with pytest.raises(TargetError, match="manifest digest drifted"):
         staging.finalize_upload(payload)
@@ -839,6 +837,88 @@ def test_guard_upload_rejects_invalid_transfer_identity(monkeypatch, tmp_path: P
 
     with pytest.raises(TargetError, match="transfer identity"):
         staging.guard_upload({"release_id": "resume", "transfer_id": "short"})
+
+
+def test_release_artifacts_are_missing_then_atomically_installed(
+    monkeypatch, tmp_path: Path
+) -> None:
+    carried = b"content-addressed-object"
+    digest = hashlib.sha256(carried).hexdigest()
+    payload = {"artifacts": [{"sha256": digest, "size": len(carried)}]}
+    store = tmp_path / "store/sha256"
+    monkeypatch.setattr(contract, "VAR_TMP", tmp_path)
+    monkeypatch.setattr(contract, "RELEASE_ARTIFACT_STORE_ROOT", store)
+    monkeypatch.setattr(staging.os, "chown", lambda *_args: None)
+
+    assert staging.release_artifact_state(payload) == {
+        "status": "missing",
+        "missing": [digest],
+        "corrupt": [],
+        "objects": 1,
+    }
+    transfer = {"transfer_id": "a" * 64, **payload}
+    assert staging.guard_release_artifacts(transfer)["status"] == "ready_for_upload"
+    assert staging.guard_release_artifacts(transfer)["status"] == "resume_upload"
+    stage = tmp_path / f"eidolon-artifacts-{'a' * 16}/sha256"
+    stage.mkdir()
+    (stage / digest).write_bytes(carried)
+
+    finalized = staging.finalize_release_artifacts(transfer)
+
+    assert finalized == {"status": "installed", "objects": 1, "installed": 1}
+    assert (store / digest).read_bytes() == carried
+    assert staging.release_artifact_state(payload)["status"] == "complete"
+    assert not stage.parent.exists()
+
+
+def test_release_artifact_finalization_rejects_corruption_before_store_visibility(
+    monkeypatch, tmp_path: Path
+) -> None:
+    carried = b"expected"
+    digest = hashlib.sha256(carried).hexdigest()
+    payload = {
+        "transfer_id": "b" * 64,
+        "artifacts": [{"sha256": digest, "size": len(carried)}],
+    }
+    store = tmp_path / "store/sha256"
+    monkeypatch.setattr(contract, "VAR_TMP", tmp_path)
+    monkeypatch.setattr(contract, "RELEASE_ARTIFACT_STORE_ROOT", store)
+    staging.guard_release_artifacts(payload)
+    stage = tmp_path / f"eidolon-artifacts-{'b' * 16}/sha256"
+    stage.mkdir()
+    (stage / digest).write_bytes(b"corrupt!")
+
+    with pytest.raises(TargetError, match="checksum drifted"):
+        staging.finalize_release_artifacts(payload)
+
+    assert not (store / digest).exists()
+
+
+def test_corrupt_regular_artifact_is_reported_missing_and_repaired(
+    monkeypatch, tmp_path: Path
+) -> None:
+    carried = b"repaired-object"
+    digest = hashlib.sha256(carried).hexdigest()
+    store = tmp_path / "store/sha256"
+    store.mkdir(parents=True)
+    (store / digest).write_bytes(b"corrupt-object")
+    payload = {"artifacts": [{"sha256": digest, "size": len(carried)}]}
+    monkeypatch.setattr(contract, "VAR_TMP", tmp_path)
+    monkeypatch.setattr(contract, "RELEASE_ARTIFACT_STORE_ROOT", store)
+    monkeypatch.setattr(staging.os, "chown", lambda *_args: None)
+
+    state = staging.release_artifact_state(payload)
+    assert state["missing"] == [digest]
+    assert state["corrupt"] == [digest]
+    transfer = {"transfer_id": "c" * 64, **payload}
+    staging.guard_release_artifacts(transfer)
+    stage = tmp_path / f"eidolon-artifacts-{'c' * 16}/sha256"
+    stage.mkdir()
+    (stage / digest).write_bytes(carried)
+
+    staging.finalize_release_artifacts(transfer)
+
+    assert (store / digest).read_bytes() == carried
 
 
 def test_guard_upload_reports_exact_prepared_release(monkeypatch, tmp_path: Path) -> None:

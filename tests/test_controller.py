@@ -204,7 +204,7 @@ class ControllerRunner:
             document = {
                 "tool": "eidolon-release",
                 "cli_contract_version": 1,
-                "bundle_schema_version": 2,
+                "bundle_schema_version": 3,
                 "descriptor_schema_version": 2,
                 "snapshot_schema_version": 2,
                 "activator_relative_path": ".release/bin/eidolon-release",
@@ -236,12 +236,38 @@ class ControllerRunner:
                 )
             preparer = output / "prepare_target.py"
             preparer.write_bytes(b"preparer")
-            dependencies = output / "python-dependencies.tar.gz"
-            dependencies.write_bytes(b"arm64 dependency cache")
+            artifact_root = output / "artifacts/sha256"
+            artifact_root.mkdir(parents=True)
+            artifact_records = []
+            artifact_inputs = [
+                ("python-dependencies", "dependency-cache", "", b"arm64 dependency cache"),
+                *[
+                    (
+                        f"channel-model:model-{index}.bin",
+                        "channel-model",
+                        f"model-{index}.bin",
+                        f"model-{index}".encode(),
+                    )
+                    for index in range(8)
+                ],
+            ]
+            for artifact_id, kind, install_path, content in artifact_inputs:
+                digest = hashlib.sha256(content).hexdigest()
+                (artifact_root / digest).write_bytes(content)
+                artifact_records.append(
+                    {
+                        "artifact_id": artifact_id,
+                        "kind": kind,
+                        "sha256": digest,
+                        "size": len(content),
+                        "bundle_path": f"artifacts/sha256/{digest}",
+                        "install_path": install_path,
+                    }
+                )
             (output / "bundle.json").write_text(
                 json.dumps(
                     {
-                        "schema_version": 2,
+                        "schema_version": 3,
                         "release_id": command[2],
                         "cutover_mode": cutover_mode,
                         "target": {"system": "linux", "machine": "aarch64"},
@@ -250,9 +276,9 @@ class ControllerRunner:
                             "path": "prepare_target.py",
                             "sha256": hashlib.sha256(preparer.read_bytes()).hexdigest(),
                         },
+                        "artifacts": artifact_records,
                         "python_dependencies": {
-                            "path": "python-dependencies.tar.gz",
-                            "sha256": hashlib.sha256(dependencies.read_bytes()).hexdigest(),
+                            "artifact_id": "python-dependencies",
                             "uv_version": "0.11.15",
                             "python_version": "3.13",
                             "platform": "aarch64-manylinux_2_40",
@@ -330,6 +356,10 @@ class FakeTransport:
             "doctor-host": {"status": "healthy", "checks": {}},
             "guard-upload": {"status": "ready_for_upload"},
             "finalize-upload": {"status": "finalized"},
+            "release-artifact-state": {
+                "status": "complete",
+                "missing": [],
+            },
             "cleanup-stage": {"status": "cleaned"},
             "retire-legacy-root": {"status": "retired"},
             "abort-replacement": {"status": "aborted"},
@@ -470,7 +500,7 @@ class FakeTransport:
         self.downloads.append((source, Path(destination), recursive))
         Path(destination).mkdir(parents=True, exist_ok=True)
 
-    def upload_directory_resumable(self, source, destination):
+    def upload_directory_resumable(self, source, destination, *, exclude=()):
         self.resumable_uploads.append((Path(source), destination))
 
 
@@ -513,7 +543,7 @@ def test_local_preflight_proves_exact_commits(config) -> None:
     assert result["source_selection"] == {"mode": "repository_head"}
     assert result["install_prerequisites_checked"] is True
     assert result["release_tool_contract"]["tool"] == "eidolon-release"
-    assert result["release_tool_contract"]["bundle_schema_version"] == 2
+    assert result["release_tool_contract"]["bundle_schema_version"] == 3
     assert result["install_input_contract"] == {"status": "compatible"}
     assert result["python_resolver"] == {
         "index_url": "https://pypi.org/simple",
@@ -733,6 +763,7 @@ def test_deploy_defaults_to_prepare_and_dry_run(setup_controller) -> None:
         "release_reclaim_prepare",
         "upload_guard",
         "upload_finalize",
+        "release_artifacts",
         # The encoder is carried before the release is prepared: a Host that
         # gets the code without the weights answers memory queries slowly and
         # emptily, which reads like an Eidolon that remembers nothing.
@@ -770,6 +801,63 @@ def test_deploy_defaults_to_prepare_and_dry_run(setup_controller) -> None:
     assert reclaim["required_bytes"] > 0
     assert reclaim["reserve_bytes"] == 1024**3
     assert (controller.config.workspace.bundle_root / "r1").is_dir()
+
+
+def test_deploy_refuses_wireless_before_sealing_or_upload(config) -> None:
+    strict = replace(
+        config,
+        host=replace(config.host, require_wired_release_upload=True),
+    )
+    transport = FakeTransport()
+    transport.endpoint = HostEndpoint(
+        address="192.168.3.40", interface="en0", link="wireless"
+    )
+    controller = EidolonPiController(
+        strict,
+        ControllerRunner(strict),
+        transport=transport,
+    )
+    _stub_input_contract(controller)
+
+    with pytest.raises(OperationsError, match="requires a wired endpoint"):
+        controller.deploy(release_id="r1", resume=False, activate=False)
+
+    assert not (strict.workspace.bundle_root / "r1").exists()
+    assert transport.resumable_uploads == []
+
+
+def test_deploy_uploads_only_release_artifacts_the_host_reports_missing(config) -> None:
+    class ColdArtifactTransport(FakeTransport):
+        def run_agent(self, action, payload, **kwargs):
+            if action == "release-artifact-state":
+                self.agent_calls.append((action, dict(payload), "/usr/bin/python3", True))
+                return {
+                    "status": "missing",
+                    "missing": [payload["artifacts"][0]["sha256"]],
+                }
+            if action == "guard-release-artifacts":
+                self.agent_calls.append((action, dict(payload), "/usr/bin/python3", False))
+                return {"status": "ready_for_upload"}
+            if action == "finalize-release-artifacts":
+                self.agent_calls.append((action, dict(payload), "/usr/bin/python3", True))
+                return {"status": "installed"}
+            return super().run_agent(action, payload, **kwargs)
+
+    transport = ColdArtifactTransport()
+    controller = EidolonPiController(config, ControllerRunner(config), transport=transport)
+    _stub_input_contract(controller)
+
+    controller.deploy(release_id="r1", resume=False, activate=False)
+
+    assert len(transport.resumable_uploads) == 2
+    assert transport.resumable_uploads[1][1].startswith("/var/tmp/eidolon-artifacts-")
+    guard = next(call for call in transport.agent_calls if call[0] == "guard-release-artifacts")
+    finalized = next(
+        call for call in transport.agent_calls if call[0] == "finalize-release-artifacts"
+    )
+    assert guard[3] is False
+    assert finalized[3] is True
+    assert len(guard[1]["artifacts"]) == 1
 
 
 def test_successful_deploy_removes_current_and_expired_local_bundles(

@@ -106,6 +106,11 @@ class HostConfig:
     known_hosts_file: Path
     connect_timeout_seconds: int
     remote_uv: Path
+    #: Fail a release before sealing or transferring it unless the selected
+    #: endpoint is on a locally identified wired interface. This is an
+    #: operator policy rather than a transport assumption: status and repair
+    #: operations may still use any reachable link.
+    require_wired_release_upload: bool = False
     #: How long this Host's own services may take to answer after an
     #: activation. A board is not a laptop — the Channel worker alone spends
     #: its stop timeout shutting down and then loads an ONNX model coming up —
@@ -253,7 +258,7 @@ def load_config(path: Path) -> OperationsConfig:
             "connect_timeout_seconds",
             "remote_uv",
         },
-        optional={"readiness_timeout_seconds"},
+        optional={"readiness_timeout_seconds", "require_wired_release_upload"},
         label="host",
     )
     user = _string(host_wire["user"], "host.user")
@@ -273,6 +278,10 @@ def load_config(path: Path) -> OperationsConfig:
         "host.readiness_timeout_seconds",
         minimum=30,
         maximum=1800,
+    )
+    require_wired_release_upload = _boolean(
+        host_wire.get("require_wired_release_upload", False),
+        "host.require_wired_release_upload",
     )
 
     workspace_wire = _mapping(document["workspace"], "workspace")
@@ -401,6 +410,7 @@ def load_config(path: Path) -> OperationsConfig:
             ),
             connect_timeout_seconds=timeout,
             remote_uv=remote_uv,
+            require_wired_release_upload=require_wired_release_upload,
             readiness_timeout_seconds=readiness,
         ),
         workspace=workspace,
@@ -450,6 +460,12 @@ def _string(value: object, label: str) -> str:
 def _integer(value: object, label: str, *, minimum: int, maximum: int) -> int:
     if type(value) is not int or not minimum <= value <= maximum:
         raise ConfigurationError(f"{label} must be between {minimum} and {maximum}")
+    return value
+
+
+def _boolean(value: object, label: str) -> bool:
+    if type(value) is not bool:
+        raise ConfigurationError(f"{label} must be a boolean")
     return value
 
 

@@ -212,13 +212,16 @@ class SSHTransport:
         )
         checked("SCP download", result)
 
-    def upload_directory_resumable(self, source: Path, destination: str) -> None:
+    def upload_directory_resumable(
+        self, source: Path, destination: str, *, exclude: Sequence[str] = ()
+    ) -> None:
         """Resume an immutable release bundle into an already guarded directory."""
 
         if (
             not source.is_dir()
             or source.is_symlink()
             or _REMOTE_TOKEN.fullmatch(destination) is None
+            or any(re.fullmatch(r"[A-Za-z0-9._-]+", item) is None for item in exclude)
         ):
             raise TransportError("resumable upload source or destination is unsafe")
         remote_shell = shlex.join(self._ssh_prefix())
@@ -231,6 +234,7 @@ class SSHTransport:
                 "--delay-updates",
                 "--timeout=120",
                 "--rsync-path=/usr/bin/rsync",
+                *(f"--exclude=/{item}" for item in exclude),
                 "-e",
                 remote_shell,
                 f"{source}/",

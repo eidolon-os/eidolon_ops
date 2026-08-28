@@ -339,7 +339,7 @@ RESET_AUTHORITY_ROOTS = (
 RELEASE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 STAGING_NAME = re.compile(
-    r"^eidolon-(?:release|secrets|backup|authority-(?:backup|restore))-[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+    r"^eidolon-(?:release|artifacts|secrets|backup|authority-(?:backup|restore))-[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
 )
 
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -347,6 +347,8 @@ SHA256 = re.compile(r"^[0-9a-f]{64}$")
 VAR_TMP = Path("/var/tmp")
 
 RELEASES = Path("/opt/eidolon/releases")
+
+RELEASE_ARTIFACT_STORE_ROOT = Path("/var/cache/eidolon/release-artifacts-v1/sha256")
 
 CURRENT_ROOT = Path("/opt/eidolon/current")
 

@@ -33,7 +33,7 @@ from eidolon_ops.workstation_toolchain import ensure_workstation_uv
 RELEASE_TOOL_CONTRACT = {
     "tool": "eidolon-release",
     "cli_contract_version": 1,
-    "bundle_schema_version": 2,
+    "bundle_schema_version": 3,
     "descriptor_schema_version": 2,
     "snapshot_schema_version": 2,
 }

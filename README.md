@@ -122,21 +122,24 @@ chmod 600 config/eidolon-pi.toml
 ```
 
 Mac 还必须安装 `git-lfs`；bundle 只从 exact commit pointer 导出 Channel 模型并验证 LFS object digest，
-不会读取 Channel working tree 中的 hydrated 文件。
+不会读取 Channel working tree 中的 hydrated 文件。模型与 Linux/aarch64 依赖缓存进入 Mac/Pi 两端的
+SHA-256 内容寻址存储；新 release 先查询 Pi，只上传缺失对象。
 
 配置显式固定 foundation profile、目标/SSH、8 个 repo/commit、15 个 release unit、authority 数据路径、
 14 个私密基础输入文件、统一 `[app]` LAN 契约、`workspace.release_cli` 与 `workspace.uv` 两个工作站工具，
 以及 Python 索引/超时/重试/并发策略。Host-bound Hub
 配置、证书、ingress 与 systemd overlay 由 Ops 从 Host identity 原子生成，不进入 Git 或 release bundle。
-Python 依赖仍由各仓库的 frozen `uv.lock` 精确
-约束，但 Linux/aarch64 artifact 在 Mac 上预取、压缩、哈希后随 bundle 传输；Pi prepare 强制 offline，
-不会因弱网重复拉包。HTTPS index URL 与 uv/build-tool 版本进入 bundle 门禁，不能在目标端漂移。SSH
+Python 依赖仍由各仓库的 frozen `uv.lock` 精确约束，但 Linux/aarch64 artifact 在 Mac 上预取、确定性
+压缩并哈希；只有 Pi CAS 缺失的 digest 才通过 USB Ethernet 传输。Pi prepare 强制 offline，并为每个
+release 新建独立 venv，不复用旧 release 环境。HTTPS index URL 与 uv/build-tool 版本进入 bundle 门禁，
+不能在目标端漂移。`host.require_wired_release_upload = true` 会在当前 endpoint 不是有线时于 seal/upload
+之前失败，避免悄悄回退到 Wi-Fi/VPN。SSH
 强制 BatchMode、独立 key、`StrictHostKeyChecking=yes` 和显式 known_hosts。
 
 工作站 bundle 只服务于封装、断点续传和目标端 prepare：dry-run、失败和未完成事务会保留本地输出供
 `--resume` 使用；成功安装或激活在 Host 健康门禁和 release reclaim 提交后删除本次输出，并顺带清理
 超过 48 小时的旧输出。清理失败作为操作证据报告，但不会把已经成功的部署改判为失败。可复用的 uv
-cache 位于持久 toolchain root，不参与 bundle 清理。
+cache 与 release artifact CAS 位于持久 toolchain root，不参与 bundle 清理。
 
 示例见 [`config/eidolon-pi.example.toml`](config/eidolon-pi.example.toml)。
 
