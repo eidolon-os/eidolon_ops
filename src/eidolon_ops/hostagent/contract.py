@@ -405,15 +405,14 @@ HOST_ENV_VALUE = (
     "EIDOLON_BOOTSTRAP_RUNTIME_ROOT=/run/eidolon-bootstrap\n"
     "EIDOLON_BOOTSTRAP_STATE_DIR=/var/lib/eidolon-bootstrap\n"
     "EIDOLON_BOOTSTRAP_RUNTIME_DIR=/run/eidolon-bootstrap\n"
-    # Host configuration, not a secret: the board cannot pay for the encoder a
-    # laptop runs. Measured on a Pi 5, bge-large costs 626 MB and 104 ms/doc
-    # against base's 198 MB and 32 ms, for MRR 0.813 against 0.787.
-    "EIDOLON_MEMORY_EMBEDDING_MODEL=bge-base-zh\n"
+    # Host configuration, not a secret. This must equal the 512-dimensional
+    # identity declared by Memory's HTTP embedding contract.
+    "EIDOLON_MEMORY_EMBEDDING_MODEL=bge-small-zh\n"
     # And where its weights are. Without this the encoder is fetched from the
     # model hub at first use, which a Host may have no route to — and the
     # failure is not an error but a slow, empty answer: seventy seconds of
     # retries, then a search that found nothing because it never ran.
-    f"EIDOLON_MEMORY_EMBEDDING_MODEL_DIR={HOST_EMBEDDING_MODEL_ROOT}/bge-base-zh\n"
+    f"EIDOLON_MEMORY_EMBEDDING_MODEL_DIR={HOST_EMBEDDING_MODEL_ROOT}/bge-small-zh\n"
     # Admin resolves the port registry relative to an operator's checkout when
     # nobody names one, which is a Mac-workstation shape. Name the Host copy.
     f"EIDOLON_PORTS_FILE={HOST_PORTS_PATH}\n"

@@ -76,20 +76,21 @@ class EmbeddingModelArtifact:
         )
 
 
-#: Chosen on measurement, not on size. On a Pi 5, bge-large costs 626 MB and
-#: 104 ms/doc against base's 198 MB and 32 ms, for MRR 0.813 against 0.787 —
-#: which is why the Host env pins base. This carries the files that choice
-#: needs.
+#: The Memory contract fixes this encoder's identity and width: BGE-small-zh,
+#: 512 dimensions. The Host artifact, Host environment and Memory HTTP client
+#: must name the same model; a base/small mismatch is a correctness failure,
+#: not a quality tuning choice. Pin an immutable upstream revision and verify
+#: every carried file by its upstream SHA-256.
 PINNED_EMBEDDING_MODEL = EmbeddingModelArtifact(
-    model_id="bge-base-zh",
-    repo="Xenova/bge-base-zh-v1.5",
-    revision="main",
+    model_id="bge-small-zh",
+    repo="Xenova/bge-small-zh-v1.5",
+    revision="75c43b069aac4d136ba6bc1122f995fedcfd2781",
     files={
         "onnx/model_quantized.onnx": (
-            "b665f3bba56c3119bc76ba131ebcc544d720a7408cb11581bdf354aaa0198d43"
+            "15b717c382bcb518ba457b93ea6850ede7f4f1cd8937454aa06972366cd19bcc"
         ),
         "tokenizer.json": (
-            "7dfbf1966ebf99d471c3796e9b457329d2b2182b817e144f1e904b957745c839"
+            "48cea5d44424912a6fd1ea647bf4fe50b55ab8b1e5879c3275f80e339e8fae26"
         ),
     },
 )

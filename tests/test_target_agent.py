@@ -379,8 +379,8 @@ def test_first_install_does_not_refuse_the_encoder_it_just_carried_in(
 
     installer, _host, _command, _stage, _release, _data = install_fixture
     models = installer.root / contract.HOST_EMBEDDING_MODEL_ROOT.relative_to("/")
-    (models / "bge-base-zh").mkdir(parents=True)
-    (models / "bge-base-zh" / contract.EMBEDDING_DIGEST_RECORD).write_text("d1", encoding="utf-8")
+    (models / "bge-small-zh").mkdir(parents=True)
+    (models / "bge-small-zh" / contract.EMBEDDING_DIGEST_RECORD).write_text("d1", encoding="utf-8")
 
     installer._assert_clean_namespace()
 
@@ -1608,7 +1608,7 @@ def test_host_env_carries_configuration_that_is_not_a_secret() -> None:
     credential — putting it in the private input set would mean reissuing every
     token to change it, since those inputs are never overwritten."""
 
-    assert "EIDOLON_MEMORY_EMBEDDING_MODEL=bge-base-zh" in contract.HOST_ENV_VALUE
+    assert "EIDOLON_MEMORY_EMBEDDING_MODEL=bge-small-zh" in contract.HOST_ENV_VALUE
     assert "TOKEN" not in contract.HOST_ENV_VALUE
     assert "KEY" not in contract.HOST_ENV_VALUE
 

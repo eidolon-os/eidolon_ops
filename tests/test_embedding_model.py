@@ -34,6 +34,20 @@ def _artifact() -> EmbeddingModelArtifact:
     )
 
 
+def test_the_shipped_encoder_is_the_memory_512_dimension_identity() -> None:
+    assert PINNED_EMBEDDING_MODEL.model_id == "bge-small-zh"
+    assert PINNED_EMBEDDING_MODEL.repo == "Xenova/bge-small-zh-v1.5"
+    assert PINNED_EMBEDDING_MODEL.revision != "main"
+    assert PINNED_EMBEDDING_MODEL.files == {
+        "onnx/model_quantized.onnx": (
+            "15b717c382bcb518ba457b93ea6850ede7f4f1cd8937454aa06972366cd19bcc"
+        ),
+        "tokenizer.json": (
+            "48cea5d44424912a6fd1ea647bf4fe50b55ab8b1e5879c3275f80e339e8fae26"
+        ),
+    }
+
+
 @pytest.fixture
 def offline(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     fetched: list[str] = []
@@ -112,7 +126,7 @@ def test_the_directory_is_named_after_the_encoder_not_its_build() -> None:
 
 
 def test_the_host_reports_what_it_holds_by_digest(tmp_path: Path) -> None:
-    destination = tmp_path / "bge-base-zh-abc"
+    destination = tmp_path / "bge-small-zh-abc"
 
     absent = staging.embedding_model_state({"destination": str(destination)})
     assert absent["status"] == "absent"
@@ -206,7 +220,7 @@ def test_carrying_a_model_in_reports_the_digest_of_what_is_now_held(
     (staged / "onnx").mkdir(parents=True)
     (staged / "onnx" / "model.onnx").write_bytes(b"weights")
     (staged / contract.EMBEDDING_DIGEST_RECORD).write_text("d1\n", encoding="utf-8")
-    destination = tmp_path / "models" / "bge-base-zh"
+    destination = tmp_path / "models" / "bge-small-zh"
 
     result = staging.install_embedding_model(
         {"staging": str(staged), "destination": str(destination)}
