@@ -61,6 +61,9 @@ debug_dir: $EIDOLON_CACHE_ROOT/debug/agent
 sqlite_path: $EIDOLON_STATE_ROOT/agent/eidolon-agent.sqlite3
 mcp_url: http://127.0.0.1:8030/mcp
 discovery_token_env: ''
+models:
+  - name: openai/deepseek-v4-flash
+    thinking: disabled
 """
     if _source_id == "eidolon_channel":
         return """\
@@ -68,7 +71,9 @@ avatar:
   enabled: true
 root: $EIDOLON_STATE_ROOT/voiceprints
 timeline_debug_path: "$EIDOLON_LOG_ROOT/channel/turn-timeline.jsonl"
-dump_dir: "$EIDOLON_CACHE_ROOT/debug/channel"
+stt:
+  dump_wav: true
+  dump_dir: "$EIDOLON_CACHE_ROOT/debug/channel"
 """
     if _source_id == "eidolon_memory":
         return """\
@@ -147,13 +152,8 @@ def test_initializer_creates_one_private_consistent_input_set(config, tmp_path: 
     # The two Owner-facing authority surfaces that grew a credential. Each one is
     # shared by exactly two files, and a Host missing either has a management
     # surface that answers 503 rather than a management surface that is open.
-    assert (
-        admin["EIDOLON_ADMIN_MEMORY_API_SERVICE_TOKEN"]
-        == memory["EIDOLON_MEMORY_API_TOKEN"]
-    )
-    assert (
-        admin["EIDOLON_AGENT_ADMIN_API_TOKEN"] == agent["EIDOLON_AGENT_ADMIN_API_TOKEN"]
-    )
+    assert admin["EIDOLON_ADMIN_MEMORY_API_SERVICE_TOKEN"] == memory["EIDOLON_MEMORY_API_TOKEN"]
+    assert admin["EIDOLON_AGENT_ADMIN_API_TOKEN"] == agent["EIDOLON_AGENT_ADMIN_API_TOKEN"]
     # Distinct secrets: memory's MCP tool surface and its HTTP authority surface
     # are different boundaries with different callers.
     assert memory["EIDOLON_MEMORY_API_TOKEN"] != memory["EIDOLON_MEMORY_MCP_TOKEN"]
@@ -173,7 +173,11 @@ def test_initializer_creates_one_private_consistent_input_set(config, tmp_path: 
     assert "DEBUG" not in agent_settings
     assert "uds_path: $EIDOLON_RUNTIME_ROOT/agent/eidolon-agent.sock" in agent_settings
     assert "sqlite_path: $EIDOLON_STATE_ROOT/agent/eidolon-agent.sqlite3" in agent_settings
-    assert "avatar:\n  enabled: false" in (target / "channel.yaml").read_text(encoding="utf-8")
+    assert "thinking: disabled" in agent_settings
+    channel_settings = (target / "channel.yaml").read_text(encoding="utf-8")
+    assert "avatar:\n  enabled: false" in channel_settings
+    assert "  dump_wav: false" in channel_settings
+    assert "dump_wav: true" not in channel_settings
     # Memory's settings ship unmodified: the Host expresses its encoder through
     # the environment, so improving that file cannot break an install.
     memory_settings = (target / "memory.yaml").read_text(encoding="utf-8")
@@ -458,9 +462,7 @@ def test_a_machine_can_be_retired_but_only_by_saying_so(config, tmp_path: Path) 
         _settings_reader,
     )
     assert following["host_identity"] == "adopted"
-    assert (
-        tmp_path / "operator-private/pi5/inputs/host_identity.ed25519"
-    ).read_bytes() == minted
+    assert (tmp_path / "operator-private/pi5/inputs/host_identity.ed25519").read_bytes() == minted
 
 
 # --- 产品长出一个凭据，已装好的主机怎么拿到 ---------------------------------
@@ -504,9 +506,7 @@ def test_an_older_input_set_is_refused_by_the_contract_check(config, tmp_path: P
         validate_install_input_contract(configured, _settings_reader)
 
 
-def test_the_repair_adds_only_what_is_missing_and_says_so_first(
-    config, tmp_path: Path
-) -> None:
+def test_the_repair_adds_only_what_is_missing_and_says_so_first(config, tmp_path: Path) -> None:
     """Dry by default: the operator running this holds a Host that works."""
 
     configured = _config_for_init(config, tmp_path)
@@ -529,12 +529,12 @@ def test_the_repair_adds_only_what_is_missing_and_says_so_first(
     # Nothing written, and no value in the report to leak.
     assert "EIDOLON_MEMORY_API_TOKEN" not in _env(target / "memory.env")
     assert str(planned["added"]).count("=") == 0
-    assert _env(target / "admin.env").keys() == before["admin.env"].keys() - _OLDER_HOST["admin.env"]
+    assert (
+        _env(target / "admin.env").keys() == before["admin.env"].keys() - _OLDER_HOST["admin.env"]
+    )
 
 
-def test_applying_the_repair_leaves_every_existing_secret_untouched(
-    config, tmp_path: Path
-) -> None:
+def test_applying_the_repair_leaves_every_existing_secret_untouched(config, tmp_path: Path) -> None:
     """The property that makes it safe to run on a working Host."""
 
     configured = _config_for_init(config, tmp_path)
@@ -552,9 +552,7 @@ def test_applying_the_repair_leaves_every_existing_secret_untouched(
             assert current[key] == value, f"{name}:{key} was rewritten"
 
 
-def test_the_repair_restores_the_relationships_the_check_requires(
-    config, tmp_path: Path
-) -> None:
+def test_the_repair_restores_the_relationships_the_check_requires(config, tmp_path: Path) -> None:
     """Minting one side of a shared secret is how a pair breaks, so a value the
     other side already has is copied rather than re-made."""
 
@@ -575,18 +573,13 @@ def test_the_repair_restores_the_relationships_the_check_requires(
 
     add_missing_install_credentials(configured, apply=True)
 
-    assert (
-        _env(target / "admin.env")["EIDOLON_ADMIN_MEMORY_API_SERVICE_TOKEN"]
-        == memory_before
-    )
+    assert _env(target / "admin.env")["EIDOLON_ADMIN_MEMORY_API_SERVICE_TOKEN"] == memory_before
     assert _env(target / "agent.env")["EIDOLON_AGENT_ADMIN_API_TOKEN"] == admin_before
     # And the whole set passes the check it used to fail.
     validate_install_input_contract(configured, _settings_reader)
 
 
-def test_a_credential_nobody_has_yet_is_minted_once_for_both_sides(
-    config, tmp_path: Path
-) -> None:
+def test_a_credential_nobody_has_yet_is_minted_once_for_both_sides(config, tmp_path: Path) -> None:
     configured = _config_for_init(config, tmp_path)
     initialize_install_inputs(configured, _settings_reader)
     target = next(iter(configured.install_files.values())).parent
@@ -682,13 +675,11 @@ def test_a_component_changing_a_default_does_not_stop_every_operation(
 
     assert report["status"] == "compatible"
     assert report["refreshed"] == {"settings": ["agent.yaml"]}
-    assert "$EIDOLON_CACHE_ROOT/agent-debug" in (target / "agent.yaml").read_text(
-        encoding="utf-8"
-    )
+    assert "$EIDOLON_CACHE_ROOT/agent-debug" in (target / "agent.yaml").read_text(encoding="utf-8")
     # And a second run has nothing to say, because nothing moved.
-    assert validate_install_input_contract(configured, moved, refresh_derived=True)[
-        "refreshed"
-    ] == {}
+    assert (
+        validate_install_input_contract(configured, moved, refresh_derived=True)["refreshed"] == {}
+    )
 
 
 def test_rotating_a_provider_key_where_it_is_typed_is_enough(config, tmp_path: Path) -> None:
@@ -710,17 +701,16 @@ def test_rotating_a_provider_key_where_it_is_typed_is_enough(config, tmp_path: P
     with pytest.raises(InstallInputError, match="provider credential drifted"):
         validate_install_input_contract(configured, _settings_reader)
 
-    report = validate_install_input_contract(
-        configured, _settings_reader, refresh_derived=True
-    )
+    report = validate_install_input_contract(configured, _settings_reader, refresh_derived=True)
 
     assert report["refreshed"] == {"provider_credentials": ["agent.env"]}
     assert _env(target / "agent.env")["EIDOLON_AGENT_LLM_API_KEY"] == "rotated-agent-key"
     # The internal secrets in the same file are untouched: only the keys whose
     # home is the component's file follow it.
-    assert _env(target / "agent.env")["EIDOLON_MEMORY_MCP_TOKEN"] == _env(
-        target / "memory.env"
-    )["EIDOLON_MEMORY_MCP_TOKEN"]
+    assert (
+        _env(target / "agent.env")["EIDOLON_MEMORY_MCP_TOKEN"]
+        == _env(target / "memory.env")["EIDOLON_MEMORY_MCP_TOKEN"]
+    )
 
 
 def test_a_provider_key_that_is_gone_is_still_a_refusal(config, tmp_path: Path) -> None:

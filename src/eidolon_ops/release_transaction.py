@@ -112,8 +112,7 @@ class ReleaseTransaction:
         outstanding = host.get("missing") or {}
         if outstanding:
             short = ", ".join(
-                f"{name} is missing {', '.join(keys)}"
-                for name, keys in sorted(outstanding.items())
+                f"{name} is missing {', '.join(keys)}" for name, keys in sorted(outstanding.items())
             )
             raise OperationsError(
                 "this Host does not hold every credential the product declares "
@@ -133,6 +132,12 @@ class ReleaseTransaction:
     ) -> dict[str, object]:
         release_id = validate_release_id(release_id)
         local = self.preflight.run(require_install_files=False)
+        # A deploy updates code and the product settings derived from those
+        # exact commits as one cutover. Settings used to be validated only by
+        # first install, so later releases could report the new source revision
+        # while services kept reading years-old /etc/eidolon/*.yaml files.
+        # Credentials remain Host-owned and are checked separately below.
+        local["product_settings_contract"] = self.preflight.refresh_product_settings()
         # Before anything is prepared or moved. A release that needs a credential
         # the Host does not hold is a release that ships green and does not work,
         # which is exactly what happened: two credentials were added to the
@@ -212,9 +217,8 @@ class ReleaseTransaction:
                     timeout=180,
                 )
                 host_snapshot_value = host_cutover.get("host_snapshot")
-                if (
-                    host_cutover.get("status") != "host_cutover_snapshotted"
-                    or not isinstance(host_snapshot_value, str)
+                if host_cutover.get("status") != "host_cutover_snapshotted" or not isinstance(
+                    host_snapshot_value, str
                 ):
                     raise OperationsError("Host cutover snapshot returned invalid evidence")
                 host_snapshot = host_snapshot_value
@@ -254,9 +258,7 @@ class ReleaseTransaction:
             ):
                 persistent_barrier_crossed = True
                 health_gates_passed = True
-                self._finalize_cutover(
-                    release_id, cutover_mode, host_snapshot, activation, phases
-                )
+                self._finalize_cutover(release_id, cutover_mode, host_snapshot, activation, phases)
                 self._commit_reclaim_after_barrier(release_id, phases)
                 raise OperationsError(
                     "release crossed the forward-only persistent-state barrier; "
@@ -301,13 +303,9 @@ class ReleaseTransaction:
                     self._restore(cli, descriptor, snapshot, phases, gate_error)
                 finally:
                     if host_snapshot is not None:
-                        self._restore_host_cutover(
-                            release_id, cutover_mode, host_snapshot, phases
-                        )
+                        self._restore_host_cutover(release_id, cutover_mode, host_snapshot, phases)
                         host_restored = True
-            self._finalize_cutover(
-                release_id, cutover_mode, host_snapshot, activation, phases
-            )
+            self._finalize_cutover(release_id, cutover_mode, host_snapshot, activation, phases)
             health_gates_passed = True
             phases.begin("release_reclaim_commit")
             committed = self.bundles.reclaim(release_id, phase="commit")
@@ -334,9 +332,7 @@ class ReleaseTransaction:
                 and not health_gates_passed
             ):
                 try:
-                    self._restore_host_cutover(
-                        release_id, cutover_mode, host_snapshot, phases
-                    )
+                    self._restore_host_cutover(release_id, cutover_mode, host_snapshot, phases)
                 except Exception as host_restore_error:
                     raise OperationsError(
                         f"release transaction failed ({exc}); Host layer rollback also failed: "
@@ -368,9 +364,7 @@ class ReleaseTransaction:
         advance = self.preflight.sources.advance_from(sources)
         if not advance:
             return failure
-        moved = ", ".join(
-            f"{source_id} +{count}" for source_id, count in sorted(advance.items())
-        )
+        moved = ", ".join(f"{source_id} +{count}" for source_id, count in sorted(advance.items()))
         return OperationsError(
             f"{failure}\n\nsince release {release_id} — the last one this Host activated "
             f"— these sources advanced: {moved}. A release is only as consistent as the "
@@ -423,10 +417,7 @@ class ReleaseTransaction:
         """
 
         report = self._link_report()
-        if (
-            self.preflight.config.host.require_wired_release_upload
-            and report["status"] != "wired"
-        ):
+        if self.preflight.config.host.require_wired_release_upload and report["status"] != "wired":
             raise OperationsError(
                 "release upload requires a wired endpoint, but the selected link is "
                 f"{report['status']!r}. Connect the USB Ethernet link and retry; "
@@ -495,9 +486,7 @@ class ReleaseTransaction:
             raise OperationsError("Host layer rollback returned invalid evidence")
         phases.append({"phase": "host_cutover_rollback", "result": restored})
 
-    def _commit_reclaim_after_barrier(
-        self, release_id: str, phases: Journal
-    ) -> None:
+    def _commit_reclaim_after_barrier(self, release_id: str, phases: Journal) -> None:
         """Clean private staging after a candidate became forward-only current."""
 
         phases.begin("release_reclaim_commit")
@@ -530,9 +519,7 @@ class ReleaseTransaction:
             raise OperationsError("release cutover receipt returned invalid evidence")
         phases.append({"phase": "cutover_receipt", "result": recorded})
 
-    def _abort_candidate(
-        self, release_id: str, phases: Journal, primary_error: Exception
-    ) -> None:
+    def _abort_candidate(self, release_id: str, phases: Journal, primary_error: Exception) -> None:
         try:
             phases.begin("release_reclaim_abort")
             aborted = self.bundles.reclaim(release_id, phase="abort")
@@ -666,9 +653,7 @@ class ReleaseTransaction:
         # phase list is the plan's vocabulary, and the plan does not name it.
         phases.begin("foundation")
         foundation = self._provision(apply=True)
-        self.bundles.prepare(
-            release_id, reuse=resume, cutover_mode="reversible", journal=phases
-        )
+        self.bundles.prepare(release_id, reuse=resume, cutover_mode="reversible", journal=phases)
         candidate_prepared = True
         try:
             self.host_layer.stage_install_files(
@@ -774,15 +759,11 @@ class ReleaseTransaction:
         result = self.transport.run(command, sudo=True, timeout=timeout, operation=operation)
         return parse_json(result.stdout, operation)
 
-    def _rollback_json(
-        self, operation: str, command: tuple[str, ...]
-    ) -> dict[str, object]:
+    def _rollback_json(self, operation: str, command: tuple[str, ...]) -> dict[str, object]:
         """Keep the activator's receipt when it restored but could not start."""
 
         try:
-            return self._remote_json(
-                operation, command, timeout=_REMOTE_ACTIVATION_TIMEOUT_SECONDS
-            )
+            return self._remote_json(operation, command, timeout=_REMOTE_ACTIVATION_TIMEOUT_SECONDS)
         except ProcessError as exc:
             if exc.result.returncode != 5:
                 raise

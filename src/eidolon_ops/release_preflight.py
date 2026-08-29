@@ -22,6 +22,7 @@ from eidolon_ops.config import (
 )
 from eidolon_ops.errors import InstallInputError, OperationsError
 from eidolon_ops.install_inputs import validate_install_input_contract
+from eidolon_ops.private_inputs import refresh_derived_settings
 from eidolon_ops.process import ProcessRunner, checked
 from eidolon_ops.release_matrix import ReleaseMatrixError, validate_release_matrix
 from eidolon_ops.source_resolution import ResolvedSource, SourceResolver
@@ -65,9 +66,7 @@ class ReleasePreflight:
         #: Shared with everything else in this operation that needs to know
         #: which commit a source ships — the bundle seal, the resumed-bundle
         #: check, the Host provenance record. One resolution, one answer.
-        self.sources = sources or SourceResolver(
-            config, runner, git=git, allow_dirty=allow_dirty
-        )
+        self.sources = sources or SourceResolver(config, runner, git=git, allow_dirty=allow_dirty)
 
     def validate_ssh_material(self) -> None:
         validate_private_local_file(self.config.host.identity_file, label="host.identity_file")
@@ -96,9 +95,7 @@ class ReleasePreflight:
     def require_commands(self, commands: tuple[str, ...]) -> None:
         missing = [command for command in commands if shutil.which(command) is None]
         if missing:
-            raise OperationsError(
-                "required workstation command is missing: " + ", ".join(missing)
-            )
+            raise OperationsError("required workstation command is missing: " + ", ".join(missing))
 
     def run(
         self, *, require_install_files: bool, require_clean_sources: bool = True
@@ -390,3 +387,37 @@ class ReleasePreflight:
             )
         except InstallInputError as exc:
             raise OperationsError(str(exc)) from exc
+
+    def refresh_product_settings(self) -> dict[str, object]:
+        """Materialize settings from this operation's exact source revisions.
+
+        Deploy does not need the workstation's provider credential sources: the
+        installed Host already owns and separately proves those credentials. It
+        does need the three non-secret settings inputs because they travel with
+        every code cutover. Keeping this narrower than the install contract
+        prevents an unrelated key-source file from blocking a normal update.
+        """
+
+        names = ("agent_settings", "channel_settings", "memory_settings")
+        paths = [self.config.install_files[name] for name in names]
+        parents = {path.parent for path in paths}
+        if len(parents) != 1:
+            raise OperationsError("product settings inputs must share one private directory")
+        for name, path in zip(names, paths, strict=True):
+            validate_private_local_file(path, label=f"install.files.{name}")
+        try:
+            refreshed = refresh_derived_settings(
+                parents.pop(),
+                self.sources.resolved_config(),
+                self.read_exact_source_file,
+            )
+        except InstallInputError as exc:
+            raise OperationsError(str(exc)) from exc
+        return {
+            "status": "exact",
+            "refreshed": refreshed,
+            "sources": {
+                source_id: self.sources.revision(source_id)
+                for source_id in ("eidolon_agent", "eidolon_channel", "eidolon_memory")
+            },
+        }

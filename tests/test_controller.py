@@ -70,9 +70,7 @@ def test_authority_restore_waits_for_app_readiness_without_accepting_degraded(
     )
     monkeypatch.setattr(controller_module.time, "sleep", lambda _seconds: None)
 
-    result = _wait_for_restored_authority_readiness(
-        lambda: next(reports), timeout_seconds=1
-    )
+    result = _wait_for_restored_authority_readiness(lambda: next(reports), timeout_seconds=1)
 
     assert result["status"] == "app_ready"
 
@@ -758,6 +756,22 @@ def test_deploy_defaults_to_prepare_and_dry_run(setup_controller) -> None:
     result = controller.deploy(release_id="r1", resume=False, activate=False)
 
     assert result["status"] == "dry_run"
+    assert result["local"]["product_settings_contract"] == {
+        "status": "exact",
+        "refreshed": ["agent.yaml", "channel.yaml", "memory.yaml"],
+        "sources": {
+            "eidolon_agent": SOURCE_HEADS["eidolon_agent"],
+            "eidolon_channel": SOURCE_HEADS["eidolon_channel"],
+            "eidolon_memory": SOURCE_HEADS["eidolon_memory"],
+        },
+    }
+    assert "thinking: disabled" in controller.config.install_files["agent_settings"].read_text(
+        encoding="utf-8"
+    )
+    channel_settings = controller.config.install_files["channel_settings"].read_text(
+        encoding="utf-8"
+    )
+    assert "dump_wav: false" in channel_settings
     assert [phase["phase"] for phase in result["phases"]] == [
         "bundle",
         "release_reclaim_prepare",
@@ -794,7 +808,8 @@ def test_deploy_defaults_to_prepare_and_dry_run(setup_controller) -> None:
     )
     assert transport.remote_timeouts[prepare_index] == 3600
     reclaim = next(
-        payload for action, payload, _python, _sudo in transport.agent_calls
+        payload
+        for action, payload, _python, _sudo in transport.agent_calls
         if action == "reclaim-releases"
     )
     assert reclaim["phase"] == "prepare"
@@ -809,9 +824,7 @@ def test_deploy_refuses_wireless_before_sealing_or_upload(config) -> None:
         host=replace(config.host, require_wired_release_upload=True),
     )
     transport = FakeTransport()
-    transport.endpoint = HostEndpoint(
-        address="192.168.3.40", interface="en0", link="wireless"
-    )
+    transport.endpoint = HostEndpoint(address="192.168.3.40", interface="en0", link="wireless")
     controller = EidolonPiController(
         strict,
         ControllerRunner(strict),
@@ -954,8 +967,9 @@ def test_deploy_prestages_host_application_before_component_activation(
     monkeypatch.setattr(
         controller.host_layer,
         "refresh",
-        lambda release_id: events.append(f"host application {release_id}")
-        or {"status": "refreshed"},
+        lambda release_id: (
+            events.append(f"host application {release_id}") or {"status": "refreshed"}
+        ),
     )
 
     result = controller.deploy(release_id="r1", resume=True, activate=True)
@@ -998,9 +1012,7 @@ def test_forward_only_activation_failure_requires_same_schema_fix_without_abort(
     )
 
     with pytest.raises(OperationsError, match="same-schema forward fix"):
-        controller.deploy(
-            release_id="r1", resume=False, activate=True, cutover_mode="forward-only"
-        )
+        controller.deploy(release_id="r1", resume=False, activate=True, cutover_mode="forward-only")
 
     actions = [action for action, _payload, _python, _sudo in transport.agent_calls]
     assert "release-cutover-finalize" in actions
@@ -1035,9 +1047,7 @@ def test_forward_only_app_readiness_failure_never_restores_old_interpreters(
     )
 
     with pytest.raises(OperationsError, match="same-schema forward fix"):
-        controller.deploy(
-            release_id="r1", resume=False, activate=True, cutover_mode="forward-only"
-        )
+        controller.deploy(release_id="r1", resume=False, activate=True, cutover_mode="forward-only")
 
     actions = [action for action, _payload, _python, _sudo in transport.agent_calls]
     assert "release-cutover-finalize" in actions
@@ -1087,9 +1097,7 @@ def test_forward_only_failure_before_barrier_restores_host_layer_and_aborts(
     monkeypatch.setattr(controller.releases, "_activation_json", fail_before_barrier)
 
     with pytest.raises(RuntimeError, match="before candidate start"):
-        controller.deploy(
-            release_id="r1", resume=False, activate=True, cutover_mode="forward-only"
-        )
+        controller.deploy(release_id="r1", resume=False, activate=True, cutover_mode="forward-only")
 
     assert any(
         action == "release-cutover-restore"
@@ -1355,9 +1363,7 @@ def test_deploy_refuses_a_host_short_of_a_declared_credential(
     assert "EIDOLON_MEMORY_API_TOKEN" in message
     assert "converge-inputs --apply" in message
     # Nothing was moved. The refusal is the whole operation.
-    assert not any(
-        call[0] in {"guard-upload", "finalize-upload"} for call in transport.agent_calls
-    )
+    assert not any(call[0] in {"guard-upload", "finalize-upload"} for call in transport.agent_calls)
 
 
 def test_deploy_asks_the_host_rather_than_the_workstation(setup_controller) -> None:
@@ -1377,9 +1383,7 @@ def test_deploy_asks_the_host_rather_than_the_workstation(setup_controller) -> N
     payload = asked[0][1]
     assert payload["apply"] is False, "a gate must not write"
     assert "admin.env" in payload["declared"]
-    assert (
-        "EIDOLON_ADMIN_MEMORY_API_SERVICE_TOKEN" in payload["declared"]["admin.env"]
-    )
+    assert "EIDOLON_ADMIN_MEMORY_API_SERVICE_TOKEN" in payload["declared"]["admin.env"]
 
 
 def test_deploy_stops_after_prepare_failure(setup_controller) -> None:
@@ -1541,10 +1545,20 @@ def test_unified_pi_stage_renders_host_bound_application_assets(config) -> None:
     rendered_hub = transport.uploaded_bytes[f"{stage}/hub.generated.yaml"].decode()
     assert f"EIDOLON_LOCAL_API_OWNER_DOMAIN_ID={app['owner_domain_id']}" in rendered_local
     assert f"owner_domain_id: {app['owner_domain_id']}" in rendered_hub
-    assert f"descriptor_uri: {app['hub_origin']}/api/device-onboarding/v1/descriptor" in rendered_hub
+    assert (
+        f"descriptor_uri: {app['hub_origin']}/api/device-onboarding/v1/descriptor" in rendered_hub
+    )
     assert f"{stage}/owner-domain-root.key.pem" not in transport.uploaded_bytes
     assert f"{stage}/authority-signing.key.pem" not in transport.uploaded_bytes
     assert b"--listen-port 8443" in transport.uploaded_bytes[f"{stage}/hub-ingress.service"]
+
+    transport.uploaded_bytes.clear()
+    controller.host_layer.refresh("host-bound")
+    assert {
+        f"{stage}/agent.yaml",
+        f"{stage}/channel.yaml",
+        f"{stage}/memory.yaml",
+    } <= set(transport.uploaded_bytes)
 
 
 def test_development_commissioning_registry_uses_only_the_private_stage(config) -> None:
@@ -1559,9 +1573,7 @@ def test_development_commissioning_registry_uses_only_the_private_stage(config) 
         json.dumps(
             {
                 "profile": "eidolon-development-hmac-commissioning-v2",
-                "devices": {
-                    "box-3-hil": {"setup_secret": encoded}
-                },
+                "devices": {"box-3-hil": {"setup_secret": encoded}},
             }
         ),
         encoding="utf-8",
@@ -1596,9 +1608,7 @@ def test_development_commissioning_registry_uses_only_the_private_stage(config) 
     controller.host_layer.stage_install_files("development", stage)
     payload = controller.host_layer.target_payload()
 
-    uploaded = transport.uploaded_bytes[
-        f"{stage}/{DEVELOPMENT_COMMISSIONING_STAGE_NAME}"
-    ]
+    uploaded = transport.uploaded_bytes[f"{stage}/{DEVELOPMENT_COMMISSIONING_STAGE_NAME}"]
     assert uploaded == registry.read_bytes()
     assert encoded not in repr(payload)
     assert encoded not in repr(transport.uploads)
@@ -2187,9 +2197,7 @@ def test_a_half_declared_release_refuses_to_wipe(setup_controller, config) -> No
     assert transport.agent_calls == []
 
 
-def test_state_a_reset_could_not_reach_stops_the_reset(
-    setup_controller, config
-) -> None:
+def test_state_a_reset_could_not_reach_stops_the_reset(setup_controller, config) -> None:
     controller, _runner, transport = setup_controller
     for source_id in SOURCE_IDS:
         _publish_contract(config, source_id, "/var/lib/eidolon/example")
@@ -2207,9 +2215,7 @@ def test_state_a_reset_could_not_reach_stops_the_reset(
     assert transport.agent_calls == []
 
 
-def test_a_fully_declared_reset_reports_what_each_component_loses(
-    setup_controller, config
-) -> None:
+def test_a_fully_declared_reset_reports_what_each_component_loses(setup_controller, config) -> None:
     controller, _runner, transport = setup_controller
     for source_id in SOURCE_IDS:
         _publish_contract(config, source_id, f"/var/lib/eidolon/{source_id}")
@@ -2258,9 +2264,7 @@ def _plan_with_contents(transport, contents: list[str]) -> None:
     transport.run_agent = run_agent
 
 
-def test_the_report_is_about_what_will_actually_be_removed(
-    setup_controller, config
-) -> None:
+def test_the_report_is_about_what_will_actually_be_removed(setup_controller, config) -> None:
     """The roots are the unit of removal, so they are the unit of the report.
 
     Narrowing the deletion to the declared paths would be the wrong fix: the
@@ -2297,9 +2301,7 @@ def test_the_report_is_about_what_will_actually_be_removed(
     assert authority["removed_but_unclaimed"] == ["/var/lib/eidolon/mementos"]
 
 
-def test_a_databases_own_sidecars_belong_to_whoever_declared_it(
-    setup_controller, config
-) -> None:
+def test_a_databases_own_sidecars_belong_to_whoever_declared_it(setup_controller, config) -> None:
     controller, _runner, transport = setup_controller
     for source_id in SOURCE_IDS:
         _publish_contract(config, source_id, f"/var/lib/eidolon/{source_id}.sqlite3")
@@ -2393,7 +2395,9 @@ def test_an_install_tells_the_host_which_commits_it_is_installing(setup_controll
 
     controller.install(release_id="r1", resume=False, apply=True)
 
-    payload = next(payload for action, payload, _p, _s in transport.agent_calls if action == "install")
+    payload = next(
+        payload for action, payload, _p, _s in transport.agent_calls if action == "install"
+    )
     assert payload["sources"] == {
         source_id: {
             "revision": revision,
@@ -2616,8 +2620,8 @@ def test_an_ordinary_install_keeps_the_generation_the_host_established(config) -
     assert capability["decision"] == "keep_established_lineage"
     assert capability["generation_advanced"] is False
     assert capability["lineage"] == spent
-    assert _material_state(controller)["owner_domain_generation"] == (
-        spent["owner_domain_generation"]
+    assert (
+        _material_state(controller)["owner_domain_generation"] == (spent["owner_domain_generation"])
     )
 
 
@@ -2681,8 +2685,7 @@ def test_an_install_plan_names_the_generation_it_would_advance_without_advancing
     assert authority["generation_advanced"] is False
     assert authority["owner_domain_generation"] == spent["owner_domain_generation"] + 1
     assert (
-        "advance owner_domain_generation and void every existing device Claim"
-        in plan["mutations"]
+        "advance owner_domain_generation and void every existing device Claim" in plan["mutations"]
     )
     state = _material_state(controller)
     assert state["owner_domain_generation"] == spent["owner_domain_generation"]
@@ -2769,16 +2772,12 @@ def test_a_wiped_host_is_reinstalled_end_to_end_with_a_fresh_capability(config) 
     assert result["status"] == "installed"
     assert result["authority"]["decision"] == "advance_generation"
     assert result["authority"]["generation_advanced"] is True
-    staged = json.loads(
-        transport.staged["/var/tmp/eidolon-secrets-r1/authority-bootstrap.json"]
-    )
+    staged = json.loads(transport.staged["/var/tmp/eidolon-secrets-r1/authority-bootstrap.json"])
     assert staged["operation"] == "owner-authority.bootstrap"
     assert staged["owner_domain_generation"] == spent["owner_domain_generation"] + 1
     assert result["authority_bootstrap"] == {
         "status": "authority_bootstrap_consumed",
-        "authority": {
-            key: value for key, value in staged.items() if key != "operation"
-        },
+        "authority": {key: value for key, value in staged.items() if key != "operation"},
     }
     assert _material_state(controller) == {
         "contract_version": 1,

@@ -51,6 +51,10 @@ _STAGED_INSTALL_NAMES = INSTALL_DESTINATION_NAMES
 _PORT_REGISTRY = Path(__file__).with_name("assets") / "ports.yaml"
 #: Environment files whose values name this Host rather than a credential.
 HOST_BOUND_INPUTS = frozenset({"local_api_env", "channel_env"})
+# Non-secret product settings are derived from the exact component revisions
+# selected for this release. They belong to every cutover, not only first
+# install; the Host snapshot makes replacing them reversible with the code.
+PRODUCT_SETTINGS_INPUTS = ("agent_settings", "channel_settings", "memory_settings")
 
 
 class HostLayer:
@@ -93,9 +97,7 @@ class HostLayer:
             # What this Host is asked to attest, and what it needs to attest
             # it. The check set has one author; a copy compiled into the
             # injected agent would be the one nobody thinks to update.
-            "readiness": product_payload(
-                settle_seconds=self.config.host.readiness_timeout_seconds
-            ),
+            "readiness": product_payload(settle_seconds=self.config.host.readiness_timeout_seconds),
             "readiness_timeout_seconds": self.config.host.readiness_timeout_seconds,
             "data": {
                 "system_database": str(self.config.data.system_database),
@@ -177,7 +179,11 @@ class HostLayer:
         self.stage_install_files(
             release_id,
             stage,
-            names=("host_identity", *sorted(HOST_BOUND_INPUTS)),
+            names=(
+                "host_identity",
+                *sorted(HOST_BOUND_INPUTS),
+                *PRODUCT_SETTINGS_INPUTS,
+            ),
         )
         return self.transport.run_agent(
             "refresh-host-application",

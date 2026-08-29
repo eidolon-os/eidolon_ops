@@ -316,9 +316,7 @@ def test_development_commissioning_input_is_installed_without_a_digest_in_eviden
     registry = json.dumps(
         {
             "profile": "eidolon-development-hmac-commissioning-v2",
-            "devices": {
-                "box-3-hil": {"setup_secret": encoded_secret}
-            },
+            "devices": {"box-3-hil": {"setup_secret": encoded_secret}},
         }
     )
     (stage / "commissioning-secrets.json").write_text(registry, encoding="utf-8")
@@ -382,9 +380,7 @@ def test_first_install_does_not_refuse_the_encoder_it_just_carried_in(
     installer, _host, _command, _stage, _release, _data = install_fixture
     models = installer.root / contract.HOST_EMBEDDING_MODEL_ROOT.relative_to("/")
     (models / "bge-base-zh").mkdir(parents=True)
-    (models / "bge-base-zh" / contract.EMBEDDING_DIGEST_RECORD).write_text(
-        "d1", encoding="utf-8"
-    )
+    (models / "bge-base-zh" / contract.EMBEDDING_DIGEST_RECORD).write_text("d1", encoding="utf-8")
 
     installer._assert_clean_namespace()
 
@@ -517,9 +513,7 @@ def test_reset_stops_the_manager_before_the_workers_it_would_restore(tmp_path: P
     assert len(disables) == 2
     assert disables[0][3:] == contract.RESET_RECONCILER_UNITS
     assert disables[1][3:] == tuple(
-        unit
-        for unit in contract.RESET_STOP_UNITS
-        if unit not in contract.RESET_RECONCILER_UNITS
+        unit for unit in contract.RESET_STOP_UNITS if unit not in contract.RESET_RECONCILER_UNITS
     )
     assert not [call for call in command.calls if call[1] == "stop"]
     assert ("/usr/bin/systemctl", "daemon-reload") in command.calls
@@ -664,7 +658,8 @@ def test_status_parses_systemd_properties(monkeypatch) -> None:
 
 def test_status_records_systemctl_failure(monkeypatch) -> None:
     monkeypatch.setattr(
-        primitives, "run",
+        primitives,
+        "run",
         lambda command, **kwargs: subprocess.CompletedProcess(command, 1, "", "not found"),
     )
 
@@ -692,7 +687,8 @@ def test_logs_rejects_unbounded_line_count(lines) -> None:
 
 def test_logs_collects_fixed_units(monkeypatch) -> None:
     monkeypatch.setattr(
-        primitives, "run",
+        primitives,
+        "run",
         lambda command, **kwargs: subprocess.CompletedProcess(command, 0, "entry\n", ""),
     )
 
@@ -1008,13 +1004,15 @@ def test_atomic_json_and_file_hash(tmp_path: Path) -> None:
 
 def test_checked_command_success_and_failure(monkeypatch) -> None:
     monkeypatch.setattr(
-        primitives, "run",
+        primitives,
+        "run",
         lambda command, **kwargs: subprocess.CompletedProcess(command, 0, "ok", ""),
     )
     assert primitives.checked("probe", ("true",)).stdout == "ok"
 
     monkeypatch.setattr(
-        primitives, "run",
+        primitives,
+        "run",
         lambda command, **kwargs: subprocess.CompletedProcess(command, 1, "", "failed"),
     )
     with pytest.raises(TargetError, match="probe failed"):
@@ -1024,7 +1022,8 @@ def test_checked_command_success_and_failure(monkeypatch) -> None:
 def test_diagnose_composes_redacted_status(monkeypatch) -> None:
     monkeypatch.setattr(host_lifecycle, "status", lambda payload: {"status": "observed"})
     monkeypatch.setattr(
-        host_lifecycle, "logs",
+        host_lifecycle,
+        "logs",
         lambda payload: {"status": "collected", "entries": {"eidolond": "line"}},
     )
 
@@ -1103,9 +1102,7 @@ def test_upgrade_identity_cutover_proves_distinct_non_root_uids(monkeypatch) -> 
     monkeypatch.setattr(primitives, "run", run)
     monkeypatch.setattr(primitives, "checked", checked)
 
-    result = identities.ensure_service_identities(
-        {"units": list(contract.PRODUCT_UNITS)}
-    )
+    result = identities.ensure_service_identities({"units": list(contract.PRODUCT_UNITS)})
 
     assert result["status"] == "service_identities_ready"
     assert len(set(result["uids"].values())) == 4
@@ -1123,9 +1120,7 @@ def test_upgrade_identity_cutover_rejects_duplicate_uids(monkeypatch) -> None:
     monkeypatch.setattr(
         primitives,
         "run",
-        lambda command, **_kwargs: subprocess.CompletedProcess(
-            command, 0, "exists\n", ""
-        ),
+        lambda command, **_kwargs: subprocess.CompletedProcess(command, 0, "exists\n", ""),
     )
 
     def checked(_operation, command, **_kwargs):
@@ -1185,7 +1180,8 @@ def test_status_reads_recent_receipt(monkeypatch, tmp_path: Path) -> None:
     )
     monkeypatch.setitem(contract.FIXED_DATA, "deployment_evidence", evidence)
     monkeypatch.setattr(
-        primitives, "run",
+        primitives,
+        "run",
         lambda command, **kwargs: subprocess.CompletedProcess(command, 0, "", ""),
     )
 
@@ -1251,7 +1247,8 @@ def test_status_reports_which_commits_each_release_was_built_from(
         )
     monkeypatch.setitem(contract.FIXED_DATA, "deployment_evidence", evidence)
     monkeypatch.setattr(
-        primitives, "run",
+        primitives,
+        "run",
         lambda command, **kwargs: subprocess.CompletedProcess(command, 0, "", ""),
     )
 
@@ -1321,7 +1318,8 @@ def test_doctor_host_checks_release_result(
 ) -> None:
     monkeypatch.setattr(contract, "RELEASES", tmp_path)
     monkeypatch.setattr(
-        primitives, "run",
+        primitives,
+        "run",
         lambda command, **kwargs: subprocess.CompletedProcess(
             command, returncode, stdout, "failed"
         ),
@@ -1347,7 +1345,8 @@ def test_deployment_runner_maps_command_result(monkeypatch) -> None:
             self.stderr = stderr
 
     monkeypatch.setattr(
-        primitives, "run",
+        primitives,
+        "run",
         lambda command, **kwargs: subprocess.CompletedProcess(command, 3, "out", "err"),
     )
 
@@ -1526,12 +1525,14 @@ def test_controller_reset_reports_the_bootstrap_evidence(tmp_path, monkeypatch) 
     ctl.write_text("#!/bin/sh\n", encoding="utf-8")
     ctl.chmod(0o755)
     monkeypatch.setattr(host_lifecycle, "BOOTSTRAP_CTL", ctl)
-    document = {"revoked_controllers": ["ectrl-0123456789abcdef0123"], "preserved": ["owner_binding"]}
+    document = {
+        "revoked_controllers": ["ectrl-0123456789abcdef0123"],
+        "preserved": ["owner_binding"],
+    }
     monkeypatch.setattr(
-        primitives, "run",
-        lambda command, **kwargs: subprocess.CompletedProcess(
-            command, 0, json.dumps(document), ""
-        ),
+        primitives,
+        "run",
+        lambda command, **kwargs: subprocess.CompletedProcess(command, 0, json.dumps(document), ""),
     )
 
     result = host_lifecycle.controller_reset({"units": list(contract.PRODUCT_UNITS)})
@@ -1555,7 +1556,8 @@ def test_controller_reset_rejects_output_that_is_not_bootstrap_evidence(
     ctl.chmod(0o755)
     monkeypatch.setattr(host_lifecycle, "BOOTSTRAP_CTL", ctl)
     monkeypatch.setattr(
-        primitives, "run",
+        primitives,
+        "run",
         lambda command, **kwargs: subprocess.CompletedProcess(command, 0, "{}", ""),
     )
 
@@ -1567,7 +1569,8 @@ def test_a_host_without_a_declared_address_reports_the_one_it_has(monkeypatch) -
     """An address a Host once had says nothing about reaching it now."""
 
     monkeypatch.setattr(
-        primitives, "run",
+        primitives,
+        "run",
         lambda command, **kwargs: subprocess.CompletedProcess(
             command, 0, "1.1.1.1 via 192.168.1.1 dev eth0 src 192.168.1.26 uid 0\n", ""
         ),
@@ -1578,7 +1581,8 @@ def test_a_host_without_a_declared_address_reports_the_one_it_has(monkeypatch) -
 
 def test_a_host_with_no_routable_address_fails_closed(monkeypatch) -> None:
     monkeypatch.setattr(
-        primitives, "run",
+        primitives,
+        "run",
         lambda command, **kwargs: subprocess.CompletedProcess(command, 1, "", "unreachable"),
     )
 
@@ -1588,7 +1592,8 @@ def test_a_host_with_no_routable_address_fails_closed(monkeypatch) -> None:
 
 def test_a_loopback_default_route_is_refused(monkeypatch) -> None:
     monkeypatch.setattr(
-        primitives, "run",
+        primitives,
+        "run",
         lambda command, **kwargs: subprocess.CompletedProcess(
             command, 0, "1.1.1.1 dev lo src 127.0.0.1 uid 0\n", ""
         ),
@@ -1616,10 +1621,7 @@ def test_the_host_states_where_the_port_registry_is() -> None:
     — the whole Pi install then failed its readiness gate on Admin.
     """
 
-    assert (
-        f"EIDOLON_PORTS_FILE={contract.HOST_PORTS_PATH}"
-        in contract.HOST_ENV_VALUE
-    )
+    assert f"EIDOLON_PORTS_FILE={contract.HOST_PORTS_PATH}" in contract.HOST_ENV_VALUE
 
 
 def test_the_port_registry_is_carried_not_restated(tmp_path: Path) -> None:
@@ -1766,10 +1768,7 @@ def test_a_host_states_how_long_its_own_services_need() -> None:
     """
 
     assert contract.release_readiness_seconds({"readiness_timeout_seconds": 600}) == 600
-    assert (
-        contract.release_readiness_seconds({})
-        == contract.DEFAULT_RELEASE_READINESS_SECONDS
-    )
+    assert contract.release_readiness_seconds({}) == contract.DEFAULT_RELEASE_READINESS_SECONDS
 
 
 def test_a_readiness_deadline_outside_reason_is_refused() -> None:
@@ -1889,9 +1888,7 @@ def test_the_derived_host_layer_is_delivered_without_a_reinstall(tmp_path, monke
     for name in contract.REFRESHABLE_HOST_LAYER_INPUTS:
         (stage / name).write_text(f"new-{name}", encoding="utf-8")
     monkeypatch.setattr(primitives, "chown_path", lambda *_a: None)
-    monkeypatch.setattr(
-        host_application, "_expected_ids", lambda *_a: (os.getuid(), os.getgid())
-    )
+    monkeypatch.setattr(host_application, "_expected_ids", lambda *_a: (os.getuid(), os.getgid()))
     monkeypatch.setattr(
         primitives, "checked", lambda *_a, **_k: subprocess.CompletedProcess((), 0, "", "")
     )
@@ -1907,7 +1904,8 @@ def test_the_derived_host_layer_is_delivered_without_a_reinstall(tmp_path, monke
         destination.parent.mkdir(parents=True, exist_ok=True)
         placed[name] = destination
     monkeypatch.setattr(
-        contract, "INSTALL_INPUTS",
+        contract,
+        "INSTALL_INPUTS",
         {
             **{
                 name: (placed[name], "root", "root", 0o644)
@@ -1943,13 +1941,16 @@ def test_the_derived_host_layer_is_delivered_without_a_reinstall(tmp_path, monke
     assert reconciled == [(Path("/"), "admin:\n  api:\n    port: 9000\n")]
 
     # Second run has nothing to deliver, so systemd is left alone.
-    assert host_application.refresh_host_application(
-        {
-            "units": list(contract.PRODUCT_UNITS),
-            "release_id": "r1",
-            "port_registry": "admin:\n  api:\n    port: 9000\n",
-        }
-    )["changed"] == []
+    assert (
+        host_application.refresh_host_application(
+            {
+                "units": list(contract.PRODUCT_UNITS),
+                "release_id": "r1",
+                "port_registry": "admin:\n  api:\n    port: 9000\n",
+            }
+        )["changed"]
+        == []
+    )
     assert reconciled == [
         (Path("/"), "admin:\n  api:\n    port: 9000\n"),
         (Path("/"), "admin:\n  api:\n    port: 9000\n"),
@@ -1978,9 +1979,7 @@ def test_refresh_installs_and_then_removes_the_opt_in_commissioning_registry(
     registry_value = json.dumps(
         {
             "profile": "eidolon-development-hmac-commissioning-v2",
-            "devices": {
-                "box-3-hil": {"setup_secret": encoded_secret}
-            },
+            "devices": {"box-3-hil": {"setup_secret": encoded_secret}},
         }
     )
     (stage / "commissioning-secrets.json").write_text(registry_value, encoding="utf-8")
@@ -1991,10 +1990,7 @@ def test_refresh_installs_and_then_removes_the_opt_in_commissioning_registry(
             "commissioning-secrets.json",
         )
     }
-    install_inputs = {
-        name: (path, "root", "root", 0o640)
-        for name, path in targets.items()
-    }
+    install_inputs = {name: (path, "root", "root", 0o640) for name, path in targets.items()}
     install_inputs["commissioning-secrets.json"] = (
         targets["commissioning-secrets.json"],
         "root",
@@ -2036,12 +2032,26 @@ def test_refresh_installs_and_then_removes_the_opt_in_commissioning_registry(
     assert target.read_text(encoding="utf-8") == registry_value
     assert target.stat().st_mode & 0o777 == 0o640
     assert enabled["changed"][0] == str(target)
-    assert len(validation_commands) == 2
+    assert len(validation_commands) == 8
     assert "/opt/eidolon/current/eidolon_hub/.venv/bin/python" in validation_commands[0]
     assert "/opt/eidolon/releases/r1/eidolon_hub/.venv/bin/python" in validation_commands[1]
     assert any(
-        path.name.startswith(".commissioning-secrets.json")
-        and (user, group) == ("root", "eidolon")
+        "/opt/eidolon/releases/r1/eidolon_agent/.venv/bin/python" in command
+        and any(value.endswith("/agent.yaml") for value in command)
+        for command in validation_commands
+    )
+    assert any(
+        "/opt/eidolon/releases/r1/eidolon_channel/.venv/bin/python" in command
+        and any(value.endswith("/channel.yaml") for value in command)
+        for command in validation_commands
+    )
+    assert any(
+        "/opt/eidolon/releases/r1/eidolon_memory/.venv/bin/python" in command
+        and any(value.endswith("/memory.yaml") for value in command)
+        for command in validation_commands
+    )
+    assert any(
+        path.name.startswith(".commissioning-secrets.json") and (user, group) == ("root", "eidolon")
         for path, user, group in ownership
     )
     assert encoded_secret not in repr(enabled)
@@ -2054,9 +2064,7 @@ def test_refresh_installs_and_then_removes_the_opt_in_commissioning_registry(
     assert disabled["removed"] == [str(target)]
 
 
-def test_refresh_rejects_a_symlinked_commissioning_registry_stage(
-    tmp_path, monkeypatch
-) -> None:
+def test_refresh_rejects_a_symlinked_commissioning_registry_stage(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(contract, "VAR_TMP", tmp_path / "var-tmp")
     stage = tmp_path / "var-tmp" / "eidolon-secrets-r1"
     stage.mkdir(parents=True)
@@ -2171,6 +2179,11 @@ def test_refresh_rewrites_host_tls_but_never_owner_signing_authority() -> None:
     assert "authority-signing-certificate.pem" in contract.REFRESHABLE_HOST_APPLICATION_INPUTS
     assert set(contract.REFRESHABLE_HOST_APPLICATION_INPUTS) <= set(contract.INSTALL_INPUTS)
     assert set(contract.REFRESHABLE_HOST_BOUND_INPUTS) == {"local-api.env", "channel.env"}
+    assert set(contract.REFRESHABLE_PRODUCT_SETTINGS) == {
+        "agent.yaml",
+        "channel.yaml",
+        "memory.yaml",
+    }
     assert set(contract.REFRESHABLE_HOST_LAYER_INPUTS) <= set(contract.INSTALL_INPUTS)
     registry = contract.OPTIONAL_HOST_APPLICATION_INPUTS["commissioning-secrets.json"]
     assert registry == (
@@ -2192,7 +2205,9 @@ def test_public_owner_trust_does_not_grant_access_to_private_host_inputs() -> No
     files along with them would erase that boundary.
     """
 
-    directories = {path: (mode, owner, group) for path, mode, owner, group in contract.HOST_DIRECTORIES}
+    directories = {
+        path: (mode, owner, group) for path, mode, owner, group in contract.HOST_DIRECTORIES
+    }
     assert directories[Path("/etc/eidolon")] == (0o751, "root", "eidolon")
     assert directories[Path("/etc/eidolon/owner-domain")] == (
         0o750,
@@ -2205,12 +2220,8 @@ def test_public_owner_trust_does_not_grant_access_to_private_host_inputs() -> No
         "owner-domain-root-ca.pem",
         "authority-signing-certificate.pem",
     }
-    assert {
-        name: contract.HOST_APPLICATION_INPUTS[name][1:]
-        for name in public_names
-    } == {
-        name: ("root", "eidolon-owner-trust-readers", 0o640)
-        for name in public_names
+    assert {name: contract.HOST_APPLICATION_INPUTS[name][1:] for name in public_names} == {
+        name: ("root", "eidolon-owner-trust-readers", 0o640) for name in public_names
     }
 
     assert contract.HOST_APPLICATION_INPUTS["hub.key"][1:] == ("root", "eidolon", 0o640)
@@ -2302,9 +2313,7 @@ def test_owner_authority_reset_is_targeted_monotonic_and_proven(tmp_path: Path) 
             return subprocess.CompletedProcess(value, 0, "active\n", "")
         return subprocess.CompletedProcess(value, 0, "", "")
 
-    plan = authority_reset.authority_reset_plan(
-        _authority_reset_payload(), root=tmp_path
-    )
+    plan = authority_reset.authority_reset_plan(_authority_reset_payload(), root=tmp_path)
     assert plan["status"] == "planned"
     assert plan["destructive_work_required"] is True
 
@@ -2321,9 +2330,10 @@ def test_owner_authority_reset_is_targeted_monotonic_and_proven(tmp_path: Path) 
         authority_reset.HUB_INGRESS_UNIT,
         authority_reset.HUB_UNIT,
     )
-    assert authority_reset.authority_reset_plan(
-        _authority_reset_payload(), root=tmp_path
-    )["status"] == "already_reset"
+    assert (
+        authority_reset.authority_reset_plan(_authority_reset_payload(), root=tmp_path)["status"]
+        == "already_reset"
+    )
 
 
 def test_owner_authority_reset_refuses_partial_lineage(tmp_path: Path) -> None:
@@ -2332,9 +2342,7 @@ def test_owner_authority_reset_refuses_partial_lineage(tmp_path: Path) -> None:
     anchor.write_text(json.dumps(expected), encoding="utf-8")
 
     with pytest.raises(TargetError, match="partially committed"):
-        authority_reset.authority_reset_plan(
-            _authority_reset_payload(), root=tmp_path
-        )
+        authority_reset.authority_reset_plan(_authority_reset_payload(), root=tmp_path)
 
 
 def _authority_fixture(tmp_path: Path, monkeypatch):
@@ -2577,9 +2585,7 @@ def test_a_backup_that_was_not_told_where_memory_is_refuses(tmp_path, monkeypatc
         authorities.backup({"units": list(contract.PRODUCT_UNITS), "release_id": "r1"})
 
 
-def test_memory_spaces_go_back_only_once_the_product_is_running(
-    tmp_path, monkeypatch
-) -> None:
+def test_memory_spaces_go_back_only_once_the_product_is_running(tmp_path, monkeypatch) -> None:
     """Ordering is the whole point: only a live supervisor can take a realm's
     runner off its palace, and one process holds a palace."""
 
@@ -2726,8 +2732,9 @@ def test_the_host_registers_the_hub_name_it_advertises(monkeypatch, tmp_path: Pa
     monkeypatch.setattr(
         primitives,
         "checked",
-        lambda _label, *command, **_k: reloads.append(command)
-        or subprocess.CompletedProcess((), 0, "", ""),
+        lambda _label, *command, **_k: (
+            reloads.append(command) or subprocess.CompletedProcess((), 0, "", "")
+        ),
     )
 
     changed = host_application.publish_hub_hostname(_publish_payload(), root=tmp_path)
@@ -2742,9 +2749,7 @@ def test_the_host_registers_the_hub_name_it_advertises(monkeypatch, tmp_path: Pa
 def test_a_host_with_no_app_contract_registers_nothing(monkeypatch, tmp_path: Path) -> None:
     """Production Hosts without the app layer have no Hub name to answer for."""
 
-    monkeypatch.setattr(
-        primitives, "checked", lambda *_a, **_k: pytest.fail("nothing to reload")
-    )
+    monkeypatch.setattr(primitives, "checked", lambda *_a, **_k: pytest.fail("nothing to reload"))
 
     assert host_application.publish_hub_hostname({"units": []}, root=tmp_path) == []
     assert not _hosts_file(tmp_path).exists()
@@ -2804,7 +2809,6 @@ def test_registrations_this_host_does_not_own_are_kept(monkeypatch, tmp_path: Pa
     ]
 
 
-
 def test_delivering_the_host_layer_registers_the_hub_name(monkeypatch, tmp_path: Path) -> None:
     """Registration has to happen on the path that actually runs on a deploy.
 
@@ -2822,6 +2826,9 @@ def test_delivering_the_host_layer_registers_the_hub_name(monkeypatch, tmp_path:
     monkeypatch.setattr(contract, "ensure_host_path_contract", lambda *_a: None)
     monkeypatch.setattr(host_application, "remove_legacy_system_assets", lambda *_a: [])
     monkeypatch.setattr(host_application, "_validate_hub_settings_compatibility", lambda *_a: None)
+    monkeypatch.setattr(
+        host_application, "_validate_product_settings_compatibility", lambda *_a: None
+    )
     monkeypatch.setattr(contract, "REFRESHABLE_HOST_LAYER_INPUTS", ())
     monkeypatch.setattr(contract, "INSTALL_INPUTS", {})
     monkeypatch.setattr(

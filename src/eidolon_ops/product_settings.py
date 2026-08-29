@@ -46,6 +46,11 @@ def product_settings(
         "config/settings.yaml",
     )
     channel = _replace(channel, "avatar:\n  enabled: true", "avatar:\n  enabled: false", expected=1)
+    # Raw STT audio capture is a developer diagnostic. A production Host neither
+    # needs to retain microphone audio nor grants Channel write access to its
+    # read-only cache root, so enabling it produces a warning on every session
+    # and violates the product's data-minimisation boundary.
+    channel = _replace(channel, "  dump_wav: true", "  dump_wav: false", expected=1)
     # Channel path settings follow the same Host environment contract as
     # Agent; systemd supplies EIDOLON_STATE_ROOT, EIDOLON_LOG_ROOT, and
     # EIDOLON_CACHE_ROOT for the product installation.

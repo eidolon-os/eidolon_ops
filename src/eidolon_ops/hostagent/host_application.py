@@ -44,6 +44,7 @@ def _expected_ids(user: str, group: str) -> tuple[int, int]:
     except KeyError as exc:
         raise TargetError(f"required Host layer identity is missing: {user}:{group}") from exc
 
+
 def await_host_application(run: Callable[..., object], root: Path = Path("/")) -> None:
     """Wait for the Host layer, the way the release waits for its components.
 
@@ -54,7 +55,9 @@ def await_host_application(run: Callable[..., object], root: Path = Path("/")) -
     once, without retrying. So this waits, and never starts.
     """
 
-    if not primitives.host_path(root, contract.HOST_APPLICATION_INPUTS["hub-ingress.service"][0]).is_file():
+    if not primitives.host_path(
+        root, contract.HOST_APPLICATION_INPUTS["hub-ingress.service"][0]
+    ).is_file():
         return
     deadline = time.monotonic() + HOST_APPLICATION_READY_SECONDS
     while True:
@@ -65,6 +68,7 @@ def await_host_application(run: Callable[..., object], root: Path = Path("/")) -
             state = (result.stdout or "").strip() or "unknown"
             raise TargetError(f"Host application ingress is not active: {state}")
         time.sleep(0.5)
+
 
 def refresh_host_application(payload: Mapping[str, object]) -> dict[str, object]:
     """Deliver the Host layer the operator derived, without a reinstall.
@@ -85,11 +89,10 @@ def refresh_host_application(payload: Mapping[str, object]) -> dict[str, object]
         raise TargetError("Host application staging directory is missing")
     optional_name = "commissioning-secrets.json"
     optional_source = stage / optional_name
-    if optional_source.is_symlink() or (
-        optional_source.exists() and not optional_source.is_file()
-    ):
+    if optional_source.is_symlink() or (optional_source.exists() and not optional_source.is_file()):
         raise TargetError("development commissioning registry staging input is unsafe")
     _validate_hub_settings_compatibility(stage, release_id)
+    _validate_product_settings_compatibility(stage, release_id)
     # A refresh is the deployment path for Host-owned contract changes, not
     # merely a byte copier.  Reconcile the path contract before replacing
     # files so a new public/private classification (including parent traversal
@@ -153,18 +156,14 @@ def refresh_host_application(payload: Mapping[str, object]) -> dict[str, object]
         destination = primitives.host_path(Path("/"), destination_value)
         if destination.exists() or destination.is_symlink():
             if destination.is_symlink() or not destination.is_file():
-                raise TargetError(
-                    "development commissioning registry destination is unsafe"
-                )
+                raise TargetError("development commissioning registry destination is unsafe")
             expected_uid, expected_gid = _expected_ids(user, group)
             metadata = destination.stat()
-            if (
-                stat.S_IMODE(metadata.st_mode) != mode
-                or (metadata.st_uid, metadata.st_gid) != (expected_uid, expected_gid)
+            if stat.S_IMODE(metadata.st_mode) != mode or (metadata.st_uid, metadata.st_gid) != (
+                expected_uid,
+                expected_gid,
             ):
-                raise TargetError(
-                    "development commissioning registry ownership or mode drifted"
-                )
+                raise TargetError("development commissioning registry ownership or mode drifted")
             destination.unlink()
             removed.append(str(destination_value))
     if changed:
@@ -174,9 +173,7 @@ def refresh_host_application(payload: Mapping[str, object]) -> dict[str, object]
     return {"status": "refreshed", "changed": changed, "removed": removed}
 
 
-def publish_hub_hostname(
-    payload: Mapping[str, object], root: Path = Path("/")
-) -> list[str]:
+def publish_hub_hostname(payload: Mapping[str, object], root: Path = Path("/")) -> list[str]:
     """Register the Hub's advertised name with this Host's ``.local`` responder.
 
     The advertisement and the address answer are two halves of one fact — where
@@ -258,6 +255,72 @@ def _validate_hub_settings_compatibility(stage: Path, release_id: str) -> None:
             ),
             timeout=120,
         )
+
+
+def _validate_product_settings_compatibility(stage: Path, release_id: str) -> None:
+    """Require each component config to load before replacing the live copy.
+
+    The settings and component links switch in separate atomic operations. Both
+    the current interpreter (rollback safety) and candidate interpreter (forward
+    safety) must therefore understand the candidate settings before any live
+    Host path is touched.
+    """
+
+    roots = {
+        "EIDOLON_RUNTIME_ROOT": "/run/eidolon",
+        "EIDOLON_STATE_ROOT": "/var/lib/eidolon",
+        "EIDOLON_CACHE_ROOT": "/var/cache/eidolon",
+        "EIDOLON_LOG_ROOT": "/var/log/eidolon",
+    }
+    specifications = (
+        (
+            "agent",
+            "agent.yaml",
+            "EIDOLON_AGENT_SETTINGS_YAML",
+            "EIDOLON_AGENT_ENV_FILE=/etc/eidolon/agent.env",
+            "from eidolon_agent.config import load_settings; load_settings()",
+        ),
+        (
+            "channel",
+            "channel.yaml",
+            "EIDOLON_CHANNEL_SETTINGS_YAML",
+            "EIDOLON_CHANNEL_ENV_FILE=/etc/eidolon/channel.env",
+            (
+                "from eidolon.livekit.common.config import load_effective_config; "
+                "load_effective_config()"
+            ),
+        ),
+        (
+            "memory",
+            "memory.yaml",
+            "EIDOLON_MEMORY_SETTINGS_YAML",
+            "EIDOLON_MEMORY_ENV_FILE=/etc/eidolon/memory.env",
+            "from eidolon.memory.config import load_memory_settings; load_memory_settings()",
+        ),
+    )
+    for component, filename, settings_variable, env_file, script in specifications:
+        settings = stage / filename
+        if not settings.is_file() or settings.is_symlink():
+            raise TargetError(f"product settings were not staged safely: {filename}")
+        interpreters = (
+            Path(f"/opt/eidolon/current/eidolon_{component}/.venv/bin/python"),
+            Path(f"/opt/eidolon/releases/{release_id}/eidolon_{component}/.venv/bin/python"),
+        )
+        for interpreter in interpreters:
+            primitives.checked(
+                f"cross-release {component} settings validation",
+                (
+                    "/usr/bin/env",
+                    *(f"{key}={value}" for key, value in roots.items()),
+                    f"{settings_variable}={settings}",
+                    env_file,
+                    str(interpreter),
+                    "-c",
+                    script,
+                ),
+                timeout=120,
+            )
+
 
 def remove_legacy_system_assets(root: Path = Path("/")) -> list[str]:
     """Take away what a release used to install and no longer does.

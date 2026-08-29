@@ -83,6 +83,7 @@ DIRECT_ENABLE_UNITS = (
 #: spurious rollback is a far worse failure than a slow one.
 DEFAULT_RELEASE_READINESS_SECONDS = 240
 
+
 def release_readiness_seconds(payload: Mapping[str, object]) -> int:
     """How long this Host says its own services need. A platform property."""
 
@@ -90,6 +91,7 @@ def release_readiness_seconds(payload: Mapping[str, object]) -> int:
     if not isinstance(value, int) or isinstance(value, bool) or not 30 <= value <= 1800:
         raise TargetError("Host readiness timeout is invalid")
     return value
+
 
 CURRENT_LINKS = {
     "eidolon_kernel": Path("/opt/eidolon/current/eidolon_kernel"),
@@ -216,9 +218,11 @@ REFRESHABLE_HOST_APPLICATION_INPUTS = (
 #: The controller re-renders the whole authoritative environment file so the
 #: target never edits or infers credentials while updating those fields.
 REFRESHABLE_HOST_BOUND_INPUTS = ("local-api.env", "channel.env")
+REFRESHABLE_PRODUCT_SETTINGS = ("agent.yaml", "channel.yaml", "memory.yaml")
 REFRESHABLE_HOST_LAYER_INPUTS = (
     *REFRESHABLE_HOST_APPLICATION_INPUTS,
     *REFRESHABLE_HOST_BOUND_INPUTS,
+    *REFRESHABLE_PRODUCT_SETTINGS,
 )
 
 CORE_COMPONENTS = (
@@ -467,6 +471,7 @@ PHASES = (
     "completed",
 )
 
+
 def ensure_host_path_contract(
     root: Path,
     chown: Callable[[Path, str, str], None],
@@ -503,11 +508,13 @@ def ensure_host_path_contract(
     primitives.atomic_text(host_env, HOST_ENV_VALUE, mode=0o644)
     chown(host_env, "root", "root")
 
+
 def fixed_units(payload: Mapping[str, object]) -> tuple[str, ...]:
     value = payload.get("units")
     if value != list(PRODUCT_UNITS):
         raise TargetError("unit set differs from the reviewed product topology")
     return PRODUCT_UNITS
+
 
 def fixed_data(payload: Mapping[str, object]) -> dict[str, Path]:
     value = payload.get("data")
@@ -517,6 +524,7 @@ def fixed_data(payload: Mapping[str, object]) -> dict[str, Path]:
     if result != FIXED_DATA:
         raise TargetError("data paths differ from reviewed system assets")
     return result
+
 
 def fixed_port_registry(payload: Mapping[str, object]) -> str:
     """The port registry the operator sent, refused rather than invented.
@@ -530,6 +538,7 @@ def fixed_port_registry(payload: Mapping[str, object]) -> str:
     if not isinstance(value, str) or not value.strip():
         raise TargetError("Host port registry is missing from the operation payload")
     return value
+
 
 def fixed_memory_admin_url(payload: Mapping[str, object]) -> str:
     """Where memory's supervisor answers, as the operator's registry has it.
@@ -546,6 +555,7 @@ def fixed_memory_admin_url(payload: Mapping[str, object]) -> str:
     if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost"}:
         raise TargetError(f"memory admin URL must be loopback http: {value}")
     return value.strip().rstrip("/")
+
 
 #: What a Host records about each source repository a release was built from.
 #: Five facts, fixed, because this is the only durable answer to "which commits
