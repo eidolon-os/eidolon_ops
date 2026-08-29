@@ -97,7 +97,7 @@ mkdir -p \
   "${EIDOLON_STATE_ROOT}/audit" \
   "${EIDOLON_STATE_ROOT}/admin" \
   "${EIDOLON_STATE_ROOT}/agent" \
-  "${EIDOLON_STATE_ROOT}/memory/mempalaces" \
+  "${EIDOLON_STATE_ROOT}/memory/mempalaces-v3.8" \
   "${EIDOLON_STATE_ROOT}/nats/jetstream" \
   "${EIDOLON_STATE_ROOT}/voiceprints" \
   "${EIDOLON_RUNTIME_ROOT}/agent" \

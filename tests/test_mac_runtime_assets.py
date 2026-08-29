@@ -201,3 +201,12 @@ def test_the_product_source_profile_renders_livekit_before_running_it() -> None:
     # The renderer needs the server credentials, which live in the profile's
     # own env root rather than in any settings file.
     assert "livekit.env" in command
+
+
+def test_memory_38_source_profile_uses_a_fresh_storage_epoch() -> None:
+    profile = (ROOT / "deploy/supervisor/product-source.conf").read_text(encoding="utf-8")
+    launcher = (ROOT / "deploy/dev/run_all.sh").read_text(encoding="utf-8")
+
+    expected = "memory/mempalaces-v3.8"
+    assert f'EIDOLON_MEMORY_PALACES_ROOT="%(ENV_EIDOLON_STATE_ROOT)s/{expected}"' in profile
+    assert f'"${{EIDOLON_STATE_ROOT}}/{expected}"' in launcher
