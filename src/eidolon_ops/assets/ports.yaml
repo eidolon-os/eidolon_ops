@@ -41,6 +41,9 @@ agent:
   grpc:
     port: 45051
 memory:
+  embedder:
+    host: 127.0.0.1
+    port: 8760
   discovery:
     host: 127.0.0.1
     port: 8020

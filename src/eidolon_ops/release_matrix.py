@@ -92,6 +92,12 @@ SYSTEMD_ASSET_CONTRACTS = (
     ),
     SystemdAssetContract(
         "eidolon_kernel",
+        "deploy/systemd/eidolon-memory-embedder.service",
+        "eidolon-memory-embedder.service",
+        "eidolon_memory",
+    ),
+    SystemdAssetContract(
+        "eidolon_kernel",
         "deploy/systemd/eidolon-memory-supervisor.service",
         "eidolon-memory-supervisor.service",
         "eidolon_memory",

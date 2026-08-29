@@ -52,6 +52,7 @@ PORTS = {
     "livekit": LIVEKIT_SIGNALLING_PORT,
     "memory_admin": 8019,
     "memory_discovery": 8020,
+    "memory_embedder": 8760,
     "agent_admin": 8081,
     "agent_http": 8180,
     "hub": 8082,
@@ -110,6 +111,9 @@ def status_ports(*, hub_https_port: int | None = None) -> dict[str, list[dict[st
             endpoint("Supervisor", "127.0.0.1", PORTS["memory_admin"]),
             endpoint("MCP base", "127.0.0.1", 10030),
         ],
+        "memory-embedder": [
+            endpoint("Embedding", "127.0.0.1", PORTS["memory_embedder"])
+        ],
         "memory-discovery": [
             endpoint("Discovery", "127.0.0.1", PORTS["memory_discovery"])
         ],
@@ -133,7 +137,11 @@ def status_ports(*, hub_https_port: int | None = None) -> dict[str, list[dict[st
         ],
     }
     data["hub"] = [*data["hub-api"], *data["hub-ingress"]]
-    data["memory"] = [*data["memory-supervisor"], *data["memory-discovery"]]
+    data["memory"] = [
+        *data["memory-embedder"],
+        *data["memory-supervisor"],
+        *data["memory-discovery"],
+    ]
     return data
 
 #: Deliberately outside :data:`PORTS`, which is checked for equality against the
@@ -306,6 +314,7 @@ agent:
   admin: {{port: {PORTS["agent_admin"]}}}
   grpc: {{port: 45051}}
 memory:
+  embedder: {{host: 127.0.0.1, port: {PORTS["memory_embedder"]}}}
   discovery: {{host: 127.0.0.1, port: {PORTS["memory_discovery"]}}}
   mcp: {{port: 10030}}
   supervisor_http: {{host: 127.0.0.1, port: {PORTS["memory_admin"]}}}
@@ -350,7 +359,7 @@ _MANAGED_SERVICES = (
         "memory",
         "Eidolon Memory",
         "memory",
-        ("memory-supervisor", "memory-discovery"),
+        ("memory-embedder", "memory-supervisor", "memory-discovery"),
         "http://127.0.0.1:{memory_admin}/api/admin/health",
     ),
     ("agent", "Eidolon Agent", "agent", ("agent",), "http://127.0.0.1:{agent_http}/readyz"),

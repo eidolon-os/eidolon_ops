@@ -35,6 +35,7 @@ PRODUCT_UNITS = (
     "eidolon-admin.service",
     "eidolon-nats.service",
     "eidolon-livekit.service",
+    "eidolon-memory-embedder.service",
     "eidolon-memory-supervisor.service",
     "eidolon-memory-discovery.service",
     "eidolon-agent.service",

@@ -27,6 +27,7 @@ _UNIT_SERVICES = {
     "eidolon-admin.service": "admin",
     "eidolon-nats.service": "nats",
     "eidolon-livekit.service": "livekit",
+    "eidolon-memory-embedder.service": "memory-embedder",
     "eidolon-memory-supervisor.service": "memory-supervisor",
     "eidolon-memory-discovery.service": "memory-discovery",
     "eidolon-agent.service": "agent",
