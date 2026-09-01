@@ -306,36 +306,6 @@ def test_journal_records_hashes_not_secret_values(install_fixture) -> None:
     assert len(document["input_sha256"]["data.env"]) == 64
 
 
-def test_development_commissioning_input_is_installed_without_a_digest_in_evidence(
-    install_fixture, monkeypatch
-) -> None:
-    installer, _host, command, stage, _release, _data = install_fixture
-    for name in contract.HOST_APPLICATION_INPUTS:
-        (stage / name).write_text(f"private-{name}", encoding="utf-8")
-    encoded_secret = base64.urlsafe_b64encode(b"h" * 32).rstrip(b"=").decode()
-    registry = json.dumps(
-        {
-            "profile": "eidolon-development-hmac-commissioning-v2",
-            "devices": {"box-3-hil": {"setup_secret": encoded_secret}},
-        }
-    )
-    (stage / "commissioning-secrets.json").write_text(registry, encoding="utf-8")
-    monkeypatch.setattr(host_application, "await_host_application", lambda *_a: None)
-
-    installer.install()
-
-    target = installer.root / "etc/eidolon/commissioning-secrets.json"
-    assert target.read_text(encoding="utf-8") == registry
-    assert target.stat().st_mode & 0o777 == 0o640
-    evidence = installer.journal_path.read_text(encoding="utf-8")
-    assert encoded_secret not in evidence
-    assert hashlib.sha256(registry.encode()).hexdigest() not in evidence
-    assert json.loads(evidence)["input_sha256"]["commissioning-secrets.json"] == (
-        "private-input-redacted"
-    )
-    assert encoded_secret not in repr(command.calls)
-
-
 @pytest.mark.parametrize(
     "conflict",
     [
@@ -1913,18 +1883,6 @@ def test_the_derived_host_layer_is_delivered_without_a_reinstall(tmp_path, monke
             }
         },
     )
-    monkeypatch.setattr(
-        contract,
-        "OPTIONAL_HOST_APPLICATION_INPUTS",
-        {
-            "commissioning-secrets.json": (
-                tmp_path / "host/commissioning-secrets.json",
-                "root",
-                "root",
-                0o640,
-            )
-        },
-    )
 
     result = host_application.refresh_host_application(
         {
@@ -1967,128 +1925,6 @@ def test_the_derived_host_layer_is_delivered_without_a_reinstall(tmp_path, monke
         )
 
 
-def test_refresh_installs_and_then_removes_the_opt_in_commissioning_registry(
-    tmp_path, monkeypatch
-) -> None:
-    monkeypatch.setattr(contract, "VAR_TMP", tmp_path / "var-tmp")
-    stage = tmp_path / "var-tmp" / "eidolon-secrets-r1"
-    stage.mkdir(parents=True)
-    for name in contract.REFRESHABLE_HOST_LAYER_INPUTS:
-        (stage / name).write_text(f"new-{name}", encoding="utf-8")
-    encoded_secret = base64.urlsafe_b64encode(b"h" * 32).rstrip(b"=").decode()
-    registry_value = json.dumps(
-        {
-            "profile": "eidolon-development-hmac-commissioning-v2",
-            "devices": {"box-3-hil": {"setup_secret": encoded_secret}},
-        }
-    )
-    (stage / "commissioning-secrets.json").write_text(registry_value, encoding="utf-8")
-    targets = {
-        name: tmp_path / "host" / name
-        for name in (
-            *contract.REFRESHABLE_HOST_LAYER_INPUTS,
-            "commissioning-secrets.json",
-        )
-    }
-    install_inputs = {name: (path, "root", "root", 0o640) for name, path in targets.items()}
-    install_inputs["commissioning-secrets.json"] = (
-        targets["commissioning-secrets.json"],
-        "root",
-        "eidolon",
-        0o640,
-    )
-    monkeypatch.setattr(contract, "INSTALL_INPUTS", install_inputs)
-    monkeypatch.setattr(
-        contract,
-        "OPTIONAL_HOST_APPLICATION_INPUTS",
-        {"commissioning-secrets.json": install_inputs["commissioning-secrets.json"]},
-    )
-    monkeypatch.setattr(contract, "LEGACY_SYSTEM_ASSETS", ())
-    monkeypatch.setattr(contract, "ensure_host_path_contract", lambda *_a: None)
-    monkeypatch.setattr(host_application, "_expected_ids", lambda *_a: (os.getuid(), os.getgid()))
-    ownership: list[tuple[Path, str, str]] = []
-    monkeypatch.setattr(
-        primitives,
-        "chown_path",
-        lambda path, user, group: ownership.append((path, user, group)),
-    )
-    validation_commands: list[tuple[str, ...]] = []
-
-    def checked(_label, command, **_kwargs):
-        if command[0] == "/usr/bin/env":
-            validation_commands.append(tuple(command))
-        return subprocess.CompletedProcess(command, 0, "", "")
-
-    monkeypatch.setattr(primitives, "checked", checked)
-    payload = {
-        "units": list(contract.PRODUCT_UNITS),
-        "release_id": "r1",
-        "port_registry": "admin:\n  api:\n    port: 9000\n",
-    }
-
-    enabled = host_application.refresh_host_application(payload)
-
-    target = targets["commissioning-secrets.json"]
-    assert target.read_text(encoding="utf-8") == registry_value
-    assert target.stat().st_mode & 0o777 == 0o640
-    assert enabled["changed"][0] == str(target)
-    assert len(validation_commands) == 8
-    assert "/opt/eidolon/current/eidolon_hub/.venv/bin/python" in validation_commands[0]
-    assert "/opt/eidolon/releases/r1/eidolon_hub/.venv/bin/python" in validation_commands[1]
-    assert any(
-        "/opt/eidolon/releases/r1/eidolon_agent/.venv/bin/python" in command
-        and any(value.endswith("/agent.yaml") for value in command)
-        for command in validation_commands
-    )
-    assert any(
-        "/opt/eidolon/releases/r1/eidolon_channel/.venv/bin/python" in command
-        and any(value.endswith("/channel.yaml") for value in command)
-        for command in validation_commands
-    )
-    assert any(
-        "/opt/eidolon/releases/r1/eidolon_memory/.venv/bin/python" in command
-        and any(value.endswith("/memory.yaml") for value in command)
-        for command in validation_commands
-    )
-    assert any(
-        path.name.startswith(".commissioning-secrets.json") and (user, group) == ("root", "eidolon")
-        for path, user, group in ownership
-    )
-    assert encoded_secret not in repr(enabled)
-    assert hashlib.sha256(registry_value.encode()).hexdigest() not in repr(enabled)
-
-    (stage / "commissioning-secrets.json").unlink()
-    disabled = host_application.refresh_host_application(payload)
-
-    assert not target.exists()
-    assert disabled["removed"] == [str(target)]
-
-
-def test_refresh_rejects_a_symlinked_commissioning_registry_stage(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(contract, "VAR_TMP", tmp_path / "var-tmp")
-    stage = tmp_path / "var-tmp" / "eidolon-secrets-r1"
-    stage.mkdir(parents=True)
-    for name in contract.REFRESHABLE_HOST_LAYER_INPUTS:
-        (stage / name).write_text(f"new-{name}", encoding="utf-8")
-    outside = tmp_path / "outside-registry.json"
-    outside.write_text("private", encoding="utf-8")
-    (stage / "commissioning-secrets.json").symlink_to(outside)
-    monkeypatch.setattr(
-        primitives,
-        "checked",
-        lambda *_a, **_k: subprocess.CompletedProcess((), 0, "", ""),
-    )
-
-    with pytest.raises(TargetError, match="registry staging input is unsafe"):
-        host_application.refresh_host_application(
-            {
-                "units": list(contract.PRODUCT_UNITS),
-                "release_id": "r1",
-                "port_registry": "admin:\n  api:\n    port: 9000\n",
-            }
-        )
-
-
 def test_host_layer_refuses_settings_that_previous_release_cannot_parse(
     tmp_path, monkeypatch
 ) -> None:
@@ -2115,18 +1951,6 @@ def test_host_layer_refuses_settings_that_previous_release_cannot_parse(
                 0o644,
             )
             for name in contract.REFRESHABLE_HOST_LAYER_INPUTS
-        },
-    )
-    monkeypatch.setattr(
-        contract,
-        "OPTIONAL_HOST_APPLICATION_INPUTS",
-        {
-            "commissioning-secrets.json": (
-                registry_destination,
-                "root",
-                "root",
-                0o640,
-            )
         },
     )
 
@@ -2185,15 +2009,13 @@ def test_refresh_rewrites_host_tls_but_never_owner_signing_authority() -> None:
         "memory.yaml",
     }
     assert set(contract.REFRESHABLE_HOST_LAYER_INPUTS) <= set(contract.INSTALL_INPUTS)
-    registry = contract.OPTIONAL_HOST_APPLICATION_INPUTS["commissioning-secrets.json"]
-    assert registry == (
-        Path("/etc/eidolon/commissioning-secrets.json"),
-        "root",
-        "eidolon",
-        0o640,
-    )
-    assert "commissioning-secrets.json" in contract.INSTALL_INPUTS
-    assert "commissioning-secrets.json" not in contract.REFRESHABLE_HOST_LAYER_INPUTS
+    # There is no optional Host application input any more. The one that
+    # existed was a per-device commissioning registry belonging to no sealed
+    # release, which is how a rollback to code reading an older format of it
+    # left the Hub restarting 110 times.
+    assert not hasattr(contract, "OPTIONAL_HOST_APPLICATION_INPUTS")
+    assert "commissioning-secrets.json" not in contract.INSTALL_INPUTS
+    assert contract.INSTALL_INPUTS == contract.BASE_INSTALL_INPUTS
 
 
 def test_public_owner_trust_does_not_grant_access_to_private_host_inputs() -> None:
@@ -2831,11 +2653,6 @@ def test_delivering_the_host_layer_registers_the_hub_name(monkeypatch, tmp_path:
     )
     monkeypatch.setattr(contract, "REFRESHABLE_HOST_LAYER_INPUTS", ())
     monkeypatch.setattr(contract, "INSTALL_INPUTS", {})
-    monkeypatch.setattr(
-        contract,
-        "OPTIONAL_HOST_APPLICATION_INPUTS",
-        {"commissioning-secrets.json": (tmp_path / "absent.json", "root", "root", 0o640)},
-    )
     stage = contract.VAR_TMP / "eidolon-secrets-r1"
     stage.mkdir(parents=True, exist_ok=True)
 

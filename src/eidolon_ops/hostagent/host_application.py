@@ -87,10 +87,6 @@ def refresh_host_application(payload: Mapping[str, object]) -> dict[str, object]
         raise TargetError("secret staging path is unsafe")
     if not stage.is_dir() or stage.is_symlink():
         raise TargetError("Host application staging directory is missing")
-    optional_name = "commissioning-secrets.json"
-    optional_source = stage / optional_name
-    if optional_source.is_symlink() or (optional_source.exists() and not optional_source.is_file()):
-        raise TargetError("development commissioning registry staging input is unsafe")
     _validate_hub_settings_compatibility(stage, release_id)
     _validate_product_settings_compatibility(stage, release_id)
     # A refresh is the deployment path for Host-owned contract changes, not
@@ -105,14 +101,10 @@ def refresh_host_application(payload: Mapping[str, object]) -> dict[str, object]
         contract.fixed_port_registry(payload),
     )
     changed: list[str] = []
-    selected_inputs: list[str] = []
-    if optional_source.is_file():
-        selected_inputs.append(optional_name)
-    # Place the credential before enabling the profile in Hub settings.  The
-    # previous/default manufacturer profile ignores the otherwise inert file;
-    # the inverse order could briefly enable development-hmac against a stale
-    # registry if a later copy failed.
-    selected_inputs.extend(contract.REFRESHABLE_HOST_LAYER_INPUTS)
+    # Every Host application input is required now. What used to be placed
+    # first here was a per-device commissioning registry that belonged to no
+    # sealed release; nothing installs a per-device file any more.
+    selected_inputs: list[str] = list(contract.REFRESHABLE_HOST_LAYER_INPUTS)
     for name in selected_inputs:
         source = stage / name
         if not source.is_file():
@@ -149,23 +141,6 @@ def refresh_host_application(payload: Mapping[str, object]) -> dict[str, object]
             temporary.unlink(missing_ok=True)
         changed.append(str(destination_value))
     removed: list[str] = []
-    if not optional_source.exists():
-        destination_value, user, group, mode = contract.OPTIONAL_HOST_APPLICATION_INPUTS[
-            optional_name
-        ]
-        destination = primitives.host_path(Path("/"), destination_value)
-        if destination.exists() or destination.is_symlink():
-            if destination.is_symlink() or not destination.is_file():
-                raise TargetError("development commissioning registry destination is unsafe")
-            expected_uid, expected_gid = _expected_ids(user, group)
-            metadata = destination.stat()
-            if stat.S_IMODE(metadata.st_mode) != mode or (metadata.st_uid, metadata.st_gid) != (
-                expected_uid,
-                expected_gid,
-            ):
-                raise TargetError("development commissioning registry ownership or mode drifted")
-            destination.unlink()
-            removed.append(str(destination_value))
     if changed:
         primitives.checked("systemd reload", ("/usr/bin/systemctl", "daemon-reload"), timeout=120)
     changed.extend(publish_hub_hostname(payload))

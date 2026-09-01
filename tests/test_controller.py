@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import replace
-
-import base64
 import hashlib
 import json
 import os
 import tarfile
+from dataclasses import replace
 from ipaddress import IPv4Address
 from pathlib import Path
 
@@ -29,7 +27,6 @@ from eidolon_ops.controller import (
 from eidolon_ops.embedding_model import PINNED_EMBEDDING_MODEL, embedding_model_digest
 from eidolon_ops.endpoints import HostEndpoint
 from eidolon_ops.host_application import (
-    DEVELOPMENT_COMMISSIONING_STAGE_NAME,
     HOST_APPLICATION_STAGE_NAMES,
 )
 from eidolon_ops.hub_assets import HUB_SETTINGS_TEMPLATE as HUB_SETTINGS_TEMPLATE_CONTRACT
@@ -1561,62 +1558,6 @@ def test_unified_pi_stage_renders_host_bound_application_assets(config) -> None:
     } <= set(transport.uploaded_bytes)
 
 
-def test_development_commissioning_registry_uses_only_the_private_stage(config) -> None:
-    identity = config.install_files["host_identity"]
-    identity.write_bytes(b"a" * 32)
-    identity.chmod(0o600)
-    config.install_files["local_api_env"].write_text("LOCAL_API_SEED=test\n", encoding="utf-8")
-    config.install_files["channel_env"].write_text("CHANNEL_SEED=test\n", encoding="utf-8")
-    registry = identity.parent / "development-commissioning.json"
-    encoded = base64.urlsafe_b64encode(b"h" * 32).rstrip(b"=").decode()
-    registry.write_text(
-        json.dumps(
-            {
-                "profile": "eidolon-development-hmac-commissioning-v2",
-                "devices": {"box-3-hil": {"setup_secret": encoded}},
-            }
-        ),
-        encoding="utf-8",
-    )
-    registry.chmod(0o600)
-
-    class CapturingTransport(FakeTransport):
-        def __init__(self) -> None:
-            super().__init__()
-            self.uploaded_bytes: dict[str, bytes] = {}
-
-        def upload(self, source, destination, *, recursive=False):
-            super().upload(source, destination, recursive=recursive)
-            self.uploaded_bytes[destination] = Path(source).read_bytes()
-
-    app = AppAccess(
-        lan_ipv4=IPv4Address("192.168.100.15"),
-        hub_https_port=8443,
-        livekit_client_url="ws://192.168.100.15:7880",
-        allow_insecure_livekit=True,
-        development_commissioning_registry=registry,
-    )
-    transport = CapturingTransport()
-    controller = EidolonPiController(
-        config,
-        ControllerRunner(config),
-        transport=transport,
-        app=app,
-    )
-    stage = "/var/tmp/eidolon-secrets-development"
-
-    controller.host_layer.stage_install_files("development", stage)
-    payload = controller.host_layer.target_payload()
-
-    uploaded = transport.uploaded_bytes[f"{stage}/{DEVELOPMENT_COMMISSIONING_STAGE_NAME}"]
-    assert uploaded == registry.read_bytes()
-    assert encoded not in repr(payload)
-    assert encoded not in repr(transport.uploads)
-    assert f"{stage}/{DEVELOPMENT_COMMISSIONING_STAGE_NAME}" in {
-        destination for _source, destination, _recursive in transport.uploads
-    }
-
-
 def test_install_can_reset_and_wipe_existing_host_before_provision(setup_controller) -> None:
     controller, _runner, transport = setup_controller
 
@@ -2120,13 +2061,13 @@ def test_which_setup_code_gets_named(setup_controller) -> None:
     controller, _runner, _transport = setup_controller
 
     controller.app = None
-    assert controller._configured_setup_code() is None  # noqa: SLF001
+    assert controller._configured_setup_code() is None
 
     controller.app = replace(_app(), setup_code=None)
-    assert controller._configured_setup_code() is None  # noqa: SLF001
+    assert controller._configured_setup_code() is None
 
     controller.app = replace(_app(), setup_code="99999990")
-    assert controller._configured_setup_code() == "99999990"  # noqa: SLF001
+    assert controller._configured_setup_code() == "99999990"
 
 
 def test_a_setup_code_and_a_boundary_action_reach_the_host(setup_controller) -> None:

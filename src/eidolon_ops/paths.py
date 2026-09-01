@@ -141,7 +141,6 @@ class AppAccess:
     hub_https_port: int
     livekit_client_url: str
     allow_insecure_livekit: bool
-    development_commissioning_registry: Path | None = None
 
     #: The Setup code ``commissioning-code`` names instead of letting the Host
     #: draw one. A development loop pins it so the operator never has to look a
@@ -368,7 +367,7 @@ def _app_access(value: object | None, *, platform: HostPlatform) -> AppAccess | 
         return None
     document = _table(value, "app")
     required = {"hub_https_port", "livekit_client_url", "allow_insecure_livekit"}
-    optional = {"lan_ipv4", "development_commissioning_registry", "setup_code"}
+    optional = {"lan_ipv4", "setup_code"}
     if not required <= set(document) or not set(document) <= (required | optional):
         raise HostProfileError(
             f"app must contain exactly {', '.join(sorted(required))}, with only "
@@ -410,22 +409,6 @@ def _app_access(value: object | None, *, platform: HostPlatform) -> AppAccess | 
         )
     if address is not None and parsed.scheme == "ws" and parsed.hostname != str(address):
         raise HostProfileError("an insecure LiveKit URL must use app.lan_ipv4")
-    development_registry: Path | None = None
-    if "development_commissioning_registry" in document:
-        if platform is not HostPlatform.RASPBERRY_PI:
-            raise HostProfileError(
-                "app.development_commissioning_registry is available only for Raspberry Pi HIL"
-            )
-        development_registry = Path(
-            _text(
-                document["development_commissioning_registry"],
-                "app.development_commissioning_registry",
-            )
-        ).expanduser()
-        if not development_registry.is_absolute() or ".." in development_registry.parts:
-            raise HostProfileError(
-                "app.development_commissioning_registry must be a safe absolute local path"
-            )
     setup_code: str | None = None
     if "setup_code" in document:
         setup_code = _text(document["setup_code"], "app.setup_code")
@@ -443,7 +426,6 @@ def _app_access(value: object | None, *, platform: HostPlatform) -> AppAccess | 
         hub_https_port=port,
         livekit_client_url=livekit_url.rstrip("/"),
         allow_insecure_livekit=allow_insecure,
-        development_commissioning_registry=development_registry,
         setup_code=setup_code,
     )
 

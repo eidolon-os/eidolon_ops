@@ -180,17 +180,14 @@ HOST_APPLICATION_INPUTS = {
     ),
 }
 
-OPTIONAL_HOST_APPLICATION_INPUTS = {
-    "commissioning-secrets.json": (
-        Path("/etc/eidolon/commissioning-secrets.json"),
-        "root",
-        "eidolon",
-        0o640,
-    ),
-}
-
 BASE_INSTALL_INPUTS = {**SECRET_INPUTS, **HOST_APPLICATION_INPUTS}
-INSTALL_INPUTS = {**BASE_INSTALL_INPUTS, **OPTIONAL_HOST_APPLICATION_INPUTS}
+# Every Host application input is now required. The one optional entry here was
+# a per-device commissioning registry, installed only on a HIL Pi — a file that
+# belonged to no sealed release, which is how a rollback to code that read an
+# older format of it left the Hub restarting 110 times. There is no such file
+# any longer: the Host signs commissioning vouchers with the management secret
+# it already holds.
+INSTALL_INPUTS = BASE_INSTALL_INPUTS
 
 #: The Host layer Ops derives rather than keeps: settings rendered from the
 #: Host identity, the ingress program, and the two units that run it. Unlike a
@@ -311,6 +308,10 @@ UNCOVERED_STATE = {
 LEGACY_SYSTEM_ASSETS = (
     Path("/etc/eidolon/hub.yaml"),
     Path("/etc/eidolon/system-services.systemd.example.yaml"),
+    # The per-device commissioning registry. A Host that was installed while it
+    # existed still holds one, and it is a file of secrets that now authorises
+    # nothing — so a refresh takes it away rather than leaving it to be found.
+    Path("/etc/eidolon/commissioning-secrets.json"),
 )
 
 MANAGED_SYSTEM_ASSETS = (

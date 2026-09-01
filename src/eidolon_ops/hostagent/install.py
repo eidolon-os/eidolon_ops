@@ -170,11 +170,7 @@ class TargetInstaller:
             path = self.secret_stage / name
             if not path.is_file() or path.is_symlink():
                 raise TargetError(f"secret staging input is unsafe: {name}")
-            values[name] = (
-                "private-input-redacted"
-                if name in contract.OPTIONAL_HOST_APPLICATION_INPUTS
-                else primitives.file_sha256(path)
-            )
+            values[name] = primitives.file_sha256(path)
         return values
 
     def _load_or_begin(self, inputs: Mapping[str, str]) -> dict[str, object]:
@@ -371,11 +367,7 @@ class TargetInstaller:
                 if (
                     destination.is_symlink()
                     or not destination.is_file()
-                    or (
-                        destination.read_bytes() != source.read_bytes()
-                        if name in contract.OPTIONAL_HOST_APPLICATION_INPUTS
-                        else primitives.file_sha256(destination) != inputs[name]
-                    )
+                    or primitives.file_sha256(destination) != inputs[name]
                     or stat.S_IMODE(metadata.st_mode) != mode
                     or (
                         expected_ids is not None
