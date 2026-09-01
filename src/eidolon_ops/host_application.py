@@ -38,8 +38,6 @@ HOST_APPLICATION_STAGE_NAMES = (
     "hub-ingress.service",
     "hub-service-override.conf",
 )
-_MINIMUM_DEVELOPMENT_SECRET_BYTES = 32
-_MAXIMUM_DEVELOPMENT_REGISTRY_BYTES = 64 * 1024
 
 
 @dataclass(frozen=True, slots=True)
