@@ -34,7 +34,7 @@ class SSHTransport:
         scp: str = "scp",
         rsync: str = "rsync",
         endpoints: Callable[[str, int], Sequence[HostEndpoint]] | None = None,
-        probe: Callable[[str, int, float], bool] | None = None,
+        probe: Callable[[HostEndpoint, int, float], bool] | None = None,
     ) -> None:
         self.host = host
         self.runner = runner
@@ -103,8 +103,51 @@ class SSHTransport:
             self._endpoints(self.host.hostname, self.host.port),
             self.host.port,
             timeout=self.host.connect_timeout_seconds,
-            probe=self._probe,
+            probe=self._probe or self._answers_over_ssh,
         )
+
+    def _answers_over_ssh(self, endpoint: HostEndpoint, port: int, timeout: float) -> bool:
+        """Whether the Host answers on this candidate — asked by SSH itself.
+
+        This used to be a socket opened in this process, which asks a subtly
+        different question: on macOS a LAN socket also depends on whether this
+        interpreter was granted Local Network permission, and an interpreter
+        installed by a virtual environment is not. Three deploys were refused
+        with "the selected link is 'unresolved'" over a cable that was plugged
+        in, while `ssh` to the same address connected every time.
+
+        So the link is probed with the program that will carry the release. An
+        SSH handshake also proves more than an accepted connection: the right
+        host key, a usable identity, an account that lets us in. A candidate
+        that answers this cannot fail the first real command for any of those
+        reasons.
+        """
+
+        options = ["-o", f"BindInterface={endpoint.bind_interface}"] if endpoint.bind_interface else []
+        result = self.runner.run(
+            (
+                self.ssh,
+                *options,
+                "-p",
+                str(port),
+                "-i",
+                str(self.host.identity_file),
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "StrictHostKeyChecking=yes",
+                "-o",
+                f"HostKeyAlias={self.host.hostname}",
+                "-o",
+                f"UserKnownHostsFile={self.host.known_hosts_file}",
+                "-o",
+                f"ConnectTimeout={int(timeout)}",
+                f"{self.host.user}@{endpoint.address}",
+                "true",
+            ),
+            timeout=timeout + 10,
+        )
+        return result.returncode == 0
 
     def run(
         self,

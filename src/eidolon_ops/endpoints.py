@@ -234,20 +234,34 @@ def first_reachable(
     port: int,
     *,
     timeout: float,
-    probe: Callable[[str, int, float], bool] | None = None,
+    probe: Callable[[HostEndpoint, int, float], bool] | None = None,
 ) -> HostEndpoint | None:
-    """The best-ranked endpoint that accepts a connection, or nothing."""
+    """The best-ranked endpoint that accepts a connection, or nothing.
+
+    The probe is given the whole candidate rather than its address, because
+    reaching a link-local one is a question about an interface as much as about
+    an address, and only the candidate knows which interface that is.
+    """
 
     attempt = probe or _accepts_connection
     for endpoint in endpoints:
-        if attempt(endpoint.address, port, timeout):
+        if attempt(endpoint, port, timeout):
             return endpoint
     return None
 
 
-def _accepts_connection(address: str, port: int, timeout: float) -> bool:
+def _accepts_connection(endpoint: HostEndpoint, port: int, timeout: float) -> bool:
+    """Whether this interpreter can open a socket to the candidate.
+
+    A last resort, and a weaker question than it looks: on macOS the answer
+    also depends on whether this interpreter holds Local Network permission,
+    so a Host sitting on a cable can be reported unreachable while `ssh` to
+    the same address connects. Callers that own a real transport should probe
+    with it instead.
+    """
+
     try:
-        with socket.create_connection((address, port), timeout=timeout):
+        with socket.create_connection((endpoint.address, port), timeout=timeout):
             return True
     except OSError:
         return False

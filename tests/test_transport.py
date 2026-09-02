@@ -233,7 +233,7 @@ def test_a_dead_wire_falls_through_to_the_link_that_answers(config) -> None:
         config.host,
         runner,
         endpoints=lambda *_: candidates,
-        probe=lambda address, *_: address != "169.254.55.2",
+        probe=lambda endpoint, *_: endpoint.address != "169.254.55.2",
     )
 
     transport.run(("/usr/bin/true",))
@@ -342,3 +342,43 @@ def test_the_bundle_takes_the_same_link_as_the_commands(config, tmp_path: Path) 
         if isinstance(token, str) and "BatchMode" in token
     )
     assert "BindInterface=en7" in remote_shell
+
+
+def _two_links(_hostname: str, _port: int):
+    return (
+        HostEndpoint(address="169.254.19.7", interface="en7", link="wired"),
+        HostEndpoint(address="192.168.1.10", interface="en0", link="wireless"),
+    )
+
+
+def test_the_link_is_probed_with_ssh_and_not_with_a_socket_of_our_own(config) -> None:
+    """The program that carries the release is the one that decides it can.
+
+    A socket opened in this process answers a different question on macOS,
+    where reaching a LAN address also depends on whether this interpreter was
+    granted Local Network permission — and an interpreter installed into a
+    virtual environment is not. Deploys were refused for a link that was up,
+    with `ssh` connecting to the same address every time, so the probe now asks
+    over SSH: the wire is chosen because SSH said so.
+    """
+
+    runner = RecordingRunner(
+        [
+            ProcessResult(255, "", "ssh: connect to host 169.254.19.7 port 22: Host is down"),
+            ProcessResult(0, "", ""),
+            ProcessResult(0, "ok", ""),
+        ]
+    )
+    transport = SSHTransport(config.host, runner, endpoints=_two_links)
+
+    transport.run(("/usr/bin/true",))
+
+    probes = runner.calls[:2]
+    assert [call["command"][-1] for call in probes] == ["true", "true"]
+    assert "BindInterface=en7" in probes[0]["command"]
+    assert f"{config.host.user}@169.254.19.7" in probes[0]["command"]
+    # The wired candidate refused, so the session settled on the one that
+    # answered — and every later command leaves by that address.
+    assert transport.endpoint is not None
+    assert transport.endpoint.address == "192.168.1.10"
+    assert f"{config.host.user}@192.168.1.10" in runner.calls[2]["command"]

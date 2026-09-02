@@ -99,9 +99,9 @@ def test_the_first_endpoint_that_answers_wins() -> None:
     )
     tried: list[str] = []
 
-    def _probe(address: str, _port: int, _timeout: float) -> bool:
-        tried.append(address)
-        return address == "192.168.1.26"
+    def _probe(endpoint: HostEndpoint, _port: int, _timeout: float) -> bool:
+        tried.append(endpoint.address)
+        return endpoint.address == "192.168.1.26"
 
     chosen = first_reachable(candidates, 22, timeout=1, probe=_probe)
 
