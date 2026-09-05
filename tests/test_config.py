@@ -282,9 +282,7 @@ def test_the_build_tool_is_pinned_not_derived_from_the_activator(config_path: Pa
     assert config.workspace.uv.name == "uv"
 
     text = config_path.read_text(encoding="utf-8")
-    config_path.write_text(
-        text.replace(f'uv = "{config.workspace.uv}"\n', "", 1), encoding="utf-8"
-    )
+    config_path.write_text(text.replace(f'uv = "{config.workspace.uv}"\n', "", 1), encoding="utf-8")
     without_override = load_config(config_path)
 
     # No override means the pinned one, and it lives where Ops keeps its own
@@ -301,8 +299,11 @@ def test_a_host_may_state_how_long_its_services_need(config_path: Path) -> None:
 
     assert load_config(config_path).host.readiness_timeout_seconds == 240
 
-    _replace(config_path, "connect_timeout_seconds = 7",
-             "connect_timeout_seconds = 7\nreadiness_timeout_seconds = 600")
+    _replace(
+        config_path,
+        "connect_timeout_seconds = 7",
+        "connect_timeout_seconds = 7\nreadiness_timeout_seconds = 600",
+    )
 
     assert load_config(config_path).host.readiness_timeout_seconds == 600
 
@@ -329,8 +330,11 @@ def test_wired_release_policy_must_be_boolean(config_path: Path) -> None:
 
 
 def test_a_readiness_deadline_outside_reason_is_refused(config_path: Path) -> None:
-    _replace(config_path, "connect_timeout_seconds = 7",
-             "connect_timeout_seconds = 7\nreadiness_timeout_seconds = 5")
+    _replace(
+        config_path,
+        "connect_timeout_seconds = 7",
+        "connect_timeout_seconds = 7\nreadiness_timeout_seconds = 5",
+    )
 
     with pytest.raises(ConfigurationError, match="readiness_timeout_seconds"):
         load_config(config_path)
@@ -339,8 +343,8 @@ def test_a_readiness_deadline_outside_reason_is_refused(config_path: Path) -> No
 @pytest.mark.parametrize(
     ("label", "old", "new"),
     [
-        ("sources.eidolon_data.path", None, '/private/tmp/eidolon-data'),
-        ("workspace.release_cli", None, '/tmp/eidolon-release'),
+        ("sources.eidolon_data.path", None, "/private/tmp/eidolon-data"),
+        ("workspace.release_cli", None, "/tmp/eidolon-release"),
     ],
 )
 def test_a_release_input_may_not_be_pinned_where_the_system_sweeps(
@@ -376,6 +380,98 @@ def test_an_output_may_live_in_a_temporary_directory(config_path: Path) -> None:
         'bundle_root = "/private/tmp/eidolon-release-bundles"',
     )
 
-    assert load_config(config_path).workspace.bundle_root == Path(
-        "/private/tmp/eidolon-release-bundles"
-    ).resolve()
+    assert (
+        load_config(config_path).workspace.bundle_root
+        == Path("/private/tmp/eidolon-release-bundles").resolve()
+    )
+
+
+def _with_settings(config_path: Path, body: str) -> Path:
+    config_path.write_text(config_path.read_text(encoding="utf-8") + body, encoding="utf-8")
+    return config_path
+
+
+def test_a_host_without_a_settings_section_overlays_nothing(config_path: Path) -> None:
+    """The section is optional, because most Hosts take every default."""
+
+    assert load_config(config_path).settings_overlay == ()
+
+
+def test_settings_overlay_is_read_in_order(config_path: Path) -> None:
+    config = load_config(
+        _with_settings(
+            config_path,
+            """
+[[settings.overlay]]
+document = "channel.yaml"
+path = "providers.stt_provider"
+value = "eidolon_models"
+
+[[settings.overlay]]
+document = "channel.yaml"
+path = "providers.tts_provider"
+value = "eidolon_models"
+""",
+        )
+    )
+
+    assert [(a.document, a.display, a.value) for a in config.settings_overlay] == [
+        ("channel.yaml", "providers.stt_provider", "eidolon_models"),
+        ("channel.yaml", "providers.tts_provider", "eidolon_models"),
+    ]
+
+
+def test_an_overlay_path_is_parsed_while_reading_the_config(config_path: Path) -> None:
+    """A typo should stop the operator here, not part-way through a release."""
+
+    with pytest.raises(ConfigurationError, match="path segment is invalid"):
+        load_config(
+            _with_settings(
+                config_path,
+                """
+[[settings.overlay]]
+document = "channel.yaml"
+path = "providers..stt_provider"
+value = "x"
+""",
+            )
+        )
+
+
+def test_one_setting_may_not_be_assigned_twice(config_path: Path) -> None:
+    """Both would apply and the last would win, silently."""
+
+    with pytest.raises(ConfigurationError, match="twice"):
+        load_config(
+            _with_settings(
+                config_path,
+                """
+[[settings.overlay]]
+document = "channel.yaml"
+path = "providers.stt_provider"
+value = "a"
+
+[[settings.overlay]]
+document = "channel.yaml"
+path = "providers.stt_provider"
+value = "b"
+""",
+            )
+        )
+
+
+def test_a_non_string_value_is_refused_rather_than_rendered(config_path: Path) -> None:
+    """TOML `false` and YAML `false` are not the same decision to make here."""
+
+    with pytest.raises(ConfigurationError, match="value must be a string"):
+        load_config(
+            _with_settings(
+                config_path,
+                """
+[[settings.overlay]]
+document = "channel.yaml"
+path = "avatar.enabled"
+value = false
+""",
+            )
+        )

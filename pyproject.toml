@@ -27,6 +27,12 @@ dev = [
   # Starlette's TestClient, which is how the console's HTTP contract is tested
   # without binding a port.
   "httpx2>=2",
+  # Tests only, and deliberately not a runtime dependency. Ops carries component
+  # settings as exact Git objects and rewrites one scalar in them textually, so
+  # it needs no YAML implementation on a Host. What it does need is a real
+  # parser standing behind that rewrite in the test suite: without one, a
+  # hand-written editor is checked only against the assumptions that wrote it.
+  "PyYAML>=6.0",
 ]
 # The workstation console. An extra rather than a dependency: the CLI is the
 # entry point every Host operation goes through, and it must stay installable

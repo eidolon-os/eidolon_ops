@@ -12,6 +12,11 @@ from types import MappingProxyType
 from urllib.parse import urlsplit
 
 from eidolon_ops.foundation import FOUNDATION_PROFILE
+from eidolon_ops.settings_overlay import (
+    OverlayAssignment,
+    SettingsOverlayError,
+    parse_path,
+)
 
 SOURCE_IDS = (
     "eidolon_kernel",
@@ -182,6 +187,9 @@ class OperationsConfig:
     units: tuple[str, ...]
     data: DataConfig
     install_files: Mapping[str, Path]
+    #: What this Host wants that the product does not decide for it. Empty on a
+    #: Host that takes every default, which is why it has no required section.
+    settings_overlay: tuple[OverlayAssignment, ...] = ()
 
     def with_revision_overrides(self, values: tuple[str, ...]) -> OperationsConfig:
         sources = dict(self.sources)
@@ -234,7 +242,7 @@ def load_config(path: Path) -> OperationsConfig:
             "services",
             "data",
         },
-        optional={"install"},
+        optional={"install", "settings"},
         label="root",
     )
     if document["schema_version"] != 1:
@@ -398,6 +406,8 @@ def load_config(path: Path) -> OperationsConfig:
         if len(set(install_files.values())) != len(install_files):
             raise ConfigurationError("install.files paths must be unique per security scope")
 
+    settings_overlay = _settings_overlay(document.get("settings"))
+
     return OperationsConfig(
         path=resolved,
         foundation_profile=foundation_profile,
@@ -419,7 +429,48 @@ def load_config(path: Path) -> OperationsConfig:
         units=units,
         data=data,
         install_files=MappingProxyType(install_files),
+        settings_overlay=settings_overlay,
     )
+
+
+def _settings_overlay(value: object) -> tuple[OverlayAssignment, ...]:
+    """Read ``[[settings.overlay]]``, the per-Host settings this Host asks for.
+
+    Each entry states a document, a path into it, and the scalar to put there.
+    Whether the path exists is not decided here — that needs the pinned
+    component templates, which this loader does not read — but its shape is,
+    so a typo is refused while reading the config rather than mid-release.
+    """
+
+    if value is None:
+        return ()
+    wire = _mapping(value, "settings")
+    _require_keys(wire, required=set(), optional={"overlay"}, label="settings")
+    entries = wire.get("overlay", [])
+    if not isinstance(entries, list):
+        raise ConfigurationError("settings.overlay must be an array of tables")
+    assignments: list[OverlayAssignment] = []
+    seen: set[tuple[str, str]] = set()
+    for position, entry in enumerate(entries):
+        label = f"settings.overlay[{position}]"
+        table = _mapping(entry, label)
+        _require_keys(table, required={"document", "path", "value"}, label=label)
+        document = _string(table["document"], f"{label}.document")
+        raw_path = _string(table["path"], f"{label}.path")
+        if not isinstance(table["value"], str):
+            # Booleans and numbers are written into YAML verbatim, so taking
+            # them as TOML scalars would silently decide their rendering.
+            raise ConfigurationError(f"{label}.value must be a string")
+        key = (document, raw_path)
+        if key in seen:
+            raise ConfigurationError(f"{label} assigns {document}:{raw_path} twice")
+        seen.add(key)
+        try:
+            path = parse_path(raw_path, label=label)
+        except SettingsOverlayError as exc:
+            raise ConfigurationError(str(exc)) from exc
+        assignments.append(OverlayAssignment(document, path, table["value"]))
+    return tuple(assignments)
 
 
 def validate_private_local_file(path: Path, *, label: str) -> None:

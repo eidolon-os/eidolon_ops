@@ -50,28 +50,43 @@ def _settings_reader(_source_id: str, _revision: str, path: str) -> str:
     if path != "config/settings.yaml":
         raise AssertionError(path)
     if _source_id == "eidolon_agent":
+        # Nested the way the pinned template nests. The overlay addresses values
+        # by path, so a flat stand-in would pass here and fail on a real Host.
         return """\
 env: dev
-log_level: DEBUG
-uds_path: $EIDOLON_RUNTIME_ROOT/agent/eidolon-agent.sock
-log_a: $EIDOLON_LOG_ROOT/agent
-log_b: $EIDOLON_LOG_ROOT/agent
-run_dir: $EIDOLON_RUNTIME_ROOT/agent
-debug_dir: $EIDOLON_CACHE_ROOT/debug/agent
-sqlite_path: $EIDOLON_STATE_ROOT/agent/eidolon-agent.sqlite3
-mcp_url: http://127.0.0.1:8030/mcp
-discovery_token_env: ''
-models:
+memory:
+  discovery_url: http://127.0.0.1:8020/api/discovery/agent-routing
+  discovery_token_env: ''
+  endpoints:
+  - memory_space_id: default.default.default
+    mcp_url: http://127.0.0.1:8030/mcp
+llm:
+  models:
   - name: openai/deepseek-v4-flash
     thinking: disabled
+observability:
+  log_level: DEBUG
+  log_a: $EIDOLON_LOG_ROOT/agent
+  log_b: $EIDOLON_LOG_ROOT/agent
+runtime:
+  uds_path: $EIDOLON_RUNTIME_ROOT/agent/eidolon-agent.sock
+  run_dir: $EIDOLON_RUNTIME_ROOT/agent
+  debug_dir: $EIDOLON_CACHE_ROOT/debug/agent
+persistence:
+  sqlite_path: $EIDOLON_STATE_ROOT/agent/eidolon-agent.sqlite3
 """
     if _source_id == "eidolon_channel":
         return """\
 avatar:
   enabled: true
-root: $EIDOLON_STATE_ROOT/voiceprints
-timeline_debug_path: "$EIDOLON_LOG_ROOT/channel/turn-timeline.jsonl"
-stt:
+providers:
+  stt_provider: bailian
+  tts_provider: bailian
+voiceprint:
+  root: $EIDOLON_STATE_ROOT/voiceprints
+observability:
+  timeline_debug_path: "$EIDOLON_LOG_ROOT/channel/turn-timeline.jsonl"
+bailian_stt:
   dump_wav: true
   dump_dir: "$EIDOLON_CACHE_ROOT/debug/channel"
 """

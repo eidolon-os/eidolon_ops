@@ -122,3 +122,23 @@ livekit_env = "/absolute/private/path/livekit.env"
 agent_settings = "/absolute/private/path/agent.yaml"
 channel_settings = "/absolute/private/path/channel.yaml"
 memory_settings = "/absolute/private/path/memory.yaml"
+
+# Optional. What this Host wants that being a product does not already decide.
+# Each entry names a rendered document, a path into the component's own
+# settings, and the scalar to put there — so two Hosts built from identical
+# commits can differ without either component changing.
+#
+# The path must resolve in the pinned template or the release is refused, and
+# `value` is written into the YAML verbatim (quote it if YAML needs it quoted).
+#
+# A Host that runs its own speech models rather than reaching a cloud provider:
+#
+#   [[settings.overlay]]
+#   document = "channel.yaml"
+#   path = "providers.stt_provider"
+#   value = "eidolon_models"
+#
+#   [[settings.overlay]]
+#   document = "channel.yaml"
+#   path = "providers.tts_provider"
+#   value = "eidolon_models"
