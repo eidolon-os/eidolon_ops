@@ -3,7 +3,15 @@
 写于 2026-09-05，起因是 Orange Pi 5 Max（RK3588）要成为第三种 Host，
 而它与前两种的差别恰好落在 ops 目前用代码而非配置表达的地方。
 
-本文只做分析与方案，不含改动。所有论断都标了出处行号。
+本文只做分析与方案。**四步已于 2026-09-05 全部实施**，实施过程中推翻了本文
+两处判断，都已在原处标注更正——保留原判断而不是删掉，因为错在哪里比结论更值得读。
+
+| 步骤 | 状态 | 提交 |
+| --- | --- | --- |
+| 三：settings overlay | ✅ | `refactor(ops): address a rendered setting by where it lives` |
+| 二：capability 选择器 | ✅ | `feat(ops): let a component say which Hosts its units are for` |
+| `eidolon_models` 契约 | ✅ | `feat: declare how eidolon_models is operated...`（在 eidolon_models 仓） |
+| 一：platform profile 外置 | ✅ | `refactor(ops): make a foundation a row rather than the only one` |
 
 ---
 
@@ -77,9 +85,21 @@ if foundation_profile != FOUNDATION_PROFILE:
   与既有的 `contracts/platform/component.toml` 是同一条路，
   也符合那个文件自己写的理由——"described rather than excepted"。
 
-**建议 B。** 理由是 ops 已经证明这条路走得通（平台自己的 NATS/LiveKit 就是这么描述的），
-且加第四种 Host 时不需要碰 Python。`config.py:246` 的等值判断相应改为
-"必须是已注册 profile 之一"。
+> **更正（实施时推翻）**：原文建议 B（每平台一个 TOML）。**这是错的。**
+> `foundation.py` 的文档字符串本来就写明了理由，我当时没读到：
+>
+> > "The profile is deliberately code-owned: changing a package, download URL,
+> > or digest is a reviewed release change, not an operator-side configuration tweak."
+>
+> 包清单、下载 URL、摘要都是**供应链决策**，让操作者可编辑是把评审门槛拆掉。
+> 实际采用的是 **A 的加强版**：`FoundationProfile` 数据类 + `FOUNDATION_PROFILES`
+> 注册表，仍在 Python 里、仍随发布评审，但"只有一块板"不再写死在校验里。
+> 操作者选的是**哪个**已评审 profile，profile 里装什么不归他改。
+>
+> 一个附带的保障：有一个测试断言 `FoundationProfile` 的每个字段**都不许有默认值**。
+> 有默认值的字段，就是下一块板会不知不觉继承树莓派答案的字段。
+>
+> `config.py:246` 的等值判断已按原计划改为"必须是已注册 profile 之一"。
 
 ---
 
@@ -169,8 +189,14 @@ providers:
 
 ### 方案：把字符串替换换成按 Host 的结构化 overlay
 
-组件照常发布自己的 `settings.yaml` 模板；每个 Host profile 带一份 overlay，
-按文档名 + 键路径给值；ops 做结构化合并（YAML 层面，不是文本层面）。
+组件照常发布自己的 `settings.yaml` 模板；每个 Host 的 operations config 带一份
+overlay，按文档名 + 键路径给值。
+
+> **更正（实施时调整）**：原文写"结构化合并（YAML 层面）"。ops **运行时没有任何
+> YAML 依赖**——它把这些文档当作逐字节的 git 对象处理，Host 上也不需要 YAML 实现。
+> 实际做法是按键路径做**文本原地改写**，注释与格式一字不动。
+> PyYAML 只加进 dev extra:手写的编辑器如果只用写它的那套假设来检验，等于没检验，
+> 所以测试里用真解析器比对整份文档。
 
 ```toml
 # config/hosts/rk3588.toml
@@ -269,7 +295,32 @@ Host profile 声明的 capabilities（决定装哪些 unit 与哪些权重），
 
 ## 7. 未决
 
-* `hostagent/foundation.py` 与 `foundation.py` 那两份重复常量该合并还是保持镜像，
-  取决于 hostagent 是否必须能独立于 ops 包运行——**未查证**。
-* overlay 的合并语义（列表是替换还是追加）需要定，本文未给结论。
-* `eidolon_vision` 同样没有契约，本文未涉及。
+* ~~`hostagent/foundation.py` 与 `foundation.py` 那两份重复常量该合并还是保持镜像~~
+  —— **已查证：是刻意的镜像，保持。** host agent 在 Host 上独立于 ops 包运行，
+  必须能拒绝与自己构建时不符的 payload，所以两边各持一份、由测试保证相等。
+  本次只改了 ops 一侧；hostagent 侧要支持第二个 profile 是独立的一步，未做。
+* ~~overlay 的合并语义（列表是替换还是追加）~~ —— **已定：不支持列表合并。**
+  overlay 只赋标量，路径可以穿过列表（`memory.endpoints[0].mcp_url`）但不能以
+  列表结尾。现有六处产品级改写与本次新增的 provider 切换都只需要标量赋值，
+  为没有用例的语义写实现是在发布推测。
+* `eidolon_vision` 同样没有契约，本次未涉及。
+
+## 8. 实施中发现的、方案里没有的问题
+
+**端口冲突（已修）**：`eidolon-asr` 默认 8767，而 8767 已经归 `channel_provider`
+（`source_assets.py:64` 与 `eidolon_channel/config/channel-provider.yaml`）。
+两者都绑 127.0.0.1，同机必冲突，而症状只会是"某个服务起不来"。
+eidolon_models 是未注册、未部署的后来者，已让位到 **8768**。
+这条本来记在 `eidolon_models/VERIFICATION.md` 的 P0-4，现已解除。
+
+**测试夹具在结构上是错的（已修）**：`test_install_inputs.py` 的 agent/channel
+settings 夹具是扁平的——`log_level` 在顶层、没有 `observability` 父节。
+旧的字符串替换只要那串文本在文件里出现就通过，所以夹具错了十几个月没人发现。
+改成按键路径寻址后它立刻失败了，夹具已改成与真实模板同构。
+
+**`eidolon_models` 的 ASR 权重不该是 artifacts**：它们**在 git 里**
+（`asr/*/2.0.5/`，约 728 MB，每版带 `manifest.json` 记录逐文件 SHA-256），
+而 release 就是精确的 git commit，所以它们本来就随发布走。
+`artifacts` 是给 git 装不下的东西的——在这个组件上指的是 RKNN/RKLLM 模型
+（Qwen3-1.7B 2.3 GB、CosyVoice2 1.6 GB）。那两个**没有声明**，因为还没有
+可指向、可校验的固定位置；写上没有摘要的 artifact 等于给发布一个它兑现不了的承诺。
