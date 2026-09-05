@@ -11,7 +11,17 @@
 | 三：settings overlay | ✅ | `refactor(ops): address a rendered setting by where it lives` |
 | 二：capability 选择器 | ✅ | `feat(ops): let a component say which Hosts its units are for` |
 | `eidolon_models` 契约 | ✅ | `feat: declare how eidolon_models is operated...`（在 eidolon_models 仓） |
-| 一：platform profile 外置 | ✅ | `refactor(ops): make a foundation a row rather than the only one` |
+| 一：foundation profile 表化 | ✅ | `refactor(ops): make a foundation a row rather than the only one` |
+| 一：platform 侧泛化 + 注册 RK3588 | ✅ | `feat(ops): register RK3588 as a platform...` |
+| **把选择接到"决定装什么"** | ✅ | `feat(ops): let a Host's capabilities decide what a release installs` |
+| **capability 的 unit 文件来源** | ✅ | `feat(ops): carry a capability's unit file...` |
+
+> **实施中发现:第二步做完时它其实什么都没影响。** `read_component_contracts`
+> 只有一个调用点（恢复出厂），`ContractTopology.systemd_units` 零消费者——
+> 真正决定安装的是 `config.py` 的两个固定元组、注入 agent 里的第三份副本、
+> 以及 `release_matrix.py` 里的 unit 文件表，四者都是 host 盲的。
+> 补上这一步之后才真正连通。四份表由 `tests/test_capability_topology.py`
+> 互相钉住，任何一份漏了都会失败（已用反向修改验证过每一条都真的会响）。
 
 ---
 
