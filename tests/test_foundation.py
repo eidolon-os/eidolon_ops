@@ -886,3 +886,55 @@ def test_an_unregistered_profile_is_refused_with_the_choices() -> None:
 
     with pytest.raises(KeyError, match="must be a reviewed profile"):
         foundation_profile("ubuntu-rk3588-arm64-v1")
+
+
+def test_the_two_profiles_gate_on_different_boards() -> None:
+    """Each refuses the other's hardware, which is the point of having two.
+
+    Both gate scripts were run on the real Orange Pi 5 Max: the RK3588 profile
+    passed every check, and the Raspberry Pi profile refused it on the OS gate.
+    """
+
+    from eidolon_ops.foundation import (
+        RASPBERRY_PI_OS_TRIXIE,
+        UBUNTU_2604_RK3588,
+        python_bootstrap_script,
+    )
+
+    pi = python_bootstrap_script(RASPBERRY_PI_OS_TRIXIE).decode()
+    rk = python_bootstrap_script(UBUNTU_2604_RK3588).decode()
+
+    assert "debian:13|raspbian:13" in pi
+    assert "ubuntu:26" in rk
+    assert "Raspberry\\ Pi*" in pi
+    assert "RK3588*" in rk
+    # 26.04 must appear as its major version, because the script truncates.
+    assert "ubuntu:26.04" not in rk
+
+
+def test_each_profile_carries_its_own_journal_override_path() -> None:
+    """Not a detail: where volatile is set differs, so the drop-in must win.
+
+    Raspberry Pi OS sets it in a vendor drop-in; Armbian sets it in the main
+    journald.conf. Verified on the board that a drop-in still wins there, and
+    that a vendor file named syslog.conf sorts after a 50- prefix — hence 99-.
+    """
+
+    from eidolon_ops.foundation import RASPBERRY_PI_OS_TRIXIE, UBUNTU_2604_RK3588
+
+    assert RASPBERRY_PI_OS_TRIXIE.journal_persistence.name.startswith("50-")
+    assert UBUNTU_2604_RK3588.journal_persistence.name.startswith("99-")
+    for profile in (RASPBERRY_PI_OS_TRIXIE, UBUNTU_2604_RK3588):
+        assert "Storage=persistent" in profile.journal_persistence_content
+
+
+def test_a_profile_names_a_mirror_that_serves_its_own_suite() -> None:
+    """A stanza whose suite the mirror does not carry fails at apt update."""
+
+    from eidolon_ops.foundation import FOUNDATION_PROFILES
+
+    for profile in FOUNDATION_PROFILES.values():
+        for source in profile.apt_sources:
+            rendered = source.suites.format(suite=profile.apt_suite)
+            assert profile.apt_suite in rendered
+            assert source.uris in profile.apt_mirrors.values()

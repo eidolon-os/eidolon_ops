@@ -1,0 +1,181 @@
+schema_version = 1
+
+[foundation]
+profile = "ubuntu-2604-rk3588-arm64-v1"
+
+[host]
+user = "eidolon-opi5max"
+hostname = "192.168.100.15"
+port = 22
+identity_file = "/absolute/path/to/id_ed25519_eidolon_pi"
+known_hosts_file = "/absolute/path/to/eidolon_pi_known_hosts"
+connect_timeout_seconds = 10
+remote_uv = "/usr/local/bin/uv"
+# Fail before sealing or upload if endpoint discovery did not select a wired
+# interface. Read-only and maintenance operations may still use Wi-Fi.
+require_wired_release_upload = true
+
+[workspace]
+# Not a temporary directory. This holds the sealed bundle a resumed install
+# continues from, the snapshot a rollback restores, and the kept uv cache that
+# exists so a cold build does not crawl through the index again. macOS deletes
+# things under /private/tmp on its own schedule, which took two prepared
+# worktrees with it once already; the same policy applies to whatever a resume
+# was going to read.
+bundle_root = "~/eidolon/release-bundles"
+release_cli = "../../eidolon_kernel/.venv/bin/eidolon-release"
+# Workstation build tool, declared rather than derived from the activator's
+# directory. Must be exactly uv 0.11.15, and it is not necessarily installed
+# next to the activator.
+uv = "/absolute/path/to/uv-0.11.15"
+# The target still installs only locked artifacts. An alternate HTTPS index can
+# improve availability without relaxing the exact uv.lock resolution.
+python_index_url = "https://pypi.org/simple"
+python_http_timeout_seconds = 120
+python_http_retries = 8
+python_concurrent_downloads = 4
+
+# Each source is a path. Which commit ships is read from the repository itself:
+# a release is sealed from `git rev-parse HEAD` in each of these checkouts, and
+# refused outright if a checkout has uncommitted changes (pass --allow-dirty to
+# ship the committed HEAD beside them anyway; the dirty state is then recorded
+# in the Host's release evidence).
+#
+# `revision` is optional and means one thing only: "reproduce this exact
+# commit", the same thing `--revision source=40hex` means for a single run. It
+# is not how a release is normally selected, and nothing ever writes it back.
+# Two hand-maintained copies of one commit is what shipped a release nobody
+# meant to ship: a cross-repository change was written and tested on every
+# HEAD, deploy reported success four times, and the board kept running the
+# commits that were written down here.
+#
+# `tag` is optional and annotates rather than defines: a tag is movable, so Ops
+# only proves it still resolves to the commit that was resolved.
+
+[sources.eidolon_kernel]
+path = "../../eidolon_kernel"
+# revision = "fee7a99066438208b0289536a3a3d0ab5906e47f"
+# tag = "kernel/v0.4.2"
+
+[sources.eidolon_data]
+path = "../../eidolon_data"
+
+[sources.eidolon_hub]
+path = "../../eidolon_hub"
+
+[sources.eidolon_admin]
+path = "../../eidolon_admin"
+
+[sources.eidolon_agent]
+path = "../../eidolon_agent"
+
+[sources.eidolon_channel]
+path = "../../eidolon_channel"
+
+[sources.eidolon_memory]
+path = "../../eidolon_memory"
+
+[sources.eidolon_models]
+path = "../../eidolon_models"
+
+[sources.eidolon_sdk]
+path = "../../eidolon_sdk"
+
+[services]
+units = [
+  "eidolon-bootstrapd.service",
+  "eidolond.service",
+  "eidolon-data.service",
+  "eidolon-data-workspace.service",
+  "eidolon-hub.service",
+  "eidolon-kernel.service",
+  "eidolon-local-api.service",
+  "eidolon-lifecycle-workflow.service",
+  "eidolon-admin.service",
+  "eidolon-nats.service",
+  "eidolon-livekit.service",
+  "eidolon-memory-embedder.service",
+  "eidolon-memory-supervisor.service",
+  "eidolon-memory-discovery.service",
+  "eidolon-agent.service",
+  "eidolon-channel-provider.service",
+  "eidolon-channel.service",
+  "eidolon-asr.service",
+]
+
+[data]
+system_database = "/var/lib/eidolon/eidolon-system.sqlite3"
+object_store = "/var/lib/eidolon/objects"
+bootstrap_database = "/var/lib/eidolon-bootstrap/bootstrap.sqlite3"
+deployment_evidence = "/var/lib/eidolon/deployments"
+
+# Values stay in local mode-0600 files. The CLI copies bytes through a private
+# staging directory and removes that staging directory after every attempt.
+[install.files]
+data_env = "/absolute/private/path/data.env"
+hub_env = "/absolute/private/path/hub.env"
+kernel_env = "/absolute/private/path/kernel.env"
+admin_env = "/absolute/private/path/admin.env"
+local_api_env = "/absolute/private/path/local-api.env"
+bootstrap_env = "/absolute/private/path/bootstrap.env"
+host_identity = "/absolute/private/path/host_identity.ed25519"
+agent_env = "/absolute/private/path/agent.env"
+channel_env = "/absolute/private/path/channel.env"
+memory_env = "/absolute/private/path/memory.env"
+livekit_env = "/absolute/private/path/livekit.env"
+agent_settings = "/absolute/private/path/agent.yaml"
+channel_settings = "/absolute/private/path/channel.yaml"
+memory_settings = "/absolute/private/path/memory.yaml"
+
+# Optional. What this Host wants that being a product does not already decide.
+# Each entry names a rendered document, a path into the component's own
+# settings, and the scalar to put there — so two Hosts built from identical
+# commits can differ without either component changing.
+#
+# The path must resolve in the pinned template or the release is refused, and
+# `value` is written into the YAML verbatim (quote it if YAML needs it quoted).
+#
+# A Host that runs its own speech models rather than reaching a cloud provider:
+#
+#   [[settings.overlay]]
+#   document = "channel.yaml"
+#   path = "providers.stt_provider"
+#   value = "eidolon_models"
+#
+#   [[settings.overlay]]
+#   document = "channel.yaml"
+#   path = "providers.tts_provider"
+#   value = "eidolon_models"
+
+# Optional. What this machine can do that another cannot. A component entry
+# that asks for a capability absent here is not installed on this Host — the
+# unit is not started, the port role is not reserved, an install input only it
+# needed is not demanded, and model weights only it loads are not carried.
+#
+# Names come from the closed set in eidolon_ops.capabilities, so a misspelling
+# is refused here rather than silently selecting nothing.
+#
+# A Pi that reaches a provider for speech declares none of these. A board with
+# an NPU that runs its own models declares:
+#
+#   [capabilities]
+#   provides = ["rknpu2", "local_asr", "local_tts", "local_llm"]
+#
+# Declaring one has consequences this file must then match: a capability that
+# brings units also brings the repository they come from, so [sources] must
+# pin eidolon_models and services.units must list eidolon-asr.service. Both are
+# checked here, before a release starts, and again by the agent on the Host —
+# which derives the same list from its own copy rather than believing this one.
+
+# This board has an NPU and runs its own speech models. Declaring it is what
+# adds eidolon-asr.service to the topology above and eidolon_models to the
+# sources — both are checked here, so the three cannot drift apart.
+[capabilities]
+provides = ["rknpu2", "local_asr"]
+
+# And what makes Channel reach for it instead of a provider. The component
+# needs no change: which provider it uses was already a value in its settings.
+[[settings.overlay]]
+document = "channel.yaml"
+path = "providers.stt_provider"
+value = "eidolon_models"

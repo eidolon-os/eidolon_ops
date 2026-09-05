@@ -1,0 +1,47 @@
+# Orange Pi 5 Max (RK3588). Same layout as the Pi profile — a product board's
+# paths are reviewed and identical, which is why the rule that checks them asks
+# whether this is a product board rather than naming one.
+#
+# What differs is which reviewed foundation it provisions with, and that lives
+# in the operations config this points at, not here.
+
+schema_version = 1
+
+[host]
+id = "eidolon-opi5max"
+platform = "rk3588"
+driver = "ssh-systemd"
+
+[paths]
+install_root = "/opt/eidolon"
+current_root = "/opt/eidolon/current"
+config_root = "/etc/eidolon"
+state_root = "/var/lib/eidolon"
+runtime_root = "/run/eidolon"
+log_root = "/var/log/eidolon"
+cache_root = "/var/cache/eidolon"
+bootstrap_state_root = "/var/lib/eidolon-bootstrap"
+bootstrap_runtime_root = "/run/eidolon-bootstrap"
+
+[adapter]
+operations_config = "../eidolon-rk3588.toml"
+
+[app]
+# lan_ipv4 is optional; without it the Host reports the address on its
+# default route, so a DHCP lease change does not stale the profile.
+lan_ipv4 = "192.168.100.15"
+hub_https_port = 8443
+livekit_client_url = "ws://192.168.100.15:7880"
+allow_insecure_livekit = true
+# Development HIL only. The named file must be an absolute, mode-0600,
+# non-symlink registry; leaving this unset keeps manufacturer-p256 fail-closed.
+# Optional. Names the Setup code `commissioning-code` signs instead of letting
+# the Host draw one, so a development loop never has to look a code up: the
+# command becomes one you fire without reading its output, and the digits typed
+# on the phone are the same every time. Only the value is pinned — the Host
+# still opens one ordinary session for it, which expires, is spent once, dies
+# after five wrong tries and supersedes any window before it. It must be a code
+# the Host would have drawn: eight digits, not all the same, and not the plain
+# run up or down. A shipped Host would name the code printed on its own box
+# here instead, which is why nothing on this path looks at the build mode.
+# setup_code = "99999990"

@@ -263,9 +263,88 @@ RASPBERRY_PI_OS_TRIXIE = FoundationProfile(
     artifacts=FOUNDATION_ARTIFACTS,
 )
 
+
+#: Armbian sets Storage=volatile in /etc/systemd/journald.conf itself rather
+#: than in a vendor drop-in, and this board proves what that costs: after a
+#: reboot `journalctl --list-boots` lists only the current one. Verified on the
+#: board that a drop-in in /etc/systemd/journald.conf.d/ is parsed after the
+#: main file and wins. The 99- prefix rather than the Pi's 50- is also from
+#: that check: a vendor drop-in named syslog.conf sorts after 50- and would
+#: take precedence if it ever set Storage.
+RK3588_JOURNAL_PERSISTENCE_CONTENT = """\
+# Installed by eidolon-ops. Overrides Storage=volatile, which Armbian sets in
+# /etc/systemd/journald.conf — under it the journal is held in RAM and lost at
+# every boot, leaving a Host unable to account for any failure that happened
+# before its last restart.
+#
+# Bounded on purpose: the default it replaces exists to spare the storage it
+# writes to, so this buys back the ability to diagnose rather than an
+# unlimited log.
+[Journal]
+Storage=persistent
+SystemMaxUse=512M
+SystemMaxFileSize=64M
+SystemKeepFree=1G
+MaxRetentionSec=30day
+"""
+
+
+#: Orange Pi 5 Max and its kin. Every value below was read off the board or
+#: fetched and checked, not carried across from the Raspberry Pi by assumption:
+#: `ID=ubuntu VERSION_ID=26.04` and `RK3588 OPi 5 Max` come from the board,
+#: all 35 apt packages were confirmed available under this suite by name, the
+#: three foundation services are present and enabled, and the mirror was
+#: fetched to confirm it carries resolute, resolute-updates and
+#: resolute-security for arm64.
+UBUNTU_2604_RK3588 = FoundationProfile(
+    id="ubuntu-2604-rk3588-arm64-v1",
+    display_name="Ubuntu 26.04 on RK3588",
+    architecture="aarch64",
+    os_ids=("ubuntu",),
+    #: The bootstrap compares the major version, so 26.04 is "26".
+    os_versions=("26",),
+    hardware_model_match="RK3588*",
+    hardware_display_name="RK3588",
+    #: The 16 GB variant is the one measured; an 8 GB RK3588 exists and has
+    #: not been tried with the local models, so the floor admits what was
+    #: verified and refuses what was not. The board reports 16342360 kB.
+    minimum_memory_kib=15728640,
+    #: The Pi's figure, carried deliberately: the NPU model artifacts are not
+    #: declared yet, and this has to rise when they are.
+    minimum_disk_kib=12582912,
+    minimum_memory_label="16 GiB-class RAM",
+    minimum_disk_label="12 GiB free disk",
+    apt_suite="resolute",
+    #: Same mirror family as the reviewed Raspberry Pi profile, and confirmed
+    #: to carry this suite: Ubuntu's arm64 archive is ubuntu-ports, which
+    #: ports.ubuntu.com also serves.
+    apt_mirrors={"ubuntu": "https://mirror.nju.edu.cn/ubuntu-ports/"},
+    apt_sources=(
+        AptSource(
+            uris="https://mirror.nju.edu.cn/ubuntu-ports/",
+            #: One stanza, unlike Debian's three: Ubuntu serves updates and
+            #: security out of the same archive.
+            suites="{suite} {suite}-updates {suite}-security",
+            components="main restricted universe multiverse",
+            signed_by="/usr/share/keyrings/ubuntu-archive-keyring.gpg",
+        ),
+    ),
+    apt_packages=APT_PACKAGES,
+    bootstrap_packages=BOOTSTRAP_PACKAGES,
+    services=FOUNDATION_SERVICES,
+    journal_persistence=Path("/etc/systemd/journald.conf.d/99-eidolon-persistent.conf"),
+    journal_persistence_content=RK3588_JOURNAL_PERSISTENCE_CONTENT,
+    #: The same four prebuilt binaries. All are aarch64 and none is
+    #: Debian-specific; the NPU runtime is deliberately not here — it belongs
+    #: to the component that loads it, gated on the rknpu2 capability, so a
+    #: board that runs no local models does not carry it.
+    artifacts=FOUNDATION_ARTIFACTS,
+)
+
+
 #: Every board Ops will install onto, by the id a host config names.
 FOUNDATION_PROFILES: dict[str, FoundationProfile] = {
-    profile.id: profile for profile in (RASPBERRY_PI_OS_TRIXIE,)
+    profile.id: profile for profile in (RASPBERRY_PI_OS_TRIXIE, UBUNTU_2604_RK3588)
 }
 
 
