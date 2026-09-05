@@ -1,4 +1,12 @@
-"""The pinned non-Eidolon foundation, and whether this Host has it."""
+"""The pinned non-Eidolon foundations, and whether this Host has one of them.
+
+One entry per board Ops installs onto, held here as the agent's own copy. The
+agent is injected as a payload and imports nothing from the package it came
+from, so it cannot share these tables with eidolon_ops.foundation — and it
+should not: its job is to refuse a contract that differs from what it was
+built against, and reading the one it was handed would make that circular.
+Tests hold the two copies equal.
+"""
 
 from __future__ import annotations
 
@@ -8,12 +16,18 @@ import platform
 import re
 import shutil
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
 from . import primitives
 from .primitives import TargetError
 
-FOUNDATION_PROFILE = "raspberry-pi-os-debian-arm64-v2"
+#: The profile a payload that names none is assumed to want. Every Host built
+#: before profiles were plural was this one, and an older workstation must keep
+#: working against a newer agent.
+DEFAULT_FOUNDATION_PROFILE = "raspberry-pi-os-debian-arm64-v2"
+
+FOUNDATION_PROFILE = DEFAULT_FOUNDATION_PROFILE
 
 FOUNDATION_OS_IDS = ("debian", "raspbian")
 
@@ -140,6 +154,91 @@ FOUNDATION_ARTIFACTS = (
     },
 )
 
+
+#: Armbian sets Storage=volatile in journald.conf itself; the drop-in that
+#: overrides it is written where a drop-in wins. Byte-identical to the copy in
+#: eidolon_ops.foundation, held equal by a test.
+RK3588_JOURNAL_PERSISTENCE_CONTENT = """\
+# Installed by eidolon-ops. Overrides Storage=volatile, which Armbian sets in
+# /etc/systemd/journald.conf — under it the journal is held in RAM and lost at
+# every boot, leaving a Host unable to account for any failure that happened
+# before its last restart.
+#
+# Bounded on purpose: the default it replaces exists to spare the storage it
+# writes to, so this buys back the ability to diagnose rather than an
+# unlimited log.
+[Journal]
+Storage=persistent
+SystemMaxUse=512M
+SystemMaxFileSize=64M
+SystemKeepFree=1G
+MaxRetentionSec=30day
+"""
+
+
+@dataclass(frozen=True, slots=True)
+class AgentFoundationProfile:
+    """What the agent needs to know about one board to check a Host is it.
+
+    A subset of what eidolon_ops.foundation holds: the agent never renders a
+    bootstrap script, so it carries no apt sources or suite. It carries the
+    hardware prefix rather than the shell glob Ops writes into that script,
+    which is the same fact in the form each side uses; a test derives one from
+    the other so they cannot drift.
+    """
+
+    id: str
+    architecture: str
+    os_ids: tuple[str, ...]
+    os_versions: tuple[str, ...]
+    hardware_model_prefix: str | None
+    minimum_memory_kib: int
+    minimum_disk_kib: int
+    apt_mirrors: dict[str, str]
+    apt_packages: tuple[str, ...]
+    services: tuple[str, ...]
+    journal_persistence: Path
+    journal_persistence_content: str
+    artifacts: tuple[dict[str, object], ...]
+
+
+RASPBERRY_PI_OS_TRIXIE = AgentFoundationProfile(
+    id=DEFAULT_FOUNDATION_PROFILE,
+    architecture="aarch64",
+    os_ids=FOUNDATION_OS_IDS,
+    os_versions=FOUNDATION_OS_VERSIONS,
+    hardware_model_prefix="Raspberry Pi",
+    minimum_memory_kib=7 * 1024 * 1024,
+    minimum_disk_kib=12 * 1024 * 1024,
+    apt_mirrors=FOUNDATION_APT_MIRRORS,
+    apt_packages=FOUNDATION_PACKAGES,
+    services=FOUNDATION_SERVICES,
+    journal_persistence=JOURNAL_PERSISTENCE,
+    journal_persistence_content=JOURNAL_PERSISTENCE_CONTENT,
+    artifacts=FOUNDATION_ARTIFACTS,
+)
+
+UBUNTU_2604_RK3588 = AgentFoundationProfile(
+    id="ubuntu-2604-rk3588-arm64-v1",
+    architecture="aarch64",
+    os_ids=("ubuntu",),
+    os_versions=("26",),
+    hardware_model_prefix="RK3588",
+    minimum_memory_kib=15 * 1024 * 1024,
+    minimum_disk_kib=12 * 1024 * 1024,
+    apt_mirrors={"ubuntu": "https://mirror.nju.edu.cn/ubuntu-ports/"},
+    apt_packages=FOUNDATION_PACKAGES,
+    services=FOUNDATION_SERVICES,
+    journal_persistence=Path("/etc/systemd/journald.conf.d/99-eidolon-persistent.conf"),
+    journal_persistence_content=RK3588_JOURNAL_PERSISTENCE_CONTENT,
+    artifacts=FOUNDATION_ARTIFACTS,
+)
+
+FOUNDATION_PROFILES: dict[str, AgentFoundationProfile] = {
+    profile.id: profile for profile in (RASPBERRY_PI_OS_TRIXIE, UBUNTU_2604_RK3588)
+}
+
+
 FOUNDATION_VERSION_PREFIXES = {
     "nats-server": ("nats-server: v2.14.0", "v2.14.0"),
     "livekit-server": ("livekit-server version 1.11.0", "1.11.0"),
@@ -159,25 +258,56 @@ LOCAL_BIN = Path("/usr/local/bin")
 
 LOCAL_LIB = Path("/usr/local/lib")
 
-def expected_foundation() -> dict[str, object]:
+
+def expected_foundation(
+    profile: AgentFoundationProfile | None = None,
+) -> dict[str, object]:
+    profile = profile or FOUNDATION_PROFILES[DEFAULT_FOUNDATION_PROFILE]
     return {
-        "profile": FOUNDATION_PROFILE,
-        "architecture": "aarch64",
-        "os_ids": list(FOUNDATION_OS_IDS),
-        "os_versions": list(FOUNDATION_OS_VERSIONS),
-        "apt_mirrors": dict(FOUNDATION_APT_MIRRORS),
-        "apt_packages": list(FOUNDATION_PACKAGES),
-        "services": list(FOUNDATION_SERVICES),
-        "artifacts": [dict(artifact) for artifact in FOUNDATION_ARTIFACTS],
-        "journal_persistence": JOURNAL_PERSISTENCE_CONTENT,
+        "profile": profile.id,
+        "architecture": profile.architecture,
+        "os_ids": list(profile.os_ids),
+        "os_versions": list(profile.os_versions),
+        "apt_mirrors": dict(profile.apt_mirrors),
+        "apt_packages": list(profile.apt_packages),
+        "services": list(profile.services),
+        "artifacts": [dict(artifact) for artifact in profile.artifacts],
+        "journal_persistence": profile.journal_persistence_content,
     }
+
+
+def requested_profile(payload: Mapping[str, object]) -> AgentFoundationProfile:
+    """Which reviewed profile this payload claims to be, or refuse.
+
+    Naming one the agent was not built for is refused before it is compared:
+    the alternative is a mismatch reported as "differs from the reviewed
+    profile", which reads as drift in a profile both sides know rather than as
+    a Host asking for one this agent has never seen.
+
+    A payload naming none is the Raspberry Pi, because every Host built before
+    profiles were plural was that one and an older workstation has to keep
+    working against a newer agent.
+    """
+
+    value = payload.get("foundation")
+    named = value.get("profile") if isinstance(value, Mapping) else None
+    if named is None:
+        return FOUNDATION_PROFILES[DEFAULT_FOUNDATION_PROFILE]
+    if not isinstance(named, str) or named not in FOUNDATION_PROFILES:
+        known = ", ".join(sorted(FOUNDATION_PROFILES))
+        raise TargetError(
+            f"foundation profile is not one this agent was built for: {named!r}. It knows: {known}"
+        )
+    return FOUNDATION_PROFILES[named]
+
 
 def foundation_contract(payload: Mapping[str, object]) -> dict[str, object]:
     value = payload.get("foundation")
-    expected = expected_foundation()
+    expected = expected_foundation(requested_profile(payload))
     if value != expected:
         raise TargetError("foundation contract differs from the reviewed pinned profile")
     return expected
+
 
 def os_release(root: Path = Path("/")) -> dict[str, str]:
     path = primitives.host_path(root, Path("/etc/os-release"))
@@ -192,7 +322,21 @@ def os_release(root: Path = Path("/")) -> dict[str, str]:
             result[key] = value.strip().strip("\"'")
     return result
 
-def foundation_platform_checks() -> dict[str, bool]:
+
+def foundation_platform_checks(
+    profile: AgentFoundationProfile | None = None,
+) -> dict[str, bool]:
+    """Whether this machine is the board the profile describes.
+
+    Three keys used to answer for the Raspberry Pi in their own names —
+    ``raspberry_pi_hardware``, ``memory_at_least_8_gib``,
+    ``disk_free_at_least_12_gib``. On a second board those are reports whose
+    wording is wrong while their value is right, which is worse than either.
+    They now name what is being checked and leave what it is checked against
+    to the profile.
+    """
+
+    profile = profile or FOUNDATION_PROFILES[DEFAULT_FOUNDATION_PROFILE]
     release = os_release()
     machine = platform.machine().lower()
     os_id = release.get("ID", "")
@@ -210,13 +354,14 @@ def foundation_platform_checks() -> dict[str, bool]:
         free_bytes = 0
     return {
         "linux": platform.system().lower() == "linux",
-        "aarch64": machine in {"aarch64", "arm64"},
-        "raspberry_pi_hardware": model.startswith("Raspberry Pi"),
-        "supported_os": os_id in FOUNDATION_OS_IDS,
-        "supported_os_version": version in FOUNDATION_OS_VERSIONS,
+        "supported_architecture": machine in {profile.architecture, "arm64"},
+        "supported_hardware": profile.hardware_model_prefix is None
+        or model.startswith(profile.hardware_model_prefix),
+        "supported_os": os_id in profile.os_ids,
+        "supported_os_version": version in profile.os_versions,
         "systemd_pid1": init == "systemd",
-        "memory_at_least_8_gib": memory_kib >= 7 * 1024 * 1024,
-        "disk_free_at_least_12_gib": free_bytes >= 12 * 1024**3,
+        "sufficient_memory": memory_kib >= profile.minimum_memory_kib,
+        "sufficient_disk": free_bytes // 1024 >= profile.minimum_disk_kib,
     }
 
 
@@ -250,9 +395,11 @@ def journal_is_persistent() -> bool:
             storage = stripped.split("=", 1)[1].strip()
     return storage == "persistent"
 
+
 def package_installed(package: str) -> bool:
     result = primitives.run(("/usr/bin/dpkg-query", "-W", "-f=${Status}", package), timeout=20)
     return result.returncode == 0 and result.stdout.strip() == "install ok installed"
+
 
 def binary_version(executable: str) -> dict[str, object]:
     path = LOCAL_BIN / executable
@@ -268,9 +415,11 @@ def binary_version(executable: str) -> dict[str, object]:
         "version": version,
     }
 
+
 def foundation_doctor(payload: Mapping[str, object]) -> dict[str, object]:
+    profile = requested_profile(payload)
     contract = foundation_contract(payload)
-    platform_checks = foundation_platform_checks()
+    platform_checks = foundation_platform_checks(profile)
     packages = {package: package_installed(package) for package in contract["apt_packages"]}
     artifacts = {
         artifact["artifact_id"]: binary_version(str(artifact["executable"]))
@@ -294,7 +443,7 @@ def foundation_doctor(payload: Mapping[str, object]) -> dict[str, object]:
     evidence_healthy = (
         isinstance(evidence, dict)
         and evidence.get("schema_version") == 1
-        and evidence.get("profile") == FOUNDATION_PROFILE
+        and evidence.get("profile") == profile.id
         and evidence.get("status") == "installed"
         and evidence.get("phase") == "completed"
         and evidence.get("error") is None

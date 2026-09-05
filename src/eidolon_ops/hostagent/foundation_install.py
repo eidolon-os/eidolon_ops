@@ -75,6 +75,7 @@ def download_verified(artifact: Mapping[str, str]) -> Path:
     os.replace(temporary, destination)
     return destination
 
+
 def install_managed_link(link: Path, target: Path) -> None:
     if link.is_symlink() and link.resolve() == target.resolve():
         return
@@ -84,10 +85,14 @@ def install_managed_link(link: Path, target: Path) -> None:
     temporary.symlink_to(target)
     os.replace(temporary, link)
 
+
 def install_tar_binary(artifact: Mapping[str, str]) -> None:
     archive_path = download_verified(artifact)
     destination = (
-        foundation.FOUNDATION_LIBRARY / artifact["artifact_id"] / artifact["version"] / artifact["executable"]
+        foundation.FOUNDATION_LIBRARY
+        / artifact["artifact_id"]
+        / artifact["version"]
+        / artifact["executable"]
     )
     destination.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
     if not destination.is_file():
@@ -118,6 +123,7 @@ def install_tar_binary(artifact: Mapping[str, str]) -> None:
                 temporary.unlink(missing_ok=True)
     install_managed_link(foundation.LOCAL_BIN / artifact["executable"], destination)
 
+
 def safe_node_member(member: tarfile.TarInfo, top: str) -> bool:
     name = PurePosixPath(member.name)
     if name.is_absolute() or ".." in name.parts or not name.parts or name.parts[0] != top:
@@ -133,6 +139,7 @@ def safe_node_member(member: tarfile.TarInfo, top: str) -> bool:
             if depth < 1:
                 return False
     return True
+
 
 def install_node(artifact: Mapping[str, str]) -> None:
     archive_path = download_verified(artifact)
@@ -152,6 +159,7 @@ def install_node(artifact: Mapping[str, str]) -> None:
             os.replace(extracted, destination)
     for executable in ("node", "npm", "npx", "corepack"):
         install_managed_link(foundation.LOCAL_BIN / executable, destination / "bin" / executable)
+
 
 def install_uv(artifact: Mapping[str, str]) -> None:
     current = foundation.binary_version("uv")
@@ -189,21 +197,28 @@ def install_uv(artifact: Mapping[str, str]) -> None:
     finally:
         requirement.unlink(missing_ok=True)
 
-def install_journal_persistence(content: str) -> None:
+
+def install_journal_persistence(content: str, path: Path | None = None) -> None:
     """Make this Host keep its own account of itself across a reboot.
 
-    Raspberry Pi OS keeps the journal in RAM to spare the SD card, which means
-    every restart erases the record of whatever went wrong before it. Writing
-    the drop-in is only half of it: journald has to be told, or the file sits
-    there being correct while the logs stay in memory, and the Host looks
-    fixed without being fixed.
+    Both boards keep the journal in RAM by default and for the same reason —
+    sparing the storage they boot from — so every restart erases the record of
+    whatever went wrong before it. Writing the drop-in is only half of it:
+    journald has to be told, or the file sits there being correct while the
+    logs stay in memory, and the Host looks fixed without being fixed.
+
+    Where the drop-in goes is the profile's, because what it has to override
+    differs: Raspberry Pi OS sets volatile storage in a vendor drop-in, and
+    Armbian sets it in journald.conf itself with a vendor drop-in named
+    syslog.conf sorting after a 50- prefix.
     """
 
-    foundation.JOURNAL_PERSISTENCE.parent.mkdir(parents=True, exist_ok=True)
-    existing = primitives.read_text(foundation.JOURNAL_PERSISTENCE)
+    path = path or foundation.JOURNAL_PERSISTENCE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    existing = primitives.read_text(path)
     if existing == content and foundation.journal_is_persistent():
         return
-    primitives.atomic_text(foundation.JOURNAL_PERSISTENCE, content, mode=0o644)
+    primitives.atomic_text(path, content, mode=0o644)
     foundation.JOURNAL_DIRECTORY.mkdir(parents=True, exist_ok=True)
     primitives.checked(
         "adopt persistent journal storage",
@@ -272,18 +287,20 @@ def foundation_apt_options(contract: Mapping[str, object]) -> Iterator[tuple[str
             f"Dir::State::lists={lists}",
         )
 
+
 def foundation_install(payload: Mapping[str, object]) -> dict[str, object]:
     contract = foundation.foundation_contract(payload)
     if os.geteuid() != 0:
         raise TargetError("foundation installation requires root")
-    platform_checks = foundation.foundation_platform_checks()
+    profile = foundation.requested_profile(payload)
+    platform_checks = foundation.foundation_platform_checks(profile)
     required_platform = dict(platform_checks)
     if not all(required_platform.values()):
-        raise TargetError(f"unsupported Raspberry Pi host platform: {required_platform}")
+        raise TargetError(f"this Host is not the {profile.id} board: {required_platform}")
     with primitives.exclusive(foundation.FOUNDATION_LOCK):
         evidence: dict[str, object] = {
             "schema_version": 1,
-            "profile": foundation.FOUNDATION_PROFILE,
+            "profile": profile.id,
             "status": "installing",
             "phase": "validated",
             "artifacts": {
@@ -347,7 +364,9 @@ def foundation_install(payload: Mapping[str, object]) -> dict[str, object]:
                     raise TargetError(f"unsupported foundation artifact kind: {kind}")
             phase = "artifacts"
             record("installing", phase)
-            install_journal_persistence(str(contract["journal_persistence"]))
+            install_journal_persistence(
+                str(contract["journal_persistence"]), profile.journal_persistence
+            )
             phase = "journal"
             record("installing", phase)
             for unit in contract["services"]:
@@ -366,7 +385,7 @@ def foundation_install(payload: Mapping[str, object]) -> dict[str, object]:
             result["evidence"] = dict(evidence)
             return {
                 "status": "installed",
-                "profile": foundation.FOUNDATION_PROFILE,
+                "profile": profile.id,
                 "doctor": result,
             }
         except Exception as exc:

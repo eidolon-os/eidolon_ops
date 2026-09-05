@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import dataclasses
 import grp
 import hashlib
 import io
@@ -57,8 +58,16 @@ def test_foundation_scripts_and_target_contract_are_exact() -> None:
 
     changed = _foundation_request()
     changed["foundation"] = {**foundation_payload(), "profile": "unreviewed"}
-    with pytest.raises(TargetError, match="reviewed pinned"):
+    # Refused by name rather than as drift: a profile this agent has never seen
+    # is a different failure from one it knows whose content moved, and the
+    # message says which ones it does know.
+    with pytest.raises(TargetError, match="not one this agent was built for"):
         host_foundation.foundation_contract(changed)
+
+    drifted = _foundation_request()
+    drifted["foundation"] = {**foundation_payload(), "services": ["invented.service"]}
+    with pytest.raises(TargetError, match="reviewed pinned"):
+        host_foundation.foundation_contract(drifted)
 
 
 def test_foundation_uses_direct_debian_13_package_names() -> None:
@@ -123,7 +132,7 @@ def test_foundation_doctor_composes_every_gate(monkeypatch, tmp_path: Path) -> N
     monkeypatch.setattr(
         host_foundation,
         "foundation_platform_checks",
-        lambda: {"linux": True, "capacity": True},
+        lambda *_: {"linux": True, "capacity": True},
     )
     monkeypatch.setattr(host_foundation, "package_installed", lambda _package: True)
     monkeypatch.setattr(
@@ -353,11 +362,24 @@ def test_foundation_install_runs_locked_idempotent_phases(monkeypatch, tmp_path:
     monkeypatch.setattr(
         host_foundation, "JOURNAL_PERSISTENCE", tmp_path / "journald.conf.d/50-eidolon.conf"
     )
+    # The path now travels on the profile, so redirecting the module global
+    # alone would leave the installer writing to the real /etc.
+    monkeypatch.setattr(
+        host_foundation,
+        "FOUNDATION_PROFILES",
+        {
+            profile_id: dataclasses.replace(
+                profile,
+                journal_persistence=tmp_path / "journald.conf.d/50-eidolon.conf",
+            )
+            for profile_id, profile in host_foundation.FOUNDATION_PROFILES.items()
+        },
+    )
     monkeypatch.setattr(host_foundation, "JOURNAL_DIRECTORY", tmp_path / "journal")
     monkeypatch.setattr(
         host_foundation,
         "foundation_platform_checks",
-        lambda: {"linux": True, "aarch64": True, "capacity": True},
+        lambda *_: {"linux": True, "aarch64": True, "capacity": True},
     )
     commands: list[tuple[str, ...]] = []
     monkeypatch.setattr(
@@ -544,7 +566,7 @@ def test_foundation_low_level_checks_and_failure_evidence(monkeypatch, tmp_path:
     monkeypatch.setattr(host_foundation, "FOUNDATION_LOCK", tmp_path / "foundation.lock")
     evidence = tmp_path / "foundation.json"
     monkeypatch.setattr(host_foundation, "FOUNDATION_EVIDENCE", evidence)
-    monkeypatch.setattr(host_foundation, "foundation_platform_checks", lambda: {"ok": True})
+    monkeypatch.setattr(host_foundation, "foundation_platform_checks", lambda *_: {"ok": True})
     monkeypatch.setattr(
         primitives,
         "checked",
@@ -570,9 +592,9 @@ def test_foundation_rejects_non_root_and_unsupported_platform(monkeypatch) -> No
     monkeypatch.setattr(
         host_foundation,
         "foundation_platform_checks",
-        lambda: {"raspberry_pi_hardware": False},
+        lambda *_: {"supported_hardware": False},
     )
-    with pytest.raises(TargetError, match="unsupported Raspberry Pi"):
+    with pytest.raises(TargetError, match="is not the raspberry-pi-os-debian-arm64-v2 board"):
         host_foundation_install.foundation_install(_foundation_request())
 
 
