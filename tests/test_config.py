@@ -187,7 +187,7 @@ def test_rejects_reused_install_file_path(config_path: Path) -> None:
 def test_rejects_service_topology_drift(config_path: Path) -> None:
     _replace(config_path, '  "eidolon-admin.service",\n', "")
 
-    with pytest.raises(ConfigurationError, match="fixed reviewed"):
+    with pytest.raises(ConfigurationError, match="reviewed topology for this Host"):
         load_config(config_path)
 
 
@@ -482,29 +482,66 @@ def test_a_host_declares_no_capabilities_by_default(config_path: Path) -> None:
 
 
 def test_capabilities_are_read(config_path: Path) -> None:
-    config = load_config(
-        _with_settings(
-            config_path,
-            '\n[capabilities]\nprovides = ["rknpu2", "local_asr", "local_tts"]\n',
-        )
+    """rknpu2 alone selects no extra source or unit, so the fixture still loads."""
+
+    config = load_config(_with_settings(config_path, '\n[capabilities]\nprovides = ["rknpu2"]\n'))
+
+    assert config.capabilities == frozenset({"rknpu2"})
+
+
+def test_a_capability_demands_the_source_that_serves_it(config_path: Path) -> None:
+    """Declaring local speech without pinning the repository that does it."""
+
+    with pytest.raises(ConfigurationError, match="eidolon_models"):
+        load_config(_with_settings(config_path, '\n[capabilities]\nprovides = ["local_asr"]\n'))
+
+
+def test_a_capability_demands_the_unit_that_serves_it(config_path: Path) -> None:
+    """Source pinned, unit not: the Host would carry the code and not run it."""
+
+    _replace(
+        config_path,
+        "[sources.eidolon_sdk]",
+        '[sources.eidolon_models]\npath = "../../eidolon_models"\n\n[sources.eidolon_sdk]',
     )
 
-    assert config.capabilities == frozenset({"rknpu2", "local_asr", "local_tts"})
+    with pytest.raises(ConfigurationError, match=r"eidolon-asr\.service"):
+        load_config(_with_settings(config_path, '\n[capabilities]\nprovides = ["local_asr"]\n'))
+
+
+def test_a_host_that_can_listen_locally_pins_and_runs_the_service(
+    config_path: Path,
+) -> None:
+    _replace(
+        config_path,
+        "[sources.eidolon_sdk]",
+        '[sources.eidolon_models]\npath = "../../eidolon_models"\n\n[sources.eidolon_sdk]',
+    )
+    from eidolon_ops.config import PRODUCT_UNITS
+
+    _replace(
+        config_path,
+        f'  "{PRODUCT_UNITS[-1]}",\n',
+        f'  "{PRODUCT_UNITS[-1]}",\n  "eidolon-asr.service",\n',
+    )
+
+    config = load_config(
+        _with_settings(config_path, '\n[capabilities]\nprovides = ["local_asr"]\n')
+    )
+
+    assert "eidolon_models" in config.sources
+    assert config.units[-1] == "eidolon-asr.service"
 
 
 def test_a_capability_nobody_defined_is_refused(config_path: Path) -> None:
     """A typo would provide nothing and drop units without saying why."""
 
     with pytest.raises(ConfigurationError, match="unknown Host capability 'rknpu'"):
-        load_config(
-            _with_settings(config_path, '\n[capabilities]\nprovides = ["rknpu"]\n')
-        )
+        load_config(_with_settings(config_path, '\n[capabilities]\nprovides = ["rknpu"]\n'))
 
 
 def test_a_repeated_capability_is_refused(config_path: Path) -> None:
     with pytest.raises(ConfigurationError, match="repeats 'rknpu2'"):
         load_config(
-            _with_settings(
-                config_path, '\n[capabilities]\nprovides = ["rknpu2", "rknpu2"]\n'
-            )
+            _with_settings(config_path, '\n[capabilities]\nprovides = ["rknpu2", "rknpu2"]\n')
         )

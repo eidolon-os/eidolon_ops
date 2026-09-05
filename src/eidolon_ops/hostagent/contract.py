@@ -36,6 +36,29 @@ PRODUCT_UNITS = (
     "eidolon-channel.service",
 )
 
+#: Every capability this agent was built to understand. Its own copy, because
+#: the agent is injected and imports nothing from the eidolon_ops package it
+#: came from; a test keeps it equal to eidolon_ops.capabilities.
+HOST_CAPABILITIES: frozenset[str] = frozenset({"rknpu2", "local_asr", "local_tts", "local_llm"})
+
+#: What a capability adds to that. The agent's own copy, deliberately: it runs
+#: on the Host and its job is to refuse a payload that does not match what it
+#: was built against. Reading the list it is sent would make the check
+#: circular. eidolon_ops.config holds the same table and a test keeps them equal.
+CAPABILITY_UNITS: dict[str, tuple[str, ...]] = {
+    "local_asr": ("eidolon-asr.service",),
+}
+
+
+def expected_units(capabilities: frozenset[str]) -> tuple[str, ...]:
+    extra: list[str] = []
+    for capability in sorted(capabilities):
+        for unit in CAPABILITY_UNITS.get(capability, ()):
+            if unit not in extra:
+                extra.append(unit)
+    return PRODUCT_UNITS + tuple(extra)
+
+
 #: Units that bring other units up. They have to be stopped in a transaction
 #: of their own, before the workers they manage: systemd orders a transaction
 #: by unit dependencies rather than by the order of the arguments, so naming
@@ -512,10 +535,25 @@ def ensure_host_path_contract(
 
 
 def fixed_units(payload: Mapping[str, object]) -> tuple[str, ...]:
+    """The units this Host runs, checked rather than believed.
+
+    A payload with no capabilities is one from before Hosts differed, and gets
+    the baseline — so an older workstation keeps working against a newer agent.
+    """
+
+    declared = payload.get("capabilities", [])
+    if not isinstance(declared, list) or not all(isinstance(item, str) for item in declared):
+        raise TargetError("capabilities must be an array of strings")
+    unknown = sorted(set(declared) - HOST_CAPABILITIES)
+    if unknown:
+        # Not merely unrecognised: a capability this agent cannot reason about
+        # may be one that should have brought units it will now never install.
+        raise TargetError("capability is not one this agent was built for: " + ", ".join(unknown))
+    expected = expected_units(frozenset(declared))
     value = payload.get("units")
-    if value != list(PRODUCT_UNITS):
+    if value != list(expected):
         raise TargetError("unit set differs from the reviewed product topology")
-    return PRODUCT_UNITS
+    return expected
 
 
 def fixed_data(payload: Mapping[str, object]) -> dict[str, Path]:

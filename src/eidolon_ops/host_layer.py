@@ -87,6 +87,10 @@ class HostLayer:
             ) from exc
         payload: dict[str, object] = {
             "units": list(self.config.units),
+            # Sent so the agent can derive the unit set itself rather than
+            # take the list on trust. It holds its own copy of what each
+            # capability adds; agreeing is the check.
+            "capabilities": sorted(self.config.capabilities),
             "port_registry": port_registry,
             # Where memory's supervisor answers. A backup asks it for a
             # snapshot of each space rather than copying a palace the agent

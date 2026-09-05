@@ -156,3 +156,9 @@ memory_settings = "/absolute/private/path/memory.yaml"
 #
 #   [capabilities]
 #   provides = ["rknpu2", "local_asr", "local_tts", "local_llm"]
+#
+# Declaring one has consequences this file must then match: a capability that
+# brings units also brings the repository they come from, so [sources] must
+# pin eidolon_models and services.units must list eidolon-asr.service. Both are
+# checked here, before a release starts, and again by the agent on the Host —
+# which derives the same list from its own copy rather than believing this one.

@@ -20,6 +20,7 @@ from eidolon_ops.settings_overlay import (
     parse_path,
 )
 
+#: The repositories every Host's release pins, whatever kind of machine it is.
 SOURCE_IDS = (
     "eidolon_kernel",
     "eidolon_data",
@@ -30,6 +31,25 @@ SOURCE_IDS = (
     "eidolon_memory",
     "eidolon_sdk",
 )
+
+#: What a capability adds to that. Kept out of the baseline rather than pinned
+#: everywhere, because eidolon_models carries about 728 MB of committed ASR
+#: weights: a Host that reaches a provider for speech would otherwise ship them
+#: in every bundle and never open them.
+CAPABILITY_SOURCES: dict[str, tuple[str, ...]] = {
+    "local_asr": ("eidolon_models",),
+    "local_tts": ("eidolon_models",),
+    "local_llm": ("eidolon_models",),
+}
+
+#: What a capability adds to the unit topology. This states the same thing each
+#: component's contract states with `requires_capability`, and a test holds the
+#: two together — the duplication exists because a release is validated before
+#: any contract is read, and refusing early is the point.
+CAPABILITY_UNITS: dict[str, tuple[str, ...]] = {
+    "local_asr": ("eidolon-asr.service",),
+}
+
 PRODUCT_UNITS = (
     "eidolon-bootstrapd.service",
     "eidolond.service",
@@ -49,6 +69,35 @@ PRODUCT_UNITS = (
     "eidolon-channel-provider.service",
     "eidolon-channel.service",
 )
+
+
+def expected_sources(capabilities: frozenset[str]) -> frozenset[str]:
+    """The repositories a Host with these capabilities pins."""
+
+    extra = {
+        source_id
+        for capability in capabilities
+        for source_id in CAPABILITY_SOURCES.get(capability, ())
+    }
+    return frozenset(SOURCE_IDS) | extra
+
+
+def expected_units(capabilities: frozenset[str]) -> tuple[str, ...]:
+    """The unit topology a Host with these capabilities installs.
+
+    Ordered: the baseline as reviewed, then each capability's additions in a
+    fixed order, so two Hosts that declare the same capabilities produce the
+    same list and the equality check below stays an equality check.
+    """
+
+    extra: list[str] = []
+    for capability in sorted(capabilities):
+        for unit in CAPABILITY_UNITS.get(capability, ()):
+            if unit not in extra:
+                extra.append(unit)
+    return PRODUCT_UNITS + tuple(extra)
+
+
 INSTALL_FILE_NAMES = (
     "data_env",
     "hub_env",
@@ -258,9 +307,10 @@ def load_config(path: Path) -> OperationsConfig:
     foundation_profile = _string(foundation_wire["profile"], "foundation.profile")
     if foundation_profile not in FOUNDATION_PROFILES:
         known = ", ".join(sorted(FOUNDATION_PROFILES))
-        raise ConfigurationError(
-            f"foundation.profile must be a reviewed profile: {known}"
-        )
+        raise ConfigurationError(f"foundation.profile must be a reviewed profile: {known}")
+    # Read before sources and services, because what those two must contain
+    # depends on what this Host says it can do.
+    capabilities = _capabilities(document.get("capabilities"))
     host_wire = _mapping(document["host"], "host")
     _require_keys(
         host_wire,
@@ -352,12 +402,14 @@ def load_config(path: Path) -> OperationsConfig:
     )
 
     sources_wire = _mapping(document["sources"], "sources")
-    if set(sources_wire) != set(SOURCE_IDS):
+    required_sources = expected_sources(capabilities)
+    if set(sources_wire) != required_sources:
         raise ConfigurationError(
-            "sources must be exactly Kernel/Data/Hub/Admin/Agent/Channel/Memory/SDK"
+            "sources must be exactly the repositories this Host pins: "
+            + ", ".join(sorted(required_sources))
         )
     sources: dict[str, SourceConfig] = {}
-    for source_id in SOURCE_IDS:
+    for source_id in sorted(required_sources):
         source_wire = _mapping(sources_wire[source_id], f"sources.{source_id}")
         _require_keys(
             source_wire,
@@ -374,9 +426,7 @@ def load_config(path: Path) -> OperationsConfig:
         if tag is not None and _TAG.fullmatch(tag) is None:
             raise ConfigurationError(f"sources.{source_id}.tag is invalid")
         sources[source_id] = SourceConfig(
-            path=_durable_local_path(
-                source_wire["path"], base, f"sources.{source_id}.path"
-            ),
+            path=_durable_local_path(source_wire["path"], base, f"sources.{source_id}.path"),
             revision=revision,
             tag=tag,
         )
@@ -387,8 +437,11 @@ def load_config(path: Path) -> OperationsConfig:
     if not isinstance(units_wire, list) or not all(isinstance(item, str) for item in units_wire):
         raise ConfigurationError("services.units must be an array of strings")
     units = tuple(units_wire)
-    if units != PRODUCT_UNITS:
-        raise ConfigurationError("services.units must equal the fixed reviewed product topology")
+    if units != expected_units(capabilities):
+        raise ConfigurationError(
+            "services.units must equal the reviewed topology for this Host's "
+            "capabilities: " + ", ".join(expected_units(capabilities))
+        )
 
     data_wire = _mapping(document["data"], "data")
     _require_keys(data_wire, required=set(FIXED_DATA_PATHS), label="data")
@@ -413,7 +466,6 @@ def load_config(path: Path) -> OperationsConfig:
             raise ConfigurationError("install.files paths must be unique per security scope")
 
     settings_overlay = _settings_overlay(document.get("settings"))
-    capabilities = _capabilities(document.get("capabilities"))
 
     return OperationsConfig(
         path=resolved,
