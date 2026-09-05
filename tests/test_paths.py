@@ -127,9 +127,7 @@ def test_a_profile_may_pin_the_setup_code_it_already_knows(tmp_path: Path) -> No
 
     script = tmp_path / "run.sh"
     script.write_text("#!/bin/sh\n", encoding="utf-8")
-    path = _write_mac_profile(
-        tmp_path, script=script, overrides='setup_code = "99999990"'
-    )
+    path = _write_mac_profile(tmp_path, script=script, overrides='setup_code = "99999990"')
 
     profile = load_host_profile(path)
 
@@ -173,9 +171,7 @@ def test_a_pinned_code_is_refused_here_rather_than_three_hops_away(
 
     script = tmp_path / "run.sh"
     script.write_text("#!/bin/sh\n", encoding="utf-8")
-    path = _write_mac_profile(
-        tmp_path, script=script, overrides=f"setup_code = {code}"
-    )
+    path = _write_mac_profile(tmp_path, script=script, overrides=f"setup_code = {code}")
 
     with pytest.raises(HostProfileError, match="setup_code"):
         load_host_profile(path)
@@ -195,9 +191,7 @@ def test_the_pi_example_documents_the_pinned_code_without_pinning_one() -> None:
 
     assert profile.app is not None
     assert profile.app.setup_code is None
-    text = (REPOSITORY_ROOT / "config/hosts/pi5.example.toml").read_text(
-        encoding="utf-8"
-    )
+    text = (REPOSITORY_ROOT / "config/hosts/pi5.example.toml").read_text(encoding="utf-8")
     assert "# setup_code = " in text
 
 
@@ -255,7 +249,7 @@ operations_config = "{operations}"
         ),
         encoding="utf-8",
     )
-    with pytest.raises(HostProfileError, match=r"Pi paths\.state_root"):
+    with pytest.raises(HostProfileError, match=r"product board's paths\.state_root"):
         load_host_profile(profile_file)
 
 
@@ -470,3 +464,28 @@ def test_a_discovered_address_forbids_a_literal_one_in_the_client_url(tmp_path: 
 
     with pytest.raises(HostProfileError, match="must not embed a literal address"):
         load_host_profile(stale)
+
+
+def test_a_third_board_is_a_row_in_the_driver_table() -> None:
+    """Not a branch anywhere else.
+
+    Both path rules used to name the Raspberry Pi, which made each of them a
+    place a second board had to be remembered — and forgetting one would not
+    fail, it would let a board through with unreviewed paths.
+    """
+
+    from eidolon_ops.paths import _PLATFORM_DRIVERS, HostPlatform, is_product_board
+
+    assert set(_PLATFORM_DRIVERS) == set(HostPlatform)
+    assert is_product_board(HostPlatform.RK3588)
+    assert is_product_board(HostPlatform.RASPBERRY_PI)
+    assert not is_product_board(HostPlatform.MACOS)
+
+
+def test_every_platform_has_a_profile_to_be_built_from() -> None:
+    from eidolon_ops.host import PLATFORM_PROFILES
+    from eidolon_ops.paths import HostPlatform
+
+    assert set(PLATFORM_PROFILES) == set(HostPlatform)
+    for platform, profile in PLATFORM_PROFILES.items():
+        assert profile.platform is platform

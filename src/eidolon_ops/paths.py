@@ -32,6 +32,7 @@ class HostPlatform(StrEnum):
 
     MACOS = "macos"
     RASPBERRY_PI = "raspberry-pi"
+    RK3588 = "rk3588"
 
 
 class HostDriver(StrEnum):
@@ -52,7 +53,23 @@ _HOST_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _PLATFORM_DRIVERS = {
     HostPlatform.MACOS: HostDriver.LOCAL_SUPERVISORD,
     HostPlatform.RASPBERRY_PI: HostDriver.SSH_SYSTEMD,
+    HostPlatform.RK3588: HostDriver.SSH_SYSTEMD,
 }
+
+
+def is_product_board(platform: HostPlatform) -> bool:
+    """Whether this is a box Ops installs onto, rather than an operator's own.
+
+    Read off the driver table rather than listed again: a platform Ops reaches
+    over SSH and drives with systemd is a product board, and that is the same
+    fact the table already states. The two path rules below used to name the
+    Raspberry Pi, which made every one of them a place a second board would
+    have to be remembered.
+    """
+
+    return _PLATFORM_DRIVERS[platform] is HostDriver.SSH_SYSTEMD
+
+
 _FOUNDATION_MODES = {"external"}
 _IPV4_LITERAL = re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}$")
 #: The product Host's layout, stated once. A Pi profile is required to be
@@ -181,6 +198,7 @@ class HostProfile:
                 f"{self.host_id} declares no lifecycle script, so it has no workspace"
             )
         return self.lifecycle_script.parents[2]
+
     foundation_mode: Literal["external"] | None = None
     external_livekit_config: Path | None = None
     app: AppAccess | None = None
@@ -303,8 +321,10 @@ def merged_environment(profile: HostProfile) -> dict[str, str]:
 
 def _validate_paths(paths: HostPaths, *, platform: HostPlatform) -> None:
     if paths.current_root == paths.install_root:
-        if platform is not HostPlatform.MACOS:
-            raise HostProfileError("Pi current_root must be a link below install_root")
+        if is_product_board(platform):
+            raise HostProfileError(
+                "a product board's current_root must be a link below install_root"
+            )
     elif paths.install_root not in paths.current_root.parents:
         raise HostProfileError("current_root must equal or be below install_root")
 
@@ -321,10 +341,10 @@ def _validate_paths(paths: HostPaths, *, platform: HostPlatform) -> None:
         raise HostProfileError("Bootstrap state must remain a distinct ownership boundary")
     if paths.bootstrap_runtime_root == paths.runtime_root:
         raise HostProfileError("Bootstrap runtime must remain a distinct ownership boundary")
-    if platform is HostPlatform.RASPBERRY_PI:
+    if is_product_board(platform):
         for name, value in PRODUCT_PATHS.items():
             if getattr(paths, name) != value:
-                raise HostProfileError(f"Pi paths.{name} must be {value}")
+                raise HostProfileError(f"a product board's paths.{name} must be {value}")
 
 
 def _table(value: object, label: str) -> dict[str, object]:

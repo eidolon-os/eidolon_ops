@@ -49,6 +49,7 @@ PLATFORM_PROFILES = {
     HostPlatform.RASPBERRY_PI: PlatformProfile(
         id="linux-debian13-arm64", platform=HostPlatform.RASPBERRY_PI
     ),
+    HostPlatform.RK3588: PlatformProfile(id="linux-ubuntu2604-arm64", platform=HostPlatform.RK3588),
 }
 
 

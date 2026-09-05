@@ -13,7 +13,7 @@ from eidolon_ops import lan_observation, plans
 from eidolon_ops.errors import OperationsError
 from eidolon_ops.host import HostAdapter, build_adapter
 from eidolon_ops.model import Capability, Evidence, Outcome, Plan, steps_from_phases
-from eidolon_ops.paths import HostProfile
+from eidolon_ops.paths import HostProfile, is_product_board
 from eidolon_ops.process import ProcessError, ProcessRunner
 from eidolon_ops.progress import ProgressSink
 from eidolon_ops.source_assets import status_ports
@@ -66,7 +66,7 @@ class HostController:
             "driver": str(self.profile.driver),
             "ports": status_ports(hub_https_port=app.hub_https_port if app else None),
         }
-        if app is not None and str(self.profile.platform) == "macos":
+        if app is not None and not is_product_board(self.profile.platform):
             context["network"] = self._local_status_network()
         report = {**report, **context}
         return self._observed(plan, report, healthy=report.get("status") != "degraded")
@@ -168,9 +168,7 @@ class HostController:
             return Evidence(plan=plan, outcome=Outcome.PLANNED, report=report)
         return self._applied(plan, report)
 
-    def commissioning_code(
-        self, *, ttl_seconds: int, setup_code: str | None = None
-    ) -> Evidence:
+    def commissioning_code(self, *, ttl_seconds: int, setup_code: str | None = None) -> Evidence:
         """Issue the Setup code a phone types, on whichever Host this profile is.
 
         ``setup_code`` names the value for this one run. Left out, the profile's
@@ -280,9 +278,7 @@ class HostController:
     def abandon(self, *, release_id: str) -> Evidence:
         plan = plans.abandon(self.profile.host_id)
         release = self.adapter.require_release(Capability.DEPLOY)
-        return self._planned_or_applied(
-            plan, release.abandon(release_id=release_id), applied=True
-        )
+        return self._planned_or_applied(plan, release.abandon(release_id=release_id), applied=True)
 
     def rollback(self, *, release_id: str, snapshot: Path, apply: bool) -> Evidence:
         plan = plans.rollback(self.profile.host_id, apply=apply)
@@ -322,9 +318,7 @@ class HostController:
             self.profile.host_id, apply=apply, wipe_authority_data=wipe_authority_data
         )
         self.adapter.require(Capability.RESET)
-        report = self.adapter.supervisor.reset(
-            wipe_authority_data=wipe_authority_data, apply=apply
-        )
+        report = self.adapter.supervisor.reset(wipe_authority_data=wipe_authority_data, apply=apply)
         return self._planned_or_applied(plan, report, applied=apply)
 
     def controller_reset(self, *, apply: bool) -> Evidence:
@@ -388,9 +382,7 @@ class HostController:
         )
 
     @staticmethod
-    def _planned_or_applied(
-        plan: Plan, report: dict[str, object], *, applied: bool
-    ) -> Evidence:
+    def _planned_or_applied(plan: Plan, report: dict[str, object], *, applied: bool) -> Evidence:
         return Evidence(
             plan=plan,
             outcome=Outcome.APPLIED if applied else Outcome.PLANNED,
