@@ -87,3 +87,22 @@ def test_a_payload_naming_an_unknown_profile_is_refused_by_name() -> None:
 
     with pytest.raises(TargetError, match="not one this agent was built for"):
         agent.requested_profile({"foundation": {"profile": "ubuntu-2804-rk3688"}})
+
+
+@pytest.mark.parametrize("profile_id", sorted(ops.FOUNDATION_PROFILES))
+def test_the_doctor_reports_the_board_it_actually_checked(profile_id: str, monkeypatch) -> None:
+    """It reported the default's name whatever it had been handed.
+
+    Found by reading rather than by a failure, which is the reason for this
+    test: nothing else compares the name in the report to the payload, so an
+    RK3588 Host would have called itself a Raspberry Pi and been believed.
+    """
+
+    monkeypatch.setattr(agent, "foundation_platform_checks", lambda *_: {"ok": True})
+    monkeypatch.setattr(agent, "package_installed", lambda *_: True)
+    monkeypatch.setattr(agent, "binary_version", lambda *_: {"healthy": True})
+    monkeypatch.setattr(agent, "journal_is_persistent", lambda: True)
+    monkeypatch.setattr(agent.primitives, "service_status", lambda *_: {"healthy": True})
+
+    payload = {"foundation": ops.foundation_payload(ops.FOUNDATION_PROFILES[profile_id])}
+    assert agent.foundation_doctor(payload)["profile"] == profile_id

@@ -463,7 +463,7 @@ def foundation_doctor(payload: Mapping[str, object]) -> dict[str, object]:
     return {
         "status": "healthy" if healthy else "degraded",
         "journal_persistent": journal_persistent,
-        "profile": FOUNDATION_PROFILE,
+        "profile": profile.id,
         "platform": platform_checks,
         "packages": packages,
         "artifacts": artifacts,
