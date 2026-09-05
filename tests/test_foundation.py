@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import MISSING
-
 import base64
 import grp
 import hashlib
@@ -13,6 +11,7 @@ import socket
 import subprocess
 import tarfile
 import tempfile
+from dataclasses import MISSING
 from pathlib import Path
 from types import SimpleNamespace
 
