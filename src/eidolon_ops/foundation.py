@@ -182,6 +182,24 @@ class AptSource:
 
 
 @dataclass(frozen=True, slots=True)
+class CpuGovernor:
+    """Which scaling governor a board ships with, and where that is written.
+
+    Where differs by board and is not guessable. On this Armbian image the
+    file cpufrequtils would own is read by armbian-hardware-optimization
+    instead -- it sources it purely for the variables and ignores the ENABLE
+    flag inside, which its own FIXME admits -- so writing GOVERNOR there and
+    restarting that unit is what takes effect. A second board gets its own
+    answer here rather than inheriting this one.
+    """
+
+    name: str
+    config_file: Path
+    key: str
+    applied_by: str
+
+
+@dataclass(frozen=True, slots=True)
 class FoundationProfile:
     """One reviewed board: what it is, and what a Host of it must have.
 
@@ -218,6 +236,10 @@ class FoundationProfile:
     services: tuple[str, ...]
     journal_persistence: Path
     journal_persistence_content: str
+    #: ``None`` where the board has not decided, which is not the same as
+    #: deciding on the default: it means nobody measured what the default
+    #: costs there, or what running hotter would cost the hardware.
+    cpu_governor: CpuGovernor | None
     artifacts: tuple[FoundationArtifact, ...]
 
 
@@ -260,6 +282,10 @@ RASPBERRY_PI_OS_TRIXIE = FoundationProfile(
     services=FOUNDATION_SERVICES,
     journal_persistence=JOURNAL_PERSISTENCE,
     journal_persistence_content=JOURNAL_PERSISTENCE_CONTENT,
+    #: Undecided on this board. The governor costs measurably on RK3588, but
+    #: a Pi 5's thermal envelope is a different question and nobody has asked
+    #: it here, so the image's own default stands.
+    cpu_governor=None,
     artifacts=FOUNDATION_ARTIFACTS,
 )
 
@@ -334,6 +360,21 @@ UBUNTU_2604_RK3588 = FoundationProfile(
     services=FOUNDATION_SERVICES,
     journal_persistence=Path("/etc/systemd/journald.conf.d/99-eidolon-persistent.conf"),
     journal_persistence_content=RK3588_JOURNAL_PERSISTENCE_CONTENT,
+    #: Measured, then decided. `ondemand` costs 22% on ASR and 32% on LLM
+    #: decode -- the latter on work that runs on the NPU, because decode
+    #: leaves the CPU too idle for the governor to ramp while RKLLM's host
+    #: threads still pay the low clock (HOST-RK3588.md 2.16 iv and 2.19).
+    #: The usual objection is heat, and it does not apply: this board has a
+    #: fan, and under a full decode it sits at 47 C with the fan not yet
+    #: turning. Verified end to end on the board -- writing GOVERNOR here and
+    #: restarting that unit puts all three clusters on performance, and the
+    #: 30% comes back.
+    cpu_governor=CpuGovernor(
+        name="performance",
+        config_file=Path("/etc/default/cpufrequtils"),
+        key="GOVERNOR",
+        applied_by="armbian-hardware-optimize.service",
+    ),
     #: The same four prebuilt binaries. All are aarch64 and none is
     #: Debian-specific; the NPU runtime is deliberately not here — it belongs
     #: to the component that loads it, gated on the rknpu2 capability, so a

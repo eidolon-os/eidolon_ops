@@ -866,6 +866,7 @@ def test_a_profile_is_a_row_and_not_a_rewrite() -> None:
         "services",
         "journal_persistence",
         "journal_persistence_content",
+        "cpu_governor",
         "artifacts",
     }
     assert all(field.default is MISSING for field in fields(FoundationProfile)), (
@@ -937,3 +938,23 @@ def test_a_profile_names_a_mirror_that_serves_its_own_suite() -> None:
             rendered = source.suites.format(suite=profile.apt_suite)
             assert profile.apt_suite in rendered
             assert source.uris in profile.apt_mirrors.values()
+
+
+def test_a_board_that_ships_a_governor_says_where_it_is_written() -> None:
+    """Where differs by board and reading the code is not the same as knowing.
+
+    On this Armbian image /etc/default/cpufrequtils carries ENABLE=false and
+    the governor is applied anyway, because armbian-hardware-optimization
+    sources the file for its variables and ignores that flag. A profile that
+    named only the governor would leave the next person to rediscover that.
+    """
+
+    from eidolon_ops.foundation import FOUNDATION_PROFILES
+
+    for profile in FOUNDATION_PROFILES.values():
+        governor = profile.cpu_governor
+        if governor is None:
+            continue
+        assert governor.config_file.is_absolute()
+        assert governor.key
+        assert governor.applied_by
