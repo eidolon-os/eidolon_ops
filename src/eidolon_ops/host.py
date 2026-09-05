@@ -162,7 +162,7 @@ def _product_adapter(
         platform=platform,
         transport=transport,
         supervisor=SystemdSupervisor(release),
-        packages=AptPackages(release),
+        packages=AptPackages(release, config.foundation_profile),
         release=release,
     )
 

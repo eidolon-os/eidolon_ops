@@ -218,6 +218,9 @@ def test_pi_adapter_delegates_every_remote_capability(monkeypatch, tmp_path: Pat
             return self
 
         host = SimpleNamespace()
+        # The adapter reports which reviewed foundation this Host is, so the
+        # double has to be one; there is more than one to be now.
+        foundation_profile = "raspberry-pi-os-debian-arm64-v2"
 
     class Pi:
         def __init__(

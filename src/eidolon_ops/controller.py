@@ -22,7 +22,6 @@ from eidolon_ops.component_contract import read_component_contracts
 from eidolon_ops.config import OperationsConfig, validate_release_id
 from eidolon_ops.errors import OperationsError
 from eidolon_ops.foundation import (
-    FOUNDATION_PROFILE,
     foundation_payload,
     python_bootstrap_script,
     python_probe_script,
@@ -579,7 +578,7 @@ class EidolonPiController:
             if not apply:
                 return {
                     "status": "planned_bootstrap",
-                    "profile": FOUNDATION_PROFILE,
+                    "profile": self.config.foundation_profile,
                     "phases": phases,
                     "next": "rerun provision --apply to bootstrap Python and the pinned foundation",
                 }
@@ -604,14 +603,14 @@ class EidolonPiController:
         if observed.get("status") == "healthy":
             return {
                 "status": "healthy",
-                "profile": FOUNDATION_PROFILE,
+                "profile": self.config.foundation_profile,
                 "changed": False,
                 "phases": phases,
             }
         if not apply:
             return {
                 "status": "degraded",
-                "profile": FOUNDATION_PROFILE,
+                "profile": self.config.foundation_profile,
                 "changed": False,
                 "phases": phases,
                 "next": "rerun provision --apply after reviewing missing packages and capacity gates",
@@ -621,7 +620,7 @@ class EidolonPiController:
         phases.append({"phase": "install", "result": installed})
         return {
             "status": "installed",
-            "profile": FOUNDATION_PROFILE,
+            "profile": self.config.foundation_profile,
             "changed": True,
             "phases": phases,
         }

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import MISSING
+
 import base64
 import grp
 import hashlib
@@ -69,13 +71,15 @@ def test_foundation_uses_direct_debian_13_package_names() -> None:
 
 def test_platform_checks_cover_os_init_memory_and_disk(monkeypatch) -> None:
     monkeypatch.setattr(
-        host_foundation, "os_release",
+        host_foundation,
+        "os_release",
         lambda: {"ID": "raspbian", "ID_LIKE": "debian", "VERSION_ID": "13"},
     )
     monkeypatch.setattr(host_foundation.platform, "system", lambda: "Linux")
     monkeypatch.setattr(host_foundation.platform, "machine", lambda: "aarch64")
     monkeypatch.setattr(
-        primitives, "read_text",
+        primitives,
+        "read_text",
         lambda path: (
             "systemd"
             if path.name == "comm"
@@ -98,9 +102,7 @@ def test_platform_checks_cover_os_init_memory_and_disk(monkeypatch) -> None:
 def test_foundation_doctor_composes_every_gate(monkeypatch, tmp_path: Path) -> None:
     # A Host that keeps its journal in RAM is degraded, so the gate has to be
     # given a Host that does not — otherwise this asserts the wrong failure.
-    monkeypatch.setattr(
-        host_foundation, "journal_is_persistent", lambda: True
-    )
+    monkeypatch.setattr(host_foundation, "journal_is_persistent", lambda: True)
     evidence = tmp_path / "foundation.json"
     contract = foundation_payload()
     evidence_document = {
@@ -120,16 +122,19 @@ def test_foundation_doctor_composes_every_gate(monkeypatch, tmp_path: Path) -> N
     evidence.write_text(json.dumps(evidence_document), encoding="utf-8")
     monkeypatch.setattr(host_foundation, "FOUNDATION_EVIDENCE", evidence)
     monkeypatch.setattr(
-        host_foundation, "foundation_platform_checks",
+        host_foundation,
+        "foundation_platform_checks",
         lambda: {"linux": True, "capacity": True},
     )
     monkeypatch.setattr(host_foundation, "package_installed", lambda _package: True)
     monkeypatch.setattr(
-        host_foundation, "binary_version",
+        host_foundation,
+        "binary_version",
         lambda executable: {"healthy": True, "version": executable},
     )
     monkeypatch.setattr(
-        primitives, "service_status",
+        primitives,
+        "service_status",
         lambda unit: {"healthy": True, "active": unit},
     )
 
@@ -230,7 +235,9 @@ def test_download_uses_wheel_suffix_and_rejects_unknown_kind(monkeypatch, tmp_pa
     with pytest.raises(TargetError, match="unsupported foundation artifact kind"):
         host_foundation_install.download_verified({**artifact, "kind": "unknown"})
     with pytest.raises(TargetError, match="valid filename"):
-        host_foundation_install.download_verified({**artifact, "url": "https://example.invalid/not-a-wheel"})
+        host_foundation_install.download_verified(
+            {**artifact, "url": "https://example.invalid/not-a-wheel"}
+        )
 
 
 def _binary_archive(path: Path, name: str, payload: bytes) -> None:
@@ -349,31 +356,37 @@ def test_foundation_install_runs_locked_idempotent_phases(monkeypatch, tmp_path:
     )
     monkeypatch.setattr(host_foundation, "JOURNAL_DIRECTORY", tmp_path / "journal")
     monkeypatch.setattr(
-        host_foundation, "foundation_platform_checks",
+        host_foundation,
+        "foundation_platform_checks",
         lambda: {"linux": True, "aarch64": True, "capacity": True},
     )
     commands: list[tuple[str, ...]] = []
     monkeypatch.setattr(
-        primitives, "checked",
+        primitives,
+        "checked",
         lambda _operation, command, **_kwargs: (
             commands.append(tuple(command)) or subprocess.CompletedProcess(command, 0, "", "")
         ),
     )
     installed: list[str] = []
     monkeypatch.setattr(
-        host_foundation_install, "install_tar_binary",
+        host_foundation_install,
+        "install_tar_binary",
         lambda artifact: installed.append(str(artifact["artifact_id"])),
     )
     monkeypatch.setattr(
-        host_foundation_install, "install_uv",
+        host_foundation_install,
+        "install_uv",
         lambda artifact: installed.append(str(artifact["artifact_id"])),
     )
     monkeypatch.setattr(
-        host_foundation_install, "install_node",
+        host_foundation_install,
+        "install_node",
         lambda artifact: installed.append(str(artifact["artifact_id"])),
     )
     monkeypatch.setattr(
-        host_foundation, "foundation_doctor",
+        host_foundation,
+        "foundation_doctor",
         lambda _payload: {"status": "healthy"},
     )
 
@@ -449,17 +462,20 @@ def test_private_file_and_app_ready_gate(monkeypatch, tmp_path: Path) -> None:
         monkeypatch.setattr(probe, "MDNS_DEFINITION", mdns)
         monkeypatch.setattr(probe, "BOOTSTRAP_SOCKET", control)
         monkeypatch.setattr(
-            primitives, "run",
+            primitives,
+            "run",
             lambda *_args, **_kwargs: subprocess.CompletedProcess(
                 (), 0, json.dumps({"ok": True}), ""
             ),
         )
         monkeypatch.setattr(
-            primitives, "unit_status",
+            primitives,
+            "unit_status",
             lambda _unit: {"ActiveState": "active", "SubState": "running"},
         )
         monkeypatch.setattr(
-            primitives, "private_file_check",
+            primitives,
+            "private_file_check",
             lambda *_args: {"healthy": True},
         )
 
@@ -485,7 +501,8 @@ def test_private_file_and_app_ready_gate(monkeypatch, tmp_path: Path) -> None:
 
 def test_target_main_dispatches_foundation_doctor(monkeypatch, capsys) -> None:
     monkeypatch.setattr(
-        host_foundation, "foundation_doctor",
+        host_foundation,
+        "foundation_doctor",
         lambda _payload: {"status": "healthy"},
     )
     encoded = base64.urlsafe_b64encode(json.dumps(_foundation_request()).encode()).decode()
@@ -502,7 +519,8 @@ def test_foundation_low_level_checks_and_failure_evidence(monkeypatch, tmp_path:
     assert host_foundation.os_release(tmp_path / "missing") == {}
 
     monkeypatch.setattr(
-        primitives, "run",
+        primitives,
+        "run",
         lambda *_args, **_kwargs: subprocess.CompletedProcess((), 0, "install ok installed", ""),
     )
     assert host_foundation.package_installed("bluez")
@@ -515,7 +533,8 @@ def test_foundation_low_level_checks_and_failure_evidence(monkeypatch, tmp_path:
     uv.write_text("#!/bin/sh\n", encoding="utf-8")
     uv.chmod(0o755)
     monkeypatch.setattr(
-        primitives, "run",
+        primitives,
+        "run",
         lambda *_args, **_kwargs: subprocess.CompletedProcess((), 0, "uv 0.11.15", ""),
     )
     assert host_foundation.binary_version("uv")["healthy"]
@@ -528,7 +547,8 @@ def test_foundation_low_level_checks_and_failure_evidence(monkeypatch, tmp_path:
     monkeypatch.setattr(host_foundation, "FOUNDATION_EVIDENCE", evidence)
     monkeypatch.setattr(host_foundation, "foundation_platform_checks", lambda: {"ok": True})
     monkeypatch.setattr(
-        primitives, "checked",
+        primitives,
+        "checked",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(TargetError("apt failed")),
     )
 
@@ -549,7 +569,8 @@ def test_foundation_rejects_non_root_and_unsupported_platform(monkeypatch) -> No
 
     monkeypatch.setattr(host_foundation_install.os, "geteuid", lambda: 0)
     monkeypatch.setattr(
-        host_foundation, "foundation_platform_checks",
+        host_foundation,
+        "foundation_platform_checks",
         lambda: {"raspberry_pi_hardware": False},
     )
     with pytest.raises(TargetError, match="unsupported Raspberry Pi"):
@@ -637,11 +658,13 @@ def test_https_json_rejects_bad_responses(
 
 def test_readiness_evidence_names_what_it_could_not_reach(monkeypatch) -> None:
     monkeypatch.setattr(
-        primitives, "run",
+        primitives,
+        "run",
         lambda *_args, **_kwargs: subprocess.CompletedProcess((), 2, "", "missing"),
     )
     monkeypatch.setattr(
-        probe, "local_api_json",
+        probe,
+        "local_api_json",
         lambda _path: (_ for _ in ()).throw(TargetError("offline")),
     )
 
@@ -649,7 +672,8 @@ def test_readiness_evidence_names_what_it_could_not_reach(monkeypatch) -> None:
     assert probe.local_api_report()["error"] == "offline"
 
     monkeypatch.setattr(
-        primitives, "run",
+        primitives,
+        "run",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(TargetError("not installed")),
     )
     assert probe.bootstrap_preflight()["error"] == "not installed"
@@ -753,8 +777,7 @@ def test_journal_files_left_by_an_old_configuration_do_not_count(
     assert host_foundation.journal_is_persistent() is False
 
 
-def test_persistent_journal_is_bounded_because_the_default_it_replaces_had_a_reason(
-) -> None:
+def test_persistent_journal_is_bounded_because_the_default_it_replaces_had_a_reason() -> None:
     content = host_foundation.JOURNAL_PERSISTENCE_CONTENT
 
     assert "Storage=persistent" in content
@@ -770,22 +793,18 @@ def test_installing_persistence_tells_journald_rather_than_only_writing_a_file(
     monkeypatch, tmp_path: Path
 ) -> None:
     commands: list[tuple[str, ...]] = []
-    monkeypatch.setattr(
-        host_foundation, "JOURNAL_PERSISTENCE", tmp_path / "conf.d/50-eidolon.conf"
-    )
+    monkeypatch.setattr(host_foundation, "JOURNAL_PERSISTENCE", tmp_path / "conf.d/50-eidolon.conf")
     monkeypatch.setattr(host_foundation, "JOURNAL_DIRECTORY", tmp_path / "journal")
     monkeypatch.setattr(
-        primitives, "checked",
+        primitives,
+        "checked",
         lambda _operation, command, **_kwargs: (
-            commands.append(tuple(command))
-            or subprocess.CompletedProcess(command, 0, "", "")
+            commands.append(tuple(command)) or subprocess.CompletedProcess(command, 0, "", "")
         ),
     )
     monkeypatch.setattr(primitives, "run", lambda *_a, **_k: None)
 
-    host_foundation_install.install_journal_persistence(
-        host_foundation.JOURNAL_PERSISTENCE_CONTENT
-    )
+    host_foundation_install.install_journal_persistence(host_foundation.JOURNAL_PERSISTENCE_CONTENT)
 
     # Writing the file and stopping there would leave a Host that reads as
     # fixed while its logs are still in memory.
@@ -793,8 +812,7 @@ def test_installing_persistence_tells_journald_rather_than_only_writing_a_file(
     assert host_foundation.JOURNAL_PERSISTENCE.is_file()
 
 
-def test_journal_persistence_survives_a_reset_like_the_rest_of_the_foundation(
-) -> None:
+def test_journal_persistence_survives_a_reset_like_the_rest_of_the_foundation() -> None:
     """A reset returns the product to clean, not the machine to factory.
 
     The foundation — packages, pinned binaries, the evidence file — is
@@ -814,3 +832,57 @@ def test_journal_persistence_survives_a_reset_like_the_rest_of_the_foundation(
         root in host_foundation.JOURNAL_PERSISTENCE.parents
         for root in contract.RESET_DEPLOYMENT_ROOTS
     )
+
+
+def test_a_profile_is_a_row_and_not_a_rewrite() -> None:
+    """What a second board has to fill in, stated as a test.
+
+    Every field here was once an assumption the first board made silently. The
+    list is the cost of adding a board, and it should stay visible: a field
+    that quietly acquires a default is a field the next board inherits from
+    the Raspberry Pi without anyone deciding it should.
+    """
+
+    from dataclasses import fields
+
+    from eidolon_ops.foundation import FoundationProfile
+
+    assert {field.name for field in fields(FoundationProfile)} == {
+        "id",
+        "display_name",
+        "architecture",
+        "os_ids",
+        "os_versions",
+        "hardware_model_match",
+        "hardware_display_name",
+        "minimum_memory_kib",
+        "minimum_disk_kib",
+        "minimum_memory_label",
+        "minimum_disk_label",
+        "apt_suite",
+        "apt_mirrors",
+        "apt_sources",
+        "apt_packages",
+        "bootstrap_packages",
+        "services",
+        "journal_persistence",
+        "journal_persistence_content",
+        "artifacts",
+    }
+    assert all(field.default is MISSING for field in fields(FoundationProfile)), (
+        "a default would let the next board inherit this one's answer silently"
+    )
+
+
+def test_the_registry_is_keyed_by_the_id_a_host_config_names() -> None:
+    from eidolon_ops.foundation import FOUNDATION_PROFILES
+
+    for profile_id, profile in FOUNDATION_PROFILES.items():
+        assert profile_id == profile.id
+
+
+def test_an_unregistered_profile_is_refused_with_the_choices() -> None:
+    from eidolon_ops.foundation import foundation_profile
+
+    with pytest.raises(KeyError, match="must be a reviewed profile"):
+        foundation_profile("ubuntu-rk3588-arm64-v1")

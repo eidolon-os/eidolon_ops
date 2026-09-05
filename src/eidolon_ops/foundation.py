@@ -1,7 +1,16 @@
-"""Pinned Raspberry Pi host foundation contract.
+"""The pinned host foundations, one per kind of board Ops installs onto.
 
-The profile is deliberately code-owned: changing a package, download URL, or
-digest is a reviewed release change, not an operator-side configuration tweak.
+Code-owned, deliberately. Changing a package, a download URL or a digest is a
+supply-chain decision and belongs in a reviewed release change, not in a file
+an operator edits — which is why this is a table in Python and not a TOML the
+host config points at. What the operator chooses is *which* reviewed profile
+their Host is; what that profile contains is not theirs to alter.
+
+A second board is a second entry here. Everything that differs between boards
+— which OS the bootstrap will accept, what hardware it insists on, the apt
+sources it fetches from, the packages, the prebuilt binaries — is a field on
+the profile rather than a module constant, so adding one is filling in a row
+rather than finding every place the first board's answer was assumed.
 """
 
 from __future__ import annotations
@@ -9,7 +18,6 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-FOUNDATION_PROFILE = "raspberry-pi-os-debian-arm64-v2"
 FOUNDATION_ARCHITECTURE = "aarch64"
 FOUNDATION_OS_IDS = ("debian", "raspbian")
 FOUNDATION_OS_VERSIONS = ("13",)
@@ -162,22 +170,137 @@ FOUNDATION_ARTIFACTS = (
 )
 
 
-def foundation_payload() -> dict[str, object]:
-    """Return the exact target-side contract, with no operator-controlled URL."""
+@dataclass(frozen=True, slots=True)
+class AptSource:
+    """One stanza of the deb822 sources list the bootstrap writes."""
+
+    uris: str
+    #: May contain ``{suite}``, which the profile's suite fills in.
+    suites: str
+    components: str
+    signed_by: str
+
+
+@dataclass(frozen=True, slots=True)
+class FoundationProfile:
+    """One reviewed board: what it is, and what a Host of it must have.
+
+    Every field is something the first board answered implicitly. A second
+    board answers them differently — a different OS gate, no Raspberry Pi in
+    /proc/device-tree/model, Ubuntu's archives instead of Debian's — and the
+    point of naming them is that it then answers them all, rather than
+    inheriting whichever ones nobody noticed were assumptions.
+    """
+
+    id: str
+    #: What the bootstrap's refusals call this board, in an operator's words.
+    display_name: str
+    architecture: str
+    os_ids: tuple[str, ...]
+    os_versions: tuple[str, ...]
+    #: Shell glob matched against /proc/device-tree/model. ``None`` where the
+    #: OS gate is the whole check and the board is not identifiable that way.
+    hardware_model_match: str | None
+    #: What that glob means, for the refusal message.
+    hardware_display_name: str | None
+    #: What the bootstrap refuses to run on. Below these a Host would install
+    #: and then fail later, further from the cause.
+    minimum_memory_kib: int
+    minimum_disk_kib: int
+    #: How those two thresholds are said out loud when one is not met.
+    minimum_memory_label: str
+    minimum_disk_label: str
+    apt_suite: str
+    apt_mirrors: dict[str, str]
+    apt_sources: tuple[AptSource, ...]
+    apt_packages: tuple[str, ...]
+    bootstrap_packages: tuple[str, ...]
+    services: tuple[str, ...]
+    journal_persistence: Path
+    journal_persistence_content: str
+    artifacts: tuple[FoundationArtifact, ...]
+
+
+RASPBERRY_PI_OS_TRIXIE = FoundationProfile(
+    id="raspberry-pi-os-debian-arm64-v2",
+    display_name="Debian/Raspberry Pi OS",
+    architecture="aarch64",
+    os_ids=("debian", "raspbian"),
+    os_versions=("13",),
+    hardware_model_match="Raspberry\\ Pi*",
+    hardware_display_name="Raspberry Pi",
+    minimum_memory_kib=7340032,
+    minimum_disk_kib=12582912,
+    minimum_memory_label="8 GiB-class RAM",
+    minimum_disk_label="12 GiB free disk",
+    apt_suite="trixie",
+    apt_mirrors=APT_MIRRORS,
+    apt_sources=(
+        AptSource(
+            uris=APT_MIRRORS["debian"],
+            suites="{suite} {suite}-updates",
+            components="main contrib non-free non-free-firmware",
+            signed_by="/usr/share/keyrings/debian-archive-keyring.pgp",
+        ),
+        AptSource(
+            uris=APT_MIRRORS["raspberrypi"],
+            suites="{suite}",
+            components="main",
+            signed_by="/usr/share/keyrings/raspberrypi-archive-keyring.pgp",
+        ),
+        AptSource(
+            uris=APT_MIRRORS["security"],
+            suites="{suite}-security",
+            components="main contrib non-free non-free-firmware",
+            signed_by="/usr/share/keyrings/debian-archive-keyring.pgp",
+        ),
+    ),
+    apt_packages=APT_PACKAGES,
+    bootstrap_packages=BOOTSTRAP_PACKAGES,
+    services=FOUNDATION_SERVICES,
+    journal_persistence=JOURNAL_PERSISTENCE,
+    journal_persistence_content=JOURNAL_PERSISTENCE_CONTENT,
+    artifacts=FOUNDATION_ARTIFACTS,
+)
+
+#: Every board Ops will install onto, by the id a host config names.
+FOUNDATION_PROFILES: dict[str, FoundationProfile] = {
+    profile.id: profile for profile in (RASPBERRY_PI_OS_TRIXIE,)
+}
+
+
+def foundation_profile(profile_id: str) -> FoundationProfile:
+    """The reviewed profile a host config named, or refuse with the choices."""
+
+    try:
+        return FOUNDATION_PROFILES[profile_id]
+    except KeyError:
+        known = ", ".join(sorted(FOUNDATION_PROFILES))
+        raise KeyError(f"foundation.profile must be a reviewed profile: {known}") from None
+
+
+def foundation_payload(
+    profile: FoundationProfile = RASPBERRY_PI_OS_TRIXIE,
+) -> dict[str, object]:
+    """Return the exact target-side contract, with no operator-controlled URL.
+
+    The shape is the Host agent's wire contract and does not vary by profile;
+    only the values in it do.
+    """
 
     return {
-        "profile": FOUNDATION_PROFILE,
-        "architecture": FOUNDATION_ARCHITECTURE,
-        "os_ids": list(FOUNDATION_OS_IDS),
-        "os_versions": list(FOUNDATION_OS_VERSIONS),
-        "apt_mirrors": dict(APT_MIRRORS),
-        "apt_packages": list(APT_PACKAGES),
-        "services": list(FOUNDATION_SERVICES),
+        "profile": profile.id,
+        "architecture": profile.architecture,
+        "os_ids": list(profile.os_ids),
+        "os_versions": list(profile.os_versions),
+        "apt_mirrors": dict(profile.apt_mirrors),
+        "apt_packages": list(profile.apt_packages),
+        "services": list(profile.services),
         # Carried like every other reviewed foundation fact, and held on the
         # Host as well so it can refuse a payload that differs from the profile
         # it was built against. test_foundation.py keeps the two equal.
-        "journal_persistence": JOURNAL_PERSISTENCE_CONTENT,
-        "artifacts": [asdict(artifact) for artifact in FOUNDATION_ARTIFACTS],
+        "journal_persistence": profile.journal_persistence_content,
+        "artifacts": [asdict(artifact) for artifact in profile.artifacts],
     }
 
 
@@ -192,12 +315,63 @@ fi
 """
 
 
-def python_bootstrap_script() -> bytes:
-    packages = " ".join(BOOTSTRAP_PACKAGES)
+#: Kept out of the bootstrap template so the profile that has no hardware to
+#: check simply contributes nothing, rather than the template growing a branch.
+_HARDWARE_GATE = """model=$(tr -d '\000' </proc/device-tree/model 2>/dev/null || true)
+case \"$model\" in
+  {match}) ;;
+  *) echo 'foundation bootstrap requires {name} hardware' >&2; exit 1 ;;
+esac
+"""
+
+
+def _apt_sources(profile: FoundationProfile) -> str:
+    """The deb822 stanzas, as the printf argument list the script uses."""
+
+    lines: list[str] = []
+    for position, source in enumerate(profile.apt_sources):
+        if position:
+            lines.append("''")
+        # Suites keeps the shell's own $suite rather than the resolved value:
+        # the script sets it once above, and reading it here is what shows a
+        # reviewer that the stanzas and the suite cannot drift apart.
+        suites = source.suites.format(suite="$suite")
+        lines.append("'Types: deb'")
+        lines.append(f"'URIs: {source.uris}'")
+        lines.append(f'"Suites: {suites}"')
+        lines.append(f"'Components: {source.components}'")
+        lines.append(f"'Signed-By: {source.signed_by}'")
+    # The format string carries a real newline, and each argument three
+    # spaces, because that is exactly what the hand-written template produced
+    # once Python collapsed its line continuations. Byte-identical output is
+    # what says this refactor changed no board's bootstrap.
+    return "printf '%s\n'" + "".join(f"   {line}" for line in lines)
+
+
+def python_bootstrap_script(
+    profile: FoundationProfile = RASPBERRY_PI_OS_TRIXIE,
+) -> bytes:
+    """The script that makes a bare board able to be provisioned.
+
+    Every gate below is the profile's, not this board's: the OS it accepts,
+    the hardware it insists on, the archives it fetches from and the space it
+    needs. A board that answers any of them differently gets a profile, not a
+    branch in here.
+    """
+
+    packages = " ".join(profile.bootstrap_packages)
     apt_options = " ".join(APT_COMMAND_OPTIONS)
-    debian_mirror = APT_MIRRORS["debian"]
-    raspberrypi_mirror = APT_MIRRORS["raspberrypi"]
-    security_mirror = APT_MIRRORS["security"]
+    os_gate = "|".join(
+        f"{os_id}:{version}" for os_id in profile.os_ids for version in profile.os_versions
+    )
+    hardware_gate = (
+        _HARDWARE_GATE.format(
+            match=profile.hardware_model_match, name=profile.hardware_display_name
+        )
+        if profile.hardware_model_match
+        else ""
+    )
+    sources = _apt_sources(profile)
     return f"""#!/bin/sh
 set -eu
 if [ \"$(uname -s)\" != Linux ]; then
@@ -205,8 +379,8 @@ if [ \"$(uname -s)\" != Linux ]; then
   exit 1
 fi
 case \"$(uname -m)\" in
-  aarch64|arm64) ;;
-  *) echo 'foundation bootstrap requires aarch64' >&2; exit 1 ;;
+  {profile.architecture}|arm64) ;;
+  *) echo 'foundation bootstrap requires {profile.architecture}' >&2; exit 1 ;;
 esac
 if [ ! -r /etc/os-release ]; then
   echo 'foundation bootstrap requires /etc/os-release' >&2
@@ -215,52 +389,29 @@ fi
 . /etc/os-release
 version_major=${{VERSION_ID%%.*}}
 case \"${{ID:-}}:${{version_major:-}}\" in
-  debian:13|raspbian:13) ;;
-  *) echo 'foundation bootstrap requires reviewed Debian/Raspberry Pi OS' >&2; exit 1 ;;
+  {os_gate}) ;;
+  *) echo 'foundation bootstrap requires reviewed {profile.display_name}' >&2; exit 1 ;;
 esac
 if [ \"$(cat /proc/1/comm 2>/dev/null || true)\" != systemd ]; then
   echo 'foundation bootstrap requires systemd as PID 1' >&2
   exit 1
 fi
-model=$(tr -d '\000' </proc/device-tree/model 2>/dev/null || true)
-case \"$model\" in
-  Raspberry\\ Pi*) ;;
-  *) echo 'foundation bootstrap requires Raspberry Pi hardware' >&2; exit 1 ;;
-esac
-memory_kib=$(awk '/^MemTotal:/ {{print $2}}' /proc/meminfo)
-if [ \"${{memory_kib:-0}}\" -lt 7340032 ]; then
-  echo 'foundation bootstrap requires at least 8 GiB-class RAM' >&2
+{hardware_gate}memory_kib=$(awk '/^MemTotal:/ {{print $2}}' /proc/meminfo)
+if [ \"${{memory_kib:-0}}\" -lt {profile.minimum_memory_kib} ]; then
+  echo 'foundation bootstrap requires at least {profile.minimum_memory_label}' >&2
   exit 1
 fi
 disk_kib=$(df -Pk / | awk 'NR == 2 {{print $4}}')
-if [ \"${{disk_kib:-0}}\" -lt 12582912 ]; then
-  echo 'foundation bootstrap requires at least 12 GiB free disk' >&2
+if [ \"${{disk_kib:-0}}\" -lt {profile.minimum_disk_kib} ]; then
+  echo 'foundation bootstrap requires at least {profile.minimum_disk_label}' >&2
   exit 1
 fi
 export DEBIAN_FRONTEND=noninteractive
-suite=trixie
+suite={profile.apt_suite}
 apt_root=$(mktemp -d)
 trap 'rm -rf "$apt_root"' EXIT
 mkdir -p "$apt_root/parts" "$apt_root/lists/partial"
-printf '%s\n' \
-  'Types: deb' \
-  'URIs: {debian_mirror}' \
-  "Suites: $suite $suite-updates" \
-  'Components: main contrib non-free non-free-firmware' \
-  'Signed-By: /usr/share/keyrings/debian-archive-keyring.pgp' \
-  '' \
-  'Types: deb' \
-  'URIs: {raspberrypi_mirror}' \
-  "Suites: $suite" \
-  'Components: main' \
-  'Signed-By: /usr/share/keyrings/raspberrypi-archive-keyring.pgp' \
-  '' \
-  'Types: deb' \
-  'URIs: {security_mirror}' \
-  "Suites: $suite-security" \
-  'Components: main contrib non-free non-free-firmware' \
-  'Signed-By: /usr/share/keyrings/debian-archive-keyring.pgp' \
-  >"$apt_root/eidolon.sources"
+{sources}   >"$apt_root/eidolon.sources"
 apt_source_options="-o Dir::Etc::sourcelist=$apt_root/eidolon.sources -o Dir::Etc::sourceparts=$apt_root/parts -o Dir::State::lists=$apt_root/lists"
 apt-get {apt_options} $apt_source_options update
 apt-get {apt_options} $apt_source_options install -y --no-install-recommends {packages}

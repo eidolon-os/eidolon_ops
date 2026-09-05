@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from eidolon_ops.controller import EidolonPiController
-from eidolon_ops.foundation import FOUNDATION_PROFILE
 from eidolon_ops.model import Capability
 from eidolon_ops.ports import PackageManagerKind
 
@@ -32,8 +31,12 @@ class AptPackages:
 
     kind = PackageManagerKind.APT
 
-    def __init__(self, release: EidolonPiController) -> None:
+    def __init__(self, release: EidolonPiController, profile_id: str) -> None:
         self.release = release
+        #: Which reviewed foundation this Host is, reported rather than assumed:
+        #: with more than one profile registered, naming the first would be a
+        #: report that is wrong on every board but the first.
+        self.profile_id = profile_id
 
     @property
     def capabilities(self) -> frozenset[Capability]:
@@ -43,4 +46,4 @@ class AptPackages:
         return self.release.provision(apply=apply)
 
     def doctor(self) -> dict[str, object]:
-        return {**self.release.provision(apply=False), "profile": FOUNDATION_PROFILE}
+        return {**self.release.provision(apply=False), "profile": self.profile_id}

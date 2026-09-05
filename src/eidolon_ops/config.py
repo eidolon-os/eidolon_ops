@@ -13,7 +13,7 @@ from urllib.parse import urlsplit
 
 from eidolon_ops.capabilities import require_known_capability
 from eidolon_ops.errors import OperationsError
-from eidolon_ops.foundation import FOUNDATION_PROFILE
+from eidolon_ops.foundation import FOUNDATION_PROFILES
 from eidolon_ops.settings_overlay import (
     OverlayAssignment,
     SettingsOverlayError,
@@ -256,9 +256,10 @@ def load_config(path: Path) -> OperationsConfig:
     foundation_wire = _mapping(document["foundation"], "foundation")
     _require_keys(foundation_wire, required={"profile"}, label="foundation")
     foundation_profile = _string(foundation_wire["profile"], "foundation.profile")
-    if foundation_profile != FOUNDATION_PROFILE:
+    if foundation_profile not in FOUNDATION_PROFILES:
+        known = ", ".join(sorted(FOUNDATION_PROFILES))
         raise ConfigurationError(
-            f"foundation.profile must be the reviewed profile: {FOUNDATION_PROFILE}"
+            f"foundation.profile must be a reviewed profile: {known}"
         )
     host_wire = _mapping(document["host"], "host")
     _require_keys(

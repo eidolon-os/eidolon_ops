@@ -12,7 +12,7 @@ from eidolon_ops.config import (
     validate_private_local_file,
     validate_release_id,
 )
-from eidolon_ops.foundation import FOUNDATION_PROFILE
+from eidolon_ops.foundation import FOUNDATION_PROFILES
 from eidolon_ops.workstation_toolchain import workstation_uv_path
 
 pytestmark = pytest.mark.unit
@@ -22,7 +22,7 @@ def test_loads_strict_config(config_path: Path) -> None:
     config = load_config(config_path)
 
     assert config.host.target == "pi@pi.example"
-    assert config.foundation_profile == FOUNDATION_PROFILE
+    assert config.foundation_profile in FOUNDATION_PROFILES
     assert config.host.port == 2222
     assert config.host.require_wired_release_upload is False
     assert config.workspace.python_index_url == "https://pypi.org/simple"
