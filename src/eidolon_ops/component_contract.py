@@ -30,11 +30,12 @@ from __future__ import annotations
 
 import json
 import tomllib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from eidolon_ops.capabilities import require_known_capability
 from eidolon_ops.errors import OperationsError
 
 __all__ = [
@@ -203,6 +204,31 @@ class ComponentContract:
     @property
     def artifacts(self) -> tuple[dict[str, Any], ...]:
         return tuple(self.document.get("artifacts", ()))
+
+    def select(self, capabilities: frozenset[str]) -> ComponentContract:
+        """This contract as it applies to a Host offering ``capabilities``.
+
+        Entries asking for something the Host does not have are dropped here
+        and nowhere else, so every later check — port claims, dependencies,
+        cycles — sees exactly what this Host installs. A unit kept while
+        something it requires was dropped is therefore caught by the ordinary
+        dependency check rather than by a special case.
+        """
+
+        document = dict(self.document)
+        for section in ("units", "artifacts"):
+            entries = document.get(section)
+            if not entries:
+                continue
+            document[section] = [
+                entry
+                for entry in entries
+                if _selected(entry, capabilities, self.component_id, section)
+            ]
+        kept = {unit["id"] for unit in document.get("units", ())}
+        if kept != set(self.unit_ids):
+            document = _drop_orphans(document, self.document, kept)
+        return replace(self, document=document)
 
 
 @dataclass(frozen=True, slots=True)
@@ -387,18 +413,37 @@ def load_platform_contract() -> ComponentContract:
     return contract
 
 
-def read_component_contracts(sources: dict[str, Path]) -> ContractTopology:
-    """Load every contract and check what only the whole set can answer."""
+def read_component_contracts(
+    sources: dict[str, Path], capabilities: frozenset[str] = frozenset()
+) -> ContractTopology:
+    """Load every contract and check what only the whole set can answer.
 
-    contracts: list[ComponentContract] = []
+    ``capabilities`` is what the Host offers. Selection happens before any of
+    the checks below, so what they see is this Host's installation rather than
+    the union of every Host's — two components may both claim a port role on
+    paper if no single Host installs both.
+    """
+
+    declared: list[ComponentContract] = []
     silent: list[str] = []
     for component_id, repository in sorted(sources.items()):
         contract = load_component_contract(repository, component_id)
         if contract is None:
             silent.append(component_id)
         else:
-            contracts.append(contract)
-    platform = load_platform_contract()
+            declared.append(contract)
+    declared.append(load_platform_contract())
+
+    # Recorded before selection, because after it the unit is simply absent and
+    # a dependency on it would read as a typo.
+    withheld = {
+        unit["id"]: unit["requires_capability"]
+        for contract in declared
+        for unit in contract.units
+        if unit.get("requires_capability") not in (None, *capabilities)
+    }
+    selected = [contract.select(capabilities) for contract in declared]
+    contracts, platform = selected[:-1], selected[-1]
 
     unit_owner: dict[str, str] = {}
     port_owner: dict[str, str] = {}
@@ -424,7 +469,7 @@ def read_component_contracts(sources: dict[str, Path]) -> ContractTopology:
                 "installed file",
             )
 
-    _refuse_unknown_dependencies([*contracts, platform], unit_owner)
+    _refuse_unknown_dependencies([*contracts, platform], unit_owner, withheld)
     _refuse_cycles([*contracts, platform], unit_owner)
 
     return ContractTopology(
@@ -434,6 +479,59 @@ def read_component_contracts(sources: dict[str, Path]) -> ContractTopology:
         unit_owner=unit_owner,
         port_roles=port_roles,
     )
+
+
+def _drop_orphans(
+    document: dict[str, Any], declared: dict[str, Any], kept: set[str]
+) -> dict[str, Any]:
+    """Withdraw what only the dropped units needed.
+
+    A port role nothing listens on would still be reserved on the Host and
+    still show in the port registry, and an install input nothing requires
+    would still be demanded of the operator — for a service this Host is not
+    running. Both are withdrawn only when a unit tied them here in the first
+    place: an entry no unit ever referenced is not this selection's business.
+    """
+
+    served = {
+        role
+        for unit in document.get("units", ())
+        for role in unit.get("serves", ())
+    }
+    was_served = {
+        role
+        for unit in declared.get("units", ())
+        for role in unit.get("serves", ())
+    }
+    ports = document.get("ports")
+    if ports:
+        document["ports"] = {
+            role: port
+            for role, port in ports.items()
+            if role in served or role not in was_served
+        }
+    inputs = document.get("inputs")
+    if inputs:
+        document["inputs"] = [
+            entry
+            for entry in inputs
+            if not entry.get("required_by")
+            or any(unit_id in kept for unit_id in entry["required_by"])
+        ]
+    return document
+
+
+def _selected(
+    entry: dict[str, Any],
+    capabilities: frozenset[str],
+    component_id: str,
+    section: str,
+) -> bool:
+    wanted = entry.get("requires_capability")
+    if wanted is None:
+        return True
+    require_known_capability(wanted, label=f"{component_id} {section} {entry['id']!r}")
+    return wanted in capabilities
 
 
 def _claim(register: dict[str, str], key: str, component_id: str, noun: str) -> None:
@@ -450,12 +548,19 @@ def _dependencies(unit: dict[str, Any]) -> tuple[str, ...]:
 
 
 def _refuse_unknown_dependencies(
-    contracts: list[ComponentContract], unit_owner: dict[str, str]
+    contracts: list[ComponentContract],
+    unit_owner: dict[str, str],
+    withheld: dict[str, str] | None = None,
 ) -> None:
     """A unit may only depend on something that exists.
 
     Anything unresolvable is a typo or a stale reference, and shipping it means
     finding out as a service that never comes up on a board in someone's home.
+
+    ``withheld`` maps a unit this Host did not select to the capability it
+    wanted. A dependency found there is not a typo — it is a Host that installs
+    something whose requirement it declined — and saying which capability is
+    missing is the difference between a fixable message and a puzzle.
     """
 
     known = set(unit_owner) | _SYSTEM_TARGETS
@@ -464,6 +569,14 @@ def _refuse_unknown_dependencies(
             for dependency in _dependencies(unit):
                 if dependency in known:
                     continue
+                if withheld and dependency in withheld:
+                    raise OperationsError(
+                        f"{contract.component_id} unit {unit['id']!r} depends on "
+                        f"{dependency!r}, which this Host did not select: it "
+                        f"requires the capability {withheld[dependency]!r}. "
+                        f"Either provide that capability or stop installing "
+                        f"{unit['id']!r}."
+                    )
                 raise OperationsError(
                     f"{contract.component_id} unit {unit['id']!r} depends on "
                     f"{dependency!r}, which nothing declares"

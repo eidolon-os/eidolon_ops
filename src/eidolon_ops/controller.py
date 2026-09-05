@@ -893,7 +893,7 @@ class EidolonPiController:
         sources = {
             source_id: source.path for source_id, source in self.config.sources.items()
         }
-        topology = read_component_contracts(sources)
+        topology = read_component_contracts(sources, self.config.capabilities)
         if not topology.contracts:
             return {
                 "contracts": "absent",

@@ -65,6 +65,11 @@
             "description": "Port roles this unit listens on, drawn from this component's own [ports].",
             "type": "array",
             "items": {"type": "string"}
+          },
+          "requires_capability": {
+            "description": "A Host capability this must find present, from the closed set eidolon_ops.capabilities defines. Omitted means every Host gets it. Named as a capability and never as a platform so that a component states what it needs and a Host states what it has, and neither has to know the other. The set is closed because an unknown name is provided by no Host, which would drop this entry everywhere without saying so.",
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{1,31}$"
           }
         }
       }
@@ -222,6 +227,11 @@
           "id": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]{1,63}$"},
           "kind": {"enum": ["model", "binary"]},
           "install_root": {"type": "string", "pattern": "^/[^\\u0000]*$"},
+          "requires_capability": {
+            "description": "A Host capability this must find present, from the closed set eidolon_ops.capabilities defines. Omitted means every Host gets it. Named as a capability and never as a platform so that a component states what it needs and a Host states what it has, and neither has to know the other. The set is closed because an unknown name is provided by no Host, which would drop this entry everywhere without saying so.",
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{1,31}$"
+          },
           "files": {
             "type": "array",
             "items": {

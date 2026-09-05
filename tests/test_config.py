@@ -475,3 +475,36 @@ value = false
 """,
             )
         )
+
+
+def test_a_host_declares_no_capabilities_by_default(config_path: Path) -> None:
+    assert load_config(config_path).capabilities == frozenset()
+
+
+def test_capabilities_are_read(config_path: Path) -> None:
+    config = load_config(
+        _with_settings(
+            config_path,
+            '\n[capabilities]\nprovides = ["rknpu2", "local_asr", "local_tts"]\n',
+        )
+    )
+
+    assert config.capabilities == frozenset({"rknpu2", "local_asr", "local_tts"})
+
+
+def test_a_capability_nobody_defined_is_refused(config_path: Path) -> None:
+    """A typo would provide nothing and drop units without saying why."""
+
+    with pytest.raises(ConfigurationError, match="unknown Host capability 'rknpu'"):
+        load_config(
+            _with_settings(config_path, '\n[capabilities]\nprovides = ["rknpu"]\n')
+        )
+
+
+def test_a_repeated_capability_is_refused(config_path: Path) -> None:
+    with pytest.raises(ConfigurationError, match="repeats 'rknpu2'"):
+        load_config(
+            _with_settings(
+                config_path, '\n[capabilities]\nprovides = ["rknpu2", "rknpu2"]\n'
+            )
+        )

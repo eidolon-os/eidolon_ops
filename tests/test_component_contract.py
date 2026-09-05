@@ -370,3 +370,183 @@ def test_a_factory_reset_may_not_leave_authority_behind(tmp_path: Path) -> None:
     message = str(error.value)
     assert "factory reset would leave" in message
     assert "eidolon-hub.sqlite3" in message
+
+
+_MODELS = """
+    [[units]]
+    id = "eidolon-asr"
+    kind = "service"
+    exec = ".venv/bin/eidolon-asr"
+    user = "eidolon"
+    serves = ["asr_stream"]
+    requires_capability = "local_asr"
+
+    [ports.asr_stream]
+    default = 8767
+    bind = "loopback"
+
+    [[artifacts]]
+    id = "paraformer_zh_2pass"
+    kind = "model"
+    requires_capability = "local_asr"
+    install_root = "/opt/eidolon/models/asr"
+
+    [[artifacts]]
+    id = "qwen3_1_7b_rkllm"
+    kind = "model"
+    requires_capability = "rknpu2"
+    install_root = "/opt/eidolon/models/llm"
+"""
+
+
+def _models_only(tmp_path: Path) -> dict[str, Path]:
+    return {"eidolon_models": _publish(tmp_path, "eidolon_models", _MODELS)}
+
+
+def test_a_host_that_provides_nothing_installs_nothing_conditional(tmp_path: Path) -> None:
+    """The default, and what every Host looked like before capabilities."""
+
+    topology = read_component_contracts(_models_only(tmp_path))
+
+    assert "eidolon-asr" not in topology.unit_owner
+    assert "asr_stream" not in topology.port_roles
+    assert topology.contracts[0].artifacts == ()
+
+
+def test_a_capability_selects_only_what_asked_for_it(tmp_path: Path) -> None:
+    topology = read_component_contracts(_models_only(tmp_path), frozenset({"local_asr"}))
+
+    assert topology.unit_owner["eidolon-asr"] == "eidolon_models"
+    assert topology.port_roles["asr_stream"] == 8767
+    # The NPU weights are two gigabytes this Host would never load.
+    assert [entry["id"] for entry in topology.contracts[0].artifacts] == [
+        "paraformer_zh_2pass"
+    ]
+
+
+def test_every_capability_selects_everything(tmp_path: Path) -> None:
+    topology = read_component_contracts(
+        _models_only(tmp_path), frozenset({"local_asr", "rknpu2"})
+    )
+
+    assert [entry["id"] for entry in topology.contracts[0].artifacts] == [
+        "paraformer_zh_2pass",
+        "qwen3_1_7b_rkllm",
+    ]
+
+
+def test_an_unconditional_unit_is_installed_on_every_host(tmp_path: Path) -> None:
+    """Six components predate capabilities and must keep deploying."""
+
+    topology = read_component_contracts(
+        {"eidolon_hub": _publish(tmp_path, "eidolon_hub", _HUB)}, frozenset()
+    )
+
+    assert topology.unit_owner["eidolon-hub"] == "eidolon_hub"
+
+
+def test_depending_on_a_unit_this_host_declined_names_the_capability(
+    tmp_path: Path,
+) -> None:
+    """The one incoherent selection, refused rather than silently cascaded.
+
+    Dropping the dependent too would leave a Host quietly missing a service it
+    asked for; the operator has to choose which half they meant.
+    """
+
+    sources = {
+        "eidolon_models": _publish(tmp_path, "eidolon_models", _MODELS),
+        "eidolon_channel": _publish(
+            tmp_path,
+            "eidolon_channel",
+            """
+            [[units]]
+            id = "eidolon-channel"
+            kind = "service"
+            exec = ".venv/bin/eidolon-channel"
+            user = "eidolon"
+            requires = ["eidolon-asr"]
+            """,
+        ),
+    }
+
+    with pytest.raises(OperationsError, match="requires the capability 'local_asr'"):
+        read_component_contracts(sources, frozenset())
+
+
+def test_a_capability_no_one_defined_is_refused_not_ignored(tmp_path: Path) -> None:
+    """An open set would drop the unit on every Host and say nothing."""
+
+    sources = {
+        "eidolon_models": _publish(
+            tmp_path,
+            "eidolon_models",
+            """
+            [[units]]
+            id = "eidolon-asr"
+            kind = "service"
+            exec = ".venv/bin/eidolon-asr"
+            user = "eidolon"
+            requires_capability = "locl_asr"
+            """,
+        )
+    }
+
+    with pytest.raises(OperationsError, match="unknown Host capability 'locl_asr'"):
+        read_component_contracts(sources, frozenset({"local_asr"}))
+
+
+def test_an_input_only_a_dropped_unit_needed_is_not_demanded(tmp_path: Path) -> None:
+    """Asking an operator for a secret no service on this Host will read."""
+
+    body = """
+        [[units]]
+        id = "eidolon-asr"
+        kind = "service"
+        exec = ".venv/bin/eidolon-asr"
+        user = "eidolon"
+        requires_capability = "local_asr"
+
+        [[units]]
+        id = "eidolon-models-admin"
+        kind = "service"
+        exec = ".venv/bin/eidolon-models-admin"
+        user = "eidolon"
+
+        [[inputs]]
+        name = "asr_env"
+        install_path = "/etc/eidolon/asr.env"
+        kind = "secret"
+        source = "operator"
+        owner = "root"
+        group = "root"
+        mode = "0600"
+        required_by = ["eidolon-asr"]
+
+        [[inputs]]
+        name = "models_env"
+        install_path = "/etc/eidolon/models.env"
+        kind = "secret"
+        source = "operator"
+        owner = "root"
+        group = "root"
+        mode = "0600"
+        required_by = ["eidolon-models-admin"]
+    """
+    sources = {"eidolon_models": _publish(tmp_path, "eidolon_models", body)}
+
+    def _models_inputs(topology) -> list[str]:
+        # The platform declares inputs of its own; only this component's are
+        # the selection's business.
+        return sorted(
+            entry.name
+            for entry in topology.install_inputs
+            if entry.component_id == "eidolon_models"
+        )
+
+    assert _models_inputs(read_component_contracts(sources, frozenset())) == [
+        "models_env"
+    ]
+    assert _models_inputs(
+        read_component_contracts(sources, frozenset({"local_asr"}))
+    ) == ["asr_env", "models_env"]

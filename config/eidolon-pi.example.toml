@@ -142,3 +142,17 @@ memory_settings = "/absolute/private/path/memory.yaml"
 #   document = "channel.yaml"
 #   path = "providers.tts_provider"
 #   value = "eidolon_models"
+
+# Optional. What this machine can do that another cannot. A component entry
+# that asks for a capability absent here is not installed on this Host — the
+# unit is not started, the port role is not reserved, an install input only it
+# needed is not demanded, and model weights only it loads are not carried.
+#
+# Names come from the closed set in eidolon_ops.capabilities, so a misspelling
+# is refused here rather than silently selecting nothing.
+#
+# A Pi that reaches a provider for speech declares none of these. A board with
+# an NPU that runs its own models declares:
+#
+#   [capabilities]
+#   provides = ["rknpu2", "local_asr", "local_tts", "local_llm"]

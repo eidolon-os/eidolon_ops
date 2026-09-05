@@ -11,6 +11,8 @@ from pathlib import Path
 from types import MappingProxyType
 from urllib.parse import urlsplit
 
+from eidolon_ops.capabilities import require_known_capability
+from eidolon_ops.errors import OperationsError
 from eidolon_ops.foundation import FOUNDATION_PROFILE
 from eidolon_ops.settings_overlay import (
     OverlayAssignment,
@@ -190,6 +192,9 @@ class OperationsConfig:
     #: What this Host wants that the product does not decide for it. Empty on a
     #: Host that takes every default, which is why it has no required section.
     settings_overlay: tuple[OverlayAssignment, ...] = ()
+    #: What this machine can do that another cannot. A component entry asking
+    #: for something absent here is not installed on this Host.
+    capabilities: frozenset[str] = frozenset()
 
     def with_revision_overrides(self, values: tuple[str, ...]) -> OperationsConfig:
         sources = dict(self.sources)
@@ -242,7 +247,7 @@ def load_config(path: Path) -> OperationsConfig:
             "services",
             "data",
         },
-        optional={"install", "settings"},
+        optional={"install", "settings", "capabilities"},
         label="root",
     )
     if document["schema_version"] != 1:
@@ -407,6 +412,7 @@ def load_config(path: Path) -> OperationsConfig:
             raise ConfigurationError("install.files paths must be unique per security scope")
 
     settings_overlay = _settings_overlay(document.get("settings"))
+    capabilities = _capabilities(document.get("capabilities"))
 
     return OperationsConfig(
         path=resolved,
@@ -430,7 +436,36 @@ def load_config(path: Path) -> OperationsConfig:
         data=data,
         install_files=MappingProxyType(install_files),
         settings_overlay=settings_overlay,
+        capabilities=capabilities,
     )
+
+
+def _capabilities(value: object) -> frozenset[str]:
+    """Read ``[capabilities] provides``, what this machine offers components.
+
+    Absent means a Host that provides nothing beyond the baseline, which is
+    every Host that existed before this section did — so components without a
+    stated requirement keep installing everywhere.
+    """
+
+    if value is None:
+        return frozenset()
+    wire = _mapping(value, "capabilities")
+    _require_keys(wire, required=set(), optional={"provides"}, label="capabilities")
+    provided = wire.get("provides", [])
+    if not isinstance(provided, list):
+        raise ConfigurationError("capabilities.provides must be an array of strings")
+    names: set[str] = set()
+    for position, entry in enumerate(provided):
+        label = f"capabilities.provides[{position}]"
+        name = _string(entry, label)
+        if name in names:
+            raise ConfigurationError(f"{label} repeats {name!r}")
+        try:
+            names.add(require_known_capability(name, label=label))
+        except OperationsError as exc:
+            raise ConfigurationError(str(exc)) from exc
+    return frozenset(names)
 
 
 def _settings_overlay(value: object) -> tuple[OverlayAssignment, ...]:
