@@ -139,6 +139,7 @@ class ReleasePreflight:
             release_matrix = validate_release_matrix(
                 source_evidence,
                 self.read_exact_source_file,
+                self.config.capabilities,
             )
         except ReleaseMatrixError as exc:
             raise OperationsError(str(exc)) from exc

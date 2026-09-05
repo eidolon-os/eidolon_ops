@@ -128,6 +128,35 @@ SYSTEMD_ASSET_CONTRACTS = (
     ),
 )
 
+#: Unit files a capability brings, kept out of the tuple above because that one
+#: is read for every release: an entry there whose repository this Host does
+#: not pin fails the whole matrix with a missing revision. eidolon_ops.config
+#: states the same capability/unit pairing and a test holds the two together.
+CAPABILITY_SYSTEMD_ASSETS: dict[str, tuple[SystemdAssetContract, ...]] = {
+    "local_asr": (
+        SystemdAssetContract(
+            "eidolon_models",
+            "deploy/systemd/eidolon-asr.service",
+            "eidolon-asr.service",
+            "eidolon_models",
+        ),
+    ),
+}
+
+
+def systemd_asset_contracts(
+    capabilities: frozenset[str] = frozenset(),
+) -> tuple[SystemdAssetContract, ...]:
+    """The unit files this Host's release must carry."""
+
+    extra: list[SystemdAssetContract] = []
+    for capability in sorted(capabilities):
+        for contract in CAPABILITY_SYSTEMD_ASSETS.get(capability, ()):
+            if contract not in extra:
+                extra.append(contract)
+    return SYSTEMD_ASSET_CONTRACTS + tuple(extra)
+
+
 _FORBIDDEN_RUNTIME_PATHS = ("/srv/eidolon", "/Users/", "%(ENV_HOME)s/eidolon")
 _HOST_PROFILE_LINE = "EnvironmentFile=/etc/eidolon/host.env"
 
@@ -140,15 +169,17 @@ HUB_SETTINGS_DESTINATION = "/etc/eidolon/generated/hub.yaml"
 def validate_release_systemd_matrix(
     revisions: Mapping[str, str],
     read_exact_file: Callable[[str, str, str], str],
+    capabilities: frozenset[str] = frozenset(),
 ) -> dict[str, object]:
     """Validate systemd bytes from Git objects, never from sibling working trees."""
 
-    expected_units = {contract.unit for contract in SYSTEMD_ASSET_CONTRACTS}
-    if len(expected_units) != len(SYSTEMD_ASSET_CONTRACTS):
+    contracts = systemd_asset_contracts(capabilities)
+    expected_units = {contract.unit for contract in contracts}
+    if len(expected_units) != len(contracts):
         raise ReleaseMatrixError("systemd matrix contains duplicate unit contracts")
     assets: dict[str, dict[str, str]] = {}
     violations: list[str] = []
-    for contract in SYSTEMD_ASSET_CONTRACTS:
+    for contract in contracts:
         revision = revisions.get(contract.source_id)
         if revision is None:
             raise ReleaseMatrixError(f"missing release revision: {contract.source_id}")
@@ -221,10 +252,11 @@ def validate_release_settings_matrix(
 def validate_release_matrix(
     revisions: Mapping[str, str],
     read_exact_file: Callable[[str, str, str], str],
+    capabilities: frozenset[str] = frozenset(),
 ) -> dict[str, object]:
     """Every exact-commit gate a release has to pass, in one reviewed payload."""
 
     return {
-        **validate_release_systemd_matrix(revisions, read_exact_file),
+        **validate_release_systemd_matrix(revisions, read_exact_file, capabilities),
         "settings": validate_release_settings_matrix(revisions, read_exact_file),
     }

@@ -125,3 +125,33 @@ def test_no_two_names_claim_one_port_number() -> None:
 
     collisions = {port: sorted(names) for port, names in names_by_port.items() if len(names) > 1}
     assert not collisions, f"one port, more than one claimant: {collisions}"
+
+
+def test_every_capability_unit_has_a_file_to_install() -> None:
+    """A declared unit with no unit file is a service that cannot start.
+
+    The systemd matrix reads unit bytes from Git at the pinned commits. A
+    capability that adds a unit to the topology and no contract to that table
+    would pass every check here and produce a Host missing one service.
+    """
+
+    from eidolon_ops.release_matrix import CAPABILITY_SYSTEMD_ASSETS
+
+    for capability, units in ops_config.CAPABILITY_UNITS.items():
+        provided = {asset.unit for asset in CAPABILITY_SYSTEMD_ASSETS.get(capability, ())}
+        assert provided == set(units), (
+            f"{capability}: topology says {sorted(units)}, "
+            f"the systemd matrix provides {sorted(provided)}"
+        )
+
+
+def test_a_capability_unit_file_comes_from_a_repository_the_host_pins() -> None:
+    from eidolon_ops.release_matrix import CAPABILITY_SYSTEMD_ASSETS
+
+    for capability, assets in CAPABILITY_SYSTEMD_ASSETS.items():
+        pinned = set(ops_config.CAPABILITY_SOURCES.get(capability, ()))
+        for asset in assets:
+            assert asset.source_id in pinned | set(ops_config.SOURCE_IDS), (
+                f"{capability} installs {asset.unit} from {asset.source_id}, "
+                f"which this Host would not pin"
+            )
