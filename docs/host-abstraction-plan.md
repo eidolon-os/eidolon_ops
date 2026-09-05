@@ -15,6 +15,8 @@
 | 一：platform 侧泛化 + 注册 RK3588 | ✅ | `feat(ops): register RK3588 as a platform...` |
 | **把选择接到"决定装什么"** | ✅ | `feat(ops): let a Host's capabilities decide what a release installs` |
 | **capability 的 unit 文件来源** | ✅ | `feat(ops): carry a capability's unit file...` |
+| **RK3588 foundation profile** | ✅ | `feat(ops): add the RK3588 foundation...` |
+| **host agent 支持第二个 profile** | ✅ | `feat(ops): teach the Host agent the second board` |
 
 > **实施中发现:第二步做完时它其实什么都没影响。** `read_component_contracts`
 > 只有一个调用点（恢复出厂），`ContractTopology.systemd_units` 零消费者——
@@ -308,7 +310,10 @@ Host profile 声明的 capabilities（决定装哪些 unit 与哪些权重），
 * ~~`hostagent/foundation.py` 与 `foundation.py` 那两份重复常量该合并还是保持镜像~~
   —— **已查证：是刻意的镜像，保持。** host agent 在 Host 上独立于 ops 包运行，
   必须能拒绝与自己构建时不符的 payload，所以两边各持一份、由测试保证相等。
-  本次只改了 ops 一侧；hostagent 侧要支持第二个 profile 是独立的一步，未做。
+  ops 与 hostagent 两侧都已支持多 profile（2026-09-06）。
+  两份表由 `tests/test_agent_foundation_parity.py` 钉住：agent 期望的 payload
+  必须逐字段等于 ops 发出的，硬件门、内存/磁盘下限、journal 路径与内容都比对，
+  每一条都反向验证过（改坏 agent 那份即失败）。
 * ~~overlay 的合并语义（列表是替换还是追加）~~ —— **已定：不支持列表合并。**
   overlay 只赋标量，路径可以穿过列表（`memory.endpoints[0].mcp_url`）但不能以
   列表结尾。现有六处产品级改写与本次新增的 provider 切换都只需要标量赋值，
