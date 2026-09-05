@@ -62,6 +62,10 @@ PORTS = {
     "eidolond": 8090,
     "channel_worker": CHANNEL_WORKER_PORT,
     "channel_provider": 8767,
+    # Local recognition, on a Host that does it itself. 8767 is the Channel
+    # Provider's and was this service's default until the two were found to
+    # collide by reading, which is not a mechanism -- see the drift tests.
+    "asr_stream": 8768,
     "admin": 9000,
     "admin_web": 9001,
     "local_api": 9002,
@@ -99,9 +103,7 @@ def status_ports(*, hub_https_port: int | None = None) -> dict[str, list[dict[st
         "admin": [endpoint("API", "127.0.0.1", PORTS["admin"])],
         "admin-web": [endpoint("Web", "127.0.0.1", PORTS["admin_web"])],
         "data": [endpoint("API", "127.0.0.1", PORTS["data"])],
-        "data-workspace": [
-            endpoint("Workspace API", "127.0.0.1", PORTS["data_workspace"])
-        ],
+        "data-workspace": [endpoint("Workspace API", "127.0.0.1", PORTS["data_workspace"])],
         "hub-api": [endpoint("API", "127.0.0.1", PORTS["hub"])],
         "hub-ingress": [endpoint("HTTPS", "0.0.0.0", hub_lan_port)],
         "kernel": [endpoint("API", "127.0.0.1", PORTS["kernel"])],
@@ -111,20 +113,14 @@ def status_ports(*, hub_https_port: int | None = None) -> dict[str, list[dict[st
             endpoint("Supervisor", "127.0.0.1", PORTS["memory_admin"]),
             endpoint("MCP base", "127.0.0.1", 10030),
         ],
-        "memory-embedder": [
-            endpoint("Embedding", "127.0.0.1", PORTS["memory_embedder"])
-        ],
-        "memory-discovery": [
-            endpoint("Discovery", "127.0.0.1", PORTS["memory_discovery"])
-        ],
+        "memory-embedder": [endpoint("Embedding", "127.0.0.1", PORTS["memory_embedder"])],
+        "memory-discovery": [endpoint("Discovery", "127.0.0.1", PORTS["memory_discovery"])],
         "agent": [
             endpoint("HTTP", "127.0.0.1", PORTS["agent_http"]),
             endpoint("Admin", "127.0.0.1", PORTS["agent_admin"]),
             endpoint("gRPC", "127.0.0.1", 45051),
         ],
-        "channel-provider": [
-            endpoint("Provider", "127.0.0.1", PORTS["channel_provider"])
-        ],
+        "channel-provider": [endpoint("Provider", "127.0.0.1", PORTS["channel_provider"])],
         "channel": [endpoint("Worker", "127.0.0.1", PORTS["channel_worker"])],
         "nats": [
             endpoint("Client", "0.0.0.0", PORTS["nats"]),
@@ -143,6 +139,7 @@ def status_ports(*, hub_https_port: int | None = None) -> dict[str, list[dict[st
         *data["memory-discovery"],
     ]
     return data
+
 
 #: Deliberately outside :data:`PORTS`, which is checked for equality against the
 #: ports the components declare: the browser client is not one of them. It is
@@ -257,9 +254,7 @@ def profile_environment(
         **profile.environment(),
         "EIDOLON_PRODUCT_ENV_ROOT": str(profile.paths.config_root / "env"),
         "EIDOLON_PRODUCT_SETTINGS_ROOT": str(profile.paths.config_root / "settings"),
-        "EIDOLON_LIVEKIT_TEMPLATE_CONFIG": str(
-            profile.paths.config_root / "settings/livekit.yaml"
-        ),
+        "EIDOLON_LIVEKIT_TEMPLATE_CONFIG": str(profile.paths.config_root / "settings/livekit.yaml"),
         "EIDOLON_ADMIN_API_HOST": "127.0.0.1",
         "EIDOLON_ADMIN_API_PORT": str(PORTS["admin"]),
         "EIDOLON_ADMIN_WEB_PORT": str(PORTS["admin_web"]),
@@ -335,7 +330,13 @@ livekit:
 #: group, programs, and the health surface it publishes.
 _MANAGED_SERVICES = (
     ("admin", "Eidolon Admin", "admin", ("admin-api",), "http://127.0.0.1:{admin}/docs"),
-    ("admin-web", "Eidolon Admin Web", "admin-web", ("admin-web",), "http://127.0.0.1:{admin_web}/"),
+    (
+        "admin-web",
+        "Eidolon Admin Web",
+        "admin-web",
+        ("admin-web",),
+        "http://127.0.0.1:{admin_web}/",
+    ),
     ("bootstrap", "Eidolon Bootstrap", "bootstrap", ("bootstrapd",), None),
     ("local-api", "Eidolon Local API", "local-api", ("local-api",), None),
     ("eidolond", "Eidolon System Manager", "eidolond", ("eidolond",), None),

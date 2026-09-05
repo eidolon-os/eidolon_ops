@@ -30,7 +30,6 @@ from eidolon_ops.config import (
     FIXED_DATA_PATHS,
     INSTALL_FILE_NAMES,
     PRODUCT_UNITS,
-    SOURCE_IDS,
 )
 from eidolon_ops.hostagent import contract as host_contract
 from eidolon_ops.hostagent import memory_realms
@@ -46,15 +45,39 @@ pytestmark = pytest.mark.contract
 _CHECKOUT_ROOT = Path(__file__).resolve().parents[2]
 
 
-@pytest.fixture(scope="module")
-def topology():
-    sources = {source_id: _CHECKOUT_ROOT / source_id for source_id in SOURCE_IDS}
-    missing = [
-        source_id for source_id, path in sources.items() if not (path / "ops").is_dir()
-    ]
+def _read(capabilities):
+    from eidolon_ops.config import expected_sources
+
+    sources = {
+        source_id: _CHECKOUT_ROOT / source_id
+        for source_id in sorted(expected_sources(capabilities))
+    }
+    missing = [source_id for source_id, path in sources.items() if not (path / "ops").is_dir()]
     if missing:
         pytest.skip(f"no sibling checkout with a contract for: {', '.join(missing)}")
-    return read_component_contracts(sources)
+    return read_component_contracts(sources, capabilities)
+
+
+@pytest.fixture(scope="module")
+def topology():
+    """Everything any Host can install.
+
+    Built with every capability, not none. Read with none, a conditional unit
+    or port simply is not there, and each check below passes by not seeing it —
+    which is how eidolon_models' recognizer sat on the Channel Provider's port
+    with a drift test in the repository that compares port numbers.
+    """
+
+    from eidolon_ops.capabilities import HOST_CAPABILITIES
+
+    return _read(HOST_CAPABILITIES)
+
+
+@pytest.fixture(scope="module")
+def baseline_topology():
+    """What a Host that declares no capability installs."""
+
+    return _read(frozenset())
 
 
 def test_every_component_answers(topology) -> None:
@@ -64,15 +87,22 @@ def test_every_component_answers(topology) -> None:
 
 
 def test_the_declared_units_are_the_units_ops_expects(topology) -> None:
-    assert set(topology.systemd_units) == set(PRODUCT_UNITS)
+    from eidolon_ops.capabilities import HOST_CAPABILITIES
+    from eidolon_ops.config import expected_units
+
+    # Against what a Host with every capability installs, not the baseline:
+    # comparing the full topology to PRODUCT_UNITS would fail on every
+    # conditional unit, and comparing a baseline topology to it would pass by
+    # not looking at them.
+    assert set(topology.systemd_units) == set(expected_units(HOST_CAPABILITIES))
 
 
-def test_the_host_agent_carries_the_same_unit_list(topology) -> None:
+def test_the_host_agent_carries_the_same_unit_list(baseline_topology) -> None:
     # The Host agent is injected as one payload with no imports of its own, so
     # it cannot share this table with eidolon_ops.config — the duplicate is
     # structural. What was missing was anything checking the two still agree.
     assert set(host_contract.PRODUCT_UNITS) == set(PRODUCT_UNITS)
-    assert set(host_contract.PRODUCT_UNITS) == set(topology.systemd_units)
+    assert set(host_contract.PRODUCT_UNITS) == set(baseline_topology.systemd_units)
 
 
 def test_the_declared_ports_are_the_ports_ops_assigns(topology) -> None:
@@ -85,9 +115,7 @@ def test_the_declared_ports_are_the_ports_ops_assigns(topology) -> None:
 
 
 def test_the_operator_inputs_are_the_ones_an_install_asks_for(topology) -> None:
-    declared = {
-        entry.name for entry in topology.install_inputs if entry.is_operator_supplied
-    }
+    declared = {entry.name for entry in topology.install_inputs if entry.is_operator_supplied}
 
     # Also equality. livekit.env was the exemption here — an install input
     # belonging to no component — until the platform declared it.
@@ -119,22 +147,16 @@ def test_the_derived_input_is_rendered_from_the_template_its_component_declared(
     # component that cannot move its own template is a component whose deployed
     # defaults someone else owns — which is where Hub's settings were, in
     # eidolon_kernel, until they moved back here.
-    assert [(entry.component_id, entry.template) for entry in templated] == [
-        HUB_SETTINGS_TEMPLATE
-    ]
+    assert [(entry.component_id, entry.template) for entry in templated] == [HUB_SETTINGS_TEMPLATE]
     assert templated[0].install_path == Path(HUB_SETTINGS_DESTINATION)
-    destination, owner, group, mode = host_contract.HOST_APPLICATION_INPUTS[
-        "hub.generated.yaml"
-    ]
+    destination, owner, group, mode = host_contract.HOST_APPLICATION_INPUTS["hub.generated.yaml"]
     assert destination == templated[0].install_path
     assert (owner, group, mode) == (
         templated[0].owner,
         templated[0].group,
         templated[0].mode,
     )
-    public_owner_material = {
-        entry.name: entry for entry in derived if entry.kind == "identity"
-    }
+    public_owner_material = {entry.name: entry for entry in derived if entry.kind == "identity"}
     assert set(public_owner_material) == {
         "owner_domain_descriptor",
         "owner_domain_root_certificate",
@@ -153,8 +175,7 @@ def test_the_backed_up_authorities_are_the_ones_components_named(topology) -> No
         if state.backup == "sqlite-online"
     }
     built_in = {
-        path: (owner, group)
-        for path, owner, group in host_contract.BACKED_UP_AUTHORITIES.values()
+        path: (owner, group) for path, owner, group in host_contract.BACKED_UP_AUTHORITIES.values()
     }
 
     assert declared == built_in
@@ -216,9 +237,7 @@ def test_every_uncovered_path_says_what_covering_it_would_take(topology) -> None
 
 def test_the_fixed_data_paths_all_belong_to_some_component(topology) -> None:
     declared = {state.path for state in topology.authority}
-    runtime = {
-        path for contract in topology.declared for path in contract.runtime_paths
-    }
+    runtime = {path for contract in topology.declared for path in contract.runtime_paths}
 
     for name, path in FIXED_DATA_PATHS.items():
         assert path in declared or path in runtime, f"{name} at {path} is unclaimed"
@@ -227,9 +246,7 @@ def test_the_fixed_data_paths_all_belong_to_some_component(topology) -> None:
 
 
 def test_a_factory_reset_reaches_everything_every_component_holds(topology) -> None:
-    roots = [
-        path for contract in topology.declared for path in contract.factory_reset_paths
-    ]
+    roots = [path for contract in topology.declared for path in contract.factory_reset_paths]
 
     for state in topology.authority:
         assert any(state.path.is_relative_to(root) for root in roots), (
@@ -281,8 +298,7 @@ def test_the_shipped_unit_files_run_what_their_component_declared(topology) -> N
         )
 
         assert asset.component_root == component_id, (
-            f"{asset.unit} is rooted in {asset.component_root} but "
-            f"{component_id} declares it"
+            f"{asset.unit} is rooted in {asset.component_root} but {component_id} declares it"
         )
         assert f"/{component_id}/{executable} " in f"{exec_start} ", (
             f"{asset.unit} runs {exec_start.split('=', 1)[1]}, but "
@@ -325,6 +341,9 @@ def test_the_dev_port_registry_and_the_contracts_use_the_same_numbers(
     NOT_IN_THE_DEV_STACK = {
         "channel_provider": 8767,
         "local_api": 9002,
+        # Local recognition runs on a board with an NPU, not in the macOS
+        # stack this registry describes.
+        "asr_stream": 8768,
     }
 
     for role, port in topology.port_roles.items():

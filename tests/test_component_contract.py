@@ -382,7 +382,7 @@ _MODELS = """
     requires_capability = "local_asr"
 
     [ports.asr_stream]
-    default = 8767
+    default = 8768
     bind = "loopback"
 
     [[artifacts]]
@@ -417,7 +417,7 @@ def test_a_capability_selects_only_what_asked_for_it(tmp_path: Path) -> None:
     topology = read_component_contracts(_models_only(tmp_path), frozenset({"local_asr"}))
 
     assert topology.unit_owner["eidolon-asr"] == "eidolon_models"
-    assert topology.port_roles["asr_stream"] == 8767
+    assert topology.port_roles["asr_stream"] == 8768
     # The NPU weights are two gigabytes this Host would never load.
     assert [entry["id"] for entry in topology.contracts[0].artifacts] == [
         "paraformer_zh_2pass"
