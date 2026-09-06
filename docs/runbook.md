@@ -76,6 +76,39 @@ irreversible. Foundation packages/artifacts and service identities are preserved
 fixed 15 units, refuses an active unit that cannot stop, refuses mounted deletion roots, reloads systemd and is
 idempotent when units or paths are already absent.
 
+## A Kernel that will not open its own authority
+
+The Kernel performs no migrations, on purpose. After a Kernel schema change a Host that carries the old
+database will not start, and `status`/`logs` show `eidolon-kernel.service` failing with
+`kernel SQLite schema is partial or unknown` or `... does not match schema vN`. That refusal is correct;
+what follows it is a repair, not a migration.
+
+```bash
+uv run eidolon-ops --config /absolute/path/hosts/pi5.toml kernel-schema-reset
+```
+
+Read-only. It asks the installed Kernel whether it will open the database, and how many **Owner Companion
+selections** — which Eidolon answers through each Body — setting it aside would destroy. That number is the
+one fact in the Kernel authority nothing on the Host can give back: device mounts are replayed from the Hub
+Claim stream on the next start, but only an explicit Owner command ever writes a selection, and a backup of
+this file is a backup at the schema the Kernel just refused.
+
+```bash
+uv run eidolon-ops --config /absolute/path/hosts/pi5.toml \
+  kernel-schema-reset --apply --forget-selections <the number the plan reported>
+```
+
+`--forget-selections` is required only when the count is non-zero, and must equal it. The operation refuses
+unless the installed Kernel itself says it will not open the file, refuses when the count is unknown, stops
+`eidolond` with the Kernel so nothing restarts it mid-rename, **renames** the database and its `-wal`/`-shm`
+sidecars to `<name>.stale-schema-<UTC timestamp>` beside themselves, and starts the reconciler again. Nothing
+is deleted, and no other authority is touched — in particular the Owner Domain generation does not advance,
+so every Claim and credential stays valid. Do not reach for `reset --wipe-authority-data` for this: it
+destroys every authority on the machine and advances that generation to solve the same one file.
+
+The same command exists on the Mac source run, where it moves that profile's own
+`<state root>/eidolon-kernel.sqlite3`.
+
 ## App-ready meaning
 
 ```bash

@@ -6,7 +6,7 @@ import json
 import os
 import shutil
 import stat
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import fields
 from pathlib import Path
 from urllib.parse import urlparse
@@ -19,6 +19,16 @@ from eidolon_ops.config import OperationsConfig
 from eidolon_ops.errors import InstallInputError, OperationsError
 from eidolon_ops.host_identity import HostIdentityError, HostLanIdentity, derive_host_lan_identity
 from eidolon_ops.hostagent.authority_reset import lineage_evidence
+from eidolon_ops.hostagent.kernel_schema import (
+    absent_document,
+    acknowledged_selections,
+    kernel_evidence,
+    plan_document,
+    refuse_unless_warranted,
+    require_regular_file,
+    set_aside,
+    set_aside_suffix,
+)
 from eidolon_ops.hostagent.primitives import TargetError
 from eidolon_ops.hub_assets import (
     hub_settings_are_bound,
@@ -167,6 +177,99 @@ class LocalProductSource:
             "services": 15,
             "redaction": "generated credentials are not returned",
         }
+
+    # -- kernel schema --------------------------------------------------------
+
+    def kernel_schema_reset(
+        self,
+        *,
+        apply: bool,
+        forget_selections: int | None,
+        quiesce: Callable[[], object] | None = None,
+    ) -> dict[str, object]:
+        """Set aside a Kernel authority this checkout's Kernel refuses to open.
+
+        The narrow half of ``reset --wipe-authority-data``, and the reason this
+        profile needed one. That flag is what a Host behind the Kernel schema had
+        to reach for, and it destroys every authority on the machine and advances
+        the Owner Domain generation — voiding every Claim — to move one file. Here
+        the same Host loses one file, and keeps it.
+
+        The workstation runs the Kernel out of its own worktree, so "the installed
+        Kernel" is that checkout's interpreter. Same question, same answer, same
+        gate: this refuses unless that Kernel says it will not open this database.
+        """
+
+        database = self._kernel_database_path()
+        if not database.exists():
+            return {"profile": "product-source", **absent_document(database)}
+        try:
+            require_regular_file(database, display=database)
+            report = kernel_evidence(
+                database=database, interpreter=self._kernel_interpreter_path()
+            )
+            plan = {
+                "profile": "product-source",
+                **plan_document(database=database, display=database, report=report),
+            }
+            if not apply:
+                return plan
+            refuse_unless_warranted(
+                report,
+                acknowledged=acknowledged_selections(
+                    {"forget_selections": forget_selections}
+                ),
+            )
+        except TargetError as exc:
+            raise OperationsError(str(exc)) from exc
+        suffix = set_aside_suffix()
+        # Quiesced between the gate and the rename, never before it: supervisord's
+        # children hold this file open, so renaming it underneath a running Kernel
+        # leaves a process writing to a path nobody will read again — but taking a
+        # Host down and *then* refusing would be the worse of the two orders.
+        # Whoever knows how to stop this Host passes that in; this method knows
+        # only which file moves.
+        stopped = quiesce() if quiesce is not None else None
+        try:
+            renamed = set_aside(database, suffix=suffix)
+        except TargetError as exc:
+            raise OperationsError(str(exc)) from exc
+        return {
+            **plan,
+            "status": "kernel_schema_reset",
+            "set_aside_suffix": suffix,
+            "renamed": renamed,
+            "selections_destroyed": report.get("selections"),
+            **({"stopped": stopped} if stopped is not None else {}),
+            "next": "start this Host again; the Kernel builds an empty authority at the "
+            "current schema and replays device mounts from the Hub Claim stream",
+        }
+
+    def _kernel_database_path(self) -> Path:
+        """Where this profile's Kernel keeps its authority.
+
+        The product location resolved against this profile's state root, the way
+        ``_hub_database_path`` resolves Hub's — a second opinion about either
+        would name a file no service writes.
+        """
+
+        return self.profile.paths.state_root / "eidolon-kernel.sqlite3"
+
+    def _kernel_interpreter_path(self) -> Path:
+        """The Kernel this Host actually runs, which here is a worktree.
+
+        Asked rather than assumed for the same reason the product Host asks the
+        release's interpreter: the answer to "will this Kernel open this file"
+        has to come from the Kernel that is going to try.
+        """
+
+        source = self.config.sources.get("eidolon_kernel")
+        if source is None:
+            raise OperationsError(
+                "this profile does not declare an eidolon_kernel source, so no Kernel "
+                "can be asked what setting its authority aside would cost"
+            )
+        return Path(source.path) / ".venv/bin/python"
 
     # -- reset ---------------------------------------------------------------
 

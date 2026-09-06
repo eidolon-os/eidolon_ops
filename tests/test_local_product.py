@@ -1003,3 +1003,118 @@ def test_reset_refuses_to_reach_code_or_anything_outside_the_profile(tmp_path: P
 
     with pytest.raises(OperationsError, match="outside this profile"):
         product._require_removable([tmp_path / "somewhere-else"])
+
+
+def _kernel_schema_host(
+    tmp_path: Path, *, report: dict[str, object] | None
+) -> LocalProductSource:
+    """A source run holding a Kernel authority, and a Kernel that answers about it.
+
+    The interpreter is a script rather than a real venv because what this
+    exercises is the ops half of the seam — which answers are acted on. That the
+    report is true is the Kernel's own test, against real databases.
+    """
+
+    product = _product(tmp_path, foundation_mode="managed")
+    checkout = tmp_path / "eidolon_kernel"
+    interpreter = checkout / ".venv/bin/python"
+    interpreter.parent.mkdir(parents=True)
+    interpreter.write_text(
+        "#!/bin/sh\n" + ("exit 3\n" if report is None else f"cat <<'EOF'\n{json.dumps(report)}\nEOF\n"),
+        encoding="utf-8",
+    )
+    interpreter.chmod(0o755)
+    object.__setattr__(
+        product, "config", _FakeConfig(sources={"eidolon_kernel": _FakeSource(path=checkout)})
+    )
+    database = product.profile.paths.state_root / "eidolon-kernel.sqlite3"
+    database.parent.mkdir(parents=True, exist_ok=True)
+    database.write_bytes(b"SQLite format 3\0")
+    return product
+
+
+def _refused_report(**overrides: object) -> dict[str, object]:
+    document: dict[str, object] = {
+        "path": "kernel.sqlite3",
+        "code_schema_version": 8,
+        "accepted": False,
+        "refusal": "kernel SQLite schema is partial or unknown; migrations are unsupported",
+        "notice": "Setting it aside destroys 1 of 1 Body assignment.",
+        "schema_version": 7,
+        "mounts": 1,
+        "assignments": 1,
+        "selections": 1,
+        "countable": True,
+        "unreadable": None,
+    }
+    document.update(overrides)
+    return document
+
+
+def test_the_mac_gets_the_narrow_answer_it_only_had_the_wide_one_for(tmp_path: Path) -> None:
+    """``reset --wipe-authority-data`` was this Host's only way past a stale Kernel.
+
+    It destroys every authority on the machine and advances the Owner Domain
+    generation, voiding every Claim — to move one file. This moves the one file.
+    """
+
+    product = _kernel_schema_host(tmp_path, report=_refused_report())
+    database = product.profile.paths.state_root / "eidolon-kernel.sqlite3"
+
+    plan = product.kernel_schema_reset(apply=False, forget_selections=None)
+    assert plan["status"] == "planned"
+    assert plan["kernel"]["selections"] == 1
+    assert database.is_file()
+
+    with pytest.raises(OperationsError, match="--forget-selections 1"):
+        product.kernel_schema_reset(apply=True, forget_selections=None)
+    assert database.is_file()
+
+    stopped: list[str] = []
+    applied = product.kernel_schema_reset(
+        apply=True, forget_selections=1, quiesce=lambda: stopped.append("stop") or {"ok": True}
+    )
+
+    assert applied["status"] == "kernel_schema_reset"
+    assert stopped == ["stop"]
+    assert not database.exists()
+    assert Path(str(database) + applied["set_aside_suffix"]).is_file()
+    # Everything the wide answer would have taken is still here.
+    assert product.profile.paths.state_root.is_dir()
+    assert (product.profile.paths.bootstrap_state_root / "host_identity.ed25519").is_file()
+
+
+def test_the_mac_refuses_when_its_own_kernel_opens_the_database(tmp_path: Path) -> None:
+    product = _kernel_schema_host(
+        tmp_path, report=_refused_report(accepted=True, refusal=None, selections=0)
+    )
+    database = product.profile.paths.state_root / "eidolon-kernel.sqlite3"
+
+    with pytest.raises(OperationsError, match="there is nothing to set aside"):
+        product.kernel_schema_reset(apply=True, forget_selections=0)
+
+    assert database.is_file()
+
+
+def test_the_mac_never_quiesces_a_host_it_is_about_to_refuse(tmp_path: Path) -> None:
+    """The one ordering worse than the hand-done rename it replaces.
+
+    Taking the product down and then declining to do anything leaves an operator
+    with a stopped Host and no repair, which is a strictly worse position than
+    the one they started in.
+    """
+
+    product = _kernel_schema_host(tmp_path, report=_refused_report())
+
+    def never() -> dict[str, object]:  # pragma: no cover - the assertion is that it is not called
+        raise AssertionError("the Host was stopped before the refusal")
+
+    with pytest.raises(OperationsError, match="--forget-selections 1"):
+        product.kernel_schema_reset(apply=True, forget_selections=None, quiesce=never)
+
+
+def test_the_mac_says_so_when_no_kernel_can_be_asked(tmp_path: Path) -> None:
+    product = _kernel_schema_host(tmp_path, report=None)
+
+    with pytest.raises(OperationsError, match="Kernel schema inspection failed"):
+        product.kernel_schema_reset(apply=False, forget_selections=None)

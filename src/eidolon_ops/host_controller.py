@@ -321,6 +321,24 @@ class HostController:
         report = self.adapter.supervisor.reset(wipe_authority_data=wipe_authority_data, apply=apply)
         return self._planned_or_applied(plan, report, applied=apply)
 
+    def kernel_schema_reset(
+        self, *, apply: bool, forget_selections: int | None
+    ) -> Evidence:
+        # Asked of the supervisor for the same reason ``reset`` is: both Hosts
+        # hold this authority, one under a release and one under a source run,
+        # and each supervisor already knows how to quiesce what is holding it.
+        plan = plans.kernel_schema_reset(self.profile.host_id, apply=apply)
+        self.adapter.require(Capability.KERNEL_SCHEMA_RESET)
+        report = self.adapter.supervisor.kernel_schema_reset(
+            apply=apply, forget_selections=forget_selections
+        )
+        # ``absent`` is a read, not a change: this Host had no Kernel authority
+        # to move, and reporting it as applied would put a mutation in the run
+        # ledger that never happened.
+        return self._planned_or_applied(
+            plan, report, applied=apply and report.get("status") != "absent"
+        )
+
     def controller_reset(self, *, apply: bool) -> Evidence:
         plan = plans.controller_reset(self.profile.host_id, apply=apply)
         release = self.adapter.require_release(Capability.CONTROLLER_RESET)

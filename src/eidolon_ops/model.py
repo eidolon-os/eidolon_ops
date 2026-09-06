@@ -98,6 +98,11 @@ class Capability(StrEnum):
     RESET = "reset"
     CONTROLLER_RESET = "controller-reset"
     AUTHORITY_RESET = "authority-reset"
+    #: Set aside a Kernel authority this Host's own Kernel refuses to open.
+    #: Its own capability rather than a flag on RESET: the two differ by an
+    #: order of magnitude in what they destroy, and a Host that can do the
+    #: narrow one is not thereby offering the wide one.
+    KERNEL_SCHEMA_RESET = "kernel-schema-reset"
     DIAGNOSE = "diagnose"
     #: Workstation-only inspection of the source-run profile.
     SOURCE_PROFILE = "debug"

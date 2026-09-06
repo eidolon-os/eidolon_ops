@@ -58,6 +58,10 @@ class SupervisordSupervisor:
                 # migrate an authority database they do not recognize, so a Host
                 # behind the schema had no supported way back.
                 Capability.RESET,
+                # The narrow answer to the same problem the comment above
+                # describes. RESET is how this Host got out of it before,
+                # at the price of every other authority on the machine.
+                Capability.KERNEL_SCHEMA_RESET,
             }
         )
 
@@ -100,6 +104,41 @@ class SupervisordSupervisor:
         removed = product.reset(wipe_authority_data=wipe_authority_data, apply=True)
         phases.append({"phase": "remove", "result": removed})
         return removed
+
+    def kernel_schema_reset(
+        self, *, apply: bool, forget_selections: int | None
+    ) -> dict[str, object]:
+        """Plan without touching the Host; apply behind a stop it hands down.
+
+        The stop is passed to the product rather than run here first, because the
+        gate that can refuse this operation lives on the other side of it: taking
+        a working Host down and then declining to do anything is the one ordering
+        that is worse than the hand-done rename this replaces.
+        """
+
+        product = self._product()
+        if not apply:
+            return product.kernel_schema_reset(apply=False, forget_selections=forget_selections)
+        phases = Journal(self.progress)
+
+        def quiesce() -> dict[str, object]:
+            phases.begin("quiesce")
+            stopped = self.transport.run(
+                (str(self.script()), PROFILE, "stop"),
+                timeout=300,
+                operation=f"local {PROFILE} stop",
+            )
+            result = {"output": stopped.stdout.strip()}
+            phases.append({"phase": "quiesce", "result": result})
+            return result
+
+        phases.begin("ask")
+        applied = product.kernel_schema_reset(
+            apply=True, forget_selections=forget_selections, quiesce=quiesce
+        )
+        phases.begin("set-aside")
+        phases.append({"phase": "set-aside", "result": {"renamed": applied.get("renamed")}})
+        return applied
 
     def lifecycle(self, action: str, *, dry_run: bool) -> dict[str, object]:
         if dry_run:

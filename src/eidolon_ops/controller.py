@@ -1119,6 +1119,27 @@ class EidolonPiController:
             raise OperationsError("Controller reset returned invalid evidence")
         return result
 
+    def kernel_schema_reset(
+        self, *, apply: bool, forget_selections: int | None
+    ) -> dict[str, object]:
+        """Set aside a Kernel authority this Host's own Kernel refuses to open.
+
+        The plan is a read: it asks the installed Kernel the question and comes
+        back with the count. Nothing is renamed, and nothing is stopped, until an
+        ``--apply`` that carries the same answer the plan gave.
+        """
+
+        self.preflight.validate_ssh_material()
+        payload = dict(self.host_layer.target_payload())
+        if not apply:
+            return self.transport.run_agent("kernel-schema-plan", payload, timeout=180)
+        if forget_selections is not None:
+            payload["forget_selections"] = forget_selections
+        result = self.transport.run_agent("kernel-schema-reset", payload, timeout=600)
+        if result.get("status") not in {"kernel_schema_reset", "absent"}:
+            raise OperationsError("Kernel schema reset returned invalid evidence")
+        return result
+
     def authority_reset(self, *, apply: bool) -> dict[str, object]:
         """Advance one Owner Authority generation and replace only Hub state.
 

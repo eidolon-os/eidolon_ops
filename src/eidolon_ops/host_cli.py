@@ -85,6 +85,9 @@ OPERATIONS: dict[str, Callable[[HostController, argparse.Namespace], object]] = 
     "reset": lambda controller, a: controller.reset(
         wipe_authority_data=a.wipe_authority_data, apply=a.apply
     ),
+    "kernel-schema-reset": lambda controller, a: controller.kernel_schema_reset(
+        apply=a.apply, forget_selections=a.forget_selections
+    ),
     "deploy": lambda controller, a: controller.deploy(
         release_id=a.release_id,
         resume=a.resume,
@@ -317,6 +320,15 @@ def _parser() -> argparse.ArgumentParser:
     reset = operations.add_parser("reset")
     reset.add_argument("--wipe-authority-data", action="store_true")
     reset.add_argument("--apply", action="store_true")
+    kernel_schema_reset = operations.add_parser(
+        "kernel-schema-reset",
+        help="set aside a Kernel authority this Host's own Kernel refuses to open",
+    )
+    kernel_schema_reset.add_argument("--apply", action="store_true")
+    # Not a boolean acknowledgement. The operator types back the number the plan
+    # reported, so the one fact nothing on this Host can give back has to be read
+    # before it is destroyed. Where the count is zero it is not asked for.
+    kernel_schema_reset.add_argument("--forget-selections", type=int, default=None)
     abandon = operations.add_parser(
         "abandon",
         help="give up a prepared candidate nobody will finish (never an activated one)",

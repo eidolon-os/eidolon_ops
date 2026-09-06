@@ -487,6 +487,32 @@ CATALOG: tuple[Operation, ...] = (
         applies=lambda params: params["apply"],
     ),
     Operation(
+        name="kernel-schema-reset",
+        label="挪开旧 Kernel 权威",
+        summary="把这台 Host 上 Kernel 自己打不开的那份权威改名挪开，Kernel 才能起来",
+        capability=Capability.KERNEL_SCHEMA_RESET,
+        group="authority",
+        fields=(
+            Field(
+                name="forget_selections",
+                kind=Kind.INTEGER,
+                label="确认会丢掉的 Owner 选择条数",
+                help=(
+                    "先不勾执行、看计划里报出的条数，再原样填回来。"
+                    "只有这一个数字是这台 Host 上没有任何副本能还原的"
+                ),
+                default=0,
+                minimum=0,
+            ),
+            _apply("执行改名", "不勾选只问 Kernel 认不认这份库、以及挪开会丢什么"),
+        ),
+        plan=lambda host_id, params: plans.kernel_schema_reset(host_id, apply=params["apply"]),
+        invoke=lambda controller, params: controller.kernel_schema_reset(
+            apply=params["apply"], forget_selections=params["forget_selections"]
+        ),
+        applies=lambda params: params["apply"],
+    ),
+    Operation(
         name="controller-reset",
         label="吊销控制权",
         summary="吊销这台 Host 上的每一份 Controller Grant，让新手机可以认领",

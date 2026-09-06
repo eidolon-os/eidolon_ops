@@ -41,6 +41,7 @@ class SystemdSupervisor:
                 Capability.RESET,
                 Capability.CONTROLLER_RESET,
                 Capability.AUTHORITY_RESET,
+                Capability.KERNEL_SCHEMA_RESET,
                 Capability.DIAGNOSE,
             }
         )
@@ -74,6 +75,13 @@ class SystemdSupervisor:
         # Unchanged behaviour, reached the way this Host's other operations are:
         # the release installed the namespace, so the release clears it.
         return self.release.reset(wipe_authority_data=wipe_authority_data, apply=apply)
+
+    def kernel_schema_reset(
+        self, *, apply: bool, forget_selections: int | None
+    ) -> dict[str, object]:
+        return self.release.kernel_schema_reset(
+            apply=apply, forget_selections=forget_selections
+        )
 
 
 def unit_name(service: str | None) -> str | None:

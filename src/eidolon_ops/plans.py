@@ -286,6 +286,32 @@ def authority_restore(host_id: str, *, apply: bool) -> Plan:
     )
 
 
+def kernel_schema_reset(host_id: str, *, apply: bool) -> Plan:
+    """Move one refused Kernel authority aside so the Kernel can start.
+
+    ``SCHEMA`` and ``DATA`` together, which is the whole shape of it: the schema
+    is why the file cannot be used, and an Owner's choice of which Companion
+    answers through each Body is what goes with it. ``IRREVERSIBLE`` is not about
+    the file — that is renamed, not deleted — but about what the file holds: a
+    backup at a schema this Kernel refuses is not a way back to it.
+    """
+
+    return Plan(
+        operation="kernel-schema-reset",
+        host_id=host_id,
+        steps=_steps(
+            ("ask", "ask the installed Kernel whether it will open this authority"),
+            ("count", "count the Owner Companion selections setting it aside destroys"),
+            ("quiesce", "stop the Kernel and whatever would restart it"),
+            ("set-aside", "rename the authority and its sidecars to .stale-schema-<time>"),
+            ("start", "let the Kernel build an empty authority at the current schema"),
+        ),
+        destructive=DestructiveLevel.IRREVERSIBLE if apply else DestructiveLevel.NONE,
+        requires_flags=frozenset({"--apply"} if apply else set()),
+        touches=frozenset({ActionKind.SCHEMA, ActionKind.DATA, ActionKind.LIFECYCLE}),
+    )
+
+
 def reset(host_id: str, *, apply: bool, wipe_authority_data: bool) -> Plan:
     touches = {ActionKind.CODE, ActionKind.CONFIG, ActionKind.SECRET, ActionKind.LIFECYCLE}
     if wipe_authority_data:
