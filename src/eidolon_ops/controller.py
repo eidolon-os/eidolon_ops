@@ -23,6 +23,7 @@ from eidolon_ops.config import OperationsConfig, validate_release_id
 from eidolon_ops.errors import OperationsError
 from eidolon_ops.foundation import (
     foundation_payload,
+    foundation_profile,
     python_bootstrap_script,
     python_probe_script,
 )
@@ -102,9 +103,7 @@ def _pending_detail(
     return "; ".join(parts)
 
 
-def _authority_recovery_required(
-    marker: object, lineage: dict[str, object]
-) -> str:
+def _authority_recovery_required(marker: object, lineage: dict[str, object]) -> str:
     return authority_recovery_required(
         marker,
         lineage,
@@ -154,17 +153,13 @@ def _finalize_authority_restore_stage(
     """Require positive proof that the sensitive upload is absent."""
 
     try:
-        result = transport.run_agent(
-            "authority-restore-stage-finalize", payload, timeout=120
-        )
+        result = transport.run_agent("authority-restore-stage-finalize", payload, timeout=120)
     except Exception as exc:
         raise OperationsError(
             "AUTHORITY_RESTORE_FAILED: sensitive restore staging cleanup failed"
         ) from exc
     if result.get("status") != "authority_restore_stage_absent":
-        raise OperationsError(
-            "AUTHORITY_RESTORE_FAILED: restore staging cleanup was not proven"
-        )
+        raise OperationsError("AUTHORITY_RESTORE_FAILED: restore staging cleanup was not proven")
     return result
 
 
@@ -566,8 +561,16 @@ class EidolonPiController:
         return self.provision(apply=apply, journal=Journal())
 
     def provision(self, *, apply: bool, journal: Journal | None = None) -> dict[str, object]:
-        """Detect or install the pinned non-Eidolon Raspberry Pi foundation."""
+        """Detect or install the pinned non-Eidolon foundation this Host names.
 
+        Which foundation is read from the config rather than left to the
+        builders' defaults. Taking the default sent a Raspberry Pi's contract
+        to whatever board this is, and the agent then measured that board
+        against the wrong one — reporting, correctly and uselessly, that it is
+        not a Raspberry Pi.
+        """
+
+        profile = foundation_profile(self.config.foundation_profile)
         self.preflight.validate_ssh_material()
         self.preflight.require_commands(("ssh", "scp"))
         phases = Journal(self.progress) if journal is None else journal
@@ -585,7 +588,7 @@ class EidolonPiController:
             phases.begin("python_bootstrap")
             bootstrap = self.transport.run(
                 ("/bin/sh", "-s"),
-                input_bytes=python_bootstrap_script(),
+                input_bytes=python_bootstrap_script(profile),
                 sudo=True,
                 timeout=1800,
                 operation="remote foundation Python bootstrap",
@@ -596,7 +599,7 @@ class EidolonPiController:
                     "result": parse_json(bootstrap.stdout, "foundation bootstrap"),
                 }
             )
-        payload = {"foundation": foundation_payload()}
+        payload = {"foundation": foundation_payload(profile)}
         phases.begin("doctor")
         observed = self.transport.run_agent("foundation-doctor", payload, timeout=300)
         phases.append({"phase": "doctor", "result": observed})
@@ -715,9 +718,7 @@ class EidolonPiController:
             stage = f"/var/tmp/eidolon-secrets-{_CONVERGENCE_STAGE_ID}"
             self.host_layer.stage_install_files(_CONVERGENCE_STAGE_ID, stage)
             payload["release_id"] = _CONVERGENCE_STAGE_ID
-        host = self.transport.run_agent(
-            "converge-secret-inputs", payload, timeout=120
-        )
+        host = self.transport.run_agent("converge-secret-inputs", payload, timeout=120)
         applied = bool(local.get("applied")) or bool(host.get("applied"))
         return {
             "status": "converged" if applied else "planned",
@@ -845,11 +846,7 @@ class EidolonPiController:
         unclaimed: list[str] = []
         for entry in sorted(str(item) for item in contents):
             owner = next(
-                (
-                    component_id
-                    for path, component_id in owners.items()
-                    if _same_state(entry, path)
-                ),
+                (component_id for path, component_id in owners.items() if _same_state(entry, path)),
                 None,
             )
             if owner is None:
@@ -889,9 +886,7 @@ class EidolonPiController:
           that has not been asked is exactly where the moved state would be.
         """
 
-        sources = {
-            source_id: source.path for source_id, source in self.config.sources.items()
-        }
+        sources = {source_id: source.path for source_id, source in self.config.sources.items()}
         topology = read_component_contracts(sources, self.config.capabilities)
         if not topology.contracts:
             return {
@@ -954,9 +949,7 @@ class EidolonPiController:
             raise OperationsError("Owner Authority lineage observation is invalid")
         return observed
 
-    def authority_capability(
-        self, *, will_wipe: bool, apply: bool
-    ) -> dict[str, object] | None:
+    def authority_capability(self, *, will_wipe: bool, apply: bool) -> dict[str, object] | None:
         """Decide which Owner Authority capability an install must carry.
 
         The bootstrap capability in an install is one-shot: Hub accepts it only
@@ -1055,9 +1048,7 @@ class EidolonPiController:
         except OwnerDomainAssetError as exc:
             raise OperationsError(str(exc)) from exc
         if not advanced.bootstrap_pending:
-            raise OperationsError(
-                "Owner Authority rebuild has no pending bootstrap capability"
-            )
+            raise OperationsError("Owner Authority rebuild has no pending bootstrap capability")
         return {
             "decision": "advance_generation",
             "owner_domain_id": advanced.owner_domain_id,
@@ -1148,9 +1139,7 @@ class EidolonPiController:
             raise OperationsError(str(exc)) from exc
         retry = current.bootstrap_pending and current.owner_domain_generation > 1
         next_generation = (
-            current.owner_domain_generation
-            if retry
-            else current.owner_domain_generation + 1
+            current.owner_domain_generation if retry else current.owner_domain_generation + 1
         )
         if not apply:
             return {
@@ -1203,8 +1192,7 @@ class EidolonPiController:
             result.get("status") not in {"authority_reset", "already_reset"}
             or not isinstance(authority, dict)
             or authority.get("owner_domain_id") != pending.owner_domain_id
-            or authority.get("owner_domain_generation")
-            != pending.owner_domain_generation
+            or authority.get("owner_domain_generation") != pending.owner_domain_generation
             or authority.get("state_id") != pending.authority_state_id
         ):
             raise OperationsError("Owner Authority reset returned invalid lineage proof")
@@ -1406,7 +1394,10 @@ class EidolonPiController:
             "owner-material",
         }:
             raise OperationsError("AUTHORITY_RESTORE_INVALID: restore package has extra content")
-        for section, directory in ((host_files, source / "host-state"), (owner_files, source / "owner-material")):
+        for section, directory in (
+            (host_files, source / "host-state"),
+            (owner_files, source / "owner-material"),
+        ):
             if (
                 directory.is_symlink()
                 or not directory.is_dir()
@@ -1423,7 +1414,9 @@ class EidolonPiController:
                 raise OperationsError("AUTHORITY_RESTORE_INCOMPLETE: restore package is partial")
             for name, value in section.items():
                 if not isinstance(value, dict):
-                    raise OperationsError("AUTHORITY_RESTORE_INVALID: restore file record is invalid")
+                    raise OperationsError(
+                        "AUTHORITY_RESTORE_INVALID: restore file record is invalid"
+                    )
                 filename = str(value.get("name")) if section is host_files else str(name)
                 expected_filename = (
                     {"database": "eidolon-hub.sqlite3", "anchor": "authority-lineage.json"}[name]
@@ -1438,7 +1431,9 @@ class EidolonPiController:
                     or type(value.get("bytes")) is not int
                     or value["bytes"] < 1
                 ):
-                    raise OperationsError("AUTHORITY_RESTORE_INVALID: restore file record is invalid")
+                    raise OperationsError(
+                        "AUTHORITY_RESTORE_INVALID: restore file record is invalid"
+                    )
                 path = directory / filename
                 if (
                     path.is_symlink()
@@ -1448,18 +1443,20 @@ class EidolonPiController:
                     or file_sha256(path) != value.get("sha256")
                     or path.stat().st_size != value.get("bytes")
                 ):
-                    raise OperationsError("AUTHORITY_RESTORE_INVALID: restore file evidence drifted")
+                    raise OperationsError(
+                        "AUTHORITY_RESTORE_INVALID: restore file evidence drifted"
+                    )
         state_path = source / "owner-material/owner-domain-state.json"
         try:
             recovery_state = json.loads(state_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
-            raise OperationsError("AUTHORITY_RESTORE_INVALID: Owner recovery state is invalid") from exc
+            raise OperationsError(
+                "AUTHORITY_RESTORE_INVALID: Owner recovery state is invalid"
+            ) from exc
         if (
             not isinstance(recovery_state, dict)
-            or
-            recovery_state.get("owner_domain_id") != authority["owner_domain_id"]
-            or recovery_state.get("owner_domain_generation")
-            != authority["owner_domain_generation"]
+            or recovery_state.get("owner_domain_id") != authority["owner_domain_id"]
+            or recovery_state.get("owner_domain_generation") != authority["owner_domain_generation"]
             or recovery_state.get("authority_state_id") != authority["state_id"]
             or recovery_state.get("bootstrap_pending") is not False
         ):
@@ -1547,22 +1544,15 @@ class EidolonPiController:
                 plan.get("status") != "authority_restore_planned"
                 or plan.get("authority") != authority
             ):
-                raise OperationsError(
-                    "AUTHORITY_RESTORE_FAILED: target restore plan is invalid"
-                )
+                raise OperationsError("AUTHORITY_RESTORE_FAILED: target restore plan is invalid")
             if not materializer.material_root.exists():
                 materializer.material_root.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copytree(source / "owner-material", materializer.material_root)
                 material_installed = True
             refreshed = self.host_layer.refresh(release_id)
             result = self.transport.run_agent("authority-restore", payload, timeout=420)
-            if (
-                result.get("status") != "authority_restored"
-                or result.get("authority") != authority
-            ):
-                raise OperationsError(
-                    "AUTHORITY_RESTORE_FAILED: target returned invalid proof"
-                )
+            if result.get("status") != "authority_restored" or result.get("authority") != authority:
+                raise OperationsError("AUTHORITY_RESTORE_FAILED: target returned invalid proof")
             reclaimed = self.bundles.reclaim(release_id, phase="commit")
             self.bundles.require_reclamation(reclaimed, "committed")
             ready = _wait_for_restored_authority_readiness(

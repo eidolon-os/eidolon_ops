@@ -106,3 +106,26 @@ def test_the_doctor_reports_the_board_it_actually_checked(profile_id: str, monke
 
     payload = {"foundation": ops.foundation_payload(ops.FOUNDATION_PROFILES[profile_id])}
     assert agent.foundation_doctor(payload)["profile"] == profile_id
+
+
+def test_provision_sends_the_foundation_this_host_names() -> None:
+    """Not whichever the builders default to.
+
+    Taking the default sent a Raspberry Pi's contract to an RK3588 board. The
+    agent then did exactly its job — measured that board against the profile it
+    was handed and reported, correctly and uselessly, that it is not a
+    Raspberry Pi. Found by running a provision plan against the real board,
+    which is the only place the two halves meet.
+    """
+
+    import inspect
+
+    from eidolon_ops import controller
+
+    source = inspect.getsource(controller.EidolonPiController.provision)
+    assert "foundation_payload(profile)" in source
+    assert "python_bootstrap_script(profile)" in source
+    assert "foundation_profile(self.config.foundation_profile)" in source
+    # The defaults still exist for the agent, which has no config to read.
+    assert "foundation_payload()" not in source
+    assert "python_bootstrap_script()" not in source

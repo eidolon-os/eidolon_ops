@@ -10,7 +10,12 @@ __pycache__/
 *.pyc
 .eidolon-ops/
 diagnostics/
-config/eidolon-pi.toml
+# One workstation's view of one Host: absolute paths to its keys and its
+# input directory. Matched by shape rather than by name, so the next board's
+# config is ignored the day it is written instead of the day someone
+# notices it in a diff.
+config/eidolon-*.toml
+!config/eidolon-*.example.toml
 config/hosts/*.toml
 # One operator's record of their own runs, beside the profile it belongs to.
 # Ignored for the same reason the profiles are, plus one this repository learned
