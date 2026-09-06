@@ -196,7 +196,13 @@ class ReleaseTransaction:
             phases.begin("service_identities")
             identities = self.transport.run_agent(
                 "ensure-service-identities",
-                {"units": list(self.config.units)},
+                {
+                    "units": list(self.config.units),
+                    # The agent derives the topology from its own table and
+                    # compares; without the capabilities it derives the
+                    # baseline and refuses a Host that installs more than it.
+                    "capabilities": sorted(self.config.capabilities),
+                },
                 timeout=120,
             )
             if identities.get("status") != "service_identities_ready":

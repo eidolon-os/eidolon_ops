@@ -155,3 +155,44 @@ def test_a_capability_unit_file_comes_from_a_repository_the_host_pins() -> None:
                 f"{capability} installs {asset.unit} from {asset.source_id}, "
                 f"which this Host would not pin"
             )
+
+
+def test_every_agent_payload_that_names_units_also_names_capabilities() -> None:
+    """The invariant, rather than the three places that have broken it.
+
+    The agent checks a unit list by deriving one from its own table and the
+    capabilities it is told. A payload carrying units and no capabilities asks
+    it to derive the baseline, so a Host that installs anything conditional is
+    refused by the check meant to protect it. That has now happened in
+    provision, in the release matrix and in the service-identity cutover, which
+    is enough times to test the rule instead of the instances.
+    """
+
+    import ast
+    from pathlib import Path
+
+    source_root = Path(__file__).resolve().parents[1] / "src" / "eidolon_ops"
+    offenders: list[str] = []
+    for path in sorted(source_root.glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            callee = node.func
+            name = getattr(callee, "attr", None) or getattr(callee, "id", None)
+            if name != "run_agent":
+                continue
+            for argument in node.args:
+                if not isinstance(argument, ast.Dict):
+                    continue
+                keys = {
+                    key.value
+                    for key in argument.keys
+                    if isinstance(key, ast.Constant)
+                }
+                if "units" in keys and "capabilities" not in keys:
+                    offenders.append(f"{path.name}:{node.lineno}")
+    assert offenders == [], (
+        "these send the agent a unit list with no capabilities, so it will "
+        f"derive the baseline and refuse anything conditional: {offenders}"
+    )
