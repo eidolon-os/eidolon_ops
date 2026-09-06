@@ -53,6 +53,10 @@ CAPABILITY_UNITS: dict[str, tuple[str, ...]] = {
 PRODUCT_UNITS = (
     "eidolon-bootstrapd.service",
     "eidolond.service",
+    # The privilege eidolond does not hold. Socket first: it is what eidolond
+    # orders itself after, and the service is activated by it.
+    "eidolon-unit-applier.socket",
+    "eidolon-unit-applier.service",
     "eidolon-data.service",
     "eidolon-data-workspace.service",
     "eidolon-hub.service",

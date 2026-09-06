@@ -19,6 +19,10 @@ from .primitives import TargetError
 PRODUCT_UNITS = (
     "eidolon-bootstrapd.service",
     "eidolond.service",
+    # The privilege eidolond does not hold. Socket first: it is what eidolond
+    # orders itself after, and the service is activated by it.
+    "eidolon-unit-applier.socket",
+    "eidolon-unit-applier.service",
     "eidolon-data.service",
     "eidolon-data-workspace.service",
     "eidolon-hub.service",
@@ -75,6 +79,10 @@ RESET_STOP_UNITS = (
     "eidolon-lifecycle-workflow.service",
     "eidolon-admin.service",
     "eidolond.service",
+    # After eidolond: it is the only caller, and stopping the socket first would
+    # propagate a stop into eidolond through its Requires= mid-transaction.
+    "eidolon-unit-applier.service",
+    "eidolon-unit-applier.socket",
     "eidolon-bootstrapd.service",
     "eidolon-channel-provider.service",
     "eidolon-channel.service",
@@ -93,6 +101,10 @@ RESET_STOP_UNITS = (
 
 DIRECT_ENABLE_UNITS = (
     "eidolon-bootstrapd.service",
+    # Only the socket is enabled. Its service has no [Install] on purpose: the
+    # applier is started by the first connection and must be listening before
+    # eidolond reconciles, which is what a socket unit is for.
+    "eidolon-unit-applier.socket",
     "eidolond.service",
     "eidolon-local-api.service",
     "eidolon-lifecycle-workflow.service",
@@ -335,6 +347,10 @@ LEGACY_SYSTEM_ASSETS = (
     # existed still holds one, and it is a file of secrets that now authorises
     # nothing — so a refresh takes it away rather than leaving it to be found.
     Path("/etc/eidolon/commissioning-secrets.json"),
+    # The rule that used to grant eidolond `manage-units`. Actuation moved to
+    # eidolon-unit-applier, so on an already-installed Host this file grants a
+    # privilege nothing asks for any more.
+    Path("/etc/polkit-1/rules.d/60-eidolon-system-manager.rules"),
 )
 
 MANAGED_SYSTEM_ASSETS = (
@@ -342,7 +358,6 @@ MANAGED_SYSTEM_ASSETS = (
     Path("/etc/eidolon/eidolond.yaml"),
     Path("/etc/eidolon/kernel.yaml"),
     Path("/etc/eidolon/system-services.yaml"),
-    Path("/etc/polkit-1/rules.d/60-eidolon-system-manager.rules"),
     Path("/etc/polkit-1/rules.d/60-eidolon-bootstrap-network.rules"),
     Path("/etc/avahi/services/eidolon-local-api.service"),
     Path("/usr/local/libexec/eidolon-livekit-launch"),

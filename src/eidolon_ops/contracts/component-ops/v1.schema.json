@@ -51,6 +51,10 @@
             "type": "string",
             "pattern": "^[a-z_][a-z0-9_-]{0,31}$"
           },
+          "socket_activated": {
+            "description": "This service is started by a .socket unit of the same name, which a Host installs and enables alongside it. One unit of ownership, two unit files: the socket is how the service is reached, not a separate thing that runs. Set it where a privilege boundary is crossed \u2014 systemd creates the listener with the owner and mode the socket unit states, before either side starts, which is the only way an unprivileged caller and a root server can agree on a path without a race.",
+            "type": "boolean"
+          },
           "requires": {
             "description": "Units that must be pulled in and ordered before this one (systemd Wants= plus After=).",
             "type": "array",

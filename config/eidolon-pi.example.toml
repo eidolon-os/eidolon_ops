@@ -82,6 +82,8 @@ path = "../../eidolon_sdk"
 units = [
   "eidolon-bootstrapd.service",
   "eidolond.service",
+  "eidolon-unit-applier.socket",
+  "eidolon-unit-applier.service",
   "eidolon-data.service",
   "eidolon-data-workspace.service",
   "eidolon-hub.service",

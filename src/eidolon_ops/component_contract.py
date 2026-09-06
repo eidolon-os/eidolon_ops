@@ -147,6 +147,14 @@ class ComponentContract:
         return tuple(unit["id"] for unit in self.units)
 
     @property
+    def socket_activated_units(self) -> tuple[str, ...]:
+        """Units systemd starts through a .socket of the same name."""
+
+        return tuple(
+            unit["id"] for unit in self.units if unit.get("socket_activated") is True
+        )
+
+    @property
     def ports(self) -> dict[str, dict[str, Any]]:
         return dict(self.document.get("ports", {}))
 
@@ -253,6 +261,11 @@ class ContractTopology:
     silent: tuple[str, ...] = ()
 
     unit_owner: dict[str, str] = field(default_factory=dict)
+    #: Of those, the ones reached through a .socket unit of the same name. Kept
+    #: apart from `unit_owner` on purpose: a socket-activated service is one
+    #: unit of ownership with two unit files, so it must not become a second
+    #: entry in the namespace that `requires`, `serves` and `required_by` name.
+    socket_activated: frozenset[str] = frozenset()
     port_roles: dict[str, int] = field(default_factory=dict)
 
     @property
@@ -263,9 +276,19 @@ class ContractTopology:
 
     @property
     def systemd_units(self) -> tuple[str, ...]:
-        """Every unit on a Host, as systemd names."""
+        """Every unit file on a Host, as systemd names.
 
-        return tuple(f"{unit_id}.service" for unit_id in self.unit_owner)
+        A socket-activated service contributes both of its files, socket first:
+        that is the order a Host enables and starts them in, and the socket is
+        the half that has to exist before its caller does.
+        """
+
+        names: list[str] = []
+        for unit_id in self.unit_owner:
+            if unit_id in self.socket_activated:
+                names.append(f"{unit_id}.socket")
+            names.append(f"{unit_id}.service")
+        return tuple(names)
 
     @property
     def install_inputs(self) -> tuple[InstallInput, ...]:
@@ -446,6 +469,7 @@ def read_component_contracts(
     contracts, platform = selected[:-1], selected[-1]
 
     unit_owner: dict[str, str] = {}
+    socket_activated: set[str] = set()
     port_owner: dict[str, str] = {}
     port_roles: dict[str, int] = {}
     input_owner: dict[str, str] = {}
@@ -454,6 +478,7 @@ def read_component_contracts(
     for contract in (*contracts, platform):
         for unit_id in contract.unit_ids:
             _claim(unit_owner, unit_id, contract.component_id, "unit")
+        socket_activated.update(contract.socket_activated_units)
         for role, port in contract.ports.items():
             _claim(port_owner, role, contract.component_id, "port role")
             port_roles[role] = int(port["default"])
@@ -477,6 +502,7 @@ def read_component_contracts(
         platform=platform,
         silent=tuple(silent),
         unit_owner=unit_owner,
+        socket_activated=frozenset(socket_activated),
         port_roles=port_roles,
     )
 

@@ -32,6 +32,18 @@ SYSTEMD_ASSET_CONTRACTS = (
     ),
     SystemdAssetContract(
         "eidolon_kernel",
+        "deploy/systemd/eidolon-unit-applier.socket",
+        "eidolon-unit-applier.socket",
+        "eidolon_kernel",
+    ),
+    SystemdAssetContract(
+        "eidolon_kernel",
+        "deploy/systemd/eidolon-unit-applier.service",
+        "eidolon-unit-applier.service",
+        "eidolon_kernel",
+    ),
+    SystemdAssetContract(
+        "eidolon_kernel",
         "deploy/systemd/eidolon-data.service",
         "eidolon-data.service",
         "eidolon_data",

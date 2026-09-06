@@ -85,6 +85,8 @@ python_concurrent_downloads = 4
 units = [
   "eidolon-bootstrapd.service",
   "eidolond.service",
+  "eidolon-unit-applier.socket",
+  "eidolon-unit-applier.service",
   "eidolon-data.service",
   "eidolon-data-workspace.service",
   "eidolon-hub.service",

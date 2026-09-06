@@ -277,7 +277,15 @@ def test_the_shipped_unit_files_run_what_their_component_declared(topology) -> N
     }
 
     checked = 0
+    sockets = 0
     for asset in SYSTEMD_ASSET_CONTRACTS:
+        if asset.unit.endswith(".socket"):
+            # A .socket file runs nothing; it names a listener its service is
+            # activated through. What there is to check about it — owner, mode,
+            # and that the service is not separately enabled — belongs to the
+            # unit's own deployment test in eidolon_kernel.
+            sockets += 1
+            continue
         unit_id = asset.unit.removesuffix(".service")
         component_id, executable = declared[unit_id]
         if component_id == PLATFORM_COMPONENT_ID:
@@ -308,7 +316,7 @@ def test_the_shipped_unit_files_run_what_their_component_declared(topology) -> N
 
     # A loop that silently checked nothing would pass just as quietly.
     platform_units = len(topology.platform.unit_ids)
-    assert checked == len(PRODUCT_UNITS) - platform_units
+    assert checked == len(PRODUCT_UNITS) - platform_units - sockets
 
 
 def test_the_dev_port_registry_and_the_contracts_use_the_same_numbers(
