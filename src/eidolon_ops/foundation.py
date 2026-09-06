@@ -170,6 +170,25 @@ FOUNDATION_ARTIFACTS = (
 )
 
 
+#: The interpreter a Host is given when its OS does not have one the release
+#: can use. Same supplier uv would have downloaded from, carried and verified
+#: here instead of fetched during an install that is deliberately offline.
+#: The stripped build: identical interpreter, 29 MB against 91 for the one
+#: that keeps its debug symbols.
+CPYTHON_3_13_AARCH64 = FoundationArtifact(
+    artifact_id="cpython",
+    version="3.13.15",
+    url=(
+        "https://github.com/astral-sh/python-build-standalone/releases/download/"
+        "20260901/cpython-3.13.15%2B20260901-aarch64-unknown-linux-gnu-"
+        "install_only_stripped.tar.gz"
+    ),
+    sha256="01ce0ce9189feaead3298abf10d4efe998c55a489b3d5d38ca4f83dda7e7977e",
+    kind="python-tar",
+    executable="python3.13",
+)
+
+
 @dataclass(frozen=True, slots=True)
 class AptSource:
     """One stanza of the deb822 sources list the bootstrap writes."""
@@ -240,6 +259,12 @@ class FoundationProfile:
     #: deciding on the default: it means nobody measured what the default
     #: costs there, or what running hotter would cost the hardware.
     cpu_governor: CpuGovernor | None
+    #: The Python this board's foundation provides, or ``None`` where the OS
+    #: already ships one the release can use. Stated rather than inferred from
+    #: the artifact list, because what has to agree with the release's pin is a
+    #: version, and reading it back out of a filename would be a second way of
+    #: saying it that could disagree with the first.
+    python_version: str | None
     artifacts: tuple[FoundationArtifact, ...]
 
 
@@ -286,6 +311,10 @@ RASPBERRY_PI_OS_TRIXIE = FoundationProfile(
     #: a Pi 5's thermal envelope is a different question and nobody has asked
     #: it here, so the image's own default stands.
     cpu_governor=None,
+    #: Raspberry Pi OS ships 3.13, which the release pin accepts, so uv finds
+    #: an interpreter on PATH and nothing has to be carried. Declaring one here
+    #: would put 29 MB on every Pi for a file it would never open.
+    python_version=None,
     artifacts=FOUNDATION_ARTIFACTS,
 )
 
@@ -375,11 +404,19 @@ UBUNTU_2604_RK3588 = FoundationProfile(
         key="GOVERNOR",
         applied_by="armbian-hardware-optimize.service",
     ),
-    #: The same four prebuilt binaries. All are aarch64 and none is
-    #: Debian-specific; the NPU runtime is deliberately not here — it belongs
-    #: to the component that loads it, gated on the rknpu2 capability, so a
-    #: board that runs no local models does not carry it.
-    artifacts=FOUNDATION_ARTIFACTS,
+    #: Ubuntu 26.04 ships 3.14 and its archive carries no python3.13 at all —
+    #: checked on the board: no python3.13, -venv, -dev or libpython3.13 —
+    #: while every repository pins >=3.13,<3.14. The target build runs uv with
+    #: --no-python-downloads, deliberately, so an interpreter that is neither
+    #: present nor fetchable is a Host that cannot be installed. That is
+    #: exactly how this board failed, reported by uv as a complaint about
+    #: download policy rather than as a missing prerequisite.
+    python_version="3.13.15",
+    #: The same four prebuilt binaries, plus the interpreter. The NPU runtime
+    #: is deliberately not here — it belongs to the component that loads it,
+    #: gated on the rknpu2 capability, so a board that runs no local models
+    #: does not carry it.
+    artifacts=(*FOUNDATION_ARTIFACTS, CPYTHON_3_13_AARCH64),
 )
 
 

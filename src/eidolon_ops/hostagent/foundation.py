@@ -155,6 +155,22 @@ FOUNDATION_ARTIFACTS = (
 )
 
 
+#: The interpreter this board is given when its OS has none the release can
+#: use. The agent's own copy, held equal to Ops's by a test.
+CPYTHON_3_13_AARCH64 = {
+    "artifact_id": "cpython",
+    "version": "3.13.15",
+    "url": (
+        "https://github.com/astral-sh/python-build-standalone/releases/download/"
+        "20260901/cpython-3.13.15%2B20260901-aarch64-unknown-linux-gnu-"
+        "install_only_stripped.tar.gz"
+    ),
+    "sha256": "01ce0ce9189feaead3298abf10d4efe998c55a489b3d5d38ca4f83dda7e7977e",
+    "kind": "python-tar",
+    "executable": "python3.13",
+}
+
+
 #: Armbian sets Storage=volatile in journald.conf itself; the drop-in that
 #: overrides it is written where a drop-in wins. Byte-identical to the copy in
 #: eidolon_ops.foundation, held equal by a test.
@@ -216,6 +232,7 @@ class AgentFoundationProfile:
     services: tuple[str, ...]
     journal_persistence: Path
     journal_persistence_content: str
+    python_version: str | None
     artifacts: tuple[dict[str, object], ...]
 
 
@@ -253,6 +270,7 @@ RASPBERRY_PI_OS_TRIXIE = AgentFoundationProfile(
     services=FOUNDATION_SERVICES,
     journal_persistence=JOURNAL_PERSISTENCE,
     journal_persistence_content=JOURNAL_PERSISTENCE_CONTENT,
+    python_version=None,
     artifacts=FOUNDATION_ARTIFACTS,
 )
 
@@ -278,7 +296,8 @@ UBUNTU_2604_RK3588 = AgentFoundationProfile(
     services=FOUNDATION_SERVICES,
     journal_persistence=Path("/etc/systemd/journald.conf.d/99-eidolon-persistent.conf"),
     journal_persistence_content=RK3588_JOURNAL_PERSISTENCE_CONTENT,
-    artifacts=FOUNDATION_ARTIFACTS,
+    python_version="3.13.15",
+    artifacts=(*FOUNDATION_ARTIFACTS, CPYTHON_3_13_AARCH64),
 )
 
 FOUNDATION_PROFILES: dict[str, AgentFoundationProfile] = {
@@ -291,6 +310,10 @@ FOUNDATION_VERSION_PREFIXES = {
     "livekit-server": ("livekit-server version 1.11.0", "1.11.0"),
     "uv": ("uv 0.11.15",),
     "node": ("v22.23.2",),
+    # `python3.13 --version` says "Python 3.13.15"; the bare number is what a
+    # different build of the same version would also print, so both are here
+    # for the same reason the others are.
+    "python3.13": ("Python 3.13.15", "3.13.15"),
 }
 
 FOUNDATION_EVIDENCE = Path("/var/lib/eidolon-ops/foundation-v2.json")

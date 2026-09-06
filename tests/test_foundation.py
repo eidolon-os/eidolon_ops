@@ -889,6 +889,7 @@ def test_a_profile_is_a_row_and_not_a_rewrite() -> None:
         "journal_persistence",
         "journal_persistence_content",
         "cpu_governor",
+        "python_version",
         "artifacts",
     }
     assert all(field.default is MISSING for field in fields(FoundationProfile)), (

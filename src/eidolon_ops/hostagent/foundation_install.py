@@ -21,6 +21,7 @@ def download_verified(artifact: Mapping[str, str]) -> Path:
     suffixes = {
         "node-tar": ".tar.xz",
         "pip-wheel": ".whl",
+        "python-tar": ".tar.gz",
         "tar-binary": ".tar.gz",
     }
     try:
@@ -159,6 +160,41 @@ def install_node(artifact: Mapping[str, str]) -> None:
             os.replace(extracted, destination)
     for executable in ("node", "npm", "npx", "corepack"):
         install_managed_link(foundation.LOCAL_BIN / executable, destination / "bin" / executable)
+
+
+def install_python(artifact: Mapping[str, str]) -> None:
+    """Put the interpreter the release needs where every service can run it.
+
+    Carried rather than fetched at install time: the target build runs uv with
+    --no-python-downloads, deliberately, so an interpreter it does not already
+    have is not one it will go and get. A Host whose OS ships a matching Python
+    needs none of this and its profile declares none; this exists for the Host
+    whose OS does not, which is how the first board that needed it was the
+    second board.
+
+    Extracted beside the other foundation binaries and linked into
+    /usr/local/bin, exactly as Node is, so uv finds it on PATH as an ordinary
+    system interpreter. That is deliberately not uv's managed layout: relying
+    on the shape of another tool's private directory would make this break on
+    an upgrade of that tool rather than of this one.
+    """
+
+    archive_path = download_verified(artifact)
+    destination = foundation.LOCAL_LIB / f"{artifact['artifact_id']}-{artifact['version']}"
+    executable = artifact["executable"]
+    if not destination.is_dir():
+        with tempfile.TemporaryDirectory(prefix="eidolon-python-", dir=foundation.LOCAL_LIB) as raw:
+            stage = Path(raw)
+            with tarfile.open(archive_path, "r:gz") as archive:
+                members = archive.getmembers()
+                if not members or not all(safe_node_member(member, "python") for member in members):
+                    raise TargetError("Python archive contains an unsafe member")
+                archive.extractall(stage, filter="data")
+            extracted = stage / "python"
+            if not (extracted / "bin" / executable).is_file():
+                raise TargetError(f"Python archive is missing bin/{executable}")
+            os.replace(extracted, destination)
+    install_managed_link(foundation.LOCAL_BIN / executable, destination / "bin" / executable)
 
 
 def install_uv(artifact: Mapping[str, str]) -> None:
@@ -353,6 +389,8 @@ def foundation_install(payload: Mapping[str, object]) -> dict[str, object]:
                     install_uv(artifact)
                 elif kind == "node-tar":
                     install_node(artifact)
+                elif kind == "python-tar":
+                    install_python(artifact)
                 else:
                     raise TargetError(f"unsupported foundation artifact kind: {kind}")
             phase = "artifacts"

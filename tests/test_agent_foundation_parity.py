@@ -174,3 +174,53 @@ def test_the_agent_writes_a_sources_list_it_could_fetch_from(profile_id: str) ->
     for source in profile.apt_sources:
         assert f"URIs: {source.uris}" in text
         assert f"Signed-By: {source.signed_by}" in text
+
+
+@pytest.mark.parametrize("profile_id", sorted(ops.FOUNDATION_PROFILES))
+def test_both_sides_agree_on_the_interpreter(profile_id: str) -> None:
+    o = ops.FOUNDATION_PROFILES[profile_id]
+    a = agent.FOUNDATION_PROFILES[profile_id]
+    assert a.python_version == o.python_version
+    carried = [x.artifact_id for x in o.artifacts if x.artifact_id == "cpython"]
+    assert bool(carried) == (o.python_version is not None), (
+        "a profile that names a Python must carry one, and one that names none must not"
+    )
+
+
+def test_the_interpreter_a_profile_carries_satisfies_every_repository() -> None:
+    """The version the foundation provides against the version releases need.
+
+    These are two statements of one fact in different repositories, and nothing
+    compared them. The Host discovered the disagreement instead — from uv, in
+    the middle of a remote build, phrased as a complaint about download policy
+    rather than as a foundation that does not fit the release.
+    """
+
+    import re
+    import tomllib
+    from pathlib import Path
+
+    repositories = Path(__file__).resolve().parents[2]
+    pins: dict[str, str] = {}
+    for pyproject in sorted(repositories.glob("eidolon_*/pyproject.toml")):
+        with pyproject.open("rb") as handle:
+            requires = tomllib.load(handle).get("project", {}).get("requires-python")
+        if requires:
+            pins[pyproject.parent.name] = requires
+    if not pins:
+        pytest.skip("needs the sibling repositories to read their pins")
+
+    # Every repository is expected to state the same pin; a split is its own bug.
+    assert len(set(pins.values())) == 1, f"repositories disagree on Python: {pins}"
+    lower, upper = re.fullmatch(r">=(\d+\.\d+),<(\d+\.\d+)", next(iter(pins.values()))).groups()
+
+    for profile in ops.FOUNDATION_PROFILES.values():
+        if profile.python_version is None:
+            # The OS provides it; what it provides cannot be read from here.
+            continue
+        major, minor, *_ = profile.python_version.split(".")
+        series = f"{major}.{minor}"
+        assert series == lower, (
+            f"{profile.id} carries Python {profile.python_version}, "
+            f"and the repositories pin {lower} <= python < {upper}"
+        )
