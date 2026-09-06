@@ -177,6 +177,21 @@ MaxRetentionSec=30day
 
 
 @dataclass(frozen=True, slots=True)
+class AptSource:
+    """One stanza of the sources list the installer writes.
+
+    The agent builds its own rather than reading one out of the payload, for
+    the same reason it holds every other table: what it installs from is part
+    of what it was reviewed against.
+    """
+
+    uris: str
+    suites: str
+    components: str
+    signed_by: str
+
+
+@dataclass(frozen=True, slots=True)
 class AgentFoundationProfile:
     """What the agent needs to know about one board to check a Host is it.
 
@@ -195,6 +210,8 @@ class AgentFoundationProfile:
     minimum_memory_kib: int
     minimum_disk_kib: int
     apt_mirrors: dict[str, str]
+    apt_suite: str
+    apt_sources: tuple[AptSource, ...]
     apt_packages: tuple[str, ...]
     services: tuple[str, ...]
     journal_persistence: Path
@@ -211,6 +228,27 @@ RASPBERRY_PI_OS_TRIXIE = AgentFoundationProfile(
     minimum_memory_kib=7 * 1024 * 1024,
     minimum_disk_kib=12 * 1024 * 1024,
     apt_mirrors=FOUNDATION_APT_MIRRORS,
+    apt_suite="trixie",
+    apt_sources=(
+        AptSource(
+            uris=FOUNDATION_APT_MIRRORS["debian"],
+            suites="{suite} {suite}-updates",
+            components="main contrib non-free non-free-firmware",
+            signed_by="/usr/share/keyrings/debian-archive-keyring.pgp",
+        ),
+        AptSource(
+            uris=FOUNDATION_APT_MIRRORS["raspberrypi"],
+            suites="{suite}",
+            components="main",
+            signed_by="/usr/share/keyrings/raspberrypi-archive-keyring.pgp",
+        ),
+        AptSource(
+            uris=FOUNDATION_APT_MIRRORS["security"],
+            suites="{suite}-security",
+            components="main contrib non-free non-free-firmware",
+            signed_by="/usr/share/keyrings/debian-archive-keyring.pgp",
+        ),
+    ),
     apt_packages=FOUNDATION_PACKAGES,
     services=FOUNDATION_SERVICES,
     journal_persistence=JOURNAL_PERSISTENCE,
@@ -227,6 +265,15 @@ UBUNTU_2604_RK3588 = AgentFoundationProfile(
     minimum_memory_kib=15 * 1024 * 1024,
     minimum_disk_kib=12 * 1024 * 1024,
     apt_mirrors={"ubuntu": "https://mirror.nju.edu.cn/ubuntu-ports/"},
+    apt_suite="resolute",
+    apt_sources=(
+        AptSource(
+            uris="https://mirror.nju.edu.cn/ubuntu-ports/",
+            suites="{suite} {suite}-updates {suite}-security",
+            components="main restricted universe multiverse",
+            signed_by="/usr/share/keyrings/ubuntu-archive-keyring.gpg",
+        ),
+    ),
     apt_packages=FOUNDATION_PACKAGES,
     services=FOUNDATION_SERVICES,
     journal_persistence=Path("/etc/systemd/journald.conf.d/99-eidolon-persistent.conf"),

@@ -236,15 +236,19 @@ def install_journal_persistence(content: str, path: Path | None = None) -> None:
 
 
 @contextmanager
-def foundation_apt_options(contract: Mapping[str, object]) -> Iterator[tuple[str, ...]]:
-    version = foundation.os_release().get("VERSION_ID", "").split(".", 1)[0]
-    suites = {"13": "trixie"}
-    if version not in suites:
-        raise TargetError("foundation apt mirror requires reviewed Debian version")
-    mirrors = contract["apt_mirrors"]
-    if not isinstance(mirrors, dict):
-        raise TargetError("foundation apt mirror contract is invalid")
-    suite = suites[version]
+def foundation_apt_options(
+    profile: foundation.AgentFoundationProfile,
+) -> Iterator[tuple[str, ...]]:
+    """Fetch from the archives this board's profile names, and only those.
+
+    It used to map the OS version to a Debian suite through a table with one
+    entry and then write three stanzas addressed by the mirror names Debian
+    uses. On a board whose archive is Ubuntu's that refused before it could
+    fail, saying it wanted a reviewed Debian version, which is true and is not
+    the question. The stanzas are the profile's now, like every other thing
+    that differs between boards.
+    """
+
     with tempfile.TemporaryDirectory(prefix="eidolon-apt-") as temporary:
         root = Path(temporary)
         source_parts = root / "parts"
@@ -252,31 +256,20 @@ def foundation_apt_options(contract: Mapping[str, object]) -> Iterator[tuple[str
         source_parts.mkdir()
         (lists / "partial").mkdir(parents=True)
         sources = root / "eidolon.sources"
-        sources.write_text(
-            "\n".join(
-                (
-                    "Types: deb",
-                    f"URIs: {mirrors['debian']}",
-                    f"Suites: {suite} {suite}-updates",
-                    "Components: main contrib non-free non-free-firmware",
-                    "Signed-By: /usr/share/keyrings/debian-archive-keyring.pgp",
-                    "",
-                    "Types: deb",
-                    f"URIs: {mirrors['raspberrypi']}",
-                    f"Suites: {suite}",
-                    "Components: main",
-                    "Signed-By: /usr/share/keyrings/raspberrypi-archive-keyring.pgp",
-                    "",
-                    "Types: deb",
-                    f"URIs: {mirrors['security']}",
-                    f"Suites: {suite}-security",
-                    "Components: main contrib non-free non-free-firmware",
-                    "Signed-By: /usr/share/keyrings/debian-archive-keyring.pgp",
-                    "",
+        stanzas = []
+        for source in profile.apt_sources:
+            stanzas.append(
+                "\n".join(
+                    (
+                        "Types: deb",
+                        f"URIs: {source.uris}",
+                        f"Suites: {source.suites.format(suite=profile.apt_suite)}",
+                        f"Components: {source.components}",
+                        f"Signed-By: {source.signed_by}",
+                    )
                 )
-            ),
-            encoding="utf-8",
-        )
+            )
+        sources.write_text("\n\n".join(stanzas) + "\n", encoding="utf-8")
         yield (
             *foundation.APT_COMMAND_OPTIONS,
             "-o",
@@ -330,7 +323,7 @@ def foundation_install(payload: Mapping[str, object]) -> dict[str, object]:
         try:
             environment = dict(os.environ)
             environment["DEBIAN_FRONTEND"] = "noninteractive"
-            with foundation_apt_options(contract) as apt_options:
+            with foundation_apt_options(profile) as apt_options:
                 primitives.checked(
                     "refresh apt metadata",
                     ("/usr/bin/apt-get", *apt_options, "update"),

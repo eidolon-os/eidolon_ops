@@ -129,3 +129,46 @@ def test_provision_sends_the_foundation_this_host_names() -> None:
     # The defaults still exist for the agent, which has no config to read.
     assert "foundation_payload()" not in source
     assert "python_bootstrap_script()" not in source
+
+
+@pytest.mark.parametrize("profile_id", sorted(ops.FOUNDATION_PROFILES))
+def test_both_sides_fetch_packages_from_the_same_archives(profile_id: str) -> None:
+    """Ops writes them into the bootstrap; the agent writes them again to install.
+
+    They were not the same thing before: the agent mapped an OS version to a
+    Debian suite and addressed mirrors by Debian's names, so an Ubuntu board
+    was refused for wanting a reviewed Debian version. Whatever each side
+    writes, it must be the same archives.
+    """
+
+    o = ops.FOUNDATION_PROFILES[profile_id]
+    a = agent.FOUNDATION_PROFILES[profile_id]
+    assert a.apt_suite == o.apt_suite
+    assert len(a.apt_sources) == len(o.apt_sources)
+    for mine, theirs in zip(a.apt_sources, o.apt_sources, strict=True):
+        assert (mine.uris, mine.suites, mine.components, mine.signed_by) == (
+            theirs.uris,
+            theirs.suites,
+            theirs.components,
+            theirs.signed_by,
+        )
+
+
+@pytest.mark.parametrize("profile_id", sorted(ops.FOUNDATION_PROFILES))
+def test_the_agent_writes_a_sources_list_it_could_fetch_from(profile_id: str) -> None:
+    from eidolon_ops.hostagent import foundation_install
+
+    with foundation_install.foundation_apt_options(
+        agent.FOUNDATION_PROFILES[profile_id]
+    ) as options:
+        path = next(
+            value.split("=", 1)[1] for value in options if value.startswith("Dir::Etc::sourcelist=")
+        )
+        text = open(path, encoding="utf-8").read()
+
+    profile = ops.FOUNDATION_PROFILES[profile_id]
+    assert "{suite}" not in text, "the suite placeholder must be filled in"
+    assert profile.apt_suite in text
+    for source in profile.apt_sources:
+        assert f"URIs: {source.uris}" in text
+        assert f"Signed-By: {source.signed_by}" in text
