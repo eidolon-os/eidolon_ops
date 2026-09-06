@@ -14,7 +14,7 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
-from . import authority_reset, contract, host_application, primitives, probe
+from . import authority_reset, contract, host_application, identities, primitives, probe
 from .primitives import TargetError
 
 
@@ -25,6 +25,7 @@ class DeploymentRunner:
     def run(self, *command: str):
         result = primitives.run(command)
         return self._command_result_type(result.returncode, result.stdout, result.stderr)
+
 
 class TargetInstaller:
     """Resumable first-install state machine for an otherwise unowned namespace."""
@@ -218,9 +219,7 @@ class TargetInstaller:
         install could not proceed past weights it had just placed correctly.
         """
 
-        carried = {
-            primitives.host_path(self.root, contract.HOST_EMBEDDING_MODEL_ROOT)
-        }
+        carried = {primitives.host_path(self.root, contract.HOST_EMBEDDING_MODEL_ROOT)}
         conflicts: list[str] = []
         for component in self.release.components:
             link = primitives.host_path(self.root, component.current_link)
@@ -242,9 +241,7 @@ class TargetInstaller:
             Path("/etc/eidolon"),
         ):
             path = primitives.host_path(self.root, namespace)
-            if path.is_dir() and any(
-                entry for entry in path.iterdir() if entry not in carried
-            ):
+            if path.is_dir() and any(entry for entry in path.iterdir() if entry not in carried):
                 conflicts.append(f"{namespace}/*")
         if conflicts:
             raise TargetError(
@@ -278,12 +275,30 @@ class TargetInstaller:
     def _ensure_identities_and_directories(self) -> None:
         if self.root == Path("/"):
             self._ensure_service_group("eidolon-lifecycle-client")
+            # The owner-trust group is created by the service-identity cutover
+            # too, and that runs after this — on a Host that has been installed
+            # before, it is therefore already here and nothing noticed. On a
+            # Host being installed for the first time it is not, and the path
+            # contract below chowns to it in the next statement, so a first
+            # install failed with the group's name and no account of why.
+            self._ensure_service_group(identities.OWNER_TRUST_GROUP)
             self._ensure_service_identity("eidolon")
             self._ensure_service_identity("eidolon-bootstrap")
             self._ensure_service_identity("eidolon-local-api")
             self._ensure_service_identity("eidolon-lifecycle")
+            for name in identities.OWNER_TRUST_READERS:
+                self._ensure_group_membership(name, identities.OWNER_TRUST_GROUP)
             self._validate_service_identity_boundary()
         contract.ensure_host_path_contract(self.root, self._chown, self.port_registry)
+
+    def _ensure_group_membership(self, user: str, group: str) -> None:
+        observed = self.command(("/usr/bin/id", "-nG", user), timeout=30)
+        if group in observed.stdout.split():
+            return
+        self._command_checked(
+            "service supplementary group cutover",
+            ("/usr/sbin/usermod", "--append", "--groups", group, user),
+        )
 
     def _ensure_service_group(self, name: str) -> None:
         group = self.command(("/usr/bin/getent", "group", name), timeout=30)
@@ -326,9 +341,7 @@ class TargetInstaller:
             "eidolon-local-api",
             "eidolon-lifecycle",
         ):
-            result = self._command_checked(
-                "service uid inspection", ("/usr/bin/id", "-u", name)
-            )
+            result = self._command_checked("service uid inspection", ("/usr/bin/id", "-u", name))
             try:
                 uid = int(result.stdout.strip())
             except ValueError as exc:
@@ -420,7 +433,9 @@ class TargetInstaller:
             "product unit enablement",
             ("/usr/bin/systemctl", "enable", *contract.DIRECT_ENABLE_UNITS),
         )
-        ingress = primitives.host_path(self.root, contract.HOST_APPLICATION_INPUTS["hub-ingress.service"][0])
+        ingress = primitives.host_path(
+            self.root, contract.HOST_APPLICATION_INPUTS["hub-ingress.service"][0]
+        )
         if ingress.is_file():
             self._command_checked(
                 "Host application unit enablement",
@@ -442,12 +457,16 @@ class TargetInstaller:
             return
         primitives.chown_path(path, user, group)
 
+
 def install(payload: Mapping[str, object]) -> dict[str, object]:
     release_id = contract.fixed_release_id(payload)
     data = contract.fixed_data(payload)
     descriptor = contract.RELEASES / release_id / "release.json"
     secret_stage = contract.VAR_TMP / f"eidolon-secrets-{release_id}"
-    if secret_stage.parent != contract.VAR_TMP or contract.STAGING_NAME.fullmatch(secret_stage.name) is None:
+    if (
+        secret_stage.parent != contract.VAR_TMP
+        or contract.STAGING_NAME.fullmatch(secret_stage.name) is None
+    ):
         raise TargetError("secret staging path is unsafe")
     try:
         from eidolon_deploy.linux import CommandResult, LinuxDeploymentHost

@@ -40,6 +40,11 @@ from eidolon_ops.workstation_toolchain import ensure_workstation_uv
 #: which the profile is already required to place somewhere durable, means the
 #: path it is bound to is one nothing sweeps and nothing relocates.
 _KEPT_DEPENDENCY_CACHE = "uv-cache"
+
+#: Where a Host keeps the interpreter uv fetches for it. Beside the other
+#: foundation binaries rather than under root's home, because the services that
+#: run on it are unprivileged and root's home is not theirs to enter.
+TARGET_PYTHON_INSTALL_DIR = "/usr/local/lib/eidolon-foundation/python"
 _RELEASE_ARTIFACT_STORE = "release-artifacts-v1"
 _BUNDLE_SHAPE = {
     "bundle.json",
@@ -103,9 +108,7 @@ class BundleTransfer:
         expired: list[dict[str, object]] = []
         failures: list[dict[str, str]] = []
         if current["status"] == "cleanup_failed":
-            failures.append(
-                {"path": str(current["path"]), "error": str(current["error"])}
-            )
+            failures.append({"path": str(current["path"]), "error": str(current["error"])})
         root = self.config.workspace.bundle_root
         try:
             candidates = tuple(root.iterdir()) if root.is_dir() else ()
@@ -135,9 +138,7 @@ class BundleTransfer:
             if result["status"] == "removed":
                 expired.append(result)
             elif result["status"] == "cleanup_failed":
-                failures.append(
-                    {"path": str(result["path"]), "error": str(result["error"])}
-                )
+                failures.append({"path": str(result["path"]), "error": str(result["error"])})
         return {
             "status": "cleaned" if not failures else "cleanup_incomplete",
             "current": current,
@@ -344,9 +345,7 @@ class BundleTransfer:
         if held.get("status") == "held" and held.get("digest") == expected:
             return {"status": "already_held", "model": artifact.model_id}
 
-        source = ensure_workstation_embedding_model(
-            self.config.workspace.toolchain_root, artifact
-        )
+        source = ensure_workstation_embedding_model(self.config.workspace.toolchain_root, artifact)
         staging = f"/var/tmp/eidolon-encoder-{expected[:12]}"
         self.transport.run(("rm", "-rf", staging))
         self.transport.upload(source, staging, recursive=True)
@@ -365,16 +364,12 @@ class BundleTransfer:
         """
 
         artifacts = self._artifact_records(output)
-        identities = [
-            {"sha256": item["sha256"], "size": item["size"]} for item in artifacts
-        ]
+        identities = [{"sha256": item["sha256"], "size": item["size"]} for item in artifacts]
         state = self.transport.run_agent(
             "release-artifact-state", {"artifacts": identities}, timeout=300
         )
         missing_wire = state.get("missing")
-        if state.get("status") not in {"complete", "missing"} or not isinstance(
-            missing_wire, list
-        ):
+        if state.get("status") not in {"complete", "missing"} or not isinstance(missing_wire, list):
             raise OperationsError("Host returned invalid release artifact state")
         missing = {value for value in missing_wire if isinstance(value, str)}
         if len(missing) != len(missing_wire):
@@ -390,8 +385,7 @@ class BundleTransfer:
             }
 
         wanted = [
-            {"sha256": digest, "size": by_digest[digest]["size"]}
-            for digest in sorted(missing)
+            {"sha256": digest, "size": by_digest[digest]["size"]} for digest in sorted(missing)
         ]
         guard = self.transport.run_agent(
             "guard-release-artifacts",
@@ -431,15 +425,11 @@ class BundleTransfer:
     def _artifact_records(output: Path) -> list[dict[str, object]]:
         document = parse_json((output / "bundle.json").read_text(encoding="utf-8"), "bundle")
         artifacts = document.get("artifacts")
-        if not isinstance(artifacts, list) or not all(
-            isinstance(item, dict) for item in artifacts
-        ):
+        if not isinstance(artifacts, list) or not all(isinstance(item, dict) for item in artifacts):
             raise OperationsError("bundle artifact manifest is invalid")
         return artifacts
 
-    def _seal(
-        self, output: Path, release_id: str, *, cutover_mode: str
-    ) -> dict[str, object]:
+    def _seal(self, output: Path, release_id: str, *, cutover_mode: str) -> dict[str, object]:
         command = [
             str(self.config.workspace.release_cli),
             "bundle",
@@ -462,9 +452,7 @@ class BundleTransfer:
                 "UV_DEFAULT_INDEX": self.config.workspace.python_index_url,
                 "UV_HTTP_TIMEOUT": str(self.config.workspace.python_http_timeout_seconds),
                 "UV_HTTP_RETRIES": str(self.config.workspace.python_http_retries),
-                "UV_CONCURRENT_DOWNLOADS": str(
-                    self.config.workspace.python_concurrent_downloads
-                ),
+                "UV_CONCURRENT_DOWNLOADS": str(self.config.workspace.python_concurrent_downloads),
                 "EIDOLON_RELEASE_UV_CACHE": str(
                     self.config.workspace.toolchain_root / _KEPT_DEPENDENCY_CACHE
                 ),
@@ -480,10 +468,31 @@ class BundleTransfer:
         return parse_json(bundle.stdout, "bundle")
 
     def _build_on_target(self, remote_bundle: str) -> dict[str, object]:
+        """Build each component's venv on the Host, with its own interpreter.
+
+        UV_PYTHON_INSTALL_DIR is the difference between a Host that starts and
+        one that does not. This runs under sudo, so uv's default managed-Python
+        location is /root/.local/share/uv — and /root is 0700, which every
+        service user is refused at. The venvs then point their shebang at an
+        interpreter none of them may execute, and systemd reports 203/EXEC
+        against the console script rather than against the Python behind it.
+
+        It only bites where uv has to fetch an interpreter at all: a Host whose
+        system Python satisfies the pin never downloads one. Raspberry Pi OS
+        ships 3.13 and does; this board ships 3.14.4 against a >=3.13,<3.14
+        pin and does not. So the first board to need this was the second board.
+
+        The foundation library is where it goes because that is already what
+        that directory is for -- root-owned, world-traversable, and outliving
+        any one release, which nats-server and livekit-server sit in for the
+        same reasons.
+        """
+
         workspace = self.config.workspace
         result = self.transport.run(
             (
                 "/usr/bin/env",
+                f"UV_PYTHON_INSTALL_DIR={TARGET_PYTHON_INSTALL_DIR}",
                 f"UV_DEFAULT_INDEX={workspace.python_index_url}",
                 f"UV_HTTP_TIMEOUT={workspace.python_http_timeout_seconds}",
                 f"UV_HTTP_RETRIES={workspace.python_http_retries}",

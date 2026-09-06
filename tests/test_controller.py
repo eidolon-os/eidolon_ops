@@ -790,8 +790,12 @@ def test_deploy_defaults_to_prepare_and_dry_run(setup_controller) -> None:
         for remote, _sudo in transport.remote_calls
         if any(token.endswith("/prepare_target.py") for token in remote)
     )
-    assert prepare_command[:6] == (
+    assert prepare_command[:7] == (
         "/usr/bin/env",
+        # Where uv puts an interpreter it has to fetch. Under sudo its default
+        # is root's home, which is 0700 and refuses every service user, so the
+        # venvs would point at a Python none of them may execute.
+        "UV_PYTHON_INSTALL_DIR=/usr/local/lib/eidolon-foundation/python",
         "UV_DEFAULT_INDEX=https://pypi.org/simple",
         "UV_HTTP_TIMEOUT=120",
         "UV_HTTP_RETRIES=8",
