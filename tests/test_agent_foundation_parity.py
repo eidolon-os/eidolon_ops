@@ -10,6 +10,8 @@ stops it.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from eidolon_ops import foundation as ops
@@ -164,7 +166,7 @@ def test_the_agent_writes_a_sources_list_it_could_fetch_from(profile_id: str) ->
         path = next(
             value.split("=", 1)[1] for value in options if value.startswith("Dir::Etc::sourcelist=")
         )
-        text = open(path, encoding="utf-8").read()
+        text = Path(path).read_text(encoding="utf-8")
 
     profile = ops.FOUNDATION_PROFILES[profile_id]
     assert "{suite}" not in text, "the suite placeholder must be filled in"
