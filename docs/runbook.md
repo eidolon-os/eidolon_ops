@@ -98,8 +98,14 @@ uv run eidolon-ops --config /absolute/path/hosts/pi5.toml \
   kernel-schema-reset --apply --forget-selections <the number the plan reported>
 ```
 
-`--forget-selections` is required only when the count is non-zero, and must equal it. The operation refuses
-unless the installed Kernel itself says it will not open the file, refuses when the count is unknown, stops
+Run the plan first and use the command it prints: the acknowledgement depends on what the census found.
+`--forget-selections N` is required when the count is non-zero and must equal it. A database old enough to
+predate `kernel_body_assignments` cannot be counted at all — the most common case, since a Host one schema
+version behind has no such table — and then the acknowledgement is `--forget-uncounted-selections`, which
+says "the loss is real and unmeasured, and I accept it". The two are not interchangeable: the uncounted
+flag is refused when the Kernel did manage a count, so it can never be used to skip typing the number.
+
+The operation refuses unless the installed Kernel itself says it will not open the file, stops
 `eidolond` with the Kernel so nothing restarts it mid-rename, **renames** the database and its `-wal`/`-shm`
 sidecars to `<name>.stale-schema-<UTC timestamp>` beside themselves, and starts the reconciler again. Nothing
 is deleted, and no other authority is touched — in particular the Owner Domain generation does not advance,

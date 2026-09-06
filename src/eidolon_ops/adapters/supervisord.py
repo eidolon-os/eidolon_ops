@@ -106,7 +106,11 @@ class SupervisordSupervisor:
         return removed
 
     def kernel_schema_reset(
-        self, *, apply: bool, forget_selections: int | None
+        self,
+        *,
+        apply: bool,
+        forget_selections: int | None,
+        forget_uncounted_selections: bool = False,
     ) -> dict[str, object]:
         """Plan without touching the Host; apply behind a stop it hands down.
 
@@ -118,7 +122,11 @@ class SupervisordSupervisor:
 
         product = self._product()
         if not apply:
-            return product.kernel_schema_reset(apply=False, forget_selections=forget_selections)
+            return product.kernel_schema_reset(
+                apply=False,
+                forget_selections=forget_selections,
+                forget_uncounted_selections=forget_uncounted_selections,
+            )
         phases = Journal(self.progress)
 
         def quiesce() -> dict[str, object]:
@@ -134,7 +142,10 @@ class SupervisordSupervisor:
 
         phases.begin("ask")
         applied = product.kernel_schema_reset(
-            apply=True, forget_selections=forget_selections, quiesce=quiesce
+            apply=True,
+            forget_selections=forget_selections,
+            forget_uncounted_selections=forget_uncounted_selections,
+            quiesce=quiesce,
         )
         phases.begin("set-aside")
         phases.append({"phase": "set-aside", "result": {"renamed": applied.get("renamed")}})

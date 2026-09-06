@@ -1120,7 +1120,11 @@ class EidolonPiController:
         return result
 
     def kernel_schema_reset(
-        self, *, apply: bool, forget_selections: int | None
+        self,
+        *,
+        apply: bool,
+        forget_selections: int | None,
+        forget_uncounted_selections: bool = False,
     ) -> dict[str, object]:
         """Set aside a Kernel authority this Host's own Kernel refuses to open.
 
@@ -1135,6 +1139,8 @@ class EidolonPiController:
             return self.transport.run_agent("kernel-schema-plan", payload, timeout=180)
         if forget_selections is not None:
             payload["forget_selections"] = forget_selections
+        if forget_uncounted_selections:
+            payload["forget_uncounted_selections"] = True
         result = self.transport.run_agent("kernel-schema-reset", payload, timeout=600)
         if result.get("status") not in {"kernel_schema_reset", "absent"}:
             raise OperationsError("Kernel schema reset returned invalid evidence")

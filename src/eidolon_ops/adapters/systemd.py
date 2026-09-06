@@ -77,10 +77,16 @@ class SystemdSupervisor:
         return self.release.reset(wipe_authority_data=wipe_authority_data, apply=apply)
 
     def kernel_schema_reset(
-        self, *, apply: bool, forget_selections: int | None
+        self,
+        *,
+        apply: bool,
+        forget_selections: int | None,
+        forget_uncounted_selections: bool = False,
     ) -> dict[str, object]:
         return self.release.kernel_schema_reset(
-            apply=apply, forget_selections=forget_selections
+            apply=apply,
+            forget_selections=forget_selections,
+            forget_uncounted_selections=forget_uncounted_selections,
         )
 
 

@@ -105,20 +105,35 @@ def kernel_evidence(
 
 
 def refuse_unless_warranted(
-    report: Mapping[str, object], *, acknowledged: int | None
+    report: Mapping[str, object],
+    *,
+    acknowledged: int | None,
+    forget_uncounted: bool = False,
 ) -> None:
-    """Three ways this must not run, each of them a Host made worse.
+    """Every way this must not run — and, for each, a way it can.
 
-    The first is the important one: it runs only when the installed Kernel
-    itself says it will not open this file. The second is that same refusal from
-    the other side — a Kernel that could not be asked has not said no.
+    Two refusals are absolute. It runs only when the installed Kernel itself
+    says it will not open this file, and a Kernel that could not be asked has
+    not said no. Neither has a flag, because neither is a thing an operator can
+    know better than the Kernel does.
 
-    The third is the confirmation, and it is deliberately proportional. Where
-    nothing would be lost, ``--apply`` is enough; most Hosts that fall behind the
-    schema are development Hosts holding no Owner selection at all, and a
-    ceremony performed every time is a ceremony that stops being read. Where
-    selections would be lost, the operator types back how many — which is the one
-    number the old ``rm`` never made anybody look at.
+    The rest are confirmations, and the rule is that **every confirmation has a
+    door**. The first version of this did not, and the omission was found by the
+    first person to use the command: a database one schema version behind has no
+    ``kernel_body_assignments`` at all, so the count was ``None``, so the gate
+    refused — and no value of ``--forget-selections`` could change that, while
+    the plan cheerfully said to run ``--apply``. A refusal with no reachable
+    door is just a slower way of telling somebody to use ``rm``, which is the
+    thing this command exists to replace.
+
+    So the confirmation is proportional in three steps rather than two:
+
+    * nothing to lose — ``--apply`` is enough. Most Hosts behind the schema are
+      development Hosts, and a ceremony demanded every time stops being read;
+    * a known loss — the operator types the count back;
+    * an unknown loss — the operator says *that* deliberately, which is a
+      different statement and gets a different flag. It is not accepted when the
+      count is available: otherwise it would be a way to skip typing the number.
     """
 
     if report.get("accepted") is True:
@@ -134,10 +149,23 @@ def refuse_unless_warranted(
         )
     selections = report.get("selections")
     if not isinstance(selections, int):
+        if forget_uncounted:
+            return
+        table = report.get("selection_table")
+        column = report.get("selection_column")
+        where = f" — it has no {table}.{column} —" if table and column else ""
         raise TargetError(
-            "this Kernel cannot count the Owner Companion selections in this database, so "
-            "how much this would destroy is unknown. Copy the file off this Host before "
-            "going further; this operation will not proceed on an unknown loss"
+            "this Kernel cannot count the Owner Companion selections in this database"
+            f"{where} so the loss is real but unmeasured. The file is renamed rather "
+            "than deleted, so it stays on this Host to be read — but nothing puts those "
+            "selections back. Re-run with --forget-uncounted-selections to say so "
+            "deliberately"
+        )
+    if forget_uncounted:
+        raise TargetError(
+            f"this Kernel counted the loss — {selections} Owner Companion selection(s) — "
+            "so --forget-uncounted-selections does not apply. Acknowledge the number "
+            f"itself with --forget-selections {selections}"
         )
     if selections == 0:
         return
@@ -211,6 +239,13 @@ def acknowledged_selections(payload: Mapping[str, object]) -> int | None:
     return value
 
 
+def forgets_uncounted(payload: Mapping[str, object]) -> bool:
+    value = payload.get("forget_uncounted_selections", False)
+    if type(value) is not bool:
+        raise TargetError("forget_uncounted_selections must be a boolean")
+    return value
+
+
 # -- the product Host -----------------------------------------------------------
 
 
@@ -255,9 +290,10 @@ def kernel_schema_reset(
     if plan["status"] == "absent":
         return plan
     acknowledged = acknowledged_selections(payload)
+    uncounted = forgets_uncounted(payload)
     report = plan["kernel"]
     assert isinstance(report, dict)
-    refuse_unless_warranted(report, acknowledged=acknowledged)
+    refuse_unless_warranted(report, acknowledged=acknowledged, forget_uncounted=uncounted)
 
     database = primitives.host_path(root, KERNEL_DATABASE)
     suffix = set_aside_suffix(at)
@@ -269,7 +305,7 @@ def kernel_schema_reset(
         again = kernel_evidence(
             database=database, interpreter=_product_interpreter(root), command=command
         )
-        refuse_unless_warranted(again, acknowledged=acknowledged)
+        refuse_unless_warranted(again, acknowledged=acknowledged, forget_uncounted=uncounted)
         if manage_services:
             _checked(
                 command,

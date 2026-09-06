@@ -322,7 +322,11 @@ class HostController:
         return self._planned_or_applied(plan, report, applied=apply)
 
     def kernel_schema_reset(
-        self, *, apply: bool, forget_selections: int | None
+        self,
+        *,
+        apply: bool,
+        forget_selections: int | None,
+        forget_uncounted_selections: bool = False,
     ) -> Evidence:
         # Asked of the supervisor for the same reason ``reset`` is: both Hosts
         # hold this authority, one under a release and one under a source run,
@@ -330,7 +334,9 @@ class HostController:
         plan = plans.kernel_schema_reset(self.profile.host_id, apply=apply)
         self.adapter.require(Capability.KERNEL_SCHEMA_RESET)
         report = self.adapter.supervisor.kernel_schema_reset(
-            apply=apply, forget_selections=forget_selections
+            apply=apply,
+            forget_selections=forget_selections,
+            forget_uncounted_selections=forget_uncounted_selections,
         )
         # ``absent`` is a read, not a change: this Host had no Kernel authority
         # to move, and reporting it as applied would put a mutation in the run

@@ -504,11 +504,22 @@ CATALOG: tuple[Operation, ...] = (
                 default=0,
                 minimum=0,
             ),
+            Field(
+                name="forget_uncounted_selections",
+                kind=Kind.BOOLEAN,
+                label="这份库数不出来，我认了",
+                help=(
+                    "只有当计划说 Kernel 认不出这份库的形状时才勾。"
+                    "数得出来的时候勾它会被拒绝——那时候要填上面那个数字"
+                ),
+            ),
             _apply("执行改名", "不勾选只问 Kernel 认不认这份库、以及挪开会丢什么"),
         ),
         plan=lambda host_id, params: plans.kernel_schema_reset(host_id, apply=params["apply"]),
         invoke=lambda controller, params: controller.kernel_schema_reset(
-            apply=params["apply"], forget_selections=params["forget_selections"]
+            apply=params["apply"],
+            forget_selections=params["forget_selections"],
+            forget_uncounted_selections=params["forget_uncounted_selections"],
         ),
         applies=lambda params: params["apply"],
     ),

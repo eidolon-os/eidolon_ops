@@ -22,6 +22,7 @@ from eidolon_ops.hostagent.authority_reset import lineage_evidence
 from eidolon_ops.hostagent.kernel_schema import (
     absent_document,
     acknowledged_selections,
+    forgets_uncounted,
     kernel_evidence,
     plan_document,
     refuse_unless_warranted,
@@ -185,6 +186,7 @@ class LocalProductSource:
         *,
         apply: bool,
         forget_selections: int | None,
+        forget_uncounted_selections: bool = False,
         quiesce: Callable[[], object] | None = None,
     ) -> dict[str, object]:
         """Set aside a Kernel authority this checkout's Kernel refuses to open.
@@ -218,6 +220,9 @@ class LocalProductSource:
                 report,
                 acknowledged=acknowledged_selections(
                     {"forget_selections": forget_selections}
+                ),
+                forget_uncounted=forgets_uncounted(
+                    {"forget_uncounted_selections": forget_uncounted_selections}
                 ),
             )
         except TargetError as exc:

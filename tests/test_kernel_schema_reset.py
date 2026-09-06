@@ -21,6 +21,7 @@ selection without the operator having read how many.
 from __future__ import annotations
 
 import json
+import sqlite3
 import subprocess
 from pathlib import Path
 
@@ -159,17 +160,28 @@ def test_a_loss_this_kernel_cannot_count_is_refused_rather_than_guessed(
 ) -> None:
     """The shape the real incident file has: a Kernel that cannot count it.
 
-    Proceeding here would destroy an unknown number of Owner selections while
-    reporting nothing, which is exactly the silence being replaced.
+    Proceeding by default here would destroy an unknown number of Owner
+    selections while reporting nothing, which is exactly the silence being
+    replaced. It refuses — but it refuses *towards* a door, which is the part
+    the first version got wrong.
     """
 
     _host(tmp_path)
     kernel = FakeKernel(_report(selections=None, assignments=None, countable=False))
 
-    with pytest.raises(TargetError, match="will not proceed on an unknown loss"):
+    with pytest.raises(TargetError, match="--forget-uncounted-selections"):
         target.kernel_schema_reset(
             _payload(), root=tmp_path, command=kernel, manage_services=False
         )
+    assert (tmp_path / target.KERNEL_DATABASE.relative_to("/")).is_file()
+
+    applied = target.kernel_schema_reset(
+        _payload(forget_uncounted_selections=True),
+        root=tmp_path,
+        command=kernel,
+        manage_services=False,
+    )
+    assert applied["status"] == "kernel_schema_reset"
 
 
 def test_destroying_owner_selections_needs_the_number_typed_back(tmp_path: Path) -> None:
@@ -292,3 +304,191 @@ def test_a_host_whose_kernel_cannot_be_asked_at_all_refuses(tmp_path: Path) -> N
 
     with pytest.raises(TargetError, match="Refusing rather than setting an authority aside"):
         target.kernel_schema_plan(_payload(), root=tmp_path, command=FakeKernel(_report()))
+
+
+# -- the plan and the gate must agree ------------------------------------------
+
+KERNEL_ROOT = Path(__file__).resolve().parents[2] / "eidolon_kernel"
+KERNEL_PYTHON = KERNEL_ROOT / ".venv/bin/python"
+_BUILD_V8 = (
+    "import sys;"
+    "from pathlib import Path;"
+    "from eidolon_kernel.adapters.persistence.sqlite import SqliteMountStore;"
+    "SqliteMountStore(Path(sys.argv[1])).close()"
+)
+_ASSIGNMENT = (
+    "INSERT INTO kernel_body_assignments VALUES "
+    "(?, ?, 'body', 'owner-1', ?, 'user_selected', NULL, 'default', '[]', 1, 1, "
+    "'t', 't', ?, 'f')"
+)
+
+
+def _flags(remediation: str) -> dict[str, object]:
+    """Read the command the Kernel printed back as the flags it means.
+
+    Parsed rather than assumed, because the string is the thing an operator
+    copies. If it ever names a flag this side does not implement, that is the
+    defect and it should surface here.
+    """
+
+    words = remediation.split()
+    known = {"--apply", "--forget-selections", "--forget-uncounted-selections"}
+    unknown = [
+        word for word in words if word.startswith("--") and word not in known
+    ]
+    assert not unknown, f"the Kernel named flags ops does not implement: {unknown}"
+    acknowledged: int | None = None
+    if "--forget-selections" in words:
+        acknowledged = int(words[words.index("--forget-selections") + 1])
+    return {
+        "acknowledged": acknowledged,
+        "forget_uncounted": "--forget-uncounted-selections" in words,
+    }
+
+
+def _kernel_report(database: Path) -> dict[str, object]:
+    result = subprocess.run(
+        (str(KERNEL_PYTHON), "-c", target.CENSUS_SCRIPT, str(database)),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return json.loads(result.stdout)
+
+
+@pytest.fixture(scope="module")
+def kernel_python() -> Path:
+    if not KERNEL_PYTHON.is_file():
+        pytest.skip("sibling eidolon_kernel checkout is unavailable")
+    return KERNEL_PYTHON
+
+
+def _shapes(tmp_path: Path) -> dict[str, Path]:
+    """One real database per census shape, built by the real Kernel."""
+
+    stale = tmp_path / "stale.sqlite3"
+    subprocess.run(
+        (str(KERNEL_PYTHON), "-c", _BUILD_V8, str(stale)), check=True, capture_output=True
+    )
+    with_selections = tmp_path / "with-selections.sqlite3"
+    subprocess.run(
+        (str(KERNEL_PYTHON), "-c", _BUILD_V8, str(with_selections)),
+        check=True,
+        capture_output=True,
+    )
+    for database, rows in ((stale, ()), (with_selections, ("c-1", "c-2", None))):
+        connection = sqlite3.connect(database)
+        for index, companion in enumerate(rows, start=1):
+            connection.execute(
+                _ASSIGNMENT, (f"body-{index}", f"device-{index}", companion, f"r-{index}")
+            )
+        # What actually happens to a Host: the code moved on and the file did not.
+        connection.execute("ALTER TABLE kernel_requests ADD COLUMN arrived_late TEXT")
+        connection.commit()
+        connection.close()
+
+    # The shape the first user of this command hit: one schema version behind,
+    # so the table holding the Owner's selection does not exist yet.
+    older = tmp_path / "older.sqlite3"
+    connection = sqlite3.connect(older)
+    connection.execute("CREATE TABLE kernel_device_mounts(device_id TEXT PRIMARY KEY)")
+    connection.commit()
+    connection.close()
+
+    unreadable = tmp_path / "not-a-database.sqlite3"
+    unreadable.write_text("this is not a Kernel authority", encoding="utf-8")
+
+    return {
+        "no selection to lose": stale,
+        "a counted loss": with_selections,
+        "an uncounted loss": older,
+        "unreadable": unreadable,
+    }
+
+
+def test_every_command_the_kernel_prints_is_one_this_gate_accepts(
+    kernel_python: Path, tmp_path: Path
+) -> None:
+    """The defect this exists for was found by the first person to run the command.
+
+    A database one schema version behind has no ``kernel_body_assignments``, so
+    the count came back ``None``, so the gate refused — and no value of
+    ``--forget-selections`` could change that. Meanwhile the refusal the operator
+    was reading said to run ``--apply``. Plan and apply disagreed, on the single
+    most likely database in the workspace.
+
+    Neither side was wrong on its own, which is why neither side's tests caught
+    it: the Kernel named a command without knowing what ops accepts, and ops
+    accepted commands without knowing what the Kernel names. This is the seam,
+    asserted against a real Kernel over a real database of every census shape.
+    """
+
+    for description, database in _shapes(tmp_path).items():
+        report = _kernel_report(database)
+        remediation = report["remediation"]
+        if remediation is None:
+            # Only the unreadable database may decline to name a command, and
+            # then the gate must refuse it however it is invoked.
+            assert report["accepted"] is None, description
+            with pytest.raises(TargetError):
+                target.refuse_unless_warranted(
+                    report, acknowledged=None, forget_uncounted=True
+                )
+            continue
+        assert report["accepted"] is False, description
+        # Does not raise: the command the operator was told to run, runs.
+        target.refuse_unless_warranted(report, **_flags(remediation))
+
+
+def test_the_uncounted_door_is_not_a_way_around_typing_the_number(
+    kernel_python: Path, tmp_path: Path
+) -> None:
+    """Otherwise the wider acknowledgement would swallow the narrower one.
+
+    "I accept losing an unknown number" and "I accept losing three" are
+    different statements, and only the second can be checked against what the
+    Kernel actually counted.
+    """
+
+    counted = _kernel_report(_shapes(tmp_path)["a counted loss"])
+    assert counted["selections"] == 2
+
+    with pytest.raises(TargetError, match="does not apply"):
+        target.refuse_unless_warranted(counted, acknowledged=None, forget_uncounted=True)
+    with pytest.raises(TargetError, match="--forget-selections 2"):
+        target.refuse_unless_warranted(counted, acknowledged=None, forget_uncounted=False)
+    target.refuse_unless_warranted(counted, acknowledged=2, forget_uncounted=False)
+
+
+def test_the_uncounted_door_opens_for_the_database_that_closed_it(
+    kernel_python: Path, tmp_path: Path
+) -> None:
+    older = _shapes(tmp_path)["an uncounted loss"]
+    report = _kernel_report(older)
+
+    assert report["selections"] is None
+    assert "--forget-uncounted-selections" in report["remediation"]
+    for acknowledged in (None, 0, 1):
+        with pytest.raises(TargetError, match="--forget-uncounted-selections"):
+            target.refuse_unless_warranted(report, acknowledged=acknowledged)
+    target.refuse_unless_warranted(report, acknowledged=None, forget_uncounted=True)
+
+
+def test_the_refusal_no_longer_asks_for_something_the_operation_makes_pointless(
+    kernel_python: Path, tmp_path: Path
+) -> None:
+    """It used to say "copy the file off this Host before going further".
+
+    The operation renames rather than deletes, so the file never leaves. The
+    advice was both unnecessary and wrong about what was going to happen, and it
+    sat where the missing door should have been.
+    """
+
+    report = _kernel_report(_shapes(tmp_path)["an uncounted loss"])
+
+    with pytest.raises(TargetError) as raised:
+        target.refuse_unless_warranted(report, acknowledged=None)
+
+    message = str(raised.value)
+    assert "Copy the file off this Host" not in message
+    assert "renamed rather than deleted" in message

@@ -86,7 +86,9 @@ OPERATIONS: dict[str, Callable[[HostController, argparse.Namespace], object]] = 
         wipe_authority_data=a.wipe_authority_data, apply=a.apply
     ),
     "kernel-schema-reset": lambda controller, a: controller.kernel_schema_reset(
-        apply=a.apply, forget_selections=a.forget_selections
+        apply=a.apply,
+        forget_selections=a.forget_selections,
+        forget_uncounted_selections=a.forget_uncounted_selections,
     ),
     "deploy": lambda controller, a: controller.deploy(
         release_id=a.release_id,
@@ -329,6 +331,15 @@ def _parser() -> argparse.ArgumentParser:
     # reported, so the one fact nothing on this Host can give back has to be read
     # before it is destroyed. Where the count is zero it is not asked for.
     kernel_schema_reset.add_argument("--forget-selections", type=int, default=None)
+    # The other half of the same acknowledgement, for the database that cannot be
+    # counted at all — most often one a single schema version behind, which has
+    # no assignment table to count. Separate from the flag above rather than a
+    # sentinel value of it, because "I accept losing 3" and "I accept losing an
+    # unknown number" are different statements and only one of them can be
+    # checked against the Kernel's answer.
+    kernel_schema_reset.add_argument(
+        "--forget-uncounted-selections", action="store_true"
+    )
     abandon = operations.add_parser(
         "abandon",
         help="give up a prepared candidate nobody will finish (never an activated one)",
