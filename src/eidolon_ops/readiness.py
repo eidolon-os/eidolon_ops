@@ -47,7 +47,19 @@ DEFAULT_CHANNEL_SETTLE_SECONDS = 240
 #: every product unit, two HTTPS calls to the Hub, mDNS browsing, file checks.
 #: Seconds on a healthy board, and the allowance is generous because being
 #: wrong here turns a degraded report into a timed-out connection.
-READINESS_OVERHEAD_SECONDS = 60
+_READINESS_FIXED_OVERHEAD_SECONDS = 60
+
+#: How long an indeterminate setup answer is retried before it is called
+#: ``unknown``, which is the only answer worth asking again — ``absent`` and
+#: ``ready`` are settled facts about a Host. What this absorbs is the narrow
+#: case where Data is up and the one hop to it failed.
+SETUP_READINESS_SETTLE_SECONDS = 10
+
+#: Derived, so raising either half cannot leave the operator's transport
+#: giving up before the Host has finished answering.
+READINESS_OVERHEAD_SECONDS = (
+    _READINESS_FIXED_OVERHEAD_SECONDS + SETUP_READINESS_SETTLE_SECONDS
+)
 
 #: The deadline the operator's side holds. Derived rather than written down, so
 #: raising the budget cannot leave a transport that gives up before the Host
@@ -163,16 +175,16 @@ READINESS_CONTRACT: tuple[ReadinessCheck, ...] = (
         ReadinessFact.LOCAL_API_TARGETS_HUB,
         "the Local API is pointed at this Host's Hub and its certificate",
     ),
-    # Every other Local API fact here is about a process answering and being
-    # pointed at the right things. All of them were green on a Host where the
-    # Owner Bootstrap held had no Workspace in the Data plane, so the setup
-    # contract refused every phone identically and forever, and this gate
-    # called that Host ready. Services answering is not the same fact as a
-    # person being able to finish, and only the second one is readiness.
+    # Every other Local API fact here is about a process being up and pointed
+    # at the right things, which a unit's ActiveState answers. This one asks
+    # the question setup actually depends on, of the component that owns the
+    # answer. All the others were green on a Host no phone could finish
+    # setting up: services answering is not the same fact as a person being
+    # able to finish, and only the second one is readiness.
     _both(
         ReadinessFact.HOST_SETUP_COMPLETABLE,
-        "a phone that claims this Host can finish setup: the Owner Bootstrap "
-        "holds and the Data Workspace agree",
+        "a phone that claims this Host can finish setup: its Workspace "
+        "authority answers for it",
     ),
     _both(
         ReadinessFact.LIVEKIT_CLIENT_ORIGIN,
@@ -246,10 +258,14 @@ READINESS_CONTRACT: tuple[ReadinessCheck, ...] = (
 #: Which answers from the Local API's setup surface mean a phone could finish.
 #:
 #: ``absent`` is a Host nobody has set up yet and ``ready`` is one somebody
-#: has; both are Hosts a person can walk up to and use. ``orphaned`` is the
-#: Host whose two halves disagree, and ``unknown`` is a Host that could not be
-#: asked — which is not the same as a Host that answered well. Fail closed, as
-#: everywhere else here: a check that could not be made has not passed.
+#: has; both are Hosts a person can walk up to and use. ``unknown`` is a Host
+#: that could not be asked, which is not the same as a Host that answered
+#: well. Fail closed, as everywhere else here: a check that could not be made
+#: has not passed.
+#:
+#: There was an ``orphaned`` state, for a Host whose Bootstrap held an Owner
+#: its Data plane had no Workspace for. It was reachable only because two
+#: stores held one fact; one does now, so nothing can disagree.
 HOST_SETUP_COMPLETABLE_STATES = frozenset({"absent", "ready"})
 
 
@@ -265,6 +281,18 @@ def setup_is_completable(report: object) -> bool:
         and report.get("contract_version") == "1"
         and report.get("state") in HOST_SETUP_COMPLETABLE_STATES
     )
+
+
+def setup_answer_is_settled(report: Mapping[str, object]) -> bool:
+    """Whether re-asking could change this answer.
+
+    The predicate both probes settle on. ``absent`` and ``ready`` are settled
+    facts about a Host, so a retry window spent on either is a slower report
+    and nothing else. Only ``unknown`` — the answer that means the question
+    could not be put — is worth asking again.
+    """
+
+    return report.get("state") != "unknown"
 
 
 def setup_readiness_evidence(report: object) -> dict[str, object]:

@@ -53,6 +53,12 @@ READINESS_FACTS = (
 #: because it runs alone on the Host; a drift test keeps the two identical.
 SETUP_COMPLETABLE_STATES = ("absent", "ready")
 
+#: How long an indeterminate setup answer is retried, and only that one:
+#: ``absent`` and ``ready`` are settled facts, so re-asking either would only
+#: make the report slower. The operator's copy of
+#: ``readiness.SETUP_READINESS_SETTLE_SECONDS``; a drift test pins them.
+SETUP_READINESS_SETTLE_SECONDS = 10
+
 _FOUNDATION_READINESS_UNITS = (
     "bluetooth.service",
     "NetworkManager.service",
@@ -330,25 +336,32 @@ def setup_readiness_report() -> dict[str, object]:
     """Whether a phone claimed onto this Host right now could finish setup.
 
     Every other Local API fact in this report is about a process answering.
-    All of them read green on a Host whose Bootstrap held an Owner its Data
-    plane had no Workspace for — a Host that refused every phone's setup,
-    identically, forever, while this gate called it ready.
+    All of them read green on a Host no phone could finish setting up, which
+    is why this one asks the question setup depends on rather than inferring
+    it from a unit being active.
     """
 
-    try:
-        report = local_api_json("/api/local/v1/setup/readiness")
-    except TargetError as exc:
-        # A Local API predating this route answers 404, which arrives here as
-        # a TargetError. Same verdict as any other unanswerable check, and a
-        # different sentence, because that one is restarted rather than repaired.
-        return {"healthy": False, "state": "unknown", "error": str(exc)}
-    state = report.get("state")
-    return {
-        "healthy": report.get("contract_version") == "1"
-        and state in SETUP_COMPLETABLE_STATES,
-        "state": state,
-        "operation_id": report.get("operation_id"),
-    }
+    def observe() -> dict[str, object]:
+        try:
+            report = local_api_json("/api/local/v1/setup/readiness")
+        except TargetError as exc:
+            # A Local API predating this route answers 404, which arrives here
+            # as a TargetError. Same verdict as any other unanswerable check,
+            # and a different sentence: that one is restarted, not repaired.
+            return {"healthy": False, "state": "unknown", "error": str(exc)}
+        state = report.get("state")
+        return {
+            "healthy": report.get("contract_version") == "1"
+            and state in SETUP_COMPLETABLE_STATES,
+            "state": state,
+            "operation_id": report.get("operation_id"),
+        }
+
+    return primitives.settle(
+        observe,
+        lambda report: report.get("state") != "unknown",
+        seconds=SETUP_READINESS_SETTLE_SECONDS,
+    )
 
 def app_ready(payload: Mapping[str, object]) -> dict[str, object]:
     """Attest every fact the operator's readiness contract declares.

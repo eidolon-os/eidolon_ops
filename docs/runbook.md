@@ -76,41 +76,37 @@ irreversible. Foundation packages/artifacts and service identities are preserved
 fixed 15 units, refuses an active unit that cannot stop, refuses mounted deletion roots, reloads systemd and is
 idempotent when units or paths are already absent.
 
-## A Host every phone is refused setup on
+## A Host no phone can finish setting up
 
-Every service healthy, `app-ready: observed`, and a freshly claimed phone is
-answered `409` at `GET /api/local/v1/setup/workspace` and can go no further.
-That Host holds an Owner in Bootstrap whose Workspace the Data plane no longer
-has — most often because a Data restore, or an older `reset --wipe-authority-data`,
-destroyed the Workspace while the Bootstrap root was kept.
+`app-ready` fails on `host_setup_completable`, and
+`GET /api/local/v1/setup/readiness` answers `unknown`.
 
-It is not per-phone. A Controller's Owner scope comes from Host state, so every
-phone ever claimed onto that Host inherits the same binding and gets the same
-answer. Nothing on a phone changes it.
-
-```bash
-uv run eidolon-ops --config /absolute/path/hosts/pi5.toml owner-reset
-```
-
-Read-only, and `app-ready` says the same thing under `host_setup_completable`
-(the Local API composes it at `GET /api/local/v1/setup/readiness`, which reports
-`orphaned` for exactly this Host). If the Workspace can be restored from a Data
-backup, restore it — that keeps the Owner, the Companion and the Persona.
+That fact means one thing now: this Host's Workspace authority did not answer.
+Not that a phone is at fault, and not that anything on the Host has to be
+repaired — the Data plane could not be asked, so the gate refuses rather than
+score a check it could not make. Look at whether `data` and `data-workspace`
+are up and answering; `backend_healthy` and the service health beside it are
+usually already saying so.
 
 ```bash
-uv run eidolon-ops --config /absolute/path/hosts/pi5.toml owner-reset --apply
+uv run eidolon-ops --config /absolute/path/hosts/pi5.toml app-ready
 ```
 
-Otherwise this withdraws the binding, and the next setup rebuilds the Workspace
-under the same Owner id — it is derived from the Host id, so it does not change.
-Every Controller Grant survives: no phone has to claim the Host again, the Host
-identity and pinned TLS stay, the saved networks stay, and every component
-database including the Data plane is untouched. `reset --wipe-authority-data`
-was the only way out of this before, and it takes all four.
+The evidence under `setup` says which failure it was. `state: "unknown"` with
+an error naming `/api/local/v1/setup/readiness` is a Local API still running
+the build it started with — restart it rather than repair anything. Any other
+`unknown` is the Data plane.
 
-Since this change, `reset --wipe-authority-data` withdraws the binding itself,
-before it removes anything — a reset that cannot leave the Host coherent
-removes nothing at all.
+**There used to be a third answer here, and a verb to repair it.** Bootstrap
+kept its own record that the Data plane held a Workspace for this Host's Owner,
+so a data restore or a `reset --wipe-authority-data` could leave the record
+behind and the Workspace gone. Every phone ever claimed onto such a Host
+inherited that Owner scope and was refused at setup, identically and forever,
+and nothing on any phone changed it. That is gone: Bootstrap no longer records
+anything about the Data plane, the Owner a request is scoped to is resolved
+from the plane that holds the Workspace, and a Host whose Workspace is missing
+simply reports `absent` and can be set up again. There is nothing left to
+withdraw, so there is no `owner-reset`.
 
 ## A Kernel that will not open its own authority
 

@@ -152,6 +152,10 @@ def test_the_declared_check_set_is_the_same_on_both_sides() -> None:
     assert set(probe.SETUP_COMPLETABLE_STATES) == (
         readiness.HOST_SETUP_COMPLETABLE_STATES
     )
+    assert (
+        probe.SETUP_READINESS_SETTLE_SECONDS
+        == readiness.SETUP_READINESS_SETTLE_SECONDS
+    )
     assert product_payload()["channel_worker"] == {
         "port": readiness.CHANNEL_WORKER_PORT,
         "agent_name": readiness.CHANNEL_AGENT_NAME,
@@ -611,7 +615,6 @@ def test_a_host_that_cannot_remove_a_device_is_not_ready(
     [
         ({"contract_version": "1", "state": "ready"}, True),
         ({"contract_version": "1", "state": "absent"}, True),
-        ({"contract_version": "1", "state": "orphaned"}, False),
         # Could not be asked is not a check that passed.
         ({"contract_version": "1", "state": "unknown"}, False),
         ({"state": "ready"}, False),
@@ -649,11 +652,10 @@ def test_a_host_no_phone_can_finish_setting_up_is_not_ready(
 ) -> None:
     """Twelve services healthy, and nobody can use the product.
 
-    The state a real Host reached: Bootstrap held an Owner from an earlier
-    setup and the Data plane had no Workspace under it, so every phone that
-    claimed the Host was refused at `GET /setup/workspace` and could go no
-    further. Every unit was active, every endpoint answered, and this gate
-    reported app-ready — which is the defect, not the symptom.
+    A real Host reported app-ready with every unit active while no phone could
+    finish setting it up. The units are not the fact setup depends on, so this
+    asks the component that owns that fact, and a Host whose answer cannot be
+    obtained fails the gate rather than being scored on the checks that could.
     """
 
     app = _app()
@@ -665,7 +667,7 @@ def test_a_host_no_phone_can_finish_setting_up_is_not_ready(
             {
                 "contract_version": "1",
                 "operation_id": "06607258-a650-5570-8c91-880e8f2fb9a9",
-                "state": "orphaned",
+                "state": "unknown",
             }
             if path == "/api/local/v1/setup/readiness"
             else _healthy_local_api(path)
@@ -678,7 +680,7 @@ def test_a_host_no_phone_can_finish_setting_up_is_not_ready(
     assert [n for n, v in result["checks"].items() if not v] == [
         "host_setup_completable"
     ]
-    assert result["setup"]["state"] == "orphaned"
+    assert result["setup"]["state"] == "unknown"
     assert "host_setup_completable" in describe_failures(result["checks"])
 
 
@@ -703,9 +705,25 @@ def test_the_states_this_gate_grades_are_the_states_admin_publishes() -> None:
     )
 
     assert published >= readiness.HOST_SETUP_COMPLETABLE_STATES
-    # Every published state is decided, not merely the passing ones: the two
-    # that fail are why this fact exists.
-    assert published - readiness.HOST_SETUP_COMPLETABLE_STATES == {
-        "orphaned",
-        "unknown",
-    }
+    # Every published state is decided, not merely the passing ones. There
+    # were three failing states once; ``orphaned`` went when Bootstrap stopped
+    # keeping a copy of what the Data plane held, because nothing could
+    # produce a disagreement any more. This assertion is what noticed.
+    assert published - readiness.HOST_SETUP_COMPLETABLE_STATES == {"unknown"}
+
+
+@pytest.mark.parametrize(
+    ("state", "settled"),
+    [("ready", True), ("absent", True), ("unknown", False)],
+)
+def test_only_an_unanswerable_setup_check_is_worth_asking_again(
+    state: str, settled: bool
+) -> None:
+    """A broken Host's report must not be the slow one.
+
+    ``absent`` is a Host nobody has set up, and it is a settled fact about it.
+    Settling on ``healthy`` instead would spend the whole retry window on
+    every Host awaiting its first setup and arrive at the same answer.
+    """
+
+    assert readiness.setup_answer_is_settled({"state": state}) is settled

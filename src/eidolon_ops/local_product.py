@@ -30,7 +30,6 @@ from eidolon_ops.hostagent.kernel_schema import (
     set_aside,
     set_aside_suffix,
 )
-from eidolon_ops.hostagent.owner_binding import release_owner_binding
 from eidolon_ops.hostagent.primitives import TargetError
 from eidolon_ops.hub_assets import (
     hub_settings_are_bound,
@@ -57,9 +56,11 @@ from eidolon_ops.process import ProcessRunner, checked
 from eidolon_ops.readiness import (
     CHANNEL_AGENT_NAME,
     DEFAULT_CHANNEL_SETTLE_SECONDS,
+    SETUP_READINESS_SETTLE_SECONDS,
     HostKind,
     ReadinessFact,
     is_ready,
+    setup_answer_is_settled,
     setup_readiness_evidence,
 )
 from eidolon_ops.source_resolution import SourceResolver
@@ -278,24 +279,6 @@ class LocalProductSource:
             )
         return Path(source.path) / ".venv/bin/python"
 
-    def _bootstrap_database_path(self) -> Path:
-        """Where Bootstrap keeps this profile's Host authority."""
-
-        return self.profile.paths.bootstrap_state_root / "bootstrap.sqlite3"
-
-    def _admin_interpreter_path(self) -> Path:
-        """The Admin this Host actually runs, which here is a worktree."""
-
-        source = self.config.sources.get("eidolon_admin")
-        if source is None:
-            raise OperationsError(
-                "this profile does not declare an eidolon_admin source, so "
-                "Bootstrap cannot be asked to release its Owner binding — and "
-                "wiping the Data authority under a binding that survives is "
-                "what leaves a Host no phone can finish setting up"
-            )
-        return Path(source.path) / ".venv/bin/python"
-
     # -- reset ---------------------------------------------------------------
 
     def reset(self, *, wipe_authority_data: bool, apply: bool) -> dict[str, object]:
@@ -326,19 +309,12 @@ class LocalProductSource:
         Kernel, Agent, Memory, NATS and the rest. That is the flag for a Host
         behind the schema, and it is irreversible.
 
-        It also withdraws one row the Bootstrap root keeps, and only that row.
-        Bootstrap records which Owner this Host holds, and that record is not a
-        fact of its own — it is the claim that the Data plane has a Workspace
-        for them, and the state root being destroyed here is where that
-        Workspace lived. Kept across this operation, the claim becomes false,
-        and it is false in the one direction nothing can recover from: a
-        Controller's Owner scope comes from Host state, so every phone ever
-        claimed onto this Host — including one claimed months later — inherits
-        a binding with no Workspace behind it and is refused at setup, forever.
-        That is a real Host, found on 2026-09-06 reporting itself fully healthy.
-        The Pi does not have this problem because its reset takes the whole
-        Bootstrap root; this profile deliberately keeps the Host identity, so it
-        has to take the claim on its own.
+        Nothing in the Bootstrap root has to be reached for this to leave a
+        coherent Host, which is a property rather than an accident: Bootstrap
+        records only what it can know by itself, so destroying the Data
+        authority cannot leave it asserting something about a Workspace. It
+        used to keep an Owner binding through exactly this operation, and a
+        Host that had been through it refused every phone at setup forever.
 
         Irreversible in one more way than the file list shows. The state root is
         where this Host keeps both halves of its Owner Authority lineage
@@ -351,7 +327,6 @@ class LocalProductSource:
         """
 
         paths = self.profile.paths
-        bootstrap_database = self._bootstrap_database_path()
         generated = [
             paths.config_root / "env",
             paths.config_root / "settings",
@@ -369,13 +344,6 @@ class LocalProductSource:
             "wipe_authority_data": wipe_authority_data,
             "targets": [str(path) for path in targets],
             "present": [str(path) for path in present],
-            # A row, not a path, and named separately for that reason: the
-            # Bootstrap root below is kept, and a reader who saw only that list
-            # would take the Owner binding inside it to be kept too. It is the
-            # one thing in there this operation withdraws.
-            "withdrawn": (
-                [f"{bootstrap_database}: Owner binding"] if wipe_authority_data else []
-            ),
             "kept": [
                 str(self._owner_material_root()),
                 str(paths.bootstrap_state_root),
@@ -394,9 +362,7 @@ class LocalProductSource:
                 + (
                     "; the Authority state behind them is destroyed, so prepare "
                     "advances owner_domain_generation and every existing device "
-                    "Claim and credential becomes void, and Bootstrap's Owner "
-                    "binding is withdrawn with it so the next phone can set this "
-                    "Host up again"
+                    "Claim and credential becomes void"
                     if wipe_authority_data
                     else ""
                 )
@@ -404,45 +370,12 @@ class LocalProductSource:
         }
         if not apply:
             return {**report, "status": "planned"}
-        # Before anything is removed, so a Host that cannot be left coherent is
-        # a Host this refuses to touch at all. Every Controller Grant, the Host
-        # identity and the saved networks are untouched by it: what is withdrawn
-        # is one claim about the store this operation is about to destroy.
-        owner_binding = (
-            self._release_owner_binding(bootstrap_database)
-            if wipe_authority_data
-            else None
-        )
         for path in present:
             if path.is_dir() and not path.is_symlink():
                 shutil.rmtree(path)
             else:
                 path.unlink()
-        return {
-            **report,
-            "status": "reset",
-            "removed": [str(path) for path in present],
-            **({} if owner_binding is None else {"owner_binding": owner_binding}),
-        }
-
-    def _release_owner_binding(self, database: Path) -> dict[str, object]:
-        """Withdraw Bootstrap's claim that Data holds a Workspace for this Host.
-
-        A Host with no Bootstrap database makes no such claim, and is not asked
-        for Admin's interpreter in order to be told so — the first install runs
-        this path, and refusing it for a missing worktree would be refusing a
-        Host that has nothing to lose.
-        """
-
-        if not database.exists():
-            return {"released": False, "state": "absent", "database": str(database)}
-        try:
-            return release_owner_binding(
-                database=database,
-                interpreter=self._admin_interpreter_path(),
-            )
-        except TargetError as exc:
-            raise OperationsError(str(exc)) from exc
+        return {**report, "status": "reset", "removed": [str(path) for path in present]}
 
     def _require_removable(self, targets: Sequence[Path]) -> None:
         """Prove nothing here can reach code or an unrelated tree.
@@ -684,10 +617,15 @@ class LocalProductSource:
         # Asked over loopback, not over the LAN address: this is the Host being
         # asked about itself, and the answer must not depend on which interface
         # the question arrived on.
-        setup = setup_readiness_evidence(
-            probes.http_json(
-                f"https://127.0.0.1:{ports['local_api']}/api/local/v1/setup/readiness"
-            )
+        setup = probes.settle(
+            lambda: setup_readiness_evidence(
+                probes.http_json(
+                    f"https://127.0.0.1:{ports['local_api']}"
+                    "/api/local/v1/setup/readiness"
+                )
+            ),
+            setup_answer_is_settled,
+            seconds=SETUP_READINESS_SETTLE_SECONDS,
         )
         hub = probes.http_health(f"https://{address}:{app.hub_https_port}/health")
         livekit_origin = urlparse(app.livekit_client_url)

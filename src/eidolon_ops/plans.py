@@ -332,31 +332,6 @@ def reset(host_id: str, *, apply: bool, wipe_authority_data: bool) -> Plan:
     )
 
 
-def owner_reset(host_id: str, *, apply: bool) -> Plan:
-    """Withdraw one claim, and nothing anybody holds.
-
-    Reversible, and deliberately not graded with the resets. Nothing is
-    destroyed: the row said the Data plane held a Workspace for this Host's
-    Owner, and a Host this is run on is one where that is already untrue —
-    running it back is the next setup, which rebuilds the same Owner id from
-    the same Host id. Every Controller Grant, the Host identity, the saved
-    networks and every component database survive untouched, which is the
-    whole point of having it: ``reset --wipe-authority-data`` is what an
-    operator reached for instead, and it takes all four.
-    """
-
-    return Plan(
-        operation="owner-reset",
-        host_id=host_id,
-        steps=_steps(
-            ("release", "forget which Owner this Host holds"),
-        ),
-        destructive=DestructiveLevel.REVERSIBLE,
-        requires_flags=frozenset({"--apply"} if apply else set()),
-        touches=frozenset({ActionKind.DATA}),
-    )
-
-
 def controller_reset(host_id: str, *, apply: bool) -> Plan:
     return Plan(
         operation="controller-reset",

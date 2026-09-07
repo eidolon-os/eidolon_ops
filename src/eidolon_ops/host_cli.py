@@ -72,7 +72,6 @@ OPERATIONS: dict[str, Callable[[HostController, argparse.Namespace], object]] = 
         reset_existing=a.reset_existing,
         wipe_authority_data=a.wipe_authority_data,
     ),
-    "owner-reset": lambda controller, a: controller.owner_reset(apply=a.apply),
     "controller-reset": lambda controller, a: controller.controller_reset(
         apply=a.apply
     ),
@@ -299,14 +298,6 @@ def _parser() -> argparse.ArgumentParser:
     install.add_argument("--apply", action="store_true")
     install.add_argument("--reset-existing", action="store_true")
     install.add_argument("--wipe-authority-data", action="store_true")
-    owner_reset = operations.add_parser(
-        "owner-reset",
-        help=(
-            "forget which Owner this Host holds, when its Data plane no longer "
-            "has that Owner's Workspace and no phone can finish setup"
-        ),
-    )
-    owner_reset.add_argument("--apply", action="store_true")
     controller_reset = operations.add_parser(
         "controller-reset",
         help="revoke every managing phone so a new one can claim this Host",

@@ -343,30 +343,6 @@ def controller_reset(payload: Mapping[str, object]) -> dict[str, object]:
         raise TargetError("controller reset returned invalid evidence")
     return {"status": "reset", "controller_reset": document}
 
-def owner_reset(payload: Mapping[str, object]) -> dict[str, object]:
-    """Forget which Owner this Host holds, keeping everything anybody holds.
-
-    The repair for a Host whose Bootstrap records an Owner its Data plane has
-    no Workspace for. Every phone claimed onto such a Host is refused at setup
-    identically and forever, because a Controller's Owner scope comes from Host
-    state — so this is not about any one phone, and it takes none of their
-    Grants. It takes one row's claim about a store that no longer backs it.
-    """
-
-    contract.fixed_units(payload)
-    if not BOOTSTRAP_CTL.is_file() or not os.access(BOOTSTRAP_CTL, os.X_OK):
-        raise TargetError("bootstrap control CLI is unavailable on this Host")
-    result = primitives.checked(
-        "owner reset", (str(BOOTSTRAP_CTL), "owner-reset"), timeout=120
-    )
-    try:
-        document = json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
-        raise TargetError("owner reset did not return one JSON document") from exc
-    if not isinstance(document, dict) or "released" not in document:
-        raise TargetError("owner reset returned invalid evidence")
-    return {"status": "released", "owner_reset": document}
-
 def commissioning_code(payload: Mapping[str, object]) -> dict[str, object]:
     """Mint the one-time Setup code a phone types to claim this Host.
 

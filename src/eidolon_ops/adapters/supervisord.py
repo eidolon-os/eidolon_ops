@@ -62,10 +62,6 @@ class SupervisordSupervisor:
                 # describes. RESET is how this Host got out of it before,
                 # at the price of every other authority on the machine.
                 Capability.KERNEL_SCHEMA_RESET,
-                # The narrower repair still. A source run reaches bootstrapctl
-                # through its own profile script, the same way it mints a
-                # Setup code, so this Host can offer it without a release.
-                Capability.OWNER_RESET,
             }
         )
 
@@ -190,38 +186,6 @@ class SupervisordSupervisor:
         if setup_code is not None:
             arguments += ("--code", setup_code)
         return self.profile_operation("commissioning-code", arguments=arguments)
-
-    def owner_reset(self, *, apply: bool) -> dict[str, object]:
-        """Ask Bootstrap to forget which Owner this Host holds.
-
-        Over the control socket, with the Host up, because that is the Host
-        this repair is for: every service healthy, every phone refused at
-        setup. The offline route exists too — ``reset --wipe-authority-data``
-        takes it, having just stopped everything — but reaching a running
-        Host's authority through its own daemon is the interface, and taking a
-        working Host down to withdraw one row would be the wrong trade twice.
-        """
-
-        if not apply:
-            return {
-                "profile": PROFILE,
-                "status": "planned",
-                "releases": (
-                    "Bootstrap's record that the Data plane holds a Workspace "
-                    "for this Host's Owner"
-                ),
-                "preserves": [
-                    "every Controller Grant; no phone has to claim this Host again",
-                    "Host identity and pinned TLS",
-                    "saved Wi-Fi profiles and the current connection",
-                    "every component database, including the Data plane",
-                ],
-                "next": (
-                    "rerun owner-reset --apply, then set this Host up again from "
-                    "the phone that already holds it"
-                ),
-            }
-        return self.profile_operation("owner-reset")
 
     def profile_operation(
         self, operation: str, *, arguments: tuple[str, ...] = ()

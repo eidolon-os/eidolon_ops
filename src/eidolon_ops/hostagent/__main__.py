@@ -53,7 +53,6 @@ ACTIONS: dict[str, tuple[ModuleType, str]] = {
     "converge-secret-inputs": (secret_inputs, "converge_secret_inputs"),
     "ensure-service-identities": (identities, "ensure_service_identities"),
     "controller-reset": (lifecycle, "controller_reset"),
-    "owner-reset": (lifecycle, "owner_reset"),
     "commissioning-code": (lifecycle, "commissioning_code"),
     "refresh-host-application": (host_application, "refresh_host_application"),
     "backup": (authorities, "backup"),
