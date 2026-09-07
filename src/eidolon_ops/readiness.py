@@ -86,6 +86,7 @@ class ReadinessFact(StrEnum):
     HUB_MDNS_SERVICE = "hub_mdns_service"
     LOCAL_API_REACHABLE = "local_api_reachable"
     LOCAL_API_TARGETS_HUB = "local_api_targets_hub"
+    HOST_SETUP_COMPLETABLE = "host_setup_completable"
     LOCAL_API_MDNS_SERVICE = "local_api_mdns_service"
     DEVICE_REMOVAL_AVAILABLE = "device_removal_available"
     LIVEKIT_CLIENT_ORIGIN = "livekit_client_origin"
@@ -162,6 +163,17 @@ READINESS_CONTRACT: tuple[ReadinessCheck, ...] = (
         ReadinessFact.LOCAL_API_TARGETS_HUB,
         "the Local API is pointed at this Host's Hub and its certificate",
     ),
+    # Every other Local API fact here is about a process answering and being
+    # pointed at the right things. All of them were green on a Host where the
+    # Owner Bootstrap held had no Workspace in the Data plane, so the setup
+    # contract refused every phone identically and forever, and this gate
+    # called that Host ready. Services answering is not the same fact as a
+    # person being able to finish, and only the second one is readiness.
+    _both(
+        ReadinessFact.HOST_SETUP_COMPLETABLE,
+        "a phone that claims this Host can finish setup: the Owner Bootstrap "
+        "holds and the Data Workspace agree",
+    ),
     _both(
         ReadinessFact.LIVEKIT_CLIENT_ORIGIN,
         "Channel is configured with the LiveKit origin devices are given",
@@ -229,6 +241,59 @@ READINESS_CONTRACT: tuple[ReadinessCheck, ...] = (
         "LiveKit advertises the address its media will be answered on",
     ),
 )
+
+
+#: Which answers from the Local API's setup surface mean a phone could finish.
+#:
+#: ``absent`` is a Host nobody has set up yet and ``ready`` is one somebody
+#: has; both are Hosts a person can walk up to and use. ``orphaned`` is the
+#: Host whose two halves disagree, and ``unknown`` is a Host that could not be
+#: asked — which is not the same as a Host that answered well. Fail closed, as
+#: everywhere else here: a check that could not be made has not passed.
+HOST_SETUP_COMPLETABLE_STATES = frozenset({"absent", "ready"})
+
+
+def setup_is_completable(report: object) -> bool:
+    """Grade one Local API setup answer, for either kind of Host.
+
+    Here rather than in each probe because the two probes grading the same
+    document differently is the exact drift this module was extracted to end.
+    """
+
+    return (
+        isinstance(report, Mapping)
+        and report.get("contract_version") == "1"
+        and report.get("state") in HOST_SETUP_COMPLETABLE_STATES
+    )
+
+
+def setup_readiness_evidence(report: object) -> dict[str, object]:
+    """The graded answer, shaped so a failure says which failure it was.
+
+    A bare ``None`` in the evidence is the difference between "this Host holds
+    an Owner its Data plane lost" and "this Local API predates the route" —
+    two facts an operator acts on completely differently, and the second is
+    routine on a workstation, where the stack keeps running the build it
+    started with until somebody restarts it. Both score the same, because a
+    check that could not be made has not passed; only the report tells them
+    apart, so the report has to.
+    """
+
+    if not isinstance(report, Mapping):
+        return {
+            "healthy": False,
+            "state": "unknown",
+            "error": (
+                "the Local API did not answer /api/local/v1/setup/readiness; "
+                "a build predating that route answers 404, and is restarted "
+                "rather than repaired"
+            ),
+        }
+    return {
+        "healthy": setup_is_completable(report),
+        "state": report.get("state"),
+        "operation_id": report.get("operation_id"),
+    }
 
 
 def expected_facts(kind: HostKind) -> tuple[str, ...]:

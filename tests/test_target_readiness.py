@@ -15,7 +15,12 @@ from eidolon_ops.host_identity import derive_host_lan_identity
 from eidolon_ops.hostagent import app_contract, contract, primitives, probe
 from eidolon_ops.hostagent.primitives import TargetError
 from eidolon_ops.owner_domain_assets import ensure_owner_domain_assets
-from eidolon_ops.readiness import HostKind, expected_facts, product_payload
+from eidolon_ops.readiness import (
+    HostKind,
+    describe_failures,
+    expected_facts,
+    product_payload,
+)
 
 
 def _app() -> dict[str, object]:
@@ -144,6 +149,9 @@ def test_the_declared_check_set_is_the_same_on_both_sides() -> None:
     """The agent may only attest the contract the operator publishes."""
 
     assert expected_facts(HostKind.PRODUCT) == probe.READINESS_FACTS
+    assert set(probe.SETUP_COMPLETABLE_STATES) == (
+        readiness.HOST_SETUP_COMPLETABLE_STATES
+    )
     assert product_payload()["channel_worker"] == {
         "port": readiness.CHANNEL_WORKER_PORT,
         "agent_name": readiness.CHANNEL_AGENT_NAME,
@@ -223,6 +231,30 @@ def test_readiness_payload_fails_closed_on_a_different_check_set() -> None:
         probe.app_ready(payload)
 
 
+def _healthy_local_api(path: str) -> dict[str, object]:
+    """What the Local API on a Host nobody has broken answers.
+
+    One copy, because two tests spoiling different facts both need every other
+    answer to be the healthy one, and a route added to the probe has to reach
+    both of them or the fact it attests silently reads as broken everywhere.
+    """
+
+    if path == "/healthz":
+        return {"status": "ok", "bootstrap": "ready"}
+    if path == "/api/local/v1/setup/readiness":
+        return {
+            "contract_version": "1",
+            "operation_id": "06607258-a650-5570-8c91-880e8f2fb9a9",
+            "state": "ready",
+        }
+    return {
+        "contract_version": "1",
+        "host_id": "ehost-0123456789abcdefabcd",
+        "host_public_key_fingerprint": "sha256:test",
+        "ble_service_uuid": "123e4567-e89b-42d3-a456-426614174000",
+    }
+
+
 def _healthy_probe(monkeypatch, app: dict[str, object], tmp_path: Path) -> None:
     """Every readiness input reporting health, so one test can spoil exactly one."""
 
@@ -248,17 +280,7 @@ def _healthy_probe(monkeypatch, app: dict[str, object], tmp_path: Path) -> None:
         },
     )
 
-    def https(_path: str) -> dict[str, object]:
-        if _path == "/healthz":
-            return {"status": "ok", "bootstrap": "ready"}
-        return {
-            "contract_version": "1",
-            "host_id": "ehost-0123456789abcdefabcd",
-            "host_public_key_fingerprint": "sha256:test",
-            "ble_service_uuid": "123e4567-e89b-42d3-a456-426614174000",
-        }
-
-    monkeypatch.setattr(probe, "local_api_json", https)
+    monkeypatch.setattr(probe, "local_api_json", _healthy_local_api)
     monkeypatch.setattr(
         primitives, "https_json_endpoint",
         lambda _host, _port, path, *, label: (
@@ -324,19 +346,7 @@ def test_a_hub_that_cannot_admit_a_device_fails_the_gate(
             "expected_agent_name": worker["agent_name"],
         },
     )
-    monkeypatch.setattr(
-        probe, "local_api_json",
-        lambda path: (
-            {"status": "ok", "bootstrap": "ready"}
-            if path == "/healthz"
-            else {
-                "contract_version": "1",
-                "host_id": "ehost-0123456789abcdefabcd",
-                "host_public_key_fingerprint": "sha256:test",
-                "ble_service_uuid": "123e4567-e89b-42d3-a456-426614174000",
-            }
-        ),
-    )
+    monkeypatch.setattr(probe, "local_api_json", _healthy_local_api)
     monkeypatch.setattr(
         primitives, "https_json_endpoint",
         lambda _host, _port, path, *, label: (
@@ -594,3 +604,108 @@ def test_a_host_that_cannot_remove_a_device_is_not_ready(
     result = probe.app_ready(_payload(app))
     assert result["status"] != "app_ready"
     assert [n for n, v in result["checks"].items() if not v] == ["device_removal_available"]
+
+
+@pytest.mark.parametrize(
+    ("answer", "ready"),
+    [
+        ({"contract_version": "1", "state": "ready"}, True),
+        ({"contract_version": "1", "state": "absent"}, True),
+        ({"contract_version": "1", "state": "orphaned"}, False),
+        # Could not be asked is not a check that passed.
+        ({"contract_version": "1", "state": "unknown"}, False),
+        ({"state": "ready"}, False),
+        (None, False),
+    ],
+)
+def test_both_kinds_of_host_grade_one_setup_answer_the_same_way(
+    answer: object, ready: bool
+) -> None:
+    """The rule the workstation applies and the rule the agent applies.
+
+    Written once and copied onto the Host, like the check set itself, so this
+    is where the copy is held to it.
+    """
+
+    assert readiness.setup_is_completable(answer) is ready
+    # Both probes report the same shape, so a `degraded` says which failure it
+    # was: a Host whose halves disagree and one whose Local API predates the
+    # route both score false, and only the evidence tells them apart.
+    evidence = readiness.setup_readiness_evidence(answer)
+    assert evidence["healthy"] is ready
+    if isinstance(answer, dict):
+        assert evidence["state"] == answer.get("state")
+        assert (
+            answer.get("contract_version") == "1"
+            and answer.get("state") in probe.SETUP_COMPLETABLE_STATES
+        ) is ready
+    else:
+        assert evidence["state"] == "unknown"
+        assert "restarted rather than repaired" in evidence["error"]
+
+
+def test_a_host_no_phone_can_finish_setting_up_is_not_ready(
+    monkeypatch, tmp_path: Path, bootstrap_socket: Path, lifecycle_workflow_socket: Path
+) -> None:
+    """Twelve services healthy, and nobody can use the product.
+
+    The state a real Host reached: Bootstrap held an Owner from an earlier
+    setup and the Data plane had no Workspace under it, so every phone that
+    claimed the Host was refused at `GET /setup/workspace` and could go no
+    further. Every unit was active, every endpoint answered, and this gate
+    reported app-ready — which is the defect, not the symptom.
+    """
+
+    app = _app()
+    _healthy_probe(monkeypatch, app, tmp_path)
+    monkeypatch.setattr(
+        probe,
+        "local_api_json",
+        lambda path: (
+            {
+                "contract_version": "1",
+                "operation_id": "06607258-a650-5570-8c91-880e8f2fb9a9",
+                "state": "orphaned",
+            }
+            if path == "/api/local/v1/setup/readiness"
+            else _healthy_local_api(path)
+        ),
+    )
+
+    result = probe.app_ready(_payload(app))
+
+    assert result["status"] == "degraded"
+    assert [n for n, v in result["checks"].items() if not v] == [
+        "host_setup_completable"
+    ]
+    assert result["setup"]["state"] == "orphaned"
+    assert "host_setup_completable" in describe_failures(result["checks"])
+
+
+def test_the_states_this_gate_grades_are_the_states_admin_publishes() -> None:
+    """The vocabulary is the Local API's; this repository only grades it.
+
+    A gate that scores an enum another repository owns, with nothing linking
+    the two, is the same shape as the defect it was added for: two halves that
+    can disagree while both look right. A state added to the contract has to
+    be given a verdict here, and a state graded here that Admin cannot produce
+    is a verdict nobody will ever read.
+    """
+
+    contract = (
+        Path(__file__).resolve().parents[2]
+        / "eidolon_admin/contracts/local-api/v1/setup-readiness.schema.json"
+    )
+    if not contract.exists():
+        pytest.skip("needs the sibling eidolon_admin repository")
+    published = set(
+        json.loads(contract.read_text(encoding="utf-8"))["properties"]["state"]["enum"]
+    )
+
+    assert published >= readiness.HOST_SETUP_COMPLETABLE_STATES
+    # Every published state is decided, not merely the passing ones: the two
+    # that fail are why this fact exists.
+    assert published - readiness.HOST_SETUP_COMPLETABLE_STATES == {
+        "orphaned",
+        "unknown",
+    }

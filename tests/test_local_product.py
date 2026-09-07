@@ -19,6 +19,7 @@ from eidolon_ops import local_product as local_product_module
 from eidolon_ops import probes, source_assets
 from eidolon_ops.environment import EnvironmentFileError
 from eidolon_ops.errors import OperationsError
+from eidolon_ops.hostagent.primitives import TargetError
 from eidolon_ops.hub_assets import HUB_SETTINGS_TEMPLATE
 from eidolon_ops.local_product import LocalProductSource
 from eidolon_ops.owner_domain_assets import OwnerDomainAssets
@@ -402,6 +403,15 @@ def test_app_ready_requires_device_reachable_contract(monkeypatch, tmp_path: Pat
     monkeypatch.setattr(probes, "tcp_health", lambda *_a: {"healthy": True})
     monkeypatch.setattr(
         probes,
+        "http_json",
+        lambda _url: {
+            "contract_version": "1",
+            "operation_id": "06607258-a650-5570-8c91-880e8f2fb9a9",
+            "state": "ready",
+        },
+    )
+    monkeypatch.setattr(
+        probes,
         "channel_worker_report",
         lambda _port, *, agent_name: {
             "healthy": True,
@@ -417,6 +427,24 @@ def test_app_ready_requires_device_reachable_contract(monkeypatch, tmp_path: Pat
 
     assert result["status"] == "app_ready"
     assert all(result["checks"].values())
+    assert result["setup"]["state"] == "ready"
+
+    # A Local API still running the build it started with does not answer the
+    # setup route at all. Same verdict as a Host whose halves disagree, because
+    # a check that could not be made has not passed — and a different sentence,
+    # because this one is restarted rather than repaired. Reached routinely on
+    # a workstation: the stack keeps running until somebody restarts it.
+    monkeypatch.setattr(probes, "http_json", lambda _url: None)
+
+    stale = product.app_ready()
+
+    assert stale["status"] == "degraded"
+    assert [n for n, v in stale["checks"].items() if not v] == [
+        "host_setup_completable"
+    ]
+    assert stale["setup"]["state"] == "unknown"
+    assert "setup/readiness" in stale["setup"]["error"]
+    assert "数据面" not in stale["setup"]["error"]
 
     product.runner = SimpleNamespace(
         run=lambda *_a, **_k: ProcessResult(0, "inet 172.16.20.211\n", "")
@@ -897,12 +925,121 @@ def test_a_source_run_refuses_to_start_over_an_authority_it_cannot_account_for(
         product._ensure_hub_tls_identity()
 
 
+def test_wiping_the_data_authority_withdraws_the_owner_binding_with_it(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """The half of `reset --wipe-authority-data` that was missing.
+
+    Bootstrap records that the Data plane holds a Workspace for this Host's
+    Owner. This flag destroys that Workspace and keeps the Bootstrap root, so
+    without this the record survives what it was a record of — and because a
+    Controller's Owner scope comes from Host state, every phone claimed onto
+    the Host afterwards inherits it and is refused at setup forever. Found on a
+    real Host on 2026-09-06, reporting itself twelve-of-twelve healthy.
+    """
+
+    product = _product(tmp_path, foundation_mode="external")
+    _with_sources(product, tmp_path)
+    paths = product.profile.paths
+    paths.config_root.mkdir(parents=True, exist_ok=True)
+    paths.config_root.chmod(0o700)
+    product._ensure_hub_tls_identity()
+    _established_hub_authority(product)
+    paths.bootstrap_state_root.mkdir(parents=True, exist_ok=True)
+    database = paths.bootstrap_state_root / "bootstrap.sqlite3"
+    database.write_bytes(b"")
+    released: list[Path] = []
+
+    monkeypatch.setattr(
+        local_product_module,
+        "release_owner_binding",
+        lambda *, database, interpreter: (
+            released.append(database) or {"released": True, "state": "released"}
+        ),
+    )
+
+    plan = product.reset(wipe_authority_data=True, apply=False)
+    assert plan["withdrawn"] == [f"{database}: Owner binding"]
+    # Planning changes nothing, here least of all.
+    assert released == []
+
+    applied = product.reset(wipe_authority_data=True, apply=True)
+
+    assert released == [database]
+    assert applied["owner_binding"] == {"released": True, "state": "released"}
+    # The Host identity in the same directory is not what this takes.
+    assert str(paths.bootstrap_state_root) in applied["kept"]
+
+
+def test_a_reset_that_cannot_leave_the_host_coherent_removes_nothing(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Refused before the first deletion, not reported after the last.
+
+    Wiping the Data authority and failing to withdraw the binding is the exact
+    state this whole change exists to prevent, so it is not a warning at the
+    end of a reset that already happened.
+    """
+
+    product = _product(tmp_path, foundation_mode="external")
+    _with_sources(product, tmp_path)
+    paths = product.profile.paths
+    paths.config_root.mkdir(parents=True, exist_ok=True)
+    (paths.config_root / "env").mkdir(parents=True, exist_ok=True)
+    paths.config_root.chmod(0o700)
+    product._ensure_hub_tls_identity()
+    _established_hub_authority(product)
+    paths.bootstrap_state_root.mkdir(parents=True, exist_ok=True)
+    (paths.bootstrap_state_root / "bootstrap.sqlite3").write_bytes(b"")
+
+    def refuse(**_kwargs: object) -> dict[str, object]:
+        raise TargetError("Admin's own interpreter is missing")
+
+    monkeypatch.setattr(local_product_module, "release_owner_binding", refuse)
+
+    with pytest.raises(OperationsError, match="interpreter is missing"):
+        product.reset(wipe_authority_data=True, apply=True)
+
+    assert (paths.config_root / "env").is_dir()
+    assert paths.state_root.is_dir()
+
+
+def test_a_reset_that_keeps_the_data_authority_leaves_the_binding_alone(
+    tmp_path: Path,
+) -> None:
+    """Nothing it claims has gone, so there is nothing to withdraw."""
+
+    product = _product(tmp_path, foundation_mode="external")
+    _with_sources(product, tmp_path)
+    product.profile.paths.config_root.mkdir(parents=True, exist_ok=True)
+    product.profile.paths.config_root.chmod(0o700)
+    product._ensure_hub_tls_identity()
+
+    plan = product.reset(wipe_authority_data=False, apply=False)
+    applied = product.reset(wipe_authority_data=False, apply=True)
+
+    assert plan["withdrawn"] == []
+    assert "owner_binding" not in applied
+
+
 def _with_sources(product: LocalProductSource, tmp_path: Path) -> Path:
     """Give the product a source set, which a reset has to prove it cannot reach."""
 
     worktree = tmp_path / "workspace/eidolon_kernel"
     worktree.mkdir(parents=True, exist_ok=True)
-    product.config = cast(Any, _FakeConfig(sources={"eidolon_kernel": _FakeSource(path=worktree)}))
+    # Admin as well as Kernel: both are components a reset has to ask about its
+    # own authority, and both are worktrees it must prove it cannot reach.
+    admin = tmp_path / "workspace/eidolon_admin"
+    admin.mkdir(parents=True, exist_ok=True)
+    product.config = cast(
+        Any,
+        _FakeConfig(
+            sources={
+                "eidolon_kernel": _FakeSource(path=worktree),
+                "eidolon_admin": _FakeSource(path=admin),
+            }
+        ),
+    )
     return worktree
 
 def test_reset_clears_what_it_generated_and_keeps_what_it_did_not(tmp_path: Path) -> None:

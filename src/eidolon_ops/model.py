@@ -103,6 +103,11 @@ class Capability(StrEnum):
     #: order of magnitude in what they destroy, and a Host that can do the
     #: narrow one is not thereby offering the wide one.
     KERNEL_SCHEMA_RESET = "kernel-schema-reset"
+    #: Forget which Owner this Host holds, when its Data plane no longer has
+    #: that Owner's Workspace. Its own capability for the same reason
+    #: KERNEL_SCHEMA_RESET is: reset is the only way out of this today, and it
+    #: destroys every authority on the machine to withdraw one row.
+    OWNER_RESET = "owner-reset"
     DIAGNOSE = "diagnose"
     #: Workstation-only inspection of the source-run profile.
     SOURCE_PROFILE = "debug"

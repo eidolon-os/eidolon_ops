@@ -76,6 +76,42 @@ irreversible. Foundation packages/artifacts and service identities are preserved
 fixed 15 units, refuses an active unit that cannot stop, refuses mounted deletion roots, reloads systemd and is
 idempotent when units or paths are already absent.
 
+## A Host every phone is refused setup on
+
+Every service healthy, `app-ready: observed`, and a freshly claimed phone is
+answered `409` at `GET /api/local/v1/setup/workspace` and can go no further.
+That Host holds an Owner in Bootstrap whose Workspace the Data plane no longer
+has — most often because a Data restore, or an older `reset --wipe-authority-data`,
+destroyed the Workspace while the Bootstrap root was kept.
+
+It is not per-phone. A Controller's Owner scope comes from Host state, so every
+phone ever claimed onto that Host inherits the same binding and gets the same
+answer. Nothing on a phone changes it.
+
+```bash
+uv run eidolon-ops --config /absolute/path/hosts/pi5.toml owner-reset
+```
+
+Read-only, and `app-ready` says the same thing under `host_setup_completable`
+(the Local API composes it at `GET /api/local/v1/setup/readiness`, which reports
+`orphaned` for exactly this Host). If the Workspace can be restored from a Data
+backup, restore it — that keeps the Owner, the Companion and the Persona.
+
+```bash
+uv run eidolon-ops --config /absolute/path/hosts/pi5.toml owner-reset --apply
+```
+
+Otherwise this withdraws the binding, and the next setup rebuilds the Workspace
+under the same Owner id — it is derived from the Host id, so it does not change.
+Every Controller Grant survives: no phone has to claim the Host again, the Host
+identity and pinned TLS stay, the saved networks stay, and every component
+database including the Data plane is untouched. `reset --wipe-authority-data`
+was the only way out of this before, and it takes all four.
+
+Since this change, `reset --wipe-authority-data` withdraws the binding itself,
+before it removes anything — a reset that cannot leave the Host coherent
+removes nothing at all.
+
 ## A Kernel that will not open its own authority
 
 The Kernel performs no migrations, on purpose. After a Kernel schema change a Host that carries the old

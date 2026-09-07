@@ -275,6 +275,9 @@ def test_pi_adapter_delegates_every_remote_capability(monkeypatch, tmp_path: Pat
         def controller_reset(self, **kwargs):
             return self._result("controller-reset", kwargs)
 
+        def owner_reset(self, **kwargs):
+            return self._result("owner-reset", kwargs)
+
         def commissioning_code(self, **kwargs):
             return self._result("commissioning-code", kwargs)
 
@@ -313,6 +316,7 @@ def test_pi_adapter_delegates_every_remote_capability(monkeypatch, tmp_path: Pat
     controller.backup(output=tmp_path / "backups")
     controller.restore(source=tmp_path / "backups/r1", apply=False)
     controller.controller_reset(apply=True)
+    controller.owner_reset(apply=True)
     controller.commissioning_code(ttl_seconds=600)
     controller.diagnose(output=tmp_path / "report.tar.gz")
     assert controller.doctor(release_id="r1").report["status"] == "healthy"

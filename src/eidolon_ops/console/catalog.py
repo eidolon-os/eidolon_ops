@@ -524,6 +524,21 @@ CATALOG: tuple[Operation, ...] = (
         applies=lambda params: params["apply"],
     ),
     Operation(
+        name="owner-reset",
+        label="解除 Owner 绑定",
+        summary=(
+            "这台 Host 记着一位 Owner，数据面里却没有对应的 Workspace 时，"
+            "让它忘掉这位 Owner；每一份 Controller Grant、Host 身份、"
+            "Wi-Fi 和所有组件数据都保留"
+        ),
+        capability=Capability.OWNER_RESET,
+        group="authority",
+        fields=(_apply("执行解除", "不勾选只取计划"),),
+        plan=lambda host_id, params: plans.owner_reset(host_id, apply=params["apply"]),
+        invoke=lambda controller, params: controller.owner_reset(apply=params["apply"]),
+        applies=lambda params: params["apply"],
+    ),
+    Operation(
         name="controller-reset",
         label="吊销控制权",
         summary="吊销这台 Host 上的每一份 Controller Grant，让新手机可以认领",

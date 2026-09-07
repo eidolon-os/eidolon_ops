@@ -1055,6 +1055,15 @@ do_product_source_commissioning_code() {
        --ttl "$ttl" "${code_argument[@]}"
 }
 
+do_product_source_owner_reset() {
+  configure_supervisor_profile product-source
+  ensure_product_source_deps
+  "${OPS_ROOT}/deploy/supervisor/wrappers/with-env.sh" \
+    "$EIDOLON_SOURCE_ADMIN" \
+    "${EIDOLON_PRODUCT_ENV_ROOT}/bootstrap.env" \
+    -- "$EIDOLON_SOURCE_ADMIN/.venv/bin/eidolon-bootstrapctl" owner-reset
+}
+
 do_product_source_sv() {
   configure_supervisor_profile product-source
   ensure_product_source_deps
@@ -1194,6 +1203,7 @@ case "${1:-}" in
         shift
         do_product_source_commissioning_code "$@"
         ;;
+      owner-reset) do_product_source_owner_reset ;;
       web-start) do_product_source_web_start ;;
       web-stop) do_product_source_web_stop ;;
       web-restart) do_product_source_web_restart ;;
@@ -1204,7 +1214,7 @@ case "${1:-}" in
         ;;
       *)
         error "unknown product-source command: ${1:-}"
-        error "usage: $0 product-source start|stop|restart|status|web-start|web-stop|web-restart|web-status|commissioning-code|sv [...]"
+        error "usage: $0 product-source start|stop|restart|status|web-start|web-stop|web-restart|web-status|commissioning-code|owner-reset|sv [...]"
         exit 1
         ;;
     esac

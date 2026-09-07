@@ -345,6 +345,15 @@ class HostController:
             plan, report, applied=apply and report.get("status") != "absent"
         )
 
+    def owner_reset(self, *, apply: bool) -> Evidence:
+        # Asked of the supervisor, not the release, because both kinds of Host
+        # can reach this state and only one of them has a release. The Host it
+        # was found on is a source run.
+        plan = plans.owner_reset(self.profile.host_id, apply=apply)
+        self.adapter.require(Capability.OWNER_RESET)
+        report = self.adapter.supervisor.owner_reset(apply=apply)
+        return self._planned_or_applied(plan, report, applied=apply)
+
     def controller_reset(self, *, apply: bool) -> Evidence:
         plan = plans.controller_reset(self.profile.host_id, apply=apply)
         release = self.adapter.require_release(Capability.CONTROLLER_RESET)

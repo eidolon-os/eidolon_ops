@@ -1091,6 +1091,42 @@ class EidolonPiController:
             raise OperationsError(str(exc)) from exc
         return {"status": "authority_bootstrap_consumed", "authority": expected}
 
+    def owner_reset(self, *, apply: bool) -> dict[str, object]:
+        """Ask this Host's Bootstrap to forget which Owner it holds.
+
+        SSH is what authorises it, the same way it authorises controller-reset:
+        both reach the Host's own root-owned control socket. This is much the
+        lesser of the two — nobody loses access to anything, and the Host is
+        not taken down — but it is the same door.
+        """
+
+        self.preflight.validate_ssh_material()
+        if not apply:
+            return {
+                "status": "planned",
+                "host": self.config.host.target,
+                "releases": (
+                    "Bootstrap's record that the Data plane holds a Workspace "
+                    "for this Host's Owner"
+                ),
+                "preserves": [
+                    "every Controller Grant; no phone has to claim this Host again",
+                    "Host identity and pinned TLS",
+                    "saved Wi-Fi profiles and the current connection",
+                    "every component database, including the Data plane",
+                ],
+                "next": (
+                    "rerun owner-reset --apply, then set this Host up again from "
+                    "the phone that already holds it"
+                ),
+            }
+        result = self.transport.run_agent(
+            "owner-reset", self.host_layer.target_payload(), timeout=180
+        )
+        if result.get("status") != "released":
+            raise OperationsError("Owner binding release returned invalid evidence")
+        return result
+
     def controller_reset(self, *, apply: bool) -> dict[str, object]:
         """Return a claimed Host to unclaimed so a new phone can manage it.
 

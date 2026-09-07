@@ -32,6 +32,7 @@ READINESS_FACTS = (
     "hub_lan_reachable",
     "local_api_reachable",
     "local_api_targets_hub",
+    "host_setup_completable",
     "livekit_client_origin",
     "livekit_lan_reachable",
     "channel_worker_healthy",
@@ -46,6 +47,11 @@ READINESS_FACTS = (
     "hub_mdns_service",
     "local_api_mdns_service",
 )
+
+#: Which of the Local API's setup answers mean a phone could finish setup.
+#: The copy of ``readiness.HOST_SETUP_COMPLETABLE_STATES`` this agent needs
+#: because it runs alone on the Host; a drift test keeps the two identical.
+SETUP_COMPLETABLE_STATES = ("absent", "ready")
 
 _FOUNDATION_READINESS_UNITS = (
     "bluetooth.service",
@@ -320,6 +326,30 @@ def local_api_report() -> dict[str, object]:
         "tls": "loopback self-check only; App pins the BLE-advertised TLS SPKI",
     }
 
+def setup_readiness_report() -> dict[str, object]:
+    """Whether a phone claimed onto this Host right now could finish setup.
+
+    Every other Local API fact in this report is about a process answering.
+    All of them read green on a Host whose Bootstrap held an Owner its Data
+    plane had no Workspace for — a Host that refused every phone's setup,
+    identically, forever, while this gate called it ready.
+    """
+
+    try:
+        report = local_api_json("/api/local/v1/setup/readiness")
+    except TargetError as exc:
+        # A Local API predating this route answers 404, which arrives here as
+        # a TargetError. Same verdict as any other unanswerable check, and a
+        # different sentence, because that one is restarted rather than repaired.
+        return {"healthy": False, "state": "unknown", "error": str(exc)}
+    state = report.get("state")
+    return {
+        "healthy": report.get("contract_version") == "1"
+        and state in SETUP_COMPLETABLE_STATES,
+        "state": state,
+        "operation_id": report.get("operation_id"),
+    }
+
 def app_ready(payload: Mapping[str, object]) -> dict[str, object]:
     """Attest every fact the operator's readiness contract declares.
 
@@ -366,6 +396,7 @@ def app_ready(payload: Mapping[str, object]) -> dict[str, object]:
     channel_values = primitives.environment_values_or_empty(CHANNEL_ENV)
     preflight = bootstrap_preflight()
     local_api = local_api_report()
+    setup = setup_readiness_report()
     try:
         hub_health = primitives.https_json_endpoint(address, hub_port, "/health", label="Hub LAN ingress")
         hub_descriptor = primitives.https_json_endpoint(
@@ -457,6 +488,7 @@ def app_ready(payload: Mapping[str, object]) -> dict[str, object]:
             and local_api_values.get("EIDOLON_LOCAL_API_AUTHORITY_SIGNING_CERTIFICATE")
             == str(AUTHORITY_SIGNING_CERTIFICATE)
         ),
+        "host_setup_completable": bool(setup["healthy"]),
         "livekit_client_origin": (
             channel_values.get("EIDOLON_LIVEKIT_CLIENT_URL") == app["livekit_client_url"]
             and channel_values.get("EIDOLON_CHANNEL_PROVIDER_ALLOW_INSECURE_LAN_CLIENT_URL")
@@ -507,6 +539,7 @@ def app_ready(payload: Mapping[str, object]) -> dict[str, object]:
         "files": files,
         "preflight": preflight,
         "local_api": local_api,
+        "setup": setup,
         "hub_health": hub_health,
         "channel_worker": {**channel, "livekit_link": link},
         "waiting": waiting,

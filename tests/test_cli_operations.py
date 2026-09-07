@@ -107,6 +107,21 @@ def test_the_repair_verb_is_reachable() -> None:
     assert hasattr(HostController, "converge_inputs")
 
 
+def test_the_narrow_repair_for_a_lost_workspace_is_reachable() -> None:
+    """Named on its own, for the same reason converge-inputs is.
+
+    A Host whose Bootstrap holds an Owner its Data plane has no Workspace for
+    refuses every phone at setup, forever, while reporting itself healthy. The
+    only way out was ``reset --wipe-authority-data``, which destroys every
+    authority on the machine and voids every device Claim to withdraw one row.
+    A generic gate is satisfied by deleting this verb; this is not.
+    """
+
+    assert "owner-reset" in _subcommands()
+    assert "owner-reset" in OPERATIONS
+    assert hasattr(HostController, "owner_reset")
+
+
 def test_the_lifecycle_verbs_share_one_handler_rather_than_three() -> None:
     """start/stop/restart differ only in the word they pass on.
 

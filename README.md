@@ -230,6 +230,7 @@ session：会过期、只能用一次、错五次吊销、并把之前的窗口�
 ./eidolon pi5 install --release-id ID [--resume] [--apply]
 ./eidolon pi5 reset [--wipe-authority-data] [--apply]
 ./eidolon pi5 controller-reset [--apply]  # lost every managing phone
+./eidolon HOST owner-reset [--apply]      # Owner bound, Data has no Workspace
 ./eidolon pi5 install --release-id ID \
   --reset-existing --wipe-authority-data [--apply]
 ./eidolon pi5 deploy|update --release-id ID [--resume] [--activate]

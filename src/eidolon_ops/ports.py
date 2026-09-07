@@ -73,6 +73,8 @@ class Supervisor(Protocol):
         self, *, ttl_seconds: int, setup_code: str | None = None
     ) -> dict[str, object]: ...
 
+    def owner_reset(self, *, apply: bool) -> dict[str, object]: ...
+
 
 @runtime_checkable
 class PackageManager(Protocol):
