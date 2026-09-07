@@ -1,0 +1,1 @@
+{"at": "2026-09-07T15:57:33Z", "error": "host profile root must contain schema_version, host, paths and adapter, with only app and source_overrides optional", "gate": "host profile root must contain schema_version, host, paths and adapter, with only app and source", "operation": "status", "outcome": "failed", "profile": "eidolon-rk3588", "seconds": 0.0}

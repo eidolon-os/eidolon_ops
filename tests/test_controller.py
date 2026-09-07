@@ -183,6 +183,15 @@ class ControllerRunner:
                     "ExecStart=/srv/eidolon/current/component/service\n",
                     "",
                 )
+            if contract.unit.endswith(".socket"):
+                # A socket unit declares a listener, not a process; a service
+                # body here would only pass a check that no longer exists.
+                return ProcessResult(
+                    0,
+                    "[Unit]\nDescription=test\n"
+                    "[Socket]\nListenStream=/run/test.sock\n",
+                    "",
+                )
             executable = (
                 f"/opt/eidolon/current/{contract.component_root}/.venv/bin/service"
                 if contract.component_root is not None

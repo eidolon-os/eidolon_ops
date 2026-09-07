@@ -23,7 +23,14 @@ def _revisions() -> dict[str, str]:
     }
 
 
-def _valid_asset(component_root: str | None) -> str:
+#: A socket unit's valid body, which shares nothing with a service's: it has
+#: [Socket] and a listener, and no environment or ExecStart to be checked for.
+_VALID_SOCKET = "[Unit]\nDescription=test\n[Socket]\nListenStream=/run/test.sock\n"
+
+
+def _valid_asset(component_root: str | None, path: str = "x.service") -> str:
+    if path.endswith(".socket"):
+        return _VALID_SOCKET
     executable = (
         f"/opt/eidolon/current/{component_root}/.venv/bin/service"
         if component_root is not None
@@ -45,7 +52,7 @@ def test_exact_systemd_matrix_accepts_all_fourteen_fhs_units() -> None:
 
     result = validate_release_systemd_matrix(
         _revisions(),
-        lambda _source, _revision, path: _valid_asset(roots[path]),
+        lambda _source, _revision, path: _valid_asset(roots[path], path),
     )
 
     assert result["status"] == "compatible"
@@ -72,7 +79,7 @@ def test_exact_systemd_matrix_rejects_incompatible_asset(
     broken = SYSTEMD_ASSET_CONTRACTS[0].path
 
     def reader(_source: str, _revision: str, path: str) -> str:
-        value = _valid_asset(roots[path])
+        value = _valid_asset(roots[path], path)
         return value.replace(replacement, message) if path == broken else value
 
     with pytest.raises(ReleaseMatrixError, match="incompatible"):
@@ -168,13 +175,42 @@ def test_the_settings_gate_says_when_the_component_is_not_in_the_release() -> No
         validate_release_settings_matrix({}, _reader({HUB_SETTINGS_TEMPLATE: _HUB_TEMPLATE}))
 
 
+def test_a_socket_unit_is_validated_as_a_socket_not_waved_through() -> None:
+    """socket 单元不是"不是 service 所以不用查"，它有自己该有的东西。
+
+    校验器原先对每个资产都要求 [Service]、Host profile 的 EnvironmentFile 和
+    ExecStart 的组件根——对一个只声明监听器的 unit 来说三条都不适用，于是
+    applier 的 socket 被真实的 doctor 拒了。分叉之后要保证分叉出去的那一支
+    仍然在查东西，而不是一路放行。
+    """
+
+    roots = {contract.path: contract.component_root for contract in SYSTEMD_ASSET_CONTRACTS}
+
+    def without_listener(_source, _revision, path):
+        if path.endswith(".socket"):
+            return "[Unit]\nDescription=test\n[Socket]\n"
+        return _valid_asset(roots[path], path)
+
+    with pytest.raises(ReleaseMatrixError, match="no ListenStream"):
+        validate_release_systemd_matrix(_revisions(), without_listener)
+
+    def service_shaped_socket(_source, _revision, path):
+        if path.endswith(".socket"):
+            # 恰好是从前能过的那种内容。
+            return _valid_asset(None, "x.service")
+        return _valid_asset(roots[path], path)
+
+    with pytest.raises(ReleaseMatrixError, match="Unit/Socket"):
+        validate_release_systemd_matrix(_revisions(), service_shaped_socket)
+
+
 def test_the_release_matrix_carries_the_unit_and_the_settings_gate_together() -> None:
     roots = {contract.path: contract.component_root for contract in SYSTEMD_ASSET_CONTRACTS}
 
     def read(source: str, revision: str, path: str) -> str:
         if (source, path) == HUB_SETTINGS_TEMPLATE:
             return _HUB_TEMPLATE
-        return _valid_asset(roots[path])
+        return _valid_asset(roots[path], path)
 
     result = validate_release_matrix(_settings_revisions(), read)
 

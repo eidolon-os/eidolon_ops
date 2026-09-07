@@ -34,7 +34,8 @@ SYSTEMD_ASSET_CONTRACTS = (
         "eidolon_kernel",
         "deploy/systemd/eidolon-unit-applier.socket",
         "eidolon-unit-applier.socket",
-        "eidolon_kernel",
+        # None: a socket unit has no ExecStart to root in a component.
+        None,
     ),
     SystemdAssetContract(
         "eidolon_kernel",
@@ -202,20 +203,33 @@ def validate_release_systemd_matrix(
                 f"cannot read exact systemd asset: {contract.source_id}:{contract.path}"
             ) from exc
         label = f"{contract.source_id}@{revision[:12]}:{contract.path}"
-        if "[Unit]" not in value or "[Service]" not in value:
-            violations.append(f"{label}: missing systemd Unit/Service sections")
-        if _HOST_PROFILE_LINE not in value:
-            violations.append(f"{label}: missing sealed Host profile EnvironmentFile")
+        # A .socket unit is checked against what a socket unit *is*: it declares
+        # a listener, not a process. No [Service], nothing to hand an
+        # environment to, no ExecStart to root in a component — requiring those
+        # was requiring a listener to look like a service. The record written
+        # below is the same either way; only the checks fork.
+        if contract.unit.endswith(".socket"):
+            if "[Unit]" not in value or "[Socket]" not in value:
+                violations.append(f"{label}: missing systemd Unit/Socket sections")
+            if "ListenStream=" not in value:
+                violations.append(f"{label}: socket unit declares no ListenStream")
+        else:
+            if "[Unit]" not in value or "[Service]" not in value:
+                violations.append(f"{label}: missing systemd Unit/Service sections")
+            if _HOST_PROFILE_LINE not in value:
+                violations.append(f"{label}: missing sealed Host profile EnvironmentFile")
+            if contract.component_root is not None:
+                expected_root = f"/opt/eidolon/current/{contract.component_root}/"
+                exec_lines = [
+                    line for line in value.splitlines() if line.startswith("ExecStart=")
+                ]
+                if not exec_lines or not any(expected_root in line for line in exec_lines):
+                    violations.append(
+                        f"{label}: ExecStart must use exact component root {expected_root}"
+                    )
         for forbidden in _FORBIDDEN_RUNTIME_PATHS:
             if forbidden in value:
                 violations.append(f"{label}: forbidden runtime path {forbidden}")
-        if contract.component_root is not None:
-            expected_root = f"/opt/eidolon/current/{contract.component_root}/"
-            exec_lines = [line for line in value.splitlines() if line.startswith("ExecStart=")]
-            if not exec_lines or not any(expected_root in line for line in exec_lines):
-                violations.append(
-                    f"{label}: ExecStart must use exact component root {expected_root}"
-                )
         assets[contract.unit] = {
             "source_id": contract.source_id,
             "revision": revision,
