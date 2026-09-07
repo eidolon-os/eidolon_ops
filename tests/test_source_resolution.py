@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+from types import MappingProxyType
 
 import pytest
 
@@ -136,6 +137,67 @@ def test_a_dirty_worktree_is_refused_because_a_release_ships_commits(config) -> 
     with pytest.raises(OperationsError, match="eidolon_sdk") as failure:
         resolver.require_clean()
     assert "--allow-dirty" in str(failure.value)
+
+
+def test_a_pinned_source_is_not_refused_for_dirt_it_cannot_ship(config) -> None:
+    """Naming the commit closes the gap the refusal exists to warn about.
+
+    A pinned release is ``git archive`` of the named commit, so that worktree's
+    edits cannot reach it. Refusing anyway stopped a deliberately
+    single-variable release because of edits in a repository it does not read.
+    """
+
+    git = FakeGit(dirty={"eidolon_sdk": " M eidolon_sdk/session.py\n?? scratch.py\n"})
+    pinned = replace(
+        config,
+        sources=MappingProxyType(
+            {
+                source_id: (
+                    replace(source, revision=HEADS["eidolon_sdk"])
+                    if source_id == "eidolon_sdk"
+                    else source
+                )
+                for source_id, source in config.sources.items()
+            }
+        ),
+    )
+    resolver = _resolver(pinned, git)
+
+    resolver.require_clean()
+
+    # Exempt from the refusal, never from the record.
+    provenance = resolver.provenance()["eidolon_sdk"]
+    assert (provenance["pinned"], provenance["dirty"]) == (True, True)
+
+
+def test_an_unpinned_dirty_source_is_still_refused_beside_a_pinned_one(config) -> None:
+    git = FakeGit(
+        dirty={
+            "eidolon_sdk": " M eidolon_sdk/session.py\n",
+            "eidolon_hub": " M hub/api.py\n",
+        }
+    )
+    pinned = replace(
+        config,
+        sources=MappingProxyType(
+            {
+                source_id: (
+                    replace(source, revision=HEADS["eidolon_sdk"])
+                    if source_id == "eidolon_sdk"
+                    else source
+                )
+                for source_id, source in config.sources.items()
+            }
+        ),
+    )
+    resolver = _resolver(pinned, git)
+
+    with pytest.raises(OperationsError) as failure:
+        resolver.require_clean()
+    message = str(failure.value)
+    assert "eidolon_hub" in message
+    assert "eidolon_sdk" not in message
+    assert "--revision" in message
 
 
 def test_allow_dirty_ships_the_committed_head_and_records_the_dirt(config) -> None:

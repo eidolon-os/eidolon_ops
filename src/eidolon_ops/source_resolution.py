@@ -225,9 +225,22 @@ class SourceResolver:
         proves the activator being run is byte-identical to the one the shipped
         commit contains. Saying it a second time here, less precisely, would be
         one more copy of a fact that is already held somewhere better.
+
+        A source pinned with ``--revision`` is exempt, and for the same reason
+        the rest are not: the release is ``git archive`` of the commit the
+        operator named, so that worktree's dirt cannot reach it. The argument
+        above — "the tree that was tested is not the tree that ships" — is about
+        a release defined by HEAD. Once a commit is named out loud there is no
+        such gap to warn about, and refusing anyway is a false positive that
+        stops a deliberately single-variable release for edits in a repository
+        it does not read. The dirt is still recorded: ``provenance`` carries
+        ``pinned`` and ``dirty`` for every source either way, so the Host's
+        evidence says what the workstation looked like regardless.
         """
 
-        dirty = [item for item in self.resolve().values() if item.dirty]
+        dirty = [
+            item for item in self.resolve().values() if item.dirty and not item.pinned
+        ]
         if not dirty or self.allow_dirty:
             return
         detail = "; ".join(self._dirt(item) for item in dirty)
@@ -239,9 +252,10 @@ class SourceResolver:
             )
         raise OperationsError(
             "a release is sealed from commits, and these worktrees hold changes that "
-            f"would not be in it: {detail}. " + "; ".join(remedies) + "; or pass "
-            "--allow-dirty to ship the committed HEAD anyway and record the dirty state "
-            "in the Host's release evidence"
+            f"would not be in it: {detail}. " + "; ".join(remedies) + "; or name the "
+            "commit with --revision <source>=<40hex>, which makes the worktree "
+            "irrelevant; or pass --allow-dirty to ship the committed HEAD anyway and "
+            "record the dirty state in the Host's release evidence"
         )
 
     @staticmethod
