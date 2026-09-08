@@ -11,7 +11,7 @@ from pathlib import Path
 from types import MappingProxyType
 from urllib.parse import urlsplit
 
-from eidolon_ops.capabilities import require_known_capability
+from eidolon_ops.capabilities import HOST_CAPABILITIES, require_known_capability
 from eidolon_ops.errors import OperationsError
 from eidolon_ops.foundation import FOUNDATION_PROFILES
 from eidolon_ops.settings_overlay import (
@@ -470,6 +470,7 @@ def load_config(path: Path) -> OperationsConfig:
             raise ConfigurationError("install.files paths must be unique per security scope")
 
     settings_overlay = _settings_overlay(document.get("settings"))
+    _require_declared_capability_for_overlay(settings_overlay, capabilities)
 
     return OperationsConfig(
         path=resolved,
@@ -523,6 +524,49 @@ def _capabilities(value: object) -> frozenset[str]:
         except OperationsError as exc:
             raise ConfigurationError(str(exc)) from exc
     return frozenset(names)
+
+
+#: Settings whose value names a Host capability rather than a service outside.
+#:
+#: There is one entry because there is one such setting, and it is written as a
+#: table rather than a rule so that adding the next one is a line here and not
+#: a convention someone has to notice. The provider name *is* the capability
+#: name, deliberately — which is what makes this check a string comparison
+#: instead of a mapping that could disagree with either side.
+CAPABILITY_VALUED_SETTINGS: dict[tuple[str, str], str] = {
+    ("channel.yaml", "providers.stt_provider"): "stt",
+    ("channel.yaml", "providers.tts_provider"): "tts",
+}
+
+
+def _require_declared_capability_for_overlay(
+    overlay: tuple[OverlayAssignment, ...],
+    capabilities: frozenset[str],
+) -> None:
+    """Refuse asking a Host for something it does not say it can do.
+
+    An overlay that points Channel at local recognition on a Host that does not
+    declare `local_asr` produces a Host that installs no such unit, starts no
+    such service, and then fails every utterance at the first connection — with
+    the configuration reading as though it were deliberate.
+
+    Caught by comparing two strings, because the provider name and the
+    capability name are the same string on purpose.
+    """
+
+    for assignment in overlay:
+        key = (assignment.document, assignment.display)
+        if key not in CAPABILITY_VALUED_SETTINGS:
+            continue
+        value = assignment.value
+        if value not in HOST_CAPABILITIES or value in capabilities:
+            continue
+        raise ConfigurationError(
+            f"settings.overlay sets {assignment.document}:{assignment.display} to "
+            f"{value!r}, which is a Host capability this Host does not declare. "
+            f"Add {value!r} to capabilities.provides, or name a provider that "
+            "does not run on this Host."
+        )
 
 
 def _settings_overlay(value: object) -> tuple[OverlayAssignment, ...]:

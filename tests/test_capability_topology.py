@@ -426,3 +426,62 @@ def test_the_baseline_ports_are_not_restated_per_capability(pinned_config) -> No
     # livekit and nats are baseline roles: present in the curated file, and so
     # not repeated in the derived section.
     assert layer._capability_port_roles() == {"asr_stream": 8768}
+
+
+def test_an_overlay_cannot_ask_a_host_for_what_it_does_not_declare(tmp_path) -> None:
+    """The check the shared name buys, in one string comparison.
+
+    Pointing Channel at local recognition on a Host that does not declare
+    `local_asr` produces a Host that installs no such unit, starts no such
+    service, and then fails every utterance at the first connection — with the
+    configuration reading as though someone meant it.
+    """
+
+    from eidolon_ops.config import ConfigurationError, _require_declared_capability_for_overlay
+    from eidolon_ops.settings_overlay import OverlayAssignment
+
+    asks_for_local = (
+        OverlayAssignment(
+            "channel.yaml",
+            (("providers", None), ("stt_provider", None)),
+            "local_asr",
+        ),
+    )
+
+    _require_declared_capability_for_overlay(asks_for_local, frozenset({"local_asr"}))
+
+    with pytest.raises(ConfigurationError, match="does not declare"):
+        _require_declared_capability_for_overlay(asks_for_local, frozenset({"rknpu2"}))
+
+
+def test_a_provider_that_is_not_a_capability_is_left_alone(tmp_path) -> None:
+    """`bailian` is a service outside this Host; no capability gates it."""
+
+    from eidolon_ops.config import _require_declared_capability_for_overlay
+    from eidolon_ops.settings_overlay import OverlayAssignment
+
+    cloud = (
+        OverlayAssignment(
+            "channel.yaml",
+            (("providers", None), ("stt_provider", None)),
+            "bailian",
+        ),
+    )
+
+    _require_declared_capability_for_overlay(cloud, frozenset())
+
+
+def test_settings_that_are_not_provider_choices_are_left_alone() -> None:
+    """The table is keyed by document and path, so a value that happens to read
+    like a capability elsewhere is not second-guessed."""
+
+    from eidolon_ops.config import _require_declared_capability_for_overlay
+    from eidolon_ops.settings_overlay import OverlayAssignment
+
+    unrelated = (
+        OverlayAssignment(
+            "agent.yaml", (("notes", None),), "local_asr"
+        ),
+    )
+
+    _require_declared_capability_for_overlay(unrelated, frozenset())
