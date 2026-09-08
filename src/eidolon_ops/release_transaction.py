@@ -17,7 +17,6 @@ from eidolon_ops.host_layer import HostLayer
 from eidolon_ops.install_inputs import declared_secret_env_keys
 from eidolon_ops.process import ProcessError
 from eidolon_ops.progress import Journal, ProgressSink
-from eidolon_ops.readiness import describe_failures
 from eidolon_ops.release_bundle import BundleTransfer, parse_json
 from eidolon_ops.release_preflight import (
     RELEASE_ACTIVATOR,
@@ -548,16 +547,34 @@ class ReleaseTransaction:
             phases.append({"phase": "doctor", "result": doctor})
             if doctor.get("status") != "healthy":
                 raise OperationsError("release doctor degraded after activation")
-            phases.begin("app_ready")
-            app = self._app_ready()
-            phases.append({"phase": "app_ready", "result": app})
-            if app.get("status") != "app_ready":
-                raise OperationsError(
-                    "mobile App gate degraded after activation: " + describe_failures(app)
-                )
         except Exception as exc:
             return exc
+        self._observe_app_readiness(phases)
         return None
+
+    def _observe_app_readiness(self, phases: Journal) -> None:
+        """Observed after the gate, so it can never be one.
+
+        The doctor above is about the release: its own health, on the Host,
+        after the switch. This asks whether a phone could finish setting the
+        Host up, which depends on a Workspace existing, on somebody holding a
+        phone, and on this workstation resolving mDNS. None of that is what a
+        release changed.
+
+        It cost more than it caught: a degraded App gate rolled a Host back to
+        a release that could not start at all, which is worse than the state the
+        gate existed to prevent. It sits outside the gate's `try` and swallows
+        its own failures on purpose — inside, an unreachable probe would still
+        have rolled the Host back, which is the same refusal wearing a different
+        name. `eidolon-ops app-ready` answers the question on demand.
+        """
+
+        phases.begin("app_ready")
+        try:
+            observed: dict[str, object] = self._app_ready()
+        except Exception as exc:
+            observed = {"status": "unobserved", "error": str(exc)}
+        phases.append({"phase": "app_ready", "result": observed})
 
     def _restore(
         self,

@@ -1033,11 +1033,19 @@ def test_forward_only_activation_failure_requires_same_schema_fix_without_abort(
     assert "release-cutover-restore" not in actions
 
 
-def test_forward_only_app_readiness_failure_never_restores_old_interpreters(
+def test_forward_only_health_gate_failure_never_restores_old_interpreters(
     setup_controller, monkeypatch
 ) -> None:
     controller, _runner, transport = setup_controller
     controller.host_layer.app = _app()
+    original_run = transport.run
+
+    def degraded(remote, **kwargs):
+        if "doctor" in remote:
+            return ProcessResult(0, json.dumps({"status": "degraded"}), "")
+        return original_run(remote, **kwargs)
+
+    transport.run = degraded
     monkeypatch.setattr(
         controller.host_layer, "refresh", lambda release_id: {"status": "refreshed"}
     )
@@ -1051,9 +1059,6 @@ def test_forward_only_app_readiness_failure_never_restores_old_interpreters(
             "persistent_state_mutated": True,
             "database_migrations": [],
         },
-    )
-    monkeypatch.setattr(
-        controller.releases, "_app_ready", lambda: {"status": "degraded", "checks": []}
     )
 
     with pytest.raises(OperationsError, match="same-schema forward fix"):
@@ -1215,36 +1220,57 @@ def test_deploy_resume_rejects_existing_bundle_identity_drift(setup_controller) 
         controller.deploy(release_id="r1", resume=True, activate=False)
 
 
-def test_deploy_app_gate_failure_restores_exact_activation_snapshot(config) -> None:
+def test_deploy_records_a_degraded_app_probe_without_refusing(config) -> None:
+    """The deadlock, stated as a test.
+
+    The App probe asks whether a phone could finish setting this Host up.
+    Finishing needs a Workspace; a Workspace needs somebody to claim the Host
+    with a phone; claiming needs the release installed. A factory-fresh machine
+    could not pass its own last gate, and on the release path a degraded probe
+    rolled a Host back to a release that would not start at all. So it is
+    observed and written down, and it refuses nothing.
+    """
+
     transport = FakeTransport()
     original = transport.run_agent
 
     def degraded(action, payload, **kwargs):
         if action == "app-ready":
-            transport.agent_calls.append(
-                (action, dict(payload), kwargs.get("python", "/usr/bin/python3"), True)
-            )
-            return {"status": "degraded"}
+            return {"status": "degraded", "checks": [{"name": "workspace", "ok": False}]}
         return original(action, payload, **kwargs)
 
     transport.run_agent = degraded
     controller = EidolonPiController(config, ControllerRunner(config), transport=transport)
 
-    with pytest.raises(OperationsError, match="snapshot was restored"):
-        controller.deploy(release_id="r1", resume=True, activate=True)
+    result = controller.deploy(release_id="r1", resume=True, activate=True)
 
-    rollback = next(call for call, _sudo in transport.remote_calls if "rollback" in call)
-    assert rollback[-1] == "/var/lib/eidolon/deployments/r1-" + "a" * 32
-    actions = [action for action, *_rest in transport.agent_calls]
-    # Cleanup first, explanation after: the candidate has to be released before
-    # the failure is annotated, never the other way round.
-    assert actions[-2:] == ["reclaim-releases", "release-sources"]
-    reclaim = next(
-        payload
-        for action, payload, *_rest in reversed(transport.agent_calls)
-        if action == "reclaim-releases"
-    )
-    assert reclaim["phase"] == "abort"
+    assert result["status"] == "activated"
+    assert not any("rollback" in call for call, _sudo in transport.remote_calls)
+    app_phase = next(phase for phase in result["phases"] if phase["phase"] == "app_ready")
+    assert app_phase["result"]["status"] == "degraded"
+
+
+def test_deploy_records_an_unreachable_app_probe_without_refusing(config) -> None:
+    """An unreachable probe is not a refusal wearing a different name."""
+
+    transport = FakeTransport()
+    original = transport.run_agent
+
+    def unreachable(action, payload, **kwargs):
+        if action == "app-ready":
+            raise OperationsError("host agent app-ready failed: connection reset")
+        return original(action, payload, **kwargs)
+
+    transport.run_agent = unreachable
+    controller = EidolonPiController(config, ControllerRunner(config), transport=transport)
+
+    result = controller.deploy(release_id="r1", resume=True, activate=True)
+
+    assert result["status"] == "activated"
+    assert not any("rollback" in call for call, _sudo in transport.remote_calls)
+    app_phase = next(phase for phase in result["phases"] if phase["phase"] == "app_ready")
+    assert app_phase["result"]["status"] == "unobserved"
+    assert "connection reset" in app_phase["result"]["error"]
 
 
 def test_deploy_doctor_failure_restores_exact_activation_snapshot(config) -> None:
@@ -1262,20 +1288,33 @@ def test_deploy_doctor_failure_restores_exact_activation_snapshot(config) -> Non
     with pytest.raises(OperationsError, match="snapshot was restored"):
         controller.deploy(release_id="r1", resume=True, activate=True)
 
-    assert any("rollback" in call for call, _sudo in transport.remote_calls)
+    rollback = next(call for call, _sudo in transport.remote_calls if "rollback" in call)
+    assert rollback[-1] == "/var/lib/eidolon/deployments/r1-" + "a" * 32
+    actions = [action for action, *_rest in transport.agent_calls]
+    # Cleanup first, explanation after: the candidate has to be released before
+    # the failure is annotated, never the other way round.
+    assert actions[-2:] == ["reclaim-releases", "release-sources"]
+    reclaim = next(
+        payload
+        for action, payload, *_rest in reversed(transport.agent_calls)
+        if action == "reclaim-releases"
+    )
+    assert reclaim["phase"] == "abort"
+    # The App probe is observed after the gate, so a failing gate never reaches
+    # it — and it can no longer be the thing that rolled a Host back.
     assert not any(call[0] == "app-ready" for call in transport.agent_calls)
 
 
 def test_deploy_reports_health_gate_and_rollback_failure(config) -> None:
     transport = FakeTransport()
-    original = transport.run_agent
+    original = transport.run
 
-    def degraded(action, payload, **kwargs):
-        if action == "app-ready":
-            return {"status": "degraded"}
-        return original(action, payload, **kwargs)
+    def degraded(remote, **kwargs):
+        if "doctor" in remote:
+            return ProcessResult(0, json.dumps({"status": "degraded"}), "")
+        return original(remote, **kwargs)
 
-    transport.run_agent = degraded
+    transport.run = degraded
     transport.fail_remote_match = "rollback"
     controller = EidolonPiController(config, ControllerRunner(config), transport=transport)
 
@@ -1307,21 +1346,16 @@ def test_deploy_rejects_invalid_activation_evidence_without_guessing_snapshot(co
 
 def test_deploy_rejects_invalid_rollback_evidence(config) -> None:
     transport = FakeTransport()
-    original_agent = transport.run_agent
     original_remote = transport.run
 
-    def degraded(action, payload, **kwargs):
-        if action == "app-ready":
-            return {"status": "degraded"}
-        return original_agent(action, payload, **kwargs)
-
-    def invalid_recovery(remote, **kwargs):
+    def degraded_then_invalid_recovery(remote, **kwargs):
+        if "doctor" in remote:
+            return ProcessResult(0, json.dumps({"status": "degraded"}), "")
         if "rollback" in remote:
             return ProcessResult(0, json.dumps({"status": "unknown"}), "")
         return original_remote(remote, **kwargs)
 
-    transport.run_agent = degraded
-    transport.run = invalid_recovery
+    transport.run = degraded_then_invalid_recovery
     controller = EidolonPiController(config, ControllerRunner(config), transport=transport)
 
     with pytest.raises(OperationsError, match="invalid recovery evidence"):

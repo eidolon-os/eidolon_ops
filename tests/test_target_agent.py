@@ -226,9 +226,11 @@ def test_start_failure_stops_services_and_preserves_phase(install_fixture) -> No
     assert resumed_host.calls == ["start_release", "wait_ready", "doctor"]
 
 
-def test_app_gate_failure_is_not_committed_and_resumes_from_assets(install_fixture) -> None:
+def test_install_completes_with_a_degraded_app_probe(install_fixture) -> None:
+    """A first install has no phone behind it yet, and still has to finish."""
+
     installer, host, _command, stage, release, data = install_fixture
-    failing = TargetInstaller(
+    degraded = TargetInstaller(
         release=release,
         secret_stage=stage,
         data=data,
@@ -239,7 +241,30 @@ def test_app_gate_failure_is_not_committed_and_resumes_from_assets(install_fixtu
         app_check=lambda: {"status": "degraded"},
     )
 
-    with pytest.raises(TargetError, match="App commissioning"):
+    result = degraded.install()
+
+    assert result["status"] == "installed"
+    assert result["app"] == {"status": "degraded"}
+    assert "quiesce" not in host.calls
+    journal = json.loads(degraded.journal_path.read_text(encoding="utf-8"))
+    assert journal["status"] == "completed"
+
+
+def test_health_gate_failure_is_not_committed_and_resumes_from_assets(install_fixture) -> None:
+    installer, _unused_host, _command, stage, release, data = install_fixture
+    host = FakeHost(installer.root, release, fail="doctor")
+    failing = TargetInstaller(
+        release=release,
+        secret_stage=stage,
+        data=data,
+        host=host,
+        root=installer.root,
+        command=FakeCommand(),
+        manage_ownership=False,
+        app_check=lambda: {"status": "app_ready"},
+    )
+
+    with pytest.raises(RuntimeError, match="injected doctor failure"):
         failing.install()
 
     journal = json.loads(failing.journal_path.read_text(encoding="utf-8"))

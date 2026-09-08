@@ -77,7 +77,7 @@ class TargetInstaller:
                 return {
                     "status": "already_installed",
                     "release_id": self.release_id,
-                    "app": self._require_app_ready(),
+                    "app": self._app_state(),
                     "authority": self._established_lineage(),
                     **result,
                 }
@@ -107,12 +107,12 @@ class TargetInstaller:
                     self.host.wait_ready(self.release)
                     self._await_host_layer()
                     result = self.host.doctor(self.release)
-                    app_result = self._require_app_ready()
+                    app_result = self._app_state()
                     phase = self._record(journal, "started")
                 else:
                     self._await_host_layer()
                     result = self.host.doctor(self.release)
-                    app_result = self._require_app_ready()
+                    app_result = self._app_state()
                 phase = self._record(journal, "completed", status="completed")
                 return {
                     "status": "installed",
@@ -148,13 +148,24 @@ class TargetInstaller:
     def _established_lineage(self) -> dict[str, object] | None:
         return authority_reset.established_lineage(root=self.root)["established"]
 
-    def _require_app_ready(self) -> dict[str, object] | None:
-        if self.app_check is None:
-            return None
-        result = self.app_check()
-        if result.get("status") != "app_ready":
-            raise TargetError("mobile App commissioning gate is degraded")
-        return result
+    def _app_state(self) -> dict[str, object] | None:
+        """Where the phone stands, reported and not required.
+
+        This used to refuse the install when the App gate was degraded, which a
+        first install can never satisfy: the gate asks whether a phone could
+        finish setting this Host up, and finishing needs a Workspace, which
+        needs somebody to claim the Host with a phone, which needs the install
+        to be done. A factory-fresh machine could not pass its own last gate.
+
+        The two gates beside it stay, because they are about the release: its
+        services started (`wait_ready`) and its own doctor is healthy
+        (`doctor`). This one is about a person and their phone, and a release
+        transaction has no business failing over that. It is still measured and
+        still returned as `app`, and `eidolon-ops app-ready` still answers it on
+        demand — what is gone is the refusal.
+        """
+
+        return None if self.app_check is None else self.app_check()
 
     def _input_digests(self) -> dict[str, str]:
         if not self.secret_stage.is_dir() or self.secret_stage.is_symlink():
