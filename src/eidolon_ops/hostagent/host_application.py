@@ -12,7 +12,7 @@ import uuid
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
-from . import app_contract, contract, primitives
+from . import contract, primitives
 from .primitives import TargetError
 
 #: The name the Hub advertises, and why this Host must not also claim it.
