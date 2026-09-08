@@ -1887,11 +1887,13 @@ def test_the_derived_host_layer_is_delivered_without_a_reinstall(tmp_path, monke
     monkeypatch.setattr(
         primitives, "checked", lambda *_a, **_k: subprocess.CompletedProcess((), 0, "", "")
     )
-    reconciled: list[tuple[Path, str]] = []
+    reconciled: list[tuple[Path, str, frozenset[str]]] = []
     monkeypatch.setattr(
         contract,
         "ensure_host_path_contract",
-        lambda root, _chown, registry: reconciled.append((root, registry)),
+        lambda root, _chown, registry, capabilities=frozenset(): reconciled.append(
+            (root, registry, capabilities)
+        ),
     )
     placed: dict[str, Path] = {}
     for name in contract.REFRESHABLE_HOST_LAYER_INPUTS:
@@ -1921,7 +1923,10 @@ def test_the_derived_host_layer_is_delivered_without_a_reinstall(tmp_path, monke
     assert len(result["changed"]) == len(contract.REFRESHABLE_HOST_LAYER_INPUTS)
     for name, destination in placed.items():
         assert destination.read_text(encoding="utf-8") == f"new-{name}"
-    assert reconciled == [(Path("/"), "admin:\n  api:\n    port: 9000\n")]
+    # The refresh reconciles the path contract with the same capability
+    # declaration the payload's unit topology was derived from — the sealed
+    # Host profile is where eidolond and the applier read it.
+    assert reconciled == [(Path("/"), "admin:\n  api:\n    port: 9000\n", frozenset())]
 
     # Second run has nothing to deliver, so systemd is left alone.
     assert (
@@ -1935,8 +1940,8 @@ def test_the_derived_host_layer_is_delivered_without_a_reinstall(tmp_path, monke
         == []
     )
     assert reconciled == [
-        (Path("/"), "admin:\n  api:\n    port: 9000\n"),
-        (Path("/"), "admin:\n  api:\n    port: 9000\n"),
+        (Path("/"), "admin:\n  api:\n    port: 9000\n", frozenset()),
+        (Path("/"), "admin:\n  api:\n    port: 9000\n", frozenset()),
     ]
 
     placed["owner-domain-root-ca.pem"].chmod(0o666)

@@ -192,7 +192,7 @@ def test_a_host_learns_a_path_that_did_not_exist_when_it_was_installed(
 
     contract.ensure_host_path_contract(root, lambda *_a: None, "ports: {}\n")
 
-    assert host_env.read_text(encoding="utf-8") == contract.HOST_ENV_VALUE
+    assert host_env.read_text(encoding="utf-8") == contract.host_env_value(frozenset())
     assert "EIDOLON_MEMORY_EMBEDDING_MODEL_DIR" in host_env.read_text(encoding="utf-8")
 
 

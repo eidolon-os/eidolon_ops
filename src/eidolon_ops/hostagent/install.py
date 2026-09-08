@@ -42,9 +42,14 @@ class TargetInstaller:
         manage_ownership: bool = True,
         app_check: Callable[[], dict[str, object]] | None = None,
         port_registry: str = "",
+        #: What this Host declares, written into the sealed Host profile so
+        #: eidolond and the applier filter their service catalogue by the same
+        #: value this install derived its unit topology from.
+        capabilities: frozenset[str] = frozenset(),
         sources: Mapping[str, object] | None = None,
     ) -> None:
         self.port_registry = port_registry
+        self.capabilities = capabilities
         #: Which commit of each repository this Host was installed from. A first
         #: install writes no cutover document, so this journal is the only place
         #: the founding combination survives the release directory being
@@ -300,7 +305,9 @@ class TargetInstaller:
             for name in identities.OWNER_TRUST_READERS:
                 self._ensure_group_membership(name, identities.OWNER_TRUST_GROUP)
             self._validate_service_identity_boundary()
-        contract.ensure_host_path_contract(self.root, self._chown, self.port_registry)
+        contract.ensure_host_path_contract(
+            self.root, self._chown, self.port_registry, self.capabilities
+        )
 
     def _ensure_group_membership(self, user: str, group: str) -> None:
         observed = self.command(("/usr/bin/id", "-nG", user), timeout=30)
@@ -498,5 +505,6 @@ def install(payload: Mapping[str, object]) -> dict[str, object]:
         host=host,
         app_check=lambda: probe.app_ready(payload),
         port_registry=contract.fixed_port_registry(payload),
+        capabilities=contract.declared_capabilities(payload),
         sources=contract.optional_source_provenance(payload),
     ).install()

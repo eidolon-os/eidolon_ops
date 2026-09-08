@@ -108,6 +108,11 @@ def refresh_host_application(payload: Mapping[str, object]) -> dict[str, object]
         Path("/"),
         primitives.chown_path,
         contract.fixed_port_registry(payload),
+        # The same declaration `fixed_units` above derived this release's unit
+        # topology from, written where eidolond and the applier read it. A Host
+        # told to install a unit and told it has no such capability would agree
+        # with neither, so both come from one value.
+        contract.declared_capabilities(payload),
     )
     changed: list[str] = []
     # Every Host application input is required now. What used to be placed

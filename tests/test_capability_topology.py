@@ -300,3 +300,50 @@ def test_the_target_preparer_knows_the_same_capabilities_ops_does() -> None:
                 declared = ast.literal_eval(value)
     assert declared is not None, "the target preparer no longer states the capability set"
     assert set(declared) == set(HOST_CAPABILITIES)
+
+
+def test_the_service_manifest_requires_the_same_capability_the_contract_does() -> None:
+    """The sixth statement, and the one whose absence broke the board.
+
+    eidolond starts what its own service manifest names, and nothing else. The
+    manifest had no entry for a conditional service and no notion of one, so a
+    unit was installed that nothing started, and the release's readiness check
+    for it timed out and rolled the Host back.
+
+    The manifest states the requirement in the same words the component's own
+    `ops/component.toml` does. This is what keeps the two from drifting into
+    different answers about the same service.
+    """
+
+    import yaml
+
+    manifest = _REPOSITORIES / "eidolon_kernel" / "config" / "system-services.yaml"
+    if not manifest.is_file():
+        pytest.skip("the service manifest needs the sibling Kernel repository to check")
+    document = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    by_unit = {
+        service["host_targets"].get("systemd"): service.get("requires_capability")
+        for service in document["services"]
+    }
+
+    for capability, units in ops_config.CAPABILITY_UNITS.items():
+        for unit in units:
+            assert unit in by_unit, (
+                f"{unit} is in the topology {capability} brings and in no service the "
+                "manifest names, so nothing on the Host would ever start it"
+            )
+            assert by_unit[unit] == capability, (
+                f"the manifest has {unit} requiring {by_unit[unit]!r}; the config "
+                f"table brings it for {capability!r}"
+            )
+
+    # And the other direction: a manifest service that requires a capability
+    # must be one this config table knows brings it, or a Host that declares the
+    # capability would install no unit for a service it now expects to start.
+    conditional = {unit: needed for unit, needed in by_unit.items() if needed is not None}
+    brought = {
+        unit: capability
+        for capability, units in ops_config.CAPABILITY_UNITS.items()
+        for unit in units
+    }
+    assert conditional == brought

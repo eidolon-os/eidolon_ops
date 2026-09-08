@@ -482,6 +482,25 @@ HOST_ENV_VALUE = (
     f"EIDOLON_PORTS_FILE={HOST_PORTS_PATH}\n"
 )
 
+#: Where this Host states what it can do, for everything that reads the sealed
+#: Host profile. eidolond and the root unit applier both do, which is why this
+#: needs no plumbing of its own: the manager filters its service catalogue by
+#: it, and the applier derives the same filtered allowlist from the same file.
+#:
+#: The one line here that is not a product constant. It is rendered from the
+#: capabilities the operator declared and this agent has already validated
+#: against its own closed set — the same value `expected_units` is derived
+#: from, so a Host cannot be told to install a unit and then told it has no
+#: such capability.
+HOST_CAPABILITIES_VARIABLE = "EIDOLON_HOST_CAPABILITIES"
+
+
+def host_env_value(capabilities: frozenset[str]) -> str:
+    """The sealed Host profile, for a Host that can do these things."""
+
+    declared = ",".join(sorted(capabilities))
+    return f"{HOST_ENV_VALUE}{HOST_CAPABILITIES_VARIABLE}={declared}\n"
+
 HOST_DIRECTORIES = (
     (Path("/opt/eidolon"), 0o755, "root", "root"),
     (Path("/opt/eidolon/releases"), 0o755, "root", "root"),
@@ -539,6 +558,7 @@ def ensure_host_path_contract(
     root: Path,
     chown: Callable[[Path, str, str], None],
     port_registry: str,
+    capabilities: frozenset[str] = frozenset(),
 ) -> None:
     """Materialize the host-profile roots without adopting mutable contents."""
 
@@ -568,12 +588,18 @@ def ensure_host_path_contract(
     host_env = primitives.host_path(root, HOST_ENV_PATH)
     if host_env.is_symlink() or (host_env.exists() and not host_env.is_file()):
         raise TargetError("existing /etc/eidolon/host.env is not a regular file")
-    primitives.atomic_text(host_env, HOST_ENV_VALUE, mode=0o644)
+    primitives.atomic_text(host_env, host_env_value(capabilities), mode=0o644)
     chown(host_env, "root", "root")
 
 
-def fixed_units(payload: Mapping[str, object]) -> tuple[str, ...]:
-    """The units this Host runs, checked rather than believed.
+def declared_capabilities(payload: Mapping[str, object]) -> frozenset[str]:
+    """What the operator says this Host can do, validated once for every use.
+
+    Read through one function because three things are derived from it and
+    disagreement between them is the failure this whole mechanism exists to
+    prevent: the unit topology this install writes, the sealed Host profile
+    eidolond and the applier filter their catalogue by, and the release the
+    descriptor was sealed for.
 
     A payload with no capabilities is one from before Hosts differed, and gets
     the baseline — so an older workstation keeps working against a newer agent.
@@ -587,7 +613,17 @@ def fixed_units(payload: Mapping[str, object]) -> tuple[str, ...]:
         # Not merely unrecognised: a capability this agent cannot reason about
         # may be one that should have brought units it will now never install.
         raise TargetError("capability is not one this agent was built for: " + ", ".join(unknown))
-    expected = expected_units(frozenset(declared))
+    return frozenset(declared)
+
+
+def fixed_units(payload: Mapping[str, object]) -> tuple[str, ...]:
+    """The units this Host runs, checked rather than believed.
+
+    A payload with no capabilities is one from before Hosts differed, and gets
+    the baseline — so an older workstation keeps working against a newer agent.
+    """
+
+    expected = expected_units(declared_capabilities(payload))
     value = payload.get("units")
     if value != list(expected):
         raise TargetError("unit set differs from the reviewed product topology")
