@@ -347,3 +347,82 @@ def test_the_service_manifest_requires_the_same_capability_the_contract_does() -
         for unit in units
     }
     assert conditional == brought
+
+
+def test_a_capability_port_reaches_the_host_registry(pinned_config, monkeypatch) -> None:
+    """The number is stated once, by the component that reserves it.
+
+    Otherwise every consumer writes 8768 into its own configuration — the class
+    of defect this repository spent a day removing. `asr_stream` exists on a
+    board with an NPU and on no other Host, so it cannot live in the curated
+    baseline file; it is derived per Host and added under its own key.
+    """
+
+    from dataclasses import replace
+
+    from eidolon_ops.config import SourceConfig
+    from eidolon_ops.host_layer import HostLayer
+
+    def registry(capabilities: frozenset[str]) -> str:
+        sources = dict(pinned_config.sources)
+        sources["eidolon_models"] = SourceConfig(path=_REPOSITORIES / "eidolon_models")
+        config = replace(pinned_config, sources=sources, capabilities=capabilities)
+        layer = HostLayer(
+            config,
+            transport=object(),
+            app=None,
+            read_exact_source_file=lambda *_a: "",
+            source_revisions=lambda: {},
+        )
+        return layer._port_registry()
+
+    if not (_REPOSITORIES / "eidolon_models" / "ops" / "component.toml").is_file():
+        pytest.skip("the port role needs the sibling eidolon_models repository")
+
+    plain = registry(frozenset())
+    npu = registry(frozenset({"local_asr"}))
+
+    assert "asr_stream" not in plain
+    assert "port_roles:" not in plain, (
+        "a Host that declares nothing gets the curated baseline unchanged"
+    )
+    assert "port_roles:" in npu
+    assert "asr_stream: 8768" in npu
+    # Added, never folded into the curated nesting: the existing keys are
+    # hand-chosen (`nats_http` lives at `nats.http_port`), so there is no
+    # role-name-to-path rule to apply.
+    assert npu.startswith(plain.rstrip("\n"))
+
+
+def test_the_baseline_ports_are_not_restated_per_capability(pinned_config) -> None:
+    """Two answers to one question is the thing being avoided.
+
+    Every port every Host binds is already in the curated file. Only what a
+    capability *adds* is derived, so nothing appears twice with a chance to
+    disagree.
+    """
+
+    from dataclasses import replace
+
+    from eidolon_ops.config import SourceConfig
+    from eidolon_ops.host_layer import HostLayer
+
+    if not (_REPOSITORIES / "eidolon_models" / "ops" / "component.toml").is_file():
+        pytest.skip("the port role needs the sibling eidolon_models repository")
+
+    sources = dict(pinned_config.sources)
+    sources["eidolon_models"] = SourceConfig(path=_REPOSITORIES / "eidolon_models")
+    config = replace(
+        pinned_config, sources=sources, capabilities=frozenset({"local_asr"})
+    )
+    layer = HostLayer(
+        config,
+        transport=object(),
+        app=None,
+        read_exact_source_file=lambda *_a: "",
+        source_revisions=lambda: {},
+    )
+
+    # livekit and nats are baseline roles: present in the curated file, and so
+    # not repeated in the derived section.
+    assert layer._capability_port_roles() == {"asr_stream": 8768}

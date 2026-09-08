@@ -12,6 +12,7 @@ import os
 import tempfile
 from pathlib import Path
 
+from eidolon_ops.component_contract import read_component_contracts
 from eidolon_ops.config import INSTALL_FILE_NAMES, OperationsConfig
 from eidolon_ops.environment import EnvironmentFileError
 from eidolon_ops.errors import InstallInputError, OperationsError
@@ -84,15 +85,72 @@ class HostLayer:
         #: its own answer is the shape of the bug this replaced.
         self._source_revisions = source_revisions
 
-    def target_payload(self) -> dict[str, object]:
-        """Everything a Host is told about itself, in one reviewed shape."""
+    def _port_registry(self) -> str:
+        """The registry a Host is given: the reviewed baseline, plus the port
+        roles this Host's capabilities actually bring.
+
+        Two artifacts have been living in one file. The baseline is curated by
+        hand and aggregated from sub-project settings, keyed the way Admin reads
+        it (`hub.api.port`). The port *roles* are derived: a component's own
+        `ops/component.toml` reserves one, and Ops selects it by capability —
+        so `asr_stream` exists on a board with an NPU and on no other Host.
+
+        Only the derived half is added here, under its own key, in the flat
+        shape it is derived in. Folding it into the curated nesting would mean
+        inventing a role-name-to-path rule, and there is none to invent: the
+        existing keys are hand-chosen (`nats_http` lives at `nats.http_port`).
+        Admin reads this file key by key and ignores what it does not know.
+
+        Why it has to reach the Host at all: a component that reserves a port
+        is the only thing that should state the number, and something on the
+        Host has to be able to ask. Otherwise every consumer writes 8768 into
+        its own configuration — which is the class of defect this repository
+        spent a day removing.
+        """
 
         try:
-            port_registry = _PORT_REGISTRY.read_text(encoding="utf-8")
+            baseline = _PORT_REGISTRY.read_text(encoding="utf-8")
         except OSError as exc:
             raise OperationsError(
                 f"Ops-owned port registry is unreadable: {_PORT_REGISTRY}"
             ) from exc
+        roles = self._capability_port_roles()
+        if not roles:
+            return baseline
+        lines = [
+            "",
+            "# Derived, not curated: the port roles the components' own contracts",
+            "# reserve for the capabilities this Host declares. Absent on a Host",
+            "# that declares nothing, which is why this section is written here",
+            "# rather than kept in the file above.",
+            "port_roles:",
+        ]
+        lines.extend(f"  {role}: {port}" for role, port in sorted(roles.items()))
+        return baseline.rstrip("\n") + "\n" + "\n".join(lines) + "\n"
+
+    def _capability_port_roles(self) -> dict[str, int]:
+        """The roles a capability adds, and only those.
+
+        The baseline file already states every port every Host binds, so
+        repeating those here would give two answers to one question. What it
+        cannot state is a port that exists only on some Hosts.
+        """
+
+        sources = {source_id: source.path for source_id, source in self.config.sources.items()}
+        without = read_component_contracts(sources, frozenset()).port_roles
+        with_capabilities = read_component_contracts(
+            sources, self.config.capabilities
+        ).port_roles
+        return {
+            role: port
+            for role, port in with_capabilities.items()
+            if role not in without
+        }
+
+    def target_payload(self) -> dict[str, object]:
+        """Everything a Host is told about itself, in one reviewed shape."""
+
+        port_registry = self._port_registry()
         payload: dict[str, object] = {
             "units": list(self.config.units),
             # Sent so the agent can derive the unit set itself rather than
