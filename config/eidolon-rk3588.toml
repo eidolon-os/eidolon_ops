@@ -140,14 +140,22 @@ memory_settings = "../.eidolon-ops/opi5max/inputs/memory.yaml"
 [capabilities]
 provides = ["rknpu2", "local_asr"]
 
-# 2026-09-08：这里原本是 value = "eidolon_models"，指向一个不存在的 provider。
-# eidolon_channel 的 validate_effective_config 只接受 'bailian' 或 'sensetime'
-# ——STT 和 TTS 都没有本地分支。上次安装把这个值写进了板上的 channel.yaml，
-# 于是 refresh-host-application 在 cross-release 校验上失败，整次发布回滚。
+# 2026-09-09：STT 走本地。这台板子声明了 local_asr，release 因此带上
+# eidolon_models、装 eidolon-asr.service，eidolond 按 host.env 里的声明把它列进
+# 服务目录并启动它，channel 的 local_asr 插件从这台主机自己的端口注册表解析端点。
 #
-# 先改回云端 STT，让 applier 能落地。真正要"全本地"，缺的是 channel 里的
-# 一个本地 provider，那是功能开发，不是配置能解决的。
+# provider 名就是 capability 名，所以 load_config 会拒绝"配了 local_asr 却没在
+# capabilities.provides 里声明"——两处必须一致。
+#
+# TTS 仍在云端：本地 TTS 还没有对应的服务和 provider。
 [[settings.overlay]]
 document = "channel.yaml"
 path = "providers.stt_provider"
-value = "bailian"
+# 分两次发布，这是 cross-release 规则要求的，不是绕路：settings 和组件链接是两
+# 次独立的原子操作，所以候选 settings 必须**同时**被当前 release 的解释器（回滚
+# 安全）和候选解释器（前向安全）读懂。当前板上的 channel 还不认识 local_asr，
+# 于是它拒绝了——正确地拒绝了。
+#
+# 第一发（rk3588-20260909T...）已经把认识 local_asr 的代码放上去了，所以现在
+# 当前 release 和候选 release 都读得懂这个值。
+value = "local_asr"
