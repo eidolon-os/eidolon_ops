@@ -226,6 +226,62 @@ def test_start_failure_stops_services_and_preserves_phase(install_fixture) -> No
     assert resumed_host.calls == ["start_release", "wait_ready", "doctor"]
 
 
+def test_install_answers_for_the_name_it_advertises(install_fixture) -> None:
+    """The gap between the two halves of discovery, on the install path.
+
+    The Hub advertises `eidolon-hub-<host>.local`; the address answer for that
+    name is registered separately. Both were reached only from the refresh path,
+    which deploy runs and install does not — so a factory-fresh Host advertised
+    a name nothing answered for, and on a Host with a stale entry avahi withdrew
+    the name as a conflict. Install now publishes it before the release starts.
+    """
+
+    installer, host, _command, stage, release, data = install_fixture
+    published: list[str] = []
+    publishing = TargetInstaller(
+        release=release,
+        secret_stage=stage,
+        data=data,
+        host=host,
+        root=installer.root,
+        command=FakeCommand(),
+        manage_ownership=False,
+        app_check=lambda: {"status": "app_ready"},
+        publish_hostname=lambda: (
+            published.append("/etc/avahi/hosts") or ["/etc/avahi/hosts"]
+        ),
+    )
+
+    result = publishing.install()
+
+    assert result["hub_hostname_published"] == ["/etc/avahi/hosts"]
+    # Before the release starts, not after: the answer has to be true for as
+    # long as the advertisement is live.
+    assert published and host.calls.index("start_release") >= 0
+    assert len(published) == 1
+
+    # A resumed or repeated install re-asserts it, because the address it was
+    # written from is observed state that a Wi-Fi move invalidates.
+    again = TargetInstaller(
+        release=release,
+        secret_stage=stage,
+        data=data,
+        host=FakeHost(installer.root, release),
+        root=installer.root,
+        command=FakeCommand(),
+        manage_ownership=False,
+        app_check=lambda: {"status": "app_ready"},
+        publish_hostname=lambda: (
+            published.append("/etc/avahi/hosts") or ["/etc/avahi/hosts"]
+        ),
+    )
+    repeated = again.install()
+
+    assert repeated["status"] == "already_installed"
+    assert repeated["hub_hostname_published"] == ["/etc/avahi/hosts"]
+    assert len(published) == 2
+
+
 def test_install_completes_with_a_degraded_app_probe(install_fixture) -> None:
     """A first install has no phone behind it yet, and still has to finish."""
 
