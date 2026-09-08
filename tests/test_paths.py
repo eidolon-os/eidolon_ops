@@ -469,14 +469,39 @@ def test_the_livekit_url_is_derived_rather_than_declared(tmp_path: Path) -> None
         identity, lan_ipv4="192.168.1.25", allow_insecure=True, port=7880
     ) == "ws://192.168.1.25:7880"
 
-    # Left to discovery, the Host-bound name is used instead — never a literal
-    # address, which is what could go stale.
+    # Declared nothing, so claimed nothing. This used to fall back to the
+    # Host-bound `.local` name on the reasoning that a name cannot go stale the
+    # way an address can — sound, and still wrong: Android resolves with
+    # getaddrinfo, which does not resolve mDNS names at all, so the board
+    # shipped a LiveKit URL no phone could turn into an address.
+    #
+    # The host is left out instead, and the Channel provider answers it when it
+    # mints a binding, from the address the kernel would leave the machine by.
+    # Ops writing one here answers a question only answerable later, which is
+    # how both of the old values came to be wrong.
     assert livekit_client_url(
         identity, lan_ipv4=None, allow_insecure=True, port=7880
-    ) == "ws://eidolon-hub-0123456789abcdef0123.local:7880"
+    ) == "ws://:7880"
+    assert livekit_client_url(
+        identity, lan_ipv4=None, allow_insecure=False, port=7880
+    ) == "wss://:7880"
 
     # And the scheme follows the opt-in rather than being checked against it,
     # so the inconsistency the old validation existed to catch cannot arise.
     assert livekit_client_url(
         identity, lan_ipv4=None, allow_insecure=False, port=7880
     ).startswith("wss://")
+
+
+def test_a_report_resolves_the_deferred_livekit_host_for_the_operator() -> None:
+    """`ws://:7880` is right in a config file and reads as a bug in a report."""
+
+    from eidolon_ops.host_identity import livekit_client_url_at
+
+    assert livekit_client_url_at("ws://:7880", "192.168.1.33") == "ws://192.168.1.33:7880"
+    assert livekit_client_url_at("wss://:7880", "10.0.0.7") == "wss://10.0.0.7:7880"
+    # A declared address is already the answer and is not second-guessed.
+    assert (
+        livekit_client_url_at("ws://192.168.1.25:7880", "10.0.0.7")
+        == "ws://192.168.1.25:7880"
+    )

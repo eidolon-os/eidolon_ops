@@ -53,6 +53,22 @@ def derive_host_lan_identity(raw_private_key: bytes) -> HostLanIdentity:
     )
 
 
+def livekit_client_url_at(configured: str, observed: str) -> str:
+    """The configured LiveKit URL as a device would receive it, for a report.
+
+    `livekit_client_url` may leave the host out, because Ops does not know it
+    and the Channel provider fills it in per binding. That is the right thing
+    to write into configuration and the wrong thing to show an operator, who
+    reads `ws://:7880` as a bug. So a report resolves it the same way, against
+    the address it has just observed this Host answering on.
+    """
+
+    scheme, _, rest = configured.partition("://")
+    if not rest.startswith(":"):
+        return configured
+    return f"{scheme}://{observed}{rest}"
+
+
 def livekit_client_url(
     identity: HostLanIdentity,
     *,
@@ -60,23 +76,34 @@ def livekit_client_url(
     allow_insecure: bool,
     port: int,
 ) -> str:
-    """Where this Host tells a phone to reach its LiveKit.
+    """Where this Host tells a device to reach its LiveKit.
 
     Derived, because it never carried anything Ops did not already know. The
     profile used to spell it out, and the validation around that field had
     squeezed it to exactly two legal values: the declared `lan_ipv4` when there
-    was one, or this Host's own derived hostname when there was not. Both are
-    right here. What the field added was a chance to type the wrong one — the
-    Pi's suffix went onto the RK3588 profile and travelled all the way to the
-    board before anything refused it.
+    was one, or this Host's own derived hostname when there was not. What the
+    field added was a chance to type the wrong one — the Pi's suffix went onto
+    the RK3588 profile and travelled all the way to the board before anything
+    refused it.
 
-    Note what this still is: a value the Host repeats to a phone, chosen before
-    the phone ever spoke. A Host cannot know which of its networks a phone is
-    on, and `reachable_ipv4_addresses` says so in as many words. Deriving it
-    removes the transcription error, not the assumption; that one belongs to
-    whoever answers a phone's session request with an address it observed.
+    The second of those values was also wrong on its own terms. A `.local` name
+    is resolved on Android by getaddrinfo, which does not resolve mDNS names at
+    all, so the board shipped
+    `ws://eidolon-hub-f89c0ecca5d0070a7989.local:7880` — a URL no Android phone
+    could turn into an address. And the first is a deploy-time observation
+    frozen into an environment file: a Host that changed networks afterwards
+    went on handing out the address it used to have.
+
+    So when nothing is declared, nothing is claimed: the host is left out
+    (`ws://:7880`), and the Channel provider answers it per binding from the
+    address the kernel would leave this machine by. Ops writing an address here
+    would be Ops answering a question that is only answerable later, which is
+    how both of the old values came to be wrong.
+
+    A declared `lan_ipv4` still wins, because an operator who pins an address
+    has said something Ops cannot derive.
     """
 
-    host = str(lan_ipv4) if lan_ipv4 is not None else identity.hub_hostname
     scheme = "ws" if allow_insecure else "wss"
+    host = "" if lan_ipv4 is None else str(lan_ipv4)
     return f"{scheme}://{host}:{port}"

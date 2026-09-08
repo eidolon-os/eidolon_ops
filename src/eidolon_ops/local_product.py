@@ -22,6 +22,7 @@ from eidolon_ops.host_identity import (
     HostLanIdentity,
     derive_host_lan_identity,
     livekit_client_url,
+    livekit_client_url_at,
 )
 from eidolon_ops.hostagent.authority_reset import lineage_evidence
 from eidolon_ops.hostagent.kernel_schema import (
@@ -721,7 +722,9 @@ class LocalProductSource:
             "endpoints": {
                 "local_api": f"https://{address}:{ports['local_api']}",
                 "hub": identity.hub_origin(app.hub_https_port),
-                "livekit": self._livekit_client_url(app),
+                "livekit": livekit_client_url_at(
+                    self._livekit_client_url(app), address
+                ),
             },
             "scope": (
                 "Host-side LAN contract only; a Pad conversation remains the final external gate"
