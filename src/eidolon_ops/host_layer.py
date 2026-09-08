@@ -41,6 +41,14 @@ ASSET_ERRORS = (
 #: byte, and two copies of a mapping are a mapping that will eventually
 #: disagree with itself in a way no test was watching for.
 _STAGED_INSTALL_NAMES = INSTALL_DESTINATION_NAMES
+
+#: The staged name of an input the operator does not supply.
+#:
+#: Kept out of `INSTALL_DESTINATION_NAMES` because that table has a second job:
+#: it *is* the set every profile must provide a file for
+#: (`install_inputs.py:180`). Adding an optional entry there turned it into a
+#: requirement, which is the opposite of optional.
+_FACTORY_SETUP_CODE_STAGED_NAME = "factory_setup_code"
 #: Which port each component binds. Ops owns this file — Admin builds its
 #: service catalog from it and interpolates the EIDOLON_* variables its
 #: services.yaml names — so a Host is sent this one rather than carrying a
@@ -161,6 +169,18 @@ class HostLayer:
         application = self.prepare() if self.app else None
         with tempfile.TemporaryDirectory(prefix="eidolon-host-application-") as temporary_value:
             temporary = Path(temporary_value)
+            factory_code = self._factory_setup_code()
+            if factory_code is not None:
+                # Rendered, not collected. The value already lives in the
+                # profile as `app.setup_code`, and asking the operator for a
+                # second copy of it in a file is the drift this whole change
+                # exists to stop being possible.
+                staged = temporary / _FACTORY_SETUP_CODE_STAGED_NAME
+                staged.write_text(factory_code + "\n", encoding="utf-8")
+                os.chmod(staged, 0o600)
+                self.transport.upload(
+                    staged, f"{stage}/{_FACTORY_SETUP_CODE_STAGED_NAME}"
+                )
             for name in names:
                 source = self.config.install_files[name]
                 if application is not None and name in HOST_BOUND_INPUTS:
@@ -177,6 +197,21 @@ class HostLayer:
                     source.write_bytes(application.files[name])
                     os.chmod(source, 0o600)
                     self.transport.upload(source, f"{stage}/{name}")
+
+    def _factory_setup_code(self) -> str | None:
+        """The code this Host was manufactured with, if this profile names one.
+
+        Delivering it is what lets an unclaimed Host stand up the claim window
+        the code on its chassis is for, instead of waiting for someone to reach
+        its control socket (ADR-0007). A profile that names no code delivers no
+        file, and such a Host behaves exactly as it did before — which is also
+        how a development fleet sharing one code stays safe, since an
+        unexpiring window plus a code everyone knows is an open door.
+        """
+
+        app = self.app
+        return None if app is None else app.setup_code
+
 
     def refresh(self, release_id: str) -> dict[str, object]:
         stage = f"/var/tmp/eidolon-secrets-{release_id}"

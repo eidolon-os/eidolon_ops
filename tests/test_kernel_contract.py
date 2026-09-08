@@ -13,6 +13,7 @@ from eidolon_ops.hostagent.contract import (
     INSTALL_INPUTS,
     LEGACY_SYSTEM_ASSETS,
     MANAGED_SYSTEM_ASSETS,
+    OPTIONAL_INSTALL_INPUTS,
     PRODUCT_UNITS,
     SECRET_INPUTS,
 )
@@ -76,8 +77,14 @@ def test_operator_topology_is_kernel_release_topology_plus_manager(kernel_contra
 
 
 def test_first_install_prerequisites_match_kernel_descriptor(kernel_contract) -> None:
+    # Optional inputs are excluded on purpose: `required_secrets` is what an
+    # install refuses to start without, and the factory Setup code is the one
+    # input whose absence is a supported state — no file, no standing claim
+    # window, a Host that behaves as it did before (ADR-0007).
     private = {
-        destination for destination, _user, _group, mode in SECRET_INPUTS.values() if mode == 0o600
+        destination
+        for name, (destination, _user, _group, mode) in SECRET_INPUTS.items()
+        if mode == 0o600 and name not in OPTIONAL_INSTALL_INPUTS
     }
     assert private == set(kernel_contract.required_secrets)
     assert {

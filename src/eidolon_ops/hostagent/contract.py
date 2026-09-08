@@ -153,6 +153,16 @@ SECRET_INPUTS = {
         "eidolon-bootstrap",
         0o600,
     ),
+    # The Setup code this device was manufactured with, beside the identity it
+    # was manufactured with: same directory, same owner, same 0600, same
+    # write-once delivery. Its presence is what lets a Host stand up the claim
+    # window the code printed on its chassis is for (ADR-0007).
+    "factory_setup_code": (
+        Path("/var/lib/eidolon-bootstrap/factory_setup_code"),
+        "eidolon-bootstrap",
+        "eidolon-bootstrap",
+        0o600,
+    ),
     "agent.env": (Path("/etc/eidolon/agent.env"), "root", "root", 0o600),
     "channel.env": (Path("/etc/eidolon/channel.env"), "root", "root", 0o600),
     "memory.env": (Path("/etc/eidolon/memory.env"), "root", "root", 0o600),
@@ -223,6 +233,19 @@ BASE_INSTALL_INPUTS = {**SECRET_INPUTS, **HOST_APPLICATION_INPUTS}
 # any longer: the Host signs commissioning vouchers with the management secret
 # it already holds.
 INSTALL_INPUTS = BASE_INSTALL_INPUTS
+
+#: Inputs a Host may or may not have been given, stripped before the staged
+#: file set is compared against the required ones.
+#:
+#: The note above is about the input this replaces, and the difference is the
+#: point. That one was a per-device commissioning registry: it belonged to no
+#: sealed release, and its *format* was read by code that changed underneath
+#: it, which is how a rollback left the Hub restarting 110 times. A factory
+#: Setup code is eight digits with no format to evolve, and the only thing that
+#: reads it — bootstrapd — ships inside the release that would roll back with
+#: it. What its absence means is also decided in one place: no file, no
+#: standing window, and a Host that behaves exactly as it did before.
+OPTIONAL_INSTALL_INPUTS = frozenset({"factory_setup_code"})
 
 #: The Host layer Ops derives rather than keeps: settings rendered from the
 #: Host identity, the ingress program, and the two units that run it. Unlike a

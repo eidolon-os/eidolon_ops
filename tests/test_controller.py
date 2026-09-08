@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import os
@@ -1546,6 +1547,29 @@ def test_unified_pi_stage_renders_host_bound_application_assets(config) -> None:
     assert len(transport.uploaded_bytes) == (
         len(config.install_files) + len(HOST_APPLICATION_STAGE_NAMES)
     )
+    # This profile names no Setup code, so nothing was staged for it. That
+    # absence is the switch: an unclaimed Host with no code file stands up no
+    # claim window, which is what keeps a development fleet sharing one code
+    # from being claimable by anyone in Bluetooth range (ADR-0007).
+    assert not [
+        key for key in transport.uploaded_bytes if key.endswith("/factory_setup_code")
+    ]
+
+    # And with one named, it is delivered — rendered from the profile rather
+    # than collected as a second copy of a value it already holds.
+    coded = EidolonPiController(
+        config,
+        Runner(config),
+        transport=CapturingTransport(),
+        app=dataclasses.replace(_app(), setup_code="48213097"),
+    )
+    coded.host_layer.stage_install_files("host-bound", stage)
+    delivered = {
+        key: value
+        for key, value in coded.transport.uploaded_bytes.items()
+        if key.endswith("/factory_setup_code")
+    }
+    assert list(delivered.values()) == [b"48213097\n"]
     app = payload["app"]
     assert isinstance(app, dict)
     assert str(app["owner_domain_id"]).startswith("owner-")

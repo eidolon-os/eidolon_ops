@@ -160,10 +160,10 @@ class TargetInstaller:
         if not self.secret_stage.is_dir() or self.secret_stage.is_symlink():
             raise TargetError("secret staging directory is missing or unsafe")
         actual = {path.name for path in self.secret_stage.iterdir()}
-        if frozenset(actual) not in {
-            frozenset(contract.SECRET_INPUTS),
-            frozenset(contract.BASE_INSTALL_INPUTS),
-            frozenset(contract.INSTALL_INPUTS),
+        if frozenset(actual) - contract.OPTIONAL_INSTALL_INPUTS not in {
+            frozenset(contract.SECRET_INPUTS) - contract.OPTIONAL_INSTALL_INPUTS,
+            frozenset(contract.BASE_INSTALL_INPUTS) - contract.OPTIONAL_INSTALL_INPUTS,
+            frozenset(contract.INSTALL_INPUTS) - contract.OPTIONAL_INSTALL_INPUTS,
         }:
             raise TargetError("secret staging file set is invalid")
         values: dict[str, str] = {}
