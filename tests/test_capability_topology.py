@@ -268,3 +268,35 @@ def test_the_release_contract_adds_units_for_the_same_capabilities() -> None:
         for capability, units in ops_config.CAPABILITY_UNITS.items()
         if units
     }
+
+
+def test_the_target_preparer_knows_the_same_capabilities_ops_does() -> None:
+    """The fifth statement of the same closed set.
+
+    `prepare_target.py` runs on a Host from inside the bundle, before anything
+    is installed and with nothing to import, so it holds its own copy too. It
+    was written checking membership against the table of what each capability
+    *adds*, which refused a Host that legitimately declared `rknpu2` — a
+    capability that adds no source — as declaring something unknown, after the
+    whole bundle had been transferred to it.
+    """
+
+    import ast
+
+    path = _REPOSITORIES / "eidolon_kernel" / "eidolon_deploy" / "prepare_target.py"
+    if not path.is_file():
+        pytest.skip("the target preparer needs the sibling Kernel repository to check")
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    declared: object | None = None
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            first = node.targets[0]
+            if isinstance(first, ast.Name) and first.id == "_HOST_CAPABILITIES":
+                value = node.value
+                # `frozenset({...})` is a call, not a literal, so the set
+                # inside it is what gets read.
+                if isinstance(value, ast.Call) and len(value.args) == 1:
+                    value = value.args[0]
+                declared = ast.literal_eval(value)
+    assert declared is not None, "the target preparer no longer states the capability set"
+    assert set(declared) == set(HOST_CAPABILITIES)
