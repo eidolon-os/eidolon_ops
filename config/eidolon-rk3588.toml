@@ -74,8 +74,9 @@ path = "../../eidolon_channel"
 [sources.eidolon_memory]
 path = "../../eidolon_memory"
 
-# eidolon_models 随 local_asr 一起撤下——见下面 [capabilities] 的说明。
-# load_config 要求 sources 恰好等于 capability 算出来的集合，所以这两处必须同进同退。
+[sources.eidolon_models]
+path = "../../eidolon_models"
+
 [sources.eidolon_sdk]
 path = "../../eidolon_sdk"
 
@@ -100,6 +101,7 @@ units = [
   "eidolon-agent.service",
   "eidolon-channel-provider.service",
   "eidolon-channel.service",
+  "eidolon-asr.service",
 ]
 
 [data]
@@ -124,24 +126,19 @@ agent_settings = "../.eidolon-ops/opi5max/inputs/agent.yaml"
 channel_settings = "../.eidolon-ops/opi5max/inputs/channel.yaml"
 memory_settings = "../.eidolon-ops/opi5max/inputs/memory.yaml"
 
-# 这块板有 NPU。声明 capability 才会把对应的 unit 加进拓扑、把 eidolon_models
-# 加进源，三者由 load_config 一起校验。
+# 这块板有 NPU，本地跑语音识别。声明 capability 才会把对应的 unit 加进拓扑、
+# 把 eidolon_models 加进源，三者由 load_config 一起校验（撤下过一轮，它依次拒绝了
+# 三次——这个耦合是对的）。
 #
-# 2026-09-08：local_asr 暂时撤下。发布契约这一侧已经通了——release 能带着
-# `capabilities: ["local_asr","rknpu2"]` 和 8 个组件封好、传上板子、建好 venv，
-# 这是真机验过的。卡在最后一米：eidolond 只启动它自己那份服务清单
-# （/etc/eidolon/system-services.yaml，由 eidolon_kernel/config 原样下发）里列出
-# 的服务，而那份清单既没有 eidolon-asr 条目，也没有"条件服务"这个概念。所以
-# unit 装上了、没人启动它，而 release 的 asr readiness 检查必然超时 → 回滚。
+# 2026-09-08：local_asr 加回来了。此前撤下是因为最后一米没通——eidolond 只启动它
+# 自己那份服务清单里的服务，而清单没有"条件服务"这个概念，于是 unit 装上了没人
+# 启动它。现在清单支持 requires_capability，声明会随 host.env 下发到主机，
+# eidolond 和 unit applier 按同一个值过滤同一份清单。
 #
-# 声明一个交付不了的能力会让这台主机每次发布都失败，所以先说真话。要把它加回来
-# 需要两件事，都不是配置能解决的：
-#   1. 服务清单支持按 Host capability 条件化（kernel 侧：schema + wire + domain，
-#      外加让 eidolond 知道本机声明了什么）
-#   2. eidolon_channel 里有一个本地 STT provider——现在 validate_effective_config
-#      只认 'bailian' / 'sensetime'，所以即使服务起来了也没有东西把语音路由给它
+# 注意 STT 的 provider 仍然指向云端（见下面的 overlay）：本地服务会跑起来，但
+# channel 里还没有把语音路由给它的 provider。
 [capabilities]
-provides = ["rknpu2"]
+provides = ["rknpu2", "local_asr"]
 
 # 2026-09-08：这里原本是 value = "eidolon_models"，指向一个不存在的 provider。
 # eidolon_channel 的 validate_effective_config 只接受 'bailian' 或 'sensetime'
