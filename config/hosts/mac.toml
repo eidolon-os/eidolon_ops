@@ -1,0 +1,32 @@
+schema_version = 1
+
+[host]
+id = "mac-dev"
+platform = "macos"
+driver = "local-supervisord"
+
+[paths]
+install_root = "~/ai/eidolon"
+current_root = "~/ai/eidolon"
+config_root = "~/ai/eidolon/.eidolon/mac-product/config"
+state_root = "~/ai/eidolon/.eidolon/mac-product/state"
+runtime_root = "~/ai/eidolon/.eidolon/mac-product/run"
+log_root = "~/ai/eidolon/.eidolon/mac-product/logs"
+cache_root = "~/ai/eidolon/.eidolon/mac-product/cache"
+bootstrap_state_root = "~/ai/eidolon/.eidolon/mac-product/bootstrap/state"
+bootstrap_runtime_root = "~/ai/eidolon/.eidolon/mac-product/bootstrap/run"
+
+[adapter]
+lifecycle_script = "../../deploy/dev/run_all.sh"
+operations_config = "../eidolon-pi.toml"
+foundation_mode = "external"
+external_livekit_config = "~/ai/eidolon/.eidolon/mac-product/run/livekit/livekit.generated.yaml"
+
+[app]
+hub_https_port = 8443
+allow_insecure_livekit = true
+# No source_overrides. This Host runs the same worktrees the release matrix
+# names, at their HEAD, which is what a source run executes anyway. The
+# overrides that used to be here pointed two of them at prepared copies
+# under /private/tmp that macOS had already deleted, and pinned Admin to a
+# commit its worktree no longer held.

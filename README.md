@@ -115,10 +115,21 @@ URL/digest、原子缓存和版本目录。`rsync` 只用于带 release digest m
 ```bash
 cd /path/to/eidolon/eidolon_ops
 uv sync --all-extras
-cp config/eidolon-pi.example.toml config/eidolon-pi.toml
-cp config/hosts/pi5.example.toml config/hosts/pi5.toml
-cp config/hosts/mac.example.toml config/hosts/mac.toml
-chmod 600 config/eidolon-pi.toml
+```
+
+Host profile 和 operations config 都在仓库里（`config/hosts/*.toml`、
+`config/eidolon-*.toml`）——一块板子是什么、能做什么、跑哪些 unit，都是评审过的
+产品决定，不该只存在一台机器上。里面唯一与本机有关的两个值是 SSH 私钥和
+known_hosts，写成 `~/.ssh/...`，各自的机器自己解析。
+
+要接一块新板子，从对应的 `*.example.toml` 复制一份改名，再把它加进仓库。
+
+**secret 不在这些文件里。** 它们只写相对路径指向 `.eidolon-ops/<host>/inputs/`，
+那个目录一直是 gitignore 的。出厂配对码也在那里（`factory_setup_code`），profile
+里只写 `setup_code_file` 指向它：入库文件里的码就是所有人都有的码。
+
+```bash
+chmod 600 config/eidolon-*.toml
 ```
 
 Mac 还必须安装 `git-lfs`；bundle 只从 exact commit pointer 导出 Channel 模型并验证 LFS object digest，

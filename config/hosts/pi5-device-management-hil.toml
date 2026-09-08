@@ -1,0 +1,24 @@
+schema_version = 1
+
+[host]
+id = "eidolon-pi5"
+platform = "raspberry-pi"
+driver = "ssh-systemd"
+
+[paths]
+install_root = "/opt/eidolon"
+current_root = "/opt/eidolon/current"
+config_root = "/etc/eidolon"
+state_root = "/var/lib/eidolon"
+runtime_root = "/run/eidolon"
+log_root = "/var/log/eidolon"
+cache_root = "/var/cache/eidolon"
+bootstrap_state_root = "/var/lib/eidolon-bootstrap"
+bootstrap_runtime_root = "/run/eidolon-bootstrap"
+
+[adapter]
+operations_config = "../eidolon-pi.toml"
+
+[app]
+hub_https_port = 9443
+allow_insecure_livekit = true

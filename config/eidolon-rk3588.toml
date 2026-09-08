@@ -1,0 +1,156 @@
+schema_version = 1
+
+[foundation]
+profile = "ubuntu-2604-rk3588-arm64-v1"
+
+[host]
+user = "eidolon-opi5max"
+# The Host's name, not one of its addresses: it answers here over whichever
+# link is up, and Ops picks the best one that responds — the wire first, which
+# measured 100 MB/s against 3.9 MB/s over Wi-Fi. Neither end configures a
+# subnet: both self-assign into 169.254/16 when the cable is in, and the Pi's
+# "eidolon-wired" profile is never-default so Wi-Fi keeps the route out.
+# 台架上用网线的静态地址而不是 mDNS 名字。理由不是"名字不好"——
+# 而是 macOS 不在这条 USB 网口上发 mDNS 查询：板子确实在 enP3p49s0 上注册了
+# A 记录（avahi 日志可查），但 getaddrinfo 只在 avahi 主动广播后的 120 秒 TTL
+# 内能看到它，之后就只剩 Wi-Fi 那条。而 require_wired_release_upload 需要的
+# 正是有线端点。
+#
+# 10.42.0.2 是配置出来的常量，不是自分配地址：网线是点对点、一次只接一块板，
+# 所以每块烧好的板子都是这个地址，插上就在，不用探测也不用逐台改。
+# Mac 那一侧对应 `networksetup -setmanual "USB 10/100/1000 LAN" 10.42.0.1
+# 255.255.255.0 ""`。
+#
+# 出厂的 Host 不接这根线，那时改回 mDNS 名字。
+hostname = "10.42.0.2"
+port = 22
+identity_file = "~/.ssh/id_ed25519_eidolon_opi5max"
+known_hosts_file = "~/.ssh/known_hosts"
+connect_timeout_seconds = 10
+remote_uv = "/usr/local/bin/uv"
+# Release payloads must never fall back to Wi-Fi, where this workstation's VPN
+# accounts for the transfer. Status and maintenance commands remain reachable.
+require_wired_release_upload = true
+
+[workspace]
+# 2026-08-25: moved off /private/tmp. macOS purges it on its own schedule.
+# This directory holds in-flight outputs for --resume; successful install and
+# activation remove their output, and later successes sweep failures older than
+# 48 hours. The reusable uv cache lives under the durable toolchain root.
+bundle_root = "~/eidolon/release-bundles"
+release_cli = "../../eidolon_kernel/.venv/bin/eidolon-release"
+python_index_url = "https://pypi.org/simple"
+python_http_timeout_seconds = 120
+python_http_retries = 8
+# Two streams made a cold fetch of the whole dependency set take longer than
+# the bundle step's own ceiling. Only genuinely new dependencies reach the
+# index now, but there is no reason to crawl through those either.
+python_concurrent_downloads = 8
+
+# No `revision` here on purpose. A release is defined by what the
+# repositories hold; a written pin was a second copy of that fact, and the
+# two were not equal — a cross-repository change was tested on every HEAD,
+# deploy reported success, and the board went on running the commits in this
+# file. To reproduce a combination that already shipped, pass
+# `--revision source=<40hex>` for that run, which says so out loud.
+[sources.eidolon_kernel]
+path = "../../eidolon_kernel"
+
+[sources.eidolon_data]
+path = "../../eidolon_data"
+
+[sources.eidolon_hub]
+path = "../../eidolon_hub"
+
+[sources.eidolon_admin]
+path = "../../eidolon_admin"
+
+[sources.eidolon_agent]
+path = "../../eidolon_agent"
+
+[sources.eidolon_channel]
+path = "../../eidolon_channel"
+
+[sources.eidolon_memory]
+path = "../../eidolon_memory"
+
+# eidolon_models 随 local_asr 一起撤下——见下面 [capabilities] 的说明。
+# load_config 要求 sources 恰好等于 capability 算出来的集合，所以这两处必须同进同退。
+[sources.eidolon_sdk]
+path = "../../eidolon_sdk"
+
+[services]
+units = [
+  "eidolon-bootstrapd.service",
+  "eidolond.service",
+  "eidolon-unit-applier.socket",
+  "eidolon-unit-applier.service",
+  "eidolon-data.service",
+  "eidolon-data-workspace.service",
+  "eidolon-hub.service",
+  "eidolon-kernel.service",
+  "eidolon-local-api.service",
+  "eidolon-lifecycle-workflow.service",
+  "eidolon-admin.service",
+  "eidolon-nats.service",
+  "eidolon-livekit.service",
+  "eidolon-memory-embedder.service",
+  "eidolon-memory-supervisor.service",
+  "eidolon-memory-discovery.service",
+  "eidolon-agent.service",
+  "eidolon-channel-provider.service",
+  "eidolon-channel.service",
+]
+
+[data]
+system_database = "/var/lib/eidolon/eidolon-system.sqlite3"
+object_store = "/var/lib/eidolon/objects"
+bootstrap_database = "/var/lib/eidolon-bootstrap/bootstrap.sqlite3"
+deployment_evidence = "/var/lib/eidolon/deployments"
+
+[install.files]
+data_env = "../.eidolon-ops/opi5max/inputs/data.env"
+hub_env = "../.eidolon-ops/opi5max/inputs/hub.env"
+kernel_env = "../.eidolon-ops/opi5max/inputs/kernel.env"
+admin_env = "../.eidolon-ops/opi5max/inputs/admin.env"
+local_api_env = "../.eidolon-ops/opi5max/inputs/local-api.env"
+bootstrap_env = "../.eidolon-ops/opi5max/inputs/bootstrap.env"
+host_identity = "../.eidolon-ops/opi5max/inputs/host_identity.ed25519"
+agent_env = "../.eidolon-ops/opi5max/inputs/agent.env"
+channel_env = "../.eidolon-ops/opi5max/inputs/channel.env"
+memory_env = "../.eidolon-ops/opi5max/inputs/memory.env"
+livekit_env = "../.eidolon-ops/opi5max/inputs/livekit.env"
+agent_settings = "../.eidolon-ops/opi5max/inputs/agent.yaml"
+channel_settings = "../.eidolon-ops/opi5max/inputs/channel.yaml"
+memory_settings = "../.eidolon-ops/opi5max/inputs/memory.yaml"
+
+# 这块板有 NPU。声明 capability 才会把对应的 unit 加进拓扑、把 eidolon_models
+# 加进源，三者由 load_config 一起校验。
+#
+# 2026-09-08：local_asr 暂时撤下。发布契约这一侧已经通了——release 能带着
+# `capabilities: ["local_asr","rknpu2"]` 和 8 个组件封好、传上板子、建好 venv，
+# 这是真机验过的。卡在最后一米：eidolond 只启动它自己那份服务清单
+# （/etc/eidolon/system-services.yaml，由 eidolon_kernel/config 原样下发）里列出
+# 的服务，而那份清单既没有 eidolon-asr 条目，也没有"条件服务"这个概念。所以
+# unit 装上了、没人启动它，而 release 的 asr readiness 检查必然超时 → 回滚。
+#
+# 声明一个交付不了的能力会让这台主机每次发布都失败，所以先说真话。要把它加回来
+# 需要两件事，都不是配置能解决的：
+#   1. 服务清单支持按 Host capability 条件化（kernel 侧：schema + wire + domain，
+#      外加让 eidolond 知道本机声明了什么）
+#   2. eidolon_channel 里有一个本地 STT provider——现在 validate_effective_config
+#      只认 'bailian' / 'sensetime'，所以即使服务起来了也没有东西把语音路由给它
+[capabilities]
+provides = ["rknpu2"]
+
+# 2026-09-08：这里原本是 value = "eidolon_models"，指向一个不存在的 provider。
+# eidolon_channel 的 validate_effective_config 只接受 'bailian' 或 'sensetime'
+# ——STT 和 TTS 都没有本地分支。上次安装把这个值写进了板上的 channel.yaml，
+# 于是 refresh-host-application 在 cross-release 校验上失败，整次发布回滚。
+#
+# 先改回云端 STT，让 applier 能落地。真正要"全本地"，缺的是 channel 里的
+# 一个本地 provider，那是功能开发，不是配置能解决的。
+[[settings.overlay]]
+document = "channel.yaml"
+path = "providers.stt_provider"
+value = "bailian"

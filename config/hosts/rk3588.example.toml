@@ -43,4 +43,7 @@ allow_insecure_livekit = true
 # the Host would have drawn: eight digits, not all the same, and not the plain
 # run up or down. A shipped Host would name the code printed on its own box
 # here instead, which is why nothing on this path looks at the build mode.
-# setup_code = "99999990"
+# 值不写在这里：这些 profile 是入库的，而入库文件里的码就是所有人都有的码。
+# 只写路径，值放到运维自己的输入目录（`.eidolon-ops/` 一直是 gitignore 的），
+# 和这台主机安装时用的其他每一个 secret 在一起。
+# setup_code_file = "../../.eidolon-ops/opi5max/inputs/factory_setup_code"

@@ -177,22 +177,66 @@ def test_a_pinned_code_is_refused_here_rather_than_three_hops_away(
         load_host_profile(path)
 
 
-def test_the_pi_example_documents_the_pinned_code_without_pinning_one() -> None:
-    """Read from the tracked example, never from an operator's own profile.
+def test_no_tracked_profile_pins_a_setup_code_in_its_own_text() -> None:
+    """A code in a tracked file is a code everybody has.
 
-    ``config/hosts/*.toml`` is gitignored — those are local operator files, so a
-    test that read one would pass here and fail on every other checkout. The
-    example is what the repository actually promises, and what it promises is
-    the shape: documented, and commented out, because a code in a tracked file
-    is a code everybody has.
+    The profiles are tracked now — what a board is and what it can do are
+    reviewed product decisions, and they used to exist on one laptop. The code
+    is the one value in them that must not be, so a profile names
+    `setup_code_file` and the value sits with every other secret this Host is
+    installed with, under the ignored input directory.
+
+    This is what the gitignore used to enforce by ignoring the whole file, and
+    what nothing enforced once it stopped.
     """
 
-    profile = load_host_profile(REPOSITORY_ROOT / "config/hosts/pi5.example.toml")
+    for profile in sorted((REPOSITORY_ROOT / "config/hosts").glob("*.toml")):
+        text = profile.read_text(encoding="utf-8")
+        for line in text.splitlines():
+            stripped = line.strip()
+            assert not stripped.startswith("setup_code ="), (
+                f"{profile.name} pins a setup code in tracked text; "
+                "name setup_code_file instead"
+            )
 
-    assert profile.app is not None
-    assert profile.app.setup_code is None
-    text = (REPOSITORY_ROOT / "config/hosts/pi5.example.toml").read_text(encoding="utf-8")
-    assert "# setup_code = " in text
+
+def test_every_profile_this_repository_ships_actually_loads() -> None:
+    """Including the ones that run.
+
+    `config/hosts/*.toml` was gitignored, so a test could only read an example
+    — and said so in its own docstring. The examples were the only thing checked
+    and the configs that deploy real Hosts were checked by nothing.
+    """
+
+    profiles = sorted((REPOSITORY_ROOT / "config/hosts").glob("*.toml"))
+    assert profiles, "no host profiles are tracked"
+    for profile in profiles:
+        loaded = load_host_profile(profile)
+        assert loaded.host_id
+
+
+def test_each_example_still_describes_its_own_host_profile() -> None:
+    """Two files stating one shape, with something comparing them at last.
+
+    An example exists to be copied for a new board, so it keeps placeholder
+    values; what it must not do is describe a different *shape* from the profile
+    beside it, which is exactly what nothing checked while only the example was
+    tracked.
+    """
+
+    import tomllib
+
+    def sections(path: Path) -> set[str]:
+        document = tomllib.loads(path.read_text(encoding="utf-8"))
+        return {key for key, value in document.items() if isinstance(value, dict)}
+
+    for example in sorted((REPOSITORY_ROOT / "config/hosts").glob("*.example.toml")):
+        real = example.with_name(example.name.replace(".example", ""))
+        if not real.is_file():
+            continue
+        assert sections(example) == sections(real), (
+            f"{example.name} and {real.name} describe different sections"
+        )
 
 
 def test_mac_example_uses_the_ops_owned_source_lifecycle() -> None:

@@ -1,0 +1,111 @@
+schema_version = 1
+
+[foundation]
+profile = "raspberry-pi-os-debian-arm64-v2"
+
+[host]
+user = "eidolon-pi5"
+# The Host's name, not one of its addresses: it answers here over whichever
+# link is up, and Ops picks the best one that responds — the wire first, which
+# measured 100 MB/s against 3.9 MB/s over Wi-Fi. Neither end configures a
+# subnet: both self-assign into 169.254/16 when the cable is in, and the Pi's
+# "eidolon-wired" profile is never-default so Wi-Fi keeps the route out.
+hostname = "eidolon-pi5.local"
+port = 22
+identity_file = "~/.ssh/id_ed25519_eidolon_pi"
+known_hosts_file = "~/.ssh/known_hosts"
+connect_timeout_seconds = 10
+remote_uv = "/usr/local/bin/uv"
+# Release payloads must never fall back to Wi-Fi, where this workstation's VPN
+# accounts for the transfer. Status and maintenance commands remain reachable.
+require_wired_release_upload = true
+
+[workspace]
+# 2026-08-25: moved off /private/tmp. macOS purges it on its own schedule.
+# This directory holds in-flight outputs for --resume; successful install and
+# activation remove their output, and later successes sweep failures older than
+# 48 hours. The reusable uv cache lives under the durable toolchain root.
+bundle_root = "~/eidolon/release-bundles"
+release_cli = "../../eidolon_kernel/.venv/bin/eidolon-release"
+python_index_url = "https://pypi.org/simple"
+python_http_timeout_seconds = 120
+python_http_retries = 8
+# Two streams made a cold fetch of the whole dependency set take longer than
+# the bundle step's own ceiling. Only genuinely new dependencies reach the
+# index now, but there is no reason to crawl through those either.
+python_concurrent_downloads = 8
+
+# No `revision` here on purpose. A release is defined by what the
+# repositories hold; a written pin was a second copy of that fact, and the
+# two were not equal — a cross-repository change was tested on every HEAD,
+# deploy reported success, and the board went on running the commits in this
+# file. To reproduce a combination that already shipped, pass
+# `--revision source=<40hex>` for that run, which says so out loud.
+[sources.eidolon_kernel]
+path = "../../eidolon_kernel"
+
+[sources.eidolon_data]
+path = "../../eidolon_data"
+
+[sources.eidolon_hub]
+path = "../../eidolon_hub"
+
+[sources.eidolon_admin]
+path = "../../eidolon_admin"
+
+[sources.eidolon_agent]
+path = "../../eidolon_agent"
+
+[sources.eidolon_channel]
+path = "../../eidolon_channel"
+
+[sources.eidolon_memory]
+path = "../../eidolon_memory"
+
+[sources.eidolon_sdk]
+path = "../../eidolon_sdk"
+
+[services]
+units = [
+  "eidolon-bootstrapd.service",
+  "eidolond.service",
+  "eidolon-unit-applier.socket",
+  "eidolon-unit-applier.service",
+  "eidolon-data.service",
+  "eidolon-data-workspace.service",
+  "eidolon-hub.service",
+  "eidolon-kernel.service",
+  "eidolon-local-api.service",
+  "eidolon-lifecycle-workflow.service",
+  "eidolon-admin.service",
+  "eidolon-nats.service",
+  "eidolon-livekit.service",
+  "eidolon-memory-embedder.service",
+  "eidolon-memory-supervisor.service",
+  "eidolon-memory-discovery.service",
+  "eidolon-agent.service",
+  "eidolon-channel-provider.service",
+  "eidolon-channel.service",
+]
+
+[data]
+system_database = "/var/lib/eidolon/eidolon-system.sqlite3"
+object_store = "/var/lib/eidolon/objects"
+bootstrap_database = "/var/lib/eidolon-bootstrap/bootstrap.sqlite3"
+deployment_evidence = "/var/lib/eidolon/deployments"
+
+[install.files]
+data_env = "../.eidolon-ops/pi5/inputs/data.env"
+hub_env = "../.eidolon-ops/pi5/inputs/hub.env"
+kernel_env = "../.eidolon-ops/pi5/inputs/kernel.env"
+admin_env = "../.eidolon-ops/pi5/inputs/admin.env"
+local_api_env = "../.eidolon-ops/pi5/inputs/local-api.env"
+bootstrap_env = "../.eidolon-ops/pi5/inputs/bootstrap.env"
+host_identity = "../.eidolon-ops/pi5/inputs/host_identity.ed25519"
+agent_env = "../.eidolon-ops/pi5/inputs/agent.env"
+channel_env = "../.eidolon-ops/pi5/inputs/channel.env"
+memory_env = "../.eidolon-ops/pi5/inputs/memory.env"
+livekit_env = "../.eidolon-ops/pi5/inputs/livekit.env"
+agent_settings = "../.eidolon-ops/pi5/inputs/agent.yaml"
+channel_settings = "../.eidolon-ops/pi5/inputs/channel.yaml"
+memory_settings = "../.eidolon-ops/pi5/inputs/memory.yaml"

@@ -166,6 +166,9 @@ class AppAccess:
     #: would not have drawn itself. Nothing about the mechanism changes: the
     #: code still opens one ordinary session that expires, is spent once, dies
     #: after five wrong tries, and supersedes any window before it.
+    #: Read from ``setup_code_file`` when the profile names one, so the value
+    #: itself need not be in a tracked file. Both spellings produce this same
+    #: field: nothing downstream knows or cares which one the operator used.
     setup_code: str | None = None
 
 
@@ -295,7 +298,7 @@ def load_host_profile(path: Path) -> HostProfile:
     source_overrides = _source_overrides(document.get("source_overrides"), base=base)
     if source_overrides and driver is not HostDriver.LOCAL_SUPERVISORD:
         raise HostProfileError("source_overrides are available only for local-supervisord hosts")
-    app = _app_access(document.get("app"), platform=platform)
+    app = _app_access(document.get("app"), platform=platform, base=base)
     return HostProfile(
         path=resolved,
         host_id=host_id,
@@ -380,12 +383,14 @@ def _is_usable_setup_code(value: str) -> bool:
     return value not in {ascending, ascending[::-1]}
 
 
-def _app_access(value: object | None, *, platform: HostPlatform) -> AppAccess | None:
+def _app_access(
+    value: object | None, *, platform: HostPlatform, base: Path
+) -> AppAccess | None:
     if value is None:
         return None
     document = _table(value, "app")
     required = {"hub_https_port", "allow_insecure_livekit"}
-    optional = {"lan_ipv4", "setup_code"}
+    optional = {"lan_ipv4", "setup_code", "setup_code_file"}
     if not required <= set(document) or not set(document) <= (required | optional):
         raise HostProfileError(
             f"app must contain exactly {', '.join(sorted(required))}, with only "
@@ -412,18 +417,36 @@ def _app_access(value: object | None, *, platform: HostPlatform) -> AppAccess | 
     allow_insecure = document["allow_insecure_livekit"]
     if not isinstance(allow_insecure, bool):
         raise HostProfileError("app.allow_insecure_livekit must be boolean")
+    # Two spellings, one value. `setup_code` is the literal, which is right for
+    # an example and wrong for a profile this repository tracks: a code in a
+    # tracked file is a code everybody has. `setup_code_file` names a path
+    # instead — under the operator's own ignored input directory, beside every
+    # other secret this Host is installed with — so the profile can be reviewed
+    # and shared while the code stays one operator's.
+    if "setup_code" in document and "setup_code_file" in document:
+        raise HostProfileError("app may name setup_code or setup_code_file, not both")
     setup_code: str | None = None
     if "setup_code" in document:
         setup_code = _text(document["setup_code"], "app.setup_code")
-        # Mirrored from the Host's own rule so a bad value is caught while
-        # reading this file rather than three hops away on the machine. The
-        # Host re-checks it and stays the authority.
-        if not _is_usable_setup_code(setup_code):
+    elif "setup_code_file" in document:
+        path = _local_path(document["setup_code_file"], base, "app.setup_code_file")
+        try:
+            setup_code = path.read_text(encoding="utf-8").strip()
+        except OSError as exc:
             raise HostProfileError(
-                "app.setup_code must be a code the Host would have drawn: "
-                f"{SETUP_CODE_DIGITS} digits, not all the same, and not the "
-                "plain run up or down"
-            )
+                f"app.setup_code_file cannot be read: {path}. This Host's factory "
+                "pairing code lives with its other secrets rather than in this "
+                "profile; create it there, or drop the field to ship without one."
+            ) from exc
+    # Mirrored from the Host's own rule so a bad value is caught while reading
+    # this file rather than three hops away on the machine. The Host re-checks
+    # it and stays the authority.
+    if setup_code is not None and not _is_usable_setup_code(setup_code):
+        raise HostProfileError(
+            "app.setup_code must be a code the Host would have drawn: "
+            f"{SETUP_CODE_DIGITS} digits, not all the same, and not the "
+            "plain run up or down"
+        )
     return AppAccess(
         lan_ipv4=address,
         hub_https_port=port,
