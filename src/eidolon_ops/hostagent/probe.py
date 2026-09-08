@@ -445,12 +445,18 @@ def app_ready(payload: Mapping[str, object]) -> dict[str, object]:
             for value in units.values()
         ),
         "lan_address_observed": address in app_contract.host_addresses(),
-        # Among, not equal to. A Host on Wi-Fi and Ethernet at once has two
-        # addresses and the Hub correctly publishes both, because only the
-        # device knows which subnet it is on. Demanding that the name resolve
-        # to exactly the one address this probe happens to observe failed on
-        # the configuration that is right.
-        "lan_name_resolves": resolved_ok and address in resolved,
+        # An address of this Host, not a particular one. Two things make the
+        # stricter reading unmeasurable: a Host on Wi-Fi and Ethernet at once
+        # has several addresses and the Hub publishes all of them, because only
+        # the device knows which subnet it is on; and
+        # `avahi-resolve-host-name` returns whichever single answer arrives
+        # first, so which one this probe sees is a coin flip. What still has to
+        # hold is the fact whose absence caused the original failure: the name
+        # answers, and it answers with this Host rather than with an unrelated
+        # address a router handed back over unicast DNS.
+        "lan_name_resolves": (
+            resolved_ok and bool(resolved) and resolved <= set(app_contract.host_addresses())
+        ),
         "host_identity_material": all(
             bool(files[name]["healthy"]) for name in ("host_identity", "commissioning_tls")
         ),
@@ -506,17 +512,16 @@ def app_ready(payload: Mapping[str, object]) -> dict[str, object]:
         "hub_admits_devices": (hub_ready or {}).get("status") == "ready",
         "device_removal_available": LIFECYCLE_WORKFLOW_SOCKET.is_socket(),
         # The name, port and descriptor URI must be right on every record —
-        # those are one fact published many times. The address is not: the
-        # LAN address has to be offered, and other addresses of this same Host
-        # alongside it are the point of publishing them.
+        # those are one fact published many times. The address only has to be
+        # one this Host owns, for the reason `lan_name_resolves` gives above.
         "hub_mdns_service": bool(hub_records)
         and all(
             fields[6] == hostname
+            and fields[7] in set(app_contract.host_addresses())
             and fields[8] == str(hub_port)
             and descriptor_uri in ";".join(fields[9:])
             for fields in hub_records
-        )
-        and any(fields[7] == address for fields in hub_records),
+        ),
         "local_api_mdns_service": any(
             fields[7] == address and fields[8] == str(_LOCAL_API_PORT)
             for fields in local_api_records

@@ -144,7 +144,10 @@ def _healthy_run(app: dict[str, object]):
         elif program.endswith("avahi-browse"):
             output = hub_record if command[-1] == "_eidolon-owner._tcp" else local_api_record
         elif program.endswith("ip"):
-            output = f"2: wlan0 inet {app['lan_ipv4']}/24 brd\n"
+            output = (
+                f"2: wlan0 inet {app['lan_ipv4']}/24 brd\n"
+                f"3: enP3p49s0 inet {OTHER_HOST_ADDRESS}/24 brd\n"
+            )
         elif program.endswith("ss"):
             output = '127.0.0.1:1 127.0.0.1:7880 users:(("python",pid=4242,fd=9))\n'
         else:
@@ -736,3 +739,60 @@ def test_only_an_unanswerable_setup_check_is_worth_asking_again(
     """
 
     assert readiness.setup_answer_is_settled({"state": state}) is settled
+
+
+def test_a_name_answering_with_someone_elses_address_is_not_ready(
+    monkeypatch, tmp_path: Path, bootstrap_socket: Path
+) -> None:
+    """The failure the resolution facts exist for, stated as itself.
+
+    A device that never got an mDNS answer fell through to unicast DNS and its
+    router handed back an unrelated LAN address whose port 9443 was closed. So
+    the address a Host answers with has to be one this Host owns — which one it
+    is stays a coin flip and was never the fact.
+    """
+
+    app = _app()
+    _healthy_probe(monkeypatch, app, tmp_path)
+    healthy = _healthy_run(app)
+
+    def stranger(command, **kwargs):
+        if command[0].endswith("avahi-resolve-host-name"):
+            return subprocess.CompletedProcess(
+                command, 0, f"{app['hub_hostname']}\t192.168.9.9\n", ""
+            )
+        return healthy(command, **kwargs)
+
+    monkeypatch.setattr(primitives, "run", stranger)
+
+    report = probe.app_ready(_payload(app))
+
+    assert report["checks"]["lan_name_resolves"] is False
+
+
+def test_a_name_that_answers_with_the_other_interface_is_ready(
+    monkeypatch, tmp_path: Path, bootstrap_socket: Path
+) -> None:
+    """`avahi-resolve-host-name` returns whichever answer arrives first.
+
+    On the board it returned the Ethernet address every time, while a host on
+    the Wi-Fi LAN got both. Requiring the observed LAN address specifically
+    made a working Host read degraded on a coin flip.
+    """
+
+    app = _app()
+    _healthy_probe(monkeypatch, app, tmp_path)
+    healthy = _healthy_run(app)
+
+    def other_first(command, **kwargs):
+        if command[0].endswith("avahi-resolve-host-name"):
+            return subprocess.CompletedProcess(
+                command, 0, f"{app['hub_hostname']}\t{OTHER_HOST_ADDRESS}\n", ""
+            )
+        return healthy(command, **kwargs)
+
+    monkeypatch.setattr(primitives, "run", other_first)
+
+    report = probe.app_ready(_payload(app))
+
+    assert report["checks"]["lan_name_resolves"] is True
