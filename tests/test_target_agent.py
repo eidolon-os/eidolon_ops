@@ -2542,6 +2542,38 @@ def test_a_plaintext_livekit_origin_may_name_the_host_it_belongs_to(monkeypatch)
         assert result["livekit_client_url"] == origin
 
 
+def test_a_livekit_origin_may_name_no_host_at_all(monkeypatch) -> None:
+    """The third legal form, and the one Ops writes when nothing is declared.
+
+    Both of the old values were wrong. A deploy-time address froze into an
+    environment file and a Host that changed networks went on handing it out;
+    the `.local` name it fell back to cannot be resolved by Android at all,
+    because getaddrinfo does not do mDNS — the board shipped
+    `ws://eidolon-hub-f89c0ecca5d0070a7989.local:7880`, which no phone could
+    turn into an address.
+
+    `ws://:7880` says the host is decided when a binding is minted. Naming
+    nothing is not a weaker claim than naming this Host; it is no claim,
+    resolved later on this Host, which is the only place the answer exists.
+    """
+
+    monkeypatch.setattr(app_contract, "observed_lan_address", lambda: IPv4Address("192.168.1.26"))
+
+    result = app_contract.fixed_app({"app": _app_contract(livekit_client_url="ws://:7880")})
+
+    assert result["livekit_client_url"] == "ws://:7880"
+
+
+def test_a_livekit_origin_with_neither_host_nor_port_is_refused(monkeypatch) -> None:
+    """Deferring the host is not licence to omit the port: the port is this
+    Host's own listener and is known whenever the contract is written."""
+
+    monkeypatch.setattr(app_contract, "observed_lan_address", lambda: IPv4Address("192.168.1.26"))
+
+    with pytest.raises(TargetError, match="LiveKit origin is invalid"):
+        app_contract.fixed_app({"app": _app_contract(livekit_client_url="ws://")})
+
+
 def test_a_plaintext_livekit_origin_naming_somewhere_else_is_refused(monkeypatch) -> None:
     """A device sent this would open its microphone to another machine."""
 

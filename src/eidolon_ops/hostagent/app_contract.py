@@ -94,10 +94,18 @@ def fixed_app(payload: Mapping[str, object]) -> dict[str, object]:
     except ValueError as exc:
         raise TargetError("Host application LiveKit origin is invalid") from exc
     allow_insecure = value.get("allow_insecure_livekit")
+    # Scheme and port with no host — `ws://:7880` — is the third legal form and
+    # the one Ops writes when nothing was declared. It says the host is decided
+    # when a binding is minted, which is the truth: neither Ops nor this Host
+    # knows which of its addresses a device will reach, and the two values that
+    # used to be written here were both wrong for that reason — a deploy-time
+    # address that went stale, and a `.local` name that Android's getaddrinfo
+    # cannot resolve at all.
+    host_deferred = parsed is not None and parsed.hostname is None and parsed.port is not None
     if (
         parsed is None
         or parsed.scheme not in {"ws", "wss"}
-        or not parsed.hostname
+        or not (parsed.hostname or host_deferred)
         or parsed.username is not None
         or parsed.password is not None
         or parsed.path not in {"", "/"}
@@ -105,13 +113,16 @@ def fixed_app(payload: Mapping[str, object]) -> dict[str, object]:
         or parsed.fragment
         or not isinstance(allow_insecure, bool)
         or (parsed.scheme == "ws" and not allow_insecure)
-        # A plaintext origin has to name this Host and no other. Both its
-        # current address and its Host-bound name do that; the name is the
-        # better answer because it does not go stale when the address moves,
-        # which is why the operator side asks for it. Accepting only the
-        # literal left no value that satisfied both ends, and the placeholder
-        # that shipped to devices was the residue of that.
-        or (parsed.scheme == "ws" and parsed.hostname not in {str(address), hub_hostname})
+        # A plaintext origin that names a host has to name this Host and no
+        # other. Both its current address and its Host-bound name do that.
+        # Naming nothing is not a weaker claim than naming this Host — it is no
+        # claim, resolved later on this Host, which is the only place the answer
+        # exists.
+        or (
+            parsed.scheme == "ws"
+            and not host_deferred
+            and parsed.hostname not in {str(address), hub_hostname}
+        )
     ):
         raise TargetError("Host application LiveKit origin is invalid")
     # The resolved address travels with the contract. Discovery ran here, so a
