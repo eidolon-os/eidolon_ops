@@ -15,19 +15,28 @@ from pathlib import Path
 from . import app_contract, contract, primitives
 from .primitives import TargetError
 
-#: Where this Host tells its own ``.local`` responder about the Hub name.
+#: The name the Hub advertises, and why this Host must not also claim it.
 #:
 #: The Hub advertises ``_eidolon-owner._tcp`` with an SRV target of
-#: ``eidolon-hub-<host>.local`` — a name devices must resolve, pin TLS against,
-#: and reach. Nothing published an address for it. Clients that happened to
-#: hold a cached answer worked; a device booting fresh got no mDNS answer, fell
-#: through to unicast DNS, and its router handed back an unrelated LAN address
-#: whose port 9443 was closed. The device then reported only
-#: "failed to connect", forever.
+#: ``eidolon-hub-<host>.local`` and, through python-zeroconf, publishes the
+#: address answer for that name itself — every usable interface address, and
+#: again whenever they change. Ops used to register the same name with
+#: avahi-daemon as a static host entry, to have an answer that exists before
+#: the Hub starts.
 #:
-#: avahi-daemon owns ``.local`` on this Host, so the name is registered there,
-#: from the address this Host is observed to answer on — never from a declared
-#: value carried across from the workstation, which is how it would go stale.
+#: Two responders on one machine claiming one name is a collision, and mDNS
+#: resolves a collision by withdrawal: ``Host name conflict for
+#: "eidolon-hub-...local", not established``. The guarantee cost the name
+#: working at all — measured on the board, where removing the entry was what
+#: made it resolve again. avahi's static entry also holds exactly one address,
+#: so even uncontested it was the worse of the two answers on a Host with both
+#: Wi-Fi and Ethernet.
+#:
+#: Nothing replaced it, because nothing needed to: a phone reaches the Local
+#: API from the explicit ``local_api_base_urls`` in the commissioning endpoint
+#: document and dials each candidate, and falls back to reading that document
+#: over BLE — neither path needs the name to resolve, and neither needs the Hub
+#: to be up. So the entry is withdrawn from Hosts that still carry one.
 _AVAHI_HOSTS = Path("/etc/avahi/hosts")
 _AVAHI_UNIT = "avahi-daemon.service"
 
@@ -143,48 +152,40 @@ def refresh_host_application(payload: Mapping[str, object]) -> dict[str, object]
     removed: list[str] = []
     if changed:
         primitives.checked("systemd reload", ("/usr/bin/systemctl", "daemon-reload"), timeout=120)
-    changed.extend(publish_hub_hostname(payload))
+    changed.extend(withdraw_hub_hostname())
     removed.extend(remove_legacy_system_assets())
     return {"status": "refreshed", "changed": changed, "removed": removed}
 
 
-def publish_hub_hostname(payload: Mapping[str, object], root: Path = Path("/")) -> list[str]:
-    """Register the Hub's advertised name with this Host's ``.local`` responder.
+def withdraw_hub_hostname(root: Path = Path("/")) -> list[str]:
+    """Stop claiming the name the Hub already answers for.
 
-    The advertisement and the address answer are two halves of one fact — where
-    a device should send its first request — and they were owned by different
-    components: the Hub process advertised the SRV target, and nothing at all
-    answered for that name. Both halves live here now, derived from the same
-    app contract, so a Host cannot advertise a name it does not answer for.
+    Ops wrote a static ``/etc/avahi/hosts`` entry for the Hub's advertised
+    name; see the note on ``_AVAHI_HOSTS`` for why that was wrong. Hosts
+    installed before this still carry the line, and while it is there
+    avahi-daemon and the Hub collide over the name and it resolves for nobody.
+    So the line is taken away here, on the same pass that delivers this layer.
 
-    Written from the observed address on every refresh rather than kept, so an
-    address change is corrected by the next deploy instead of persisting as a
-    confidently wrong answer.
+    Only lines this Host owns are touched: an entry for any other name is left
+    exactly as the operator wrote it.
     """
 
-    app = app_contract.optional_app(payload)
-    if app is None:
-        return []
-    hostname = str(app["hub_hostname"])
-    address = str(app["lan_ipv4"])
-    if not hostname.endswith(".local") or "/" in hostname or " " in hostname:
-        raise TargetError(f"Hub hostname is not a bare .local name: {hostname}")
     path = primitives.host_path(root, _AVAHI_HOSTS)
-    if path.is_symlink() or (path.exists() and not path.is_file()):
-        raise TargetError(f"static mDNS host file is unsafe: {_AVAHI_HOSTS}")
-    # Every line this Host owns is rewritten; lines for other names are kept
-    # so the file stays usable by anything else the operator put there.
-    kept: list[str] = []
-    if path.is_file():
-        for line in path.read_text(encoding="utf-8").splitlines():
-            fields = line.split()
-            if len(fields) >= 2 and fields[1] == hostname:
-                continue
-            kept.append(line)
-    desired = "\n".join([*kept, f"{address} {hostname}"]).strip("\n") + "\n"
-    if path.is_file() and path.read_text(encoding="utf-8") == desired:
+    if not path.is_file() or path.is_symlink():
         return []
-    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = path.read_text(encoding="utf-8").splitlines()
+    kept = [
+        line
+        for line in lines
+        if not (
+            len(line.split()) >= 2
+            and line.split()[1].startswith("eidolon-hub-")
+            and line.split()[1].endswith(".local")
+        )
+    ]
+    if kept == lines:
+        return []
+    desired = ("\n".join(kept).strip("\n") + "\n") if any(kept) else ""
     temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     try:
         temporary.write_text(desired, encoding="utf-8")

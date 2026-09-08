@@ -226,62 +226,6 @@ def test_start_failure_stops_services_and_preserves_phase(install_fixture) -> No
     assert resumed_host.calls == ["start_release", "wait_ready", "doctor"]
 
 
-def test_install_answers_for_the_name_it_advertises(install_fixture) -> None:
-    """The gap between the two halves of discovery, on the install path.
-
-    The Hub advertises `eidolon-hub-<host>.local`; the address answer for that
-    name is registered separately. Both were reached only from the refresh path,
-    which deploy runs and install does not — so a factory-fresh Host advertised
-    a name nothing answered for, and on a Host with a stale entry avahi withdrew
-    the name as a conflict. Install now publishes it before the release starts.
-    """
-
-    installer, host, _command, stage, release, data = install_fixture
-    published: list[str] = []
-    publishing = TargetInstaller(
-        release=release,
-        secret_stage=stage,
-        data=data,
-        host=host,
-        root=installer.root,
-        command=FakeCommand(),
-        manage_ownership=False,
-        app_check=lambda: {"status": "app_ready"},
-        publish_hostname=lambda: (
-            published.append("/etc/avahi/hosts") or ["/etc/avahi/hosts"]
-        ),
-    )
-
-    result = publishing.install()
-
-    assert result["hub_hostname_published"] == ["/etc/avahi/hosts"]
-    # Before the release starts, not after: the answer has to be true for as
-    # long as the advertisement is live.
-    assert published and host.calls.index("start_release") >= 0
-    assert len(published) == 1
-
-    # A resumed or repeated install re-asserts it, because the address it was
-    # written from is observed state that a Wi-Fi move invalidates.
-    again = TargetInstaller(
-        release=release,
-        secret_stage=stage,
-        data=data,
-        host=FakeHost(installer.root, release),
-        root=installer.root,
-        command=FakeCommand(),
-        manage_ownership=False,
-        app_check=lambda: {"status": "app_ready"},
-        publish_hostname=lambda: (
-            published.append("/etc/avahi/hosts") or ["/etc/avahi/hosts"]
-        ),
-    )
-    repeated = again.install()
-
-    assert repeated["status"] == "already_installed"
-    assert repeated["hub_hostname_published"] == ["/etc/avahi/hosts"]
-    assert len(published) == 2
-
-
 def test_install_completes_with_a_degraded_app_probe(install_fixture) -> None:
     """A first install has no phone behind it yet, and still has to finish."""
 
@@ -2612,25 +2556,12 @@ def test_a_plaintext_livekit_origin_naming_somewhere_else_is_refused(monkeypatch
             app_contract.fixed_app({"app": _app_contract(livekit_client_url=origin)})
 
 
-def _publish_payload(address: str = "192.168.3.206") -> dict[str, object]:
-    return {"app": _app_contract(lan_ipv4=address)}
-
-
 def _hosts_file(root: Path) -> Path:
     return root / "etc/avahi/hosts"
 
 
-def test_the_host_registers_the_hub_name_it_advertises(monkeypatch, tmp_path: Path) -> None:
-    """The advertisement and the address answer must come from one owner.
-
-    The Hub advertises an SRV target of ``eidolon-hub-<host>.local`` and
-    nothing published an address for it. A device booting fresh got no mDNS
-    answer, fell through to unicast DNS, and its router returned an unrelated
-    LAN address with port 9443 closed — after which the device reported only
-    "failed to connect", forever.
-    """
-
-    reloads: list[tuple[str, ...]] = []
+def _no_reload_expected(monkeypatch) -> list[tuple[object, ...]]:
+    reloads: list[tuple[object, ...]] = []
     monkeypatch.setattr(primitives, "chown_path", lambda *_a: None)
     monkeypatch.setattr(
         primitives,
@@ -2639,88 +2570,89 @@ def test_the_host_registers_the_hub_name_it_advertises(monkeypatch, tmp_path: Pa
             reloads.append(command) or subprocess.CompletedProcess((), 0, "", "")
         ),
     )
+    return reloads
 
-    changed = host_application.publish_hub_hostname(_publish_payload(), root=tmp_path)
+
+def test_a_host_stops_claiming_the_name_the_hub_answers_for(monkeypatch, tmp_path: Path) -> None:
+    """Two responders, one name, and mDNS settles it by withdrawal.
+
+    Ops registered `eidolon-hub-<host>.local` with avahi-daemon so an address
+    answer would exist before the Hub started. The Hub publishes that same name
+    itself through python-zeroconf, with every interface address. avahi saw the
+    second claim and gave up the name outright — `Host name conflict for
+    "eidolon-hub-...local", not established` — so the guarantee cost the name
+    resolving at all, which is the failure it was added to prevent.
+    """
+
+    reloads = _no_reload_expected(monkeypatch)
+    path = _hosts_file(tmp_path)
+    path.parent.mkdir(parents=True)
+    path.write_text("192.168.3.206 eidolon-hub-0123456789abcdefabcd.local\n", encoding="utf-8")
+
+    changed = host_application.withdraw_hub_hostname(root=tmp_path)
 
     assert changed == ["/etc/avahi/hosts"]
-    assert _hosts_file(tmp_path).read_text(encoding="utf-8") == (
-        "192.168.3.206 eidolon-hub-0123456789abcdefabcd.local\n"
-    )
+    assert path.read_text(encoding="utf-8") == ""
     assert reloads == [(("/usr/bin/systemctl", "reload", "avahi-daemon.service"),)]
 
 
-def test_a_host_with_no_app_contract_registers_nothing(monkeypatch, tmp_path: Path) -> None:
-    """Production Hosts without the app layer have no Hub name to answer for."""
-
-    monkeypatch.setattr(primitives, "checked", lambda *_a, **_k: pytest.fail("nothing to reload"))
-
-    assert host_application.publish_hub_hostname({"units": []}, root=tmp_path) == []
-    assert not _hosts_file(tmp_path).exists()
-
-
-def test_registering_the_same_address_again_leaves_the_responder_alone(
+def test_a_stale_claim_at_an_address_the_host_no_longer_owns_is_withdrawn_too(
     monkeypatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(primitives, "chown_path", lambda *_a: None)
-    reloads: list[object] = []
-    monkeypatch.setattr(
-        primitives,
-        "checked",
-        lambda *_a, **_k: reloads.append(1) or subprocess.CompletedProcess((), 0, "", ""),
-    )
+    """The line found on the board: an address from a network it had left.
 
-    host_application.publish_hub_hostname(_publish_payload(), root=tmp_path)
-    again = host_application.publish_hub_hostname(_publish_payload(), root=tmp_path)
+    The entry is matched by the name, not the address, because the address in a
+    stale line is exactly what makes it wrong. Matching on the observed address
+    would leave the harmful line and add a second one.
+    """
 
-    assert again == []
-    assert len(reloads) == 1
+    _no_reload_expected(monkeypatch)
+    path = _hosts_file(tmp_path)
+    path.parent.mkdir(parents=True)
+    path.write_text("192.168.100.19 eidolon-hub-0123456789abcdefabcd.local\n", encoding="utf-8")
 
-
-def test_a_moved_address_replaces_the_old_answer_rather_than_joining_it(
-    monkeypatch, tmp_path: Path
-) -> None:
-    """A stale second answer is worse than none: it points devices at whatever
-    machine now holds that address, and the TLS pin then fails opaquely."""
-
-    monkeypatch.setattr(primitives, "chown_path", lambda *_a: None)
-    monkeypatch.setattr(
-        primitives, "checked", lambda *_a, **_k: subprocess.CompletedProcess((), 0, "", "")
-    )
-    host_application.publish_hub_hostname(_publish_payload("192.168.3.206"), root=tmp_path)
-
-    host_application.publish_hub_hostname(_publish_payload("192.168.3.77"), root=tmp_path)
-
-    assert _hosts_file(tmp_path).read_text(encoding="utf-8") == (
-        "192.168.3.77 eidolon-hub-0123456789abcdefabcd.local\n"
-    )
+    assert host_application.withdraw_hub_hostname(root=tmp_path) == ["/etc/avahi/hosts"]
+    assert path.read_text(encoding="utf-8") == ""
 
 
 def test_registrations_this_host_does_not_own_are_kept(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(primitives, "chown_path", lambda *_a: None)
-    monkeypatch.setattr(
-        primitives, "checked", lambda *_a, **_k: subprocess.CompletedProcess((), 0, "", "")
+    _no_reload_expected(monkeypatch)
+    path = _hosts_file(tmp_path)
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        "10.0.0.9 something-else.local\n"
+        "192.168.3.206 eidolon-hub-0123456789abcdefabcd.local\n",
+        encoding="utf-8",
     )
+
+    host_application.withdraw_hub_hostname(root=tmp_path)
+
+    assert path.read_text(encoding="utf-8").splitlines() == ["10.0.0.9 something-else.local"]
+
+
+def test_a_host_that_never_claimed_the_name_is_left_alone(monkeypatch, tmp_path: Path) -> None:
+    """No file and nothing to withdraw means no responder reload."""
+
+    monkeypatch.setattr(primitives, "checked", lambda *_a, **_k: pytest.fail("nothing to reload"))
+
+    assert host_application.withdraw_hub_hostname(root=tmp_path) == []
+    assert not _hosts_file(tmp_path).exists()
+
     path = _hosts_file(tmp_path)
     path.parent.mkdir(parents=True)
     path.write_text("10.0.0.9 something-else.local\n", encoding="utf-8")
 
-    host_application.publish_hub_hostname(_publish_payload(), root=tmp_path)
-
-    assert path.read_text(encoding="utf-8").splitlines() == [
-        "10.0.0.9 something-else.local",
-        "192.168.3.206 eidolon-hub-0123456789abcdefabcd.local",
-    ]
+    assert host_application.withdraw_hub_hostname(root=tmp_path) == []
+    assert path.read_text(encoding="utf-8") == "10.0.0.9 something-else.local\n"
 
 
-def test_delivering_the_host_layer_registers_the_hub_name(monkeypatch, tmp_path: Path) -> None:
-    """Registration has to happen on the path that actually runs on a deploy.
-
-    Publishing correctly when called directly is not the same fact as being
-    called. Nothing asserted the second one, which is how a Host advertised a
-    name it never answered for across many deploys.
-    """
+def test_delivering_the_host_layer_withdraws_the_hub_name(monkeypatch, tmp_path: Path) -> None:
+    """Withdrawing correctly when called directly is not the same fact as being
+    called. Hosts installed before this still carry the line, so the deploy
+    path is what has to take it away."""
 
     hosts = tmp_path / "avahi-hosts"
+    hosts.write_text("192.168.3.206 eidolon-hub-0123456789abcdefabcd.local\n", encoding="utf-8")
     monkeypatch.setattr(host_application, "_AVAHI_HOSTS", hosts)
     monkeypatch.setattr(primitives, "chown_path", lambda *_a: None)
     monkeypatch.setattr(
@@ -2747,9 +2679,7 @@ def test_delivering_the_host_layer_registers_the_hub_name(monkeypatch, tmp_path:
     )
 
     assert str(hosts) in result["changed"]
-    assert hosts.read_text(encoding="utf-8") == (
-        "192.168.3.206 eidolon-hub-0123456789abcdefabcd.local\n"
-    )
+    assert hosts.read_text(encoding="utf-8") == ""
 
 
 def _establish_lineage(root: Path, *, anchor: bool = True) -> dict[str, object]:

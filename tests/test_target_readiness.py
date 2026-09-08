@@ -85,10 +85,6 @@ def _materialize(monkeypatch, root: Path, app: dict[str, object]) -> None:
     monkeypatch.setattr(probe, "LOCAL_API_ENV", root / "local-api.env")
     monkeypatch.setattr(probe, "CHANNEL_ENV", root / "channel.env")
     monkeypatch.setattr(probe, "MDNS_DEFINITION", root / "hub.yaml")
-    monkeypatch.setattr(probe, "AVAHI_STATIC_HOSTS", root / "avahi-hosts")
-    (root / "avahi-hosts").write_text(
-        f"{app['lan_ipv4']} {app['hub_hostname']}\n", encoding="utf-8"
-    )
 
 
 @pytest.fixture
@@ -117,10 +113,20 @@ def lifecycle_workflow_socket(monkeypatch):
         listener.close()
 
 
+#: The second address a Host on Wi-Fi and Ethernet at once has. The Hub
+#: publishes every interface address, because only the device knows which
+#: subnet it is on, so a correct Host answers with more than the one address
+#: this probe observes.
+OTHER_HOST_ADDRESS = "10.42.0.2"
+
+
 def _healthy_run(app: dict[str, object]):
     hub_record = (
         f"=;wlan0;IPv4;{app['owner_domain_id']};_eidolon-owner._tcp;local;"
         f"{app['hub_hostname']};{app['lan_ipv4']};8443;"
+        f'"descriptor_uri={app["hub_origin"]}/api/device-onboarding/v1/descriptor"\n'
+        f"=;enP3p49s0;IPv4;{app['owner_domain_id']};_eidolon-owner._tcp;local;"
+        f"{app['hub_hostname']};{OTHER_HOST_ADDRESS};8443;"
         f'"descriptor_uri={app["hub_origin"]}/api/device-onboarding/v1/descriptor"\n'
     )
     local_api_record = (
@@ -131,7 +137,10 @@ def _healthy_run(app: dict[str, object]):
     def run(command, **_kwargs):
         program = command[0]
         if program.endswith("avahi-resolve-host-name"):
-            output = f"{app['hub_hostname']}\t{app['lan_ipv4']}\n"
+            output = (
+                f"{app['hub_hostname']}\t{app['lan_ipv4']}\n"
+                f"{app['hub_hostname']}\t{OTHER_HOST_ADDRESS}\n"
+            )
         elif program.endswith("avahi-browse"):
             output = hub_record if command[-1] == "_eidolon-owner._tcp" else local_api_record
         elif program.endswith("ip"):

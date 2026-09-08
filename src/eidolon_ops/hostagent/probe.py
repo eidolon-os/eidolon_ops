@@ -25,7 +25,6 @@ READINESS_FACTS = (
     "backend_healthy",
     "lan_address_observed",
     "lan_name_resolves",
-    "hub_name_published_by_host",
     "host_identity_material",
     "hub_tls_identity",
     "hub_settings_bound",
@@ -79,9 +78,6 @@ BOOTSTRAP_SOCKET = Path("/run/eidolon-bootstrap/control.sock")
 LIFECYCLE_WORKFLOW_SOCKET = Path("/run/eidolon-lifecycle/workflow.sock")
 
 MDNS_DEFINITION = Path("/etc/avahi/services/eidolon-local-api.service")
-#: Where this Host registers the Hub name it advertises. See
-#: ``host_application.publish_hub_hostname`` for why it has to be registered.
-AVAHI_STATIC_HOSTS = Path("/etc/avahi/hosts")
 
 HUB_SETTINGS = Path("/etc/eidolon/generated/hub.yaml")
 
@@ -277,19 +273,6 @@ def resolved_addresses(hostname: str) -> tuple[bool, set[str]]:
     }
     return resolution.returncode == 0, addresses
 
-def hub_name_published(hostname: str, address: str) -> bool:
-    """Whether this Host's own mDNS responder answers for the advertised name."""
-
-    path = AVAHI_STATIC_HOSTS
-    if not path.is_file() or path.is_symlink():
-        return False
-    for line in path.read_text(encoding="utf-8").splitlines():
-        fields = line.split()
-        if len(fields) >= 2 and fields[0] == address and fields[1] == hostname:
-            return True
-    return False
-
-
 def bootstrap_preflight() -> dict[str, object]:
     try:
         result = primitives.run((str(APP_PREFLIGHT),), timeout=60)
@@ -462,16 +445,12 @@ def app_ready(payload: Mapping[str, object]) -> dict[str, object]:
             for value in units.values()
         ),
         "lan_address_observed": address in app_contract.host_addresses(),
-        "lan_name_resolves": resolved_ok and resolved == {address},
-        # Resolvable is not the same fact as answered-by-this-Host. The Hub
-        # process advertises this name over mDNS itself, so while it is healthy
-        # the Host resolves it and this readiness set read green — while a
-        # device on a congested link timed out waiting for that answer, fell
-        # through to unicast DNS, and cached an unrelated address its router
-        # returned. What a device needs is an answer from the Host's own .local
-        # responder, which is present before the Hub starts and stays through a
-        # restart. So the fact attested is that the Host publishes it.
-        "hub_name_published_by_host": hub_name_published(hostname, address),
+        # Among, not equal to. A Host on Wi-Fi and Ethernet at once has two
+        # addresses and the Hub correctly publishes both, because only the
+        # device knows which subnet it is on. Demanding that the name resolve
+        # to exactly the one address this probe happens to observe failed on
+        # the configuration that is right.
+        "lan_name_resolves": resolved_ok and address in resolved,
         "host_identity_material": all(
             bool(files[name]["healthy"]) for name in ("host_identity", "commissioning_tls")
         ),
@@ -526,14 +505,18 @@ def app_ready(payload: Mapping[str, object]) -> dict[str, object]:
         ),
         "hub_admits_devices": (hub_ready or {}).get("status") == "ready",
         "device_removal_available": LIFECYCLE_WORKFLOW_SOCKET.is_socket(),
+        # The name, port and descriptor URI must be right on every record —
+        # those are one fact published many times. The address is not: the
+        # LAN address has to be offered, and other addresses of this same Host
+        # alongside it are the point of publishing them.
         "hub_mdns_service": bool(hub_records)
         and all(
             fields[6] == hostname
-            and fields[7] == address
             and fields[8] == str(hub_port)
             and descriptor_uri in ";".join(fields[9:])
             for fields in hub_records
-        ),
+        )
+        and any(fields[7] == address for fields in hub_records),
         "local_api_mdns_service": any(
             fields[7] == address and fields[8] == str(_LOCAL_API_PORT)
             for fields in local_api_records

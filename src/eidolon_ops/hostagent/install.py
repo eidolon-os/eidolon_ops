@@ -41,7 +41,6 @@ class TargetInstaller:
         command: Callable[..., subprocess.CompletedProcess[str]] = primitives.run,
         manage_ownership: bool = True,
         app_check: Callable[[], dict[str, object]] | None = None,
-        publish_hostname: Callable[[], list[str]] | None = None,
         port_registry: str = "",
         sources: Mapping[str, object] | None = None,
     ) -> None:
@@ -59,7 +58,6 @@ class TargetInstaller:
         self.command = command
         self.manage_ownership = manage_ownership
         self.app_check = app_check
-        self.publish_hostname = publish_hostname
         self.release_id = str(release.release_id)
         self.evidence_dir = primitives.host_path(
             self.root,
@@ -74,7 +72,6 @@ class TargetInstaller:
         inputs = self._input_digests()
         with primitives.exclusive(self.lock_path):
             journal = self._load_or_begin(inputs)
-            published = self._publish_hub_hostname()
             if journal.get("status") == "completed":
                 result = self.host.doctor(self.release)
                 return {
@@ -82,7 +79,6 @@ class TargetInstaller:
                     "release_id": self.release_id,
                     "app": self._app_state(),
                     "authority": self._established_lineage(),
-                    "hub_hostname_published": published,
                     **result,
                 }
             phase = str(journal["phase"])
@@ -123,7 +119,6 @@ class TargetInstaller:
                     "release_id": self.release_id,
                     "phase": phase,
                     "app": app_result,
-                    "hub_hostname_published": published,
                     # What Hub actually established, read back rather than
                     # assumed. The controller holds a one-shot Authority
                     # bootstrap capability and may only record it as consumed
@@ -458,29 +453,6 @@ class TargetInstaller:
                 ("/usr/bin/systemctl", "enable", "eidolon-hub-ingress.service"),
             )
 
-    def _publish_hub_hostname(self) -> list[str]:
-        """Answer for the name this Host is about to advertise.
-
-        The Hub advertises an SRV target of ``eidolon-hub-<host>.local`` and
-        `host_application.publish_hub_hostname` registers the address answer for
-        it. Both halves were reached only from the refresh path, which runs on
-        deploy and never on install — so a Host installed from factory state
-        advertised a name it did not answer for, and a phone that had never
-        cached the answer got nothing back and reported "failed to connect".
-
-        Worse than nothing when a stale entry survives: on this board
-        `/etc/avahi/hosts` still claimed the name at an address the Host no
-        longer owned, and avahi withdrew the name outright — "Host name
-        conflict ... not established". Rewriting it here from the observed
-        address is what clears that.
-
-        It runs before the release starts and on every resumed path, because
-        the answer has to be true whenever the advertisement is live, not only
-        on the run that first created it.
-        """
-
-        return [] if self.publish_hostname is None else self.publish_hostname()
-
     def _await_host_layer(self) -> None:
         host_application.await_host_application(self.command, self.root)
 
@@ -525,7 +497,6 @@ def install(payload: Mapping[str, object]) -> dict[str, object]:
         data=data,
         host=host,
         app_check=lambda: probe.app_ready(payload),
-        publish_hostname=lambda: host_application.publish_hub_hostname(payload),
         port_registry=contract.fixed_port_registry(payload),
         sources=contract.optional_source_provenance(payload),
     ).install()
