@@ -35,7 +35,6 @@ external_livekit_config = "../../../eidolon_admin/var/livekit/livekit.generated.
 # would go stale the same way.
 lan_ipv4 = "192.168.1.25"
 hub_https_port = 8443
-livekit_client_url = "ws://192.168.1.25:7880"
 allow_insecure_livekit = true
 
 # A Mac Host may point one source somewhere else without changing the Pi

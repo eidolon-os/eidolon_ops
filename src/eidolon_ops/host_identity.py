@@ -51,3 +51,32 @@ def derive_host_lan_identity(raw_private_key: bytes) -> HostLanIdentity:
         hub_id=f"eidolon-hub-{suffix}",
         hub_hostname=f"eidolon-hub-{suffix}.local",
     )
+
+
+def livekit_client_url(
+    identity: HostLanIdentity,
+    *,
+    lan_ipv4: object | None,
+    allow_insecure: bool,
+    port: int,
+) -> str:
+    """Where this Host tells a phone to reach its LiveKit.
+
+    Derived, because it never carried anything Ops did not already know. The
+    profile used to spell it out, and the validation around that field had
+    squeezed it to exactly two legal values: the declared `lan_ipv4` when there
+    was one, or this Host's own derived hostname when there was not. Both are
+    right here. What the field added was a chance to type the wrong one — the
+    Pi's suffix went onto the RK3588 profile and travelled all the way to the
+    board before anything refused it.
+
+    Note what this still is: a value the Host repeats to a phone, chosen before
+    the phone ever spoke. A Host cannot know which of its networks a phone is
+    on, and `reachable_ipv4_addresses` says so in as many words. Deriving it
+    removes the transcription error, not the assumption; that one belongs to
+    whoever answers a phone's session request with an address it observed.
+    """
+
+    host = str(lan_ipv4) if lan_ipv4 is not None else identity.hub_hostname
+    scheme = "ws" if allow_insecure else "wss"
+    return f"{scheme}://{host}:{port}"

@@ -232,8 +232,10 @@ def _app(profile: HostProfile) -> dict[str, object] | None:
     app = profile.app
     if app is None:
         return None
+    # No LiveKit URL: this summarises what the profile *declares*, and the
+    # profile no longer declares one. Reporting the derived value here would
+    # read as a decision somebody made rather than something Ops computed.
     return {
         "hub_https_port": app.hub_https_port,
-        "livekit_client_url": app.livekit_client_url,
         "allow_insecure_livekit": app.allow_insecure_livekit,
     }

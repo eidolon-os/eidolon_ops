@@ -24,7 +24,6 @@ operations_config = "../eidolon-pi.toml"
 # default route, so a DHCP lease change does not stale the profile.
 lan_ipv4 = "192.168.100.15"
 hub_https_port = 8443
-livekit_client_url = "ws://192.168.100.15:7880"
 allow_insecure_livekit = true
 # Development HIL only. The named file must be an absolute, mode-0600,
 # non-symlink registry; leaving this unset keeps manufacturer-p256 fail-closed.

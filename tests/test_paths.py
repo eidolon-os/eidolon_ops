@@ -47,7 +47,6 @@ external_livekit_config = "{tmp_path / "livekit.yaml"}"
 [app]
 lan_ipv4 = "192.168.1.25"
 hub_https_port = 8443
-livekit_client_url = "ws://192.168.1.25:7880"
 allow_insecure_livekit = true
 {overrides}
 """,
@@ -67,7 +66,8 @@ def test_mac_profile_exports_one_host_path_contract(tmp_path: Path) -> None:
     assert profile.foundation_mode == "external"
     assert profile.app is not None
     assert str(profile.app.lan_ipv4) == "192.168.1.25"
-    assert profile.app.livekit_client_url == "ws://192.168.1.25:7880"
+    # Derived now, not declared: the profile carries no LiveKit URL at all.
+    assert not hasattr(profile.app, "livekit_client_url")
     environment = profile.environment()
     assert environment["EIDOLON_ROOT"] == environment["EIDOLON_WORKSPACE_ROOT"]
     assert environment["EIDOLON_STATE_ROOT"] == str(tmp_path / "state")
@@ -384,18 +384,7 @@ def test_profile_rejects_unknown_structural_fields(
         ('lan_ipv4 = "192.168.1.25"', 'lan_ipv4 = "fd00::25"', "private IPv4"),
         ("hub_https_port = 8443", "hub_https_port = true", "valid TCP port"),
         ("hub_https_port = 8443", "hub_https_port = 0", "valid TCP port"),
-        (
-            'livekit_client_url = "ws://192.168.1.25:7880"',
-            'livekit_client_url = "ws://user@192.168.1.25:7880/path?query=1"',
-            "plain ws/wss origin",
-        ),
-        (
-            'livekit_client_url = "ws://192.168.1.25:7880"',
-            'livekit_client_url = "ws://192.168.1.99:7880"',
-            "must use app.lan_ipv4",
-        ),
         ("allow_insecure_livekit = true", 'allow_insecure_livekit = "yes"', "boolean"),
-        ("allow_insecure_livekit = true", "allow_insecure_livekit = false", "opt-in"),
     ],
 )
 def test_profile_rejects_unsafe_app_access(
@@ -408,25 +397,6 @@ def test_profile_rejects_unsafe_app_access(
 
     with pytest.raises(HostProfileError, match=message):
         load_host_profile(path)
-
-
-def test_profile_accepts_secure_livekit_origin_without_development_opt_in(tmp_path: Path) -> None:
-    script = tmp_path / "run.sh"
-    script.write_text("#!/bin/sh\n", encoding="utf-8")
-    path = _write_mac_profile(tmp_path, script=script)
-    text = path.read_text(encoding="utf-8").replace(
-        'livekit_client_url = "ws://192.168.1.25:7880"',
-        'livekit_client_url = "wss://livekit.example.test"',
-    )
-    path.write_text(
-        text.replace("allow_insecure_livekit = true", "allow_insecure_livekit = false"),
-        encoding="utf-8",
-    )
-
-    profile = load_host_profile(path)
-    assert profile.app is not None
-    assert profile.app.livekit_client_url == "wss://livekit.example.test"
-    assert profile.app.allow_insecure_livekit is False
 
 
 def test_a_host_may_leave_its_address_to_discovery(tmp_path: Path) -> None:
@@ -449,21 +419,6 @@ def test_a_host_may_leave_its_address_to_discovery(tmp_path: Path) -> None:
 
     assert profile.app is not None
     assert profile.app.lan_ipv4 is None
-
-
-def test_a_discovered_address_forbids_a_literal_one_in_the_client_url(tmp_path: Path) -> None:
-    """Otherwise the URL goes stale exactly the way the declaration did."""
-
-    script = tmp_path / "run.sh"
-    script.write_text("#!/bin/sh\n", encoding="utf-8")
-    script.chmod(0o755)
-    original = _write_mac_profile(tmp_path, script=script)
-    text = original.read_text(encoding="utf-8").replace('lan_ipv4 = "192.168.1.25"\n', "")
-    stale = tmp_path / "mac-stale-url.toml"
-    stale.write_text(text, encoding="utf-8")
-
-    with pytest.raises(HostProfileError, match="must not embed a literal address"):
-        load_host_profile(stale)
 
 
 def test_a_third_board_is_a_row_in_the_driver_table() -> None:
@@ -489,3 +444,39 @@ def test_every_platform_has_a_profile_to_be_built_from() -> None:
     assert set(PLATFORM_PROFILES) == set(HostPlatform)
     for platform, profile in PLATFORM_PROFILES.items():
         assert profile.platform is platform
+
+
+def test_the_livekit_url_is_derived_rather_than_declared(tmp_path: Path) -> None:
+    """The field is gone, and the two values it was allowed to hold are computed.
+
+    Its validation had squeezed it to exactly those two — the declared
+    `lan_ipv4`, or this Host's derived hostname — and Ops holds both. What the
+    field added was a chance to type the wrong one: the Pi's suffix went onto
+    the RK3588 profile and travelled all the way to the board before anything
+    refused it.
+    """
+
+    from eidolon_ops.host_identity import HostLanIdentity, livekit_client_url
+
+    identity = HostLanIdentity(
+        host_id="ehost-0123456789abcdef0123",
+        hub_id="eidolon-hub-0123456789abcdef0123",
+        hub_hostname="eidolon-hub-0123456789abcdef0123.local",
+    )
+
+    # A declared address is what a phone is told to use.
+    assert livekit_client_url(
+        identity, lan_ipv4="192.168.1.25", allow_insecure=True, port=7880
+    ) == "ws://192.168.1.25:7880"
+
+    # Left to discovery, the Host-bound name is used instead — never a literal
+    # address, which is what could go stale.
+    assert livekit_client_url(
+        identity, lan_ipv4=None, allow_insecure=True, port=7880
+    ) == "ws://eidolon-hub-0123456789abcdef0123.local:7880"
+
+    # And the scheme follows the opt-in rather than being checked against it,
+    # so the inconsistency the old validation existed to catch cannot arise.
+    assert livekit_client_url(
+        identity, lan_ipv4=None, allow_insecure=False, port=7880
+    ).startswith("wss://")

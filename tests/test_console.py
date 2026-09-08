@@ -81,7 +81,6 @@ external_livekit_config = "{livekit}"
 
 [app]
 hub_https_port = 8443
-livekit_client_url = "ws://eidolon-hub-console.local:7880"
 allow_insecure_livekit = true
 """,
         encoding="utf-8",
@@ -111,7 +110,6 @@ operations_config = "{config_path}"
 
 [app]
 hub_https_port = 8443
-livekit_client_url = "wss://eidolon-hub-console.local:7880"
 allow_insecure_livekit = false
 """,
         encoding="utf-8",

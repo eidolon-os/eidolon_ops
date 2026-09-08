@@ -12,6 +12,7 @@ from eidolon_ops.host_identity import (
     HostIdentityError,
     HostLanIdentity,
     derive_host_lan_identity,
+    livekit_client_url,
 )
 from eidolon_ops.hub_assets import render_hub_settings
 from eidolon_ops.owner_domain_assets import (
@@ -20,6 +21,7 @@ from eidolon_ops.owner_domain_assets import (
     ensure_owner_domain_assets,
 )
 from eidolon_ops.paths import AppAccess
+from eidolon_ops.source_assets import PORTS
 
 
 class HostApplicationError(ValueError):
@@ -114,6 +116,14 @@ class HostApplicationMaterializer:
         except (OSError, HostIdentityError) as exc:
             raise HostApplicationError("Host identity input cannot define LAN identity") from exc
 
+    def _livekit_client_url(self, identity) -> str:
+        return livekit_client_url(
+            identity,
+            lan_ipv4=self.app.lan_ipv4,
+            allow_insecure=self.app.allow_insecure_livekit,
+            port=PORTS["livekit"],
+        )
+
     def render_environment(self, name: str, value: str) -> str:
         identity = self.identity()
         replacements: dict[str, str]
@@ -142,7 +152,7 @@ class HostApplicationMaterializer:
             }
         elif name == "channel.env":
             replacements = {
-                "EIDOLON_LIVEKIT_CLIENT_URL": self.app.livekit_client_url,
+                "EIDOLON_LIVEKIT_CLIENT_URL": self._livekit_client_url(identity),
                 "EIDOLON_CHANNEL_PROVIDER_ALLOW_INSECURE_LAN_CLIENT_URL": (
                     "1" if self.app.allow_insecure_livekit else "0"
                 ),
@@ -170,7 +180,7 @@ class HostApplicationMaterializer:
                 if self.app.lan_ipv4 is not None
                 else {}
             ),
-            "livekit_client_url": self.app.livekit_client_url,
+            "livekit_client_url": self._livekit_client_url(self.identity()),
             "allow_insecure_livekit": self.app.allow_insecure_livekit,
         }
 

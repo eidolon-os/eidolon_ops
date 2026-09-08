@@ -37,7 +37,6 @@ def _app(address: str) -> AppAccess:
     return AppAccess(
         lan_ipv4=IPv4Address(address),
         hub_https_port=8443,
-        livekit_client_url=f"ws://{address}:7880",
         allow_insecure_livekit=True,
     )
 

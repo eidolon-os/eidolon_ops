@@ -18,7 +18,6 @@ from ipaddress import IPv4Address, ip_address
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Literal
-from urllib.parse import urlparse
 
 from eidolon_ops.config import SOURCE_IDS, SourceConfig
 
@@ -156,7 +155,6 @@ class AppAccess:
 
     lan_ipv4: IPv4Address | None
     hub_https_port: int
-    livekit_client_url: str
     allow_insecure_livekit: bool
 
     #: The Setup code ``commissioning-code`` names instead of letting the Host
@@ -386,7 +384,7 @@ def _app_access(value: object | None, *, platform: HostPlatform) -> AppAccess | 
     if value is None:
         return None
     document = _table(value, "app")
-    required = {"hub_https_port", "livekit_client_url", "allow_insecure_livekit"}
+    required = {"hub_https_port", "allow_insecure_livekit"}
     optional = {"lan_ipv4", "setup_code"}
     if not required <= set(document) or not set(document) <= (required | optional):
         raise HostProfileError(
@@ -405,30 +403,15 @@ def _app_access(value: object | None, *, platform: HostPlatform) -> AppAccess | 
     port = document["hub_https_port"]
     if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:
         raise HostProfileError("app.hub_https_port must be a valid TCP port")
-    livekit_url = _text(document["livekit_client_url"], "app.livekit_client_url")
-    parsed = urlparse(livekit_url)
-    if (
-        parsed.scheme not in {"ws", "wss"}
-        or not parsed.hostname
-        or parsed.username is not None
-        or parsed.password is not None
-        or parsed.path not in {"", "/"}
-        or parsed.query
-        or parsed.fragment
-    ):
-        raise HostProfileError("app.livekit_client_url must be a plain ws/wss origin")
+    # No `livekit_client_url` here any more. The checks that used to guard it
+    # had squeezed the field to exactly two legal values — the declared
+    # `lan_ipv4`, or this Host's derived hostname — and Ops holds both, so the
+    # field carried nothing and cost a transcription. It is derived now, in
+    # `host_identity.livekit_client_url`, which is also where the one rule that
+    # survived lives: plain `ws://` only when this profile opted in.
     allow_insecure = document["allow_insecure_livekit"]
     if not isinstance(allow_insecure, bool):
         raise HostProfileError("app.allow_insecure_livekit must be boolean")
-    if parsed.scheme == "ws" and not allow_insecure:
-        raise HostProfileError("an insecure LiveKit URL requires explicit development opt-in")
-    if address is None and _IPV4_LITERAL.fullmatch(parsed.hostname or "") is not None:
-        raise HostProfileError(
-            "app.livekit_client_url must not embed a literal address when lan_ipv4 is "
-            "discovered; use the Host-bound hostname so it cannot go stale either"
-        )
-    if address is not None and parsed.scheme == "ws" and parsed.hostname != str(address):
-        raise HostProfileError("an insecure LiveKit URL must use app.lan_ipv4")
     setup_code: str | None = None
     if "setup_code" in document:
         setup_code = _text(document["setup_code"], "app.setup_code")
@@ -444,7 +427,6 @@ def _app_access(value: object | None, *, platform: HostPlatform) -> AppAccess | 
     return AppAccess(
         lan_ipv4=address,
         hub_https_port=port,
-        livekit_client_url=livekit_url.rstrip("/"),
         allow_insecure_livekit=allow_insecure,
         setup_code=setup_code,
     )

@@ -70,7 +70,6 @@ def _product(tmp_path: Path, *, foundation_mode: str) -> LocalProductSource:
         app=AppAccess(
             lan_ipv4=IPv4Address("192.168.1.25"),
             hub_https_port=8443,
-            livekit_client_url="ws://192.168.1.25:7880",
             allow_insecure_livekit=True,
         ),
     )

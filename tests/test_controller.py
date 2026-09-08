@@ -519,7 +519,6 @@ def _app() -> AppAccess:
     return AppAccess(
         lan_ipv4=IPv4Address("192.168.100.15"),
         hub_https_port=8443,
-        livekit_client_url="ws://192.168.100.15:7880",
         allow_insecure_livekit=True,
     )
 
@@ -1955,7 +1954,6 @@ def test_input_initialization_reports_the_host_binding_it_established(
     controller.app = AppAccess(
         lan_ipv4=None,
         hub_https_port=8443,
-        livekit_client_url="wss://eidolon-hub.local:7880",
         allow_insecure_livekit=False,
     )
 

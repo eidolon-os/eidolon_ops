@@ -17,7 +17,12 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from eidolon_ops import environment, lan_observation, probes, source_assets
 from eidolon_ops.config import OperationsConfig
 from eidolon_ops.errors import InstallInputError, OperationsError
-from eidolon_ops.host_identity import HostIdentityError, HostLanIdentity, derive_host_lan_identity
+from eidolon_ops.host_identity import (
+    HostIdentityError,
+    HostLanIdentity,
+    derive_host_lan_identity,
+    livekit_client_url,
+)
 from eidolon_ops.hostagent.authority_reset import lineage_evidence
 from eidolon_ops.hostagent.kernel_schema import (
     absent_document,
@@ -482,7 +487,7 @@ class LocalProductSource:
                 value = environment.merge(
                     value,
                     {
-                        "EIDOLON_LIVEKIT_CLIENT_URL": app.livekit_client_url,
+                        "EIDOLON_LIVEKIT_CLIENT_URL": self._livekit_client_url(app),
                         "EIDOLON_CHANNEL_PROVIDER_ALLOW_INSECURE_LAN_CLIENT_URL": (
                             "1" if app.allow_insecure_livekit else "0"
                         ),
@@ -628,7 +633,7 @@ class LocalProductSource:
             seconds=SETUP_READINESS_SETTLE_SECONDS,
         )
         hub = probes.http_health(f"https://{address}:{app.hub_https_port}/health")
-        livekit_origin = urlparse(app.livekit_client_url)
+        livekit_origin = urlparse(self._livekit_client_url(app))
         livekit = probes.tcp_health(
             address,
             livekit_origin.port or (443 if livekit_origin.scheme == "wss" else 80),
@@ -689,7 +694,8 @@ class LocalProductSource:
             ),
             str(ReadinessFact.HOST_SETUP_COMPLETABLE): bool(setup["healthy"]),
             str(ReadinessFact.LIVEKIT_CLIENT_ORIGIN): (
-                channel_values.get("EIDOLON_LIVEKIT_CLIENT_URL") == app.livekit_client_url
+                channel_values.get("EIDOLON_LIVEKIT_CLIENT_URL")
+                == self._livekit_client_url(app)
                 and channel_values.get("EIDOLON_CHANNEL_PROVIDER_ALLOW_INSECURE_LAN_CLIENT_URL")
                 == ("1" if app.allow_insecure_livekit else "0")
             ),
@@ -715,7 +721,7 @@ class LocalProductSource:
             "endpoints": {
                 "local_api": f"https://{address}:{ports['local_api']}",
                 "hub": identity.hub_origin(app.hub_https_port),
-                "livekit": app.livekit_client_url,
+                "livekit": self._livekit_client_url(app),
             },
             "scope": (
                 "Host-side LAN contract only; a Pad conversation remains the final external gate"
@@ -801,6 +807,14 @@ class LocalProductSource:
         return (
             self._host_lan_identity().hub_origin(app.hub_https_port)
             + "/api/device-onboarding/v1/descriptor"
+        )
+
+    def _livekit_client_url(self, app) -> str:
+        return livekit_client_url(
+            self._host_lan_identity(),
+            lan_ipv4=app.lan_ipv4,
+            allow_insecure=app.allow_insecure_livekit,
+            port=source_assets.PORTS["livekit"],
         )
 
     def _host_identity_path(self) -> Path:
