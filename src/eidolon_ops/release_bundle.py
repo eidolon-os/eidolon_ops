@@ -429,6 +429,16 @@ class BundleTransfer:
             raise OperationsError("bundle artifact manifest is invalid")
         return artifacts
 
+    def _sealed_source_ids(self) -> tuple[str, ...]:
+        """Every repository this release carries, baseline plus capabilities.
+
+        Ordered with the baseline first so the bundle's own source records stay
+        in a stable order across Hosts that differ only in what they can do.
+        """
+
+        extra = sorted(set(self.config.sources) - set(SOURCE_IDS))
+        return (*SOURCE_IDS, *extra)
+
     def _seal(self, output: Path, release_id: str, *, cutover_mode: str) -> dict[str, object]:
         command = [
             str(self.config.workspace.release_cli),
@@ -437,10 +447,18 @@ class BundleTransfer:
             str(output),
         ]
         command.extend(("--cutover-mode", cutover_mode))
-        for source_id in SOURCE_IDS:
+        # What this Host can do, so the release contract expects the same sets
+        # Ops does. Told rather than inferred: the contract is validated on the
+        # Host, before Ops' config exists there, so it has to be in the bundle.
+        for capability in sorted(self.config.capabilities):
+            command.extend(("--capability", capability))
+        # The sources this Host pins, which already includes what a capability
+        # adds — `config.sources` is checked against `expected_sources` when the
+        # config loads, so a capability without its repository never gets here.
+        for source_id in self._sealed_source_ids():
             flag = source_id.removeprefix("eidolon_").replace("eidolon-", "")
             command.extend((f"--{flag}-repo", str(self.config.sources[source_id].path)))
-        for source_id in SOURCE_IDS:
+        for source_id in self._sealed_source_ids():
             flag = source_id.removeprefix("eidolon_").replace("eidolon-", "")
             command.extend((f"--{flag}-revision", self.sources.revision(source_id)))
         # The same uv preflight proved, not a second opinion about which one
@@ -523,10 +541,10 @@ class BundleTransfer:
             or document.get("release_id") != release_id
             or document.get("cutover_mode") != cutover_mode
             or not isinstance(sources, list)
-            or len(sources) != len(SOURCE_IDS)
+            or len(sources) != len(self._sealed_source_ids())
         ):
             raise OperationsError("existing bundle identity or source set is invalid")
-        for source_id, item in zip(SOURCE_IDS, sources, strict=True):
+        for source_id, item in zip(self._sealed_source_ids(), sources, strict=True):
             expected_revision = self.sources.revision(source_id)
             if (
                 not isinstance(item, dict)

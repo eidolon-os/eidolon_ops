@@ -196,3 +196,75 @@ def test_every_agent_payload_that_names_units_also_names_capabilities() -> None:
         "these send the agent a unit list with no capabilities, so it will "
         f"derive the baseline and refuse anything conditional: {offenders}"
     )
+
+
+def _deploy_module(name: str):
+    """Load one dependency-free module out of the sibling Kernel repository.
+
+    Imported by path rather than as a package: `eidolon_deploy` is installed on
+    a Host, not on this workstation, and importing the package would pull in
+    `manifest`, which needs jsonschema. `capabilities` deliberately imports
+    nothing, which is what makes this possible at all.
+    """
+
+    import importlib.util
+
+    path = _REPOSITORIES / "eidolon_kernel" / "eidolon_deploy" / f"{name}.py"
+    if not path.is_file():
+        pytest.skip("the release contract needs the sibling Kernel repository to check")
+    specification = importlib.util.spec_from_file_location(f"_deploy_{name}", path)
+    assert specification is not None and specification.loader is not None
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+    return module
+
+
+def test_the_release_contract_knows_the_same_capabilities_ops_does() -> None:
+    """The fourth statement of the same closed set, and why it exists.
+
+    A release descriptor is validated before any component contract is read and
+    before Ops' own config is loaded — on a Host, by whoever holds the
+    descriptor. That is the point of validating it, so the release contract
+    cannot ask Ops what a capability is. It holds its own copy, and this is
+    what stops the copy from becoming a different answer.
+    """
+
+    assert _deploy_module("capabilities").HOST_CAPABILITIES == HOST_CAPABILITIES
+
+
+def test_the_release_contract_adds_units_for_the_same_capabilities() -> None:
+    """A capability Ops can install units for must be one a release can carry.
+
+    Read out of the source rather than imported, because `manifest` needs
+    jsonschema and this workstation has no reason to have it. `ast` rather than
+    a regex so the comparison is against the value, not against its formatting.
+    """
+
+    import ast
+
+    path = _REPOSITORIES / "eidolon_kernel" / "eidolon_deploy" / "manifest.py"
+    if not path.is_file():
+        pytest.skip("the release contract needs the sibling Kernel repository to check")
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    tables: dict[str, object] = {}
+    for node in tree.body:
+        target = None
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            target = node.target.id
+        elif isinstance(node, ast.Assign) and len(node.targets) == 1:
+            first = node.targets[0]
+            target = first.id if isinstance(first, ast.Name) else None
+        if target == "CAPABILITY_AFFECTED_UNITS" and node.value is not None:
+            tables[target] = ast.literal_eval(node.value)
+    assert "CAPABILITY_AFFECTED_UNITS" in tables, (
+        "the release contract no longer states which units a capability adds"
+    )
+    release_units = {
+        capability: tuple(units)
+        for capability, units in tables["CAPABILITY_AFFECTED_UNITS"].items()
+    }
+    assert release_units == {
+        capability: tuple(units)
+        for capability, units in ops_config.CAPABILITY_UNITS.items()
+        if units
+    }
