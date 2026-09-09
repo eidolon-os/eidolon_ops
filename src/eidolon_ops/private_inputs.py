@@ -11,6 +11,7 @@ from pathlib import Path
 
 from eidolon_ops.config import OperationsConfig
 from eidolon_ops.errors import InstallInputError
+from eidolon_ops.hostagent.contract import OPTIONAL_INSTALL_INPUTS
 from eidolon_ops.product_settings import product_settings
 from eidolon_ops.provider_inputs import (
     EXTERNAL_KEYS,
@@ -96,7 +97,7 @@ def require_safe_input_directory(target: Path) -> set[str]:
         raise InstallInputError(f"install input directory is unsafe: {target}")
     expected = set(INSTALL_DESTINATION_NAMES.values())
     actual = {path.name for path in target.iterdir()}
-    if actual != expected:
+    if not expected <= actual or not actual <= expected | OPTIONAL_INSTALL_INPUTS:
         raise InstallInputError("existing install input directory is partial or has extra files")
     for path in target.iterdir():
         if path.is_symlink() or not path.is_file() or stat.S_IMODE(path.stat().st_mode) != 0o600:
