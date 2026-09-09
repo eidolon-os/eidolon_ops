@@ -52,6 +52,7 @@ HOST_CAPABILITIES: frozenset[str] = frozenset({"rknpu2", "local_asr", "local_tts
 CAPABILITY_UNITS: dict[str, tuple[str, ...]] = {
     "local_asr": ("eidolon-asr.service",),
     "local_llm": ("eidolon-llm.service",),
+    "local_tts": ("eidolon-tts.service",),
 }
 
 

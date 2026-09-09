@@ -355,6 +355,8 @@ def test_the_dev_port_registry_and_the_contracts_use_the_same_numbers(
         # Local generation, for the same reason: the dev stack reaches a cloud
         # model, and this one is CPU-pinned to a board's little cores.
         "llm_api": 8769,
+        # Same again for the voice: the engine wants an NPU.
+        "tts_stream": 8770,
     }
 
     for role, port in topology.port_roles.items():

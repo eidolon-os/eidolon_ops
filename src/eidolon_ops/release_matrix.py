@@ -162,6 +162,14 @@ CAPABILITY_SYSTEMD_ASSETS: dict[str, tuple[SystemdAssetContract, ...]] = {
             "eidolon_models",
         ),
     ),
+    "local_tts": (
+        SystemdAssetContract(
+            "eidolon_models",
+            "deploy/systemd/eidolon-tts.service",
+            "eidolon-tts.service",
+            "eidolon_models",
+        ),
+    ),
 }
 
 

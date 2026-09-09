@@ -49,6 +49,7 @@ CAPABILITY_SOURCES: dict[str, tuple[str, ...]] = {
 CAPABILITY_UNITS: dict[str, tuple[str, ...]] = {
     "local_asr": ("eidolon-asr.service",),
     "local_llm": ("eidolon-llm.service",),
+    "local_tts": ("eidolon-tts.service",),
 }
 
 PRODUCT_UNITS = (

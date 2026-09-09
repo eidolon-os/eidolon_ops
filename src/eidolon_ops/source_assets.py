@@ -70,6 +70,9 @@ PORTS = {
     # reaches it as it reaches any other -- the port is the only thing about it
     # that is ours to assign.
     "llm_api": 8769,
+    # This Host's own voice. Also loopback, and also not in the dev stack: the
+    # engine loads RKNN graphs onto an NPU a workstation does not have.
+    "tts_stream": 8770,
     "admin": 9000,
     "admin_web": 9001,
     "local_api": 9002,
