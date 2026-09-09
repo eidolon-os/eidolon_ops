@@ -103,6 +103,7 @@ units = [
   "eidolon-channel.service",
   "eidolon-asr.service",
   "eidolon-llm.service",
+  "eidolon-tts.service",
 ]
 
 [data]
@@ -142,8 +143,16 @@ memory_settings = "../.eidolon-ops/opi5max/inputs/memory.yaml"
 # 二进制），权重由组件契约声明、工作站取件后搬过去（1.0 GB，板子自己下不可靠）。
 # 服务跑在 A55 0-3 上——NPU 留给 TTS，两个一起放 NPU 上共存不了（HOST-RK3588.md
 # §2.22）。实测 5.88 tok/s，对 3.43 的门槛有 1.7 倍余量（§2.23）。
+# 2026-09-09：local_tts 加上。引擎（CosyVoice2 流式流水线）的源码随发布走，由
+# unit 的 ExecStartPre 在主机上编译一次——它链接本板的 NPU 运行时，不能是发布产物。
+# NPU 归它，A55 归 LLM，这是 HOST-RK3588.md §2.22-2.23 量过的唯一能在同一轮里共存
+# 的安排。
+#
+# 权重（约 1.5 GB 的 RKNN/RKLLM 产物）目前**不随发布走**：它们是转换输出，上游不
+# 发布这些文件，而组件契约要求每个 artifact 有可指向的来源。所以它们现在是手工放
+# 在 /var/lib/eidolon/models/cosyvoice2 的。这是这条链上唯一还没自动化的一步。
 [capabilities]
-provides = ["rknpu2", "local_asr", "local_llm"]
+provides = ["rknpu2", "local_asr", "local_llm", "local_tts"]
 
 # 2026-09-09：STT 走本地。这台板子声明了 local_asr，release 因此带上
 # eidolon_models、装 eidolon-asr.service，eidolond 按 host.env 里的声明把它列进

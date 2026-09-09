@@ -609,3 +609,50 @@ def test_the_path_contract_check_reads_this_hosts_own_host_env(
     # And a Host whose file really has drifted still fails.
     host_env.write_text(agent.host_env_value(frozenset()), encoding="utf-8")
     assert lifecycle.doctor_host(payload)["checks"]["host_path_contract"] is False
+
+
+def test_the_agent_knows_the_same_service_groups_ops_does() -> None:
+    """The seventh copy of a capability table, held like the other six."""
+
+    assert agent_contract.CAPABILITY_SERVICE_GROUPS == ops_config.CAPABILITY_SERVICE_GROUPS
+
+
+def test_every_service_group_belongs_to_a_capability_that_exists() -> None:
+    for capability in ops_config.CAPABILITY_SERVICE_GROUPS:
+        assert capability in HOST_CAPABILITIES
+
+
+def test_a_capability_needing_hardware_is_refused_when_the_group_is_absent() -> None:
+    """Rather than skipped. Without the group the service starts, loads
+    nothing, and answers 503 forever — which reads like a slow board.
+
+    This is what a real deployment did: `local_tts` came up as `eidolon`, the
+    RKNN runtime could not open /dev/dri/card1, and the release timed out on
+    readiness three times before the cause was read off an strace.
+    """
+
+    import inspect
+
+    from eidolon_ops.hostagent import install
+
+    source = inspect.getsource(install)
+    assert "_require_system_group" in source
+    # Required before membership is attempted, so the message is about the
+    # missing group rather than usermod's exit code.
+    require = source.index("self._require_system_group(group, capability)")
+    ensure = source.index('self._ensure_group_membership("eidolon", group)')
+    assert require < ensure
+
+
+def test_the_groups_are_not_created_by_this_agent() -> None:
+    """`video` is the distribution's, with a number the device nodes already
+    use. A group created here would be a different one with the same name."""
+
+    import inspect
+
+    from eidolon_ops.hostagent import install
+
+    source = inspect.getsource(install)
+    start = source.index("def _require_system_group")
+    end = source.index("def _ensure_group_membership")
+    assert "groupadd" not in source[start:end]

@@ -304,10 +304,33 @@ class TargetInstaller:
             self._ensure_service_identity("eidolon-lifecycle")
             for name in identities.OWNER_TRUST_READERS:
                 self._ensure_group_membership(name, identities.OWNER_TRUST_GROUP)
+            # Hardware a capability's service needs to reach. Refused loudly
+            # rather than skipped: a Host that declares local speech and has no
+            # such group cannot open the NPU, and the failure without this is a
+            # service that starts, loads nothing, and answers 503 forever.
+            for capability in sorted(self.capabilities):
+                for group in contract.CAPABILITY_SERVICE_GROUPS.get(capability, ()):
+                    self._require_system_group(group, capability)
+                    self._ensure_group_membership("eidolon", group)
             self._validate_service_identity_boundary()
         contract.ensure_host_path_contract(
             self.root, self._chown, self.port_registry, self.capabilities
         )
+
+    def _require_system_group(self, group: str, capability: str) -> None:
+        """A group the OS is expected to have already. Not created here.
+
+        `video` and its kind are the distribution's, with numbers other things
+        already depend on. Creating one would make this Host's idea of it
+        differ from the device nodes it is supposed to match.
+        """
+
+        observed = self.command(("/usr/bin/getent", "group", group), timeout=30)
+        if observed.returncode != 0:
+            raise TargetError(
+                f"this Host declares {capability!r}, whose service must be in the "
+                f"{group!r} group to reach the hardware, and no such group exists"
+            )
 
     def _ensure_group_membership(self, user: str, group: str) -> None:
         observed = self.command(("/usr/bin/id", "-nG", user), timeout=30)

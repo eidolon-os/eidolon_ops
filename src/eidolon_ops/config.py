@@ -51,6 +51,21 @@ CAPABILITY_UNITS: dict[str, tuple[str, ...]] = {
     "local_llm": ("eidolon-llm.service",),
     "local_tts": ("eidolon-tts.service",),
 }
+#: Supplementary groups the service user needs for a capability's hardware.
+#:
+#: `local_tts` needs `video` because that is how this board exposes its NPU:
+#: the RKNN runtime tries /dev/rknpu, finds nothing, and falls back to the DRM
+#: *primary* nodes /dev/dri/card0 and card1 — which are root:video 0660. Not
+#: the render nodes, which is what one would guess and what was tried first;
+#: this was read off an strace of a working run against a failing one.
+#:
+#: Nothing else needs one, and that is why this is keyed by capability: a Host
+#: that reaches a provider for speech has no reason to put its service account
+#: in a group that can open display devices.
+CAPABILITY_SERVICE_GROUPS: dict[str, tuple[str, ...]] = {
+    "local_tts": ("video",),
+}
+
 
 PRODUCT_UNITS = (
     "eidolon-bootstrapd.service",
