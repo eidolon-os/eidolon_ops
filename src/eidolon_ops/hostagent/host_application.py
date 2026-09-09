@@ -114,6 +114,26 @@ def refresh_host_application(payload: Mapping[str, object]) -> dict[str, object]
         # with neither, so both come from one value.
         contract.declared_capabilities(payload),
     )
+    # Derived from the same declaration, and applied on every refresh for the
+    # same reason host.env is rewritten rather than defended: a Host's
+    # capabilities change between releases, and one that gains local synthesis
+    # needs its service account in the group that can reach the NPU before the
+    # candidate's units start.
+    contract.ensure_capability_service_groups(
+        contract.declared_capabilities(payload),
+        group_exists=lambda group: primitives.run(
+            ("/usr/bin/getent", "group", group), timeout=30
+        ).returncode
+        == 0,
+        add_membership=lambda user, group: primitives.checked(
+            "service supplementary group",
+            ("/usr/sbin/usermod", "--append", "--groups", group, user),
+            timeout=60,
+        ),
+        member_of=lambda user: frozenset(
+            primitives.run(("/usr/bin/id", "-nG", user), timeout=30).stdout.split()
+        ),
+    )
     changed: list[str] = []
     # Every Host application input is required now. What used to be placed
     # first here was a per-device commissioning registry that belonged to no

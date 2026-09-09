@@ -635,13 +635,36 @@ def test_a_capability_needing_hardware_is_refused_when_the_group_is_absent() -> 
 
     from eidolon_ops.hostagent import install
 
-    source = inspect.getsource(install)
-    assert "_require_system_group" in source
-    # Required before membership is attempted, so the message is about the
-    # missing group rather than usermod's exit code.
-    require = source.index("self._require_system_group(group, capability)")
-    ensure = source.index('self._ensure_group_membership("eidolon", group)')
-    assert require < ensure
+    from eidolon_ops.hostagent import contract as agent
+
+    with pytest.raises(Exception, match="no such group exists"):
+        agent.ensure_capability_service_groups(
+            frozenset({"local_tts"}),
+            group_exists=lambda _group: False,
+            add_membership=lambda *_a: pytest.fail("membership attempted anyway"),
+            member_of=lambda _user: frozenset(),
+        )
+
+    # And a Host that already has it is left alone rather than usermod'ed on
+    # every release.
+    assert (
+        agent.ensure_capability_service_groups(
+            frozenset({"local_tts"}),
+            group_exists=lambda _group: True,
+            add_membership=lambda *_a: pytest.fail("membership added twice"),
+            member_of=lambda _user: frozenset({"video"}),
+        )
+        == ()
+    )
+    assert (
+        agent.ensure_capability_service_groups(
+            frozenset({"local_tts"}),
+            group_exists=lambda _group: True,
+            add_membership=lambda *_a: None,
+            member_of=lambda _user: frozenset(),
+        )
+        == ("video",)
+    )
 
 
 def test_the_groups_are_not_created_by_this_agent() -> None:
@@ -653,6 +676,18 @@ def test_the_groups_are_not_created_by_this_agent() -> None:
     from eidolon_ops.hostagent import install
 
     source = inspect.getsource(install)
-    start = source.index("def _require_system_group")
+    start = source.index("def _ensure_capability_service_groups")
     end = source.index("def _ensure_group_membership")
     assert "groupadd" not in source[start:end]
+
+
+def test_the_release_path_applies_them_too_not_only_a_first_install() -> None:
+    """A Host's capabilities change between releases. Applying this only on a
+    first install is how one that gained local synthesis would keep failing
+    readiness until someone re-installed it."""
+
+    import inspect
+
+    from eidolon_ops.hostagent import host_application
+
+    assert "ensure_capability_service_groups" in inspect.getsource(host_application)

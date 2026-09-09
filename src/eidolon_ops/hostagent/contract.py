@@ -70,6 +70,48 @@ CAPABILITY_SERVICE_GROUPS: dict[str, tuple[str, ...]] = {
 }
 
 
+def ensure_capability_service_groups(
+    capabilities: frozenset[str],
+    *,
+    group_exists: Callable[[str], bool],
+    add_membership: Callable[[str, str], None],
+    member_of: Callable[[str], frozenset[str]],
+    user: str = "eidolon",
+) -> tuple[str, ...]:
+    """Put the service account in the groups this Host's capabilities need.
+
+    Called from both the first install and every Host-layer refresh, because a
+    Host's declared capabilities change between releases and this is derived
+    from them — the same reason `host.env` is rewritten rather than defended.
+
+    The callables are passed in rather than run here: this module is the
+    contract, and the two callers reach the Host through different machinery.
+    """
+
+    wanted: list[str] = []
+    for capability in sorted(capabilities):
+        for group in CAPABILITY_SERVICE_GROUPS.get(capability, ()):
+            if group not in wanted:
+                wanted.append(group)
+    if not wanted:
+        return ()
+    present = member_of(user)
+    added: list[str] = []
+    for group in wanted:
+        if not group_exists(group):
+            # Refused rather than skipped: without it the service starts, loads
+            # nothing, and answers 503 forever — which reads like a slow board.
+            raise TargetError(
+                f"this Host declares a capability whose service must be in the "
+                f"{group!r} group to reach its hardware, and no such group exists"
+            )
+        if group in present:
+            continue
+        add_membership(user, group)
+        added.append(group)
+    return tuple(added)
+
+
 
 def expected_units(capabilities: frozenset[str]) -> tuple[str, ...]:
     extra: list[str] = []
