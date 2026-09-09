@@ -1,0 +1,50 @@
+schema_version = 1
+
+[host]
+id = "eidolon-opi5max"
+platform = "rk3588"
+driver = "ssh-systemd"
+
+[paths]
+install_root = "/opt/eidolon"
+current_root = "/opt/eidolon/current"
+config_root = "/etc/eidolon"
+state_root = "/var/lib/eidolon"
+runtime_root = "/run/eidolon"
+log_root = "/var/log/eidolon"
+cache_root = "/var/cache/eidolon"
+bootstrap_state_root = "/var/lib/eidolon-bootstrap"
+bootstrap_runtime_root = "/run/eidolon-bootstrap"
+
+[adapter]
+operations_config = "../eidolon-rk3588.toml"
+
+[app]
+hub_https_port = 9443
+# 由这台 Host 自己的 identity 派生（host_identity.py:51，公钥 SHA-256 前 20 位）。
+# 明文 ws:// 的可接受集合只有 {本机地址, 本机派生的 Hub 名}，两者 ops 都算得出来，
+# 却要操作者手打——我第一次就抄成了 Pi 的，一路通过到板子上才被拒。
+# 这个字段该不该存在是另一个话题，已单列。
+allow_insecure_livekit = true
+# HIL only: the development commissioning registry this Pi installs. Each entry
+# binds one board's stable hardware lookup id to the setup secret its firmware
+# was built with, and states nothing else — the Hub derives that board's
+# permanent hardware identity from the lookup id, so the file cannot claim a
+# board type it has no way to prove. Without the file Hub loads the rejecting
+# verifier and no device can enroll at all — which is a silent state, because
+# nothing else about the Host looks unhealthy.
+
+# Development loop only. Pinning the value is what removes the step: the
+# operator never looks a code up, so `commissioning-code` becomes a command you
+# fire without reading its output and the digits typed on the phone are the
+# same every time. Only the value is pinned — the Host still opens one ordinary
+# session for it, which expires, is spent once, dies after five wrong tries and
+# supersedes any window before it. A shipped Host would name the code printed
+# on its own box here instead, which is why there is no mode check anywhere on
+# this path.
+# 2026-09-08：值移到运维自己的输入目录里了。这个文件现在是入库的，而这个仓库
+# 自己的原则是"入库文件里的码就是所有人都有的码"。所以这里只写路径，值和这台
+# 主机安装时用的其他每一个 secret 放在一起（`.eidolon-ops/` 一直是 gitignore
+# 的）。新 checkout 上这个文件不存在，install 会明确报出来——和另外 14 个
+# install 输入的行为一致。
+setup_code_file = "../../.eidolon-ops/opi5max/inputs/factory_setup_code"

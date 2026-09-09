@@ -128,52 +128,85 @@ agent_settings = "../.eidolon-ops/opi5max/inputs/agent.yaml"
 channel_settings = "../.eidolon-ops/opi5max/inputs/channel.yaml"
 memory_settings = "../.eidolon-ops/opi5max/inputs/memory.yaml"
 
-# Installed local model capabilities remain available for comparison; this
-# profile routes ASR, TTS and every configured LLM to cloud providers.
-# The previous local routing is backed up beside this file.
+# 这块板有 NPU，本地跑语音识别。声明 capability 才会把对应的 unit 加进拓扑、
+# 把 eidolon_models 加进源，三者由 load_config 一起校验（撤下过一轮，它依次拒绝了
+# 三次——这个耦合是对的）。
+#
+# 2026-09-08：local_asr 加回来了。此前撤下是因为最后一米没通——eidolond 只启动它
+# 自己那份服务清单里的服务，而清单没有"条件服务"这个概念，于是 unit 装上了没人
+# 启动它。现在清单支持 requires_capability，声明会随 host.env 下发到主机，
+# eidolond 和 unit applier 按同一个值过滤同一份清单。
+#
+# 注意 STT 的 provider 仍然指向云端（见下面的 overlay）：本地服务会跑起来，但
+# channel 里还没有把语音路由给它的 provider。
+# 2026-09-09：local_llm 加上。llama-server 由 foundation 带上来（钉住的 arm64
+# 二进制），权重由组件契约声明、工作站取件后搬过去（1.0 GB，板子自己下不可靠）。
+# 服务跑在 A55 0-3 上——NPU 留给 TTS，两个一起放 NPU 上共存不了（HOST-RK3588.md
+# §2.22）。实测 5.88 tok/s，对 3.43 的门槛有 1.7 倍余量（§2.23）。
+# 2026-09-09：local_tts 加上。引擎（CosyVoice2 流式流水线）的源码随发布走，由
+# unit 的 ExecStartPre 在主机上编译一次——它链接本板的 NPU 运行时，不能是发布产物。
+# NPU 归它，A55 归 LLM，这是 HOST-RK3588.md §2.22-2.23 量过的唯一能在同一轮里共存
+# 的安排。
+#
+# 权重（约 1.5 GB 的 RKNN/RKLLM 产物）目前**不随发布走**：它们是转换输出，上游不
+# 发布这些文件，而组件契约要求每个 artifact 有可指向的来源。所以它们现在是手工放
+# 在 /var/lib/eidolon/models/cosyvoice2 的。这是这条链上唯一还没自动化的一步。
 [capabilities]
 provides = ["rknpu2", "local_asr", "local_llm", "local_tts"]
 
+# 2026-09-09：STT 走本地。这台板子声明了 local_asr，release 因此带上
+# eidolon_models、装 eidolon-asr.service，eidolond 按 host.env 里的声明把它列进
+# 服务目录并启动它，channel 的 local_asr 插件从这台主机自己的端口注册表解析端点。
+#
+# provider 名就是 capability 名，所以 load_config 会拒绝"配了 local_asr 却没在
+# capabilities.provides 里声明"——两处必须一致。
+#
 [[settings.overlay]]
 document = "channel.yaml"
 path = "providers.stt_provider"
-value = "bailian"
+# 分两次发布，这是 cross-release 规则要求的，不是绕路：settings 和组件链接是两
+# 次独立的原子操作，所以候选 settings 必须**同时**被当前 release 的解释器（回滚
+# 安全）和候选解释器（前向安全）读懂。当前板上的 channel 还不认识 local_asr，
+# 于是它拒绝了——正确地拒绝了。
+#
+# 第一发（rk3588-20260909T...）已经把认识 local_asr 的代码放上去了，所以现在
+# 当前 release 和候选 release 都读得懂这个值。
+value = "local_asr"
 
-[[settings.overlay]]
-document = "channel.yaml"
-path = "providers.tts_provider"
-value = "bailian"
-
-# Keep the standard Agent RPC route. Both Channel's direct LLM settings and
-# Agent's serving model use DeepSeek; API keys remain in private inputs.
-[[settings.overlay]]
-document = "channel.yaml"
-path = "llm.base_url"
-value = "https://api.deepseek.com"
-
-[[settings.overlay]]
-document = "channel.yaml"
-path = "llm.model"
-value = "deepseek-v4-flash"
-
+# 2026-09-09：对话也走本地。Agent 侧没有一行代码是为此写的——llama-server 服务的
+# 是 OpenAI 那套形状，LiteLLM 本来就按 name + api_base 找模型，所以让这台主机自己
+# 回答问题是一个地址的事，不是一个适配器的事。
+#
+# 地址不是随手写的：load_config 会把它对着端口注册表里 llm_api 的分配核一遍，
+# 并且要求这台主机声明了 local_llm——否则就是一台对着没人监听的端口说话的主机。
+#
+# 同样分两次发布，和 STT 一个道理：候选 settings 必须被当前和候选两个解释器都读懂。
+# 这里读的是 Agent 的 settings，模型条目的形状两边一样，改的只是值，所以两边都读
+# 得懂——但组件链接和 settings 仍是两次独立的原子操作，先让代码和权重上去。
 [[settings.overlay]]
 document = "agent.yaml"
 path = "llm.models[0].name"
-value = "openai/deepseek-v4-flash"
+# openai/ 前缀是 LiteLLM 用来"按 api_base 走 OpenAI 兼容协议"的写法，不是在调
+# OpenAI。后半是权重的身份，和契约里 install_root 的名字对得上。
+value = "openai/qwen3-1.7b"
 
-# api_base inherits https://api.deepseek.com/v1 from Agent's pinned settings.
-# Removing the local address override restores its existing cloud endpoint.
+[[settings.overlay]]
+document = "agent.yaml"
+path = "llm.models[0].api_base"
+value = "http://127.0.0.1:8769/v1"
+
 [[settings.overlay]]
 document = "agent.yaml"
 path = "llm.default_model"
-value = "openai/deepseek-v4-flash"
+value = "openai/qwen3-1.7b"
 
+# 2026-09-09：TTS 也走本地。第一发（rk3588-20260909T055722）已经把认识 local_tts
+# 的 channel 和 eidolon-tts.service 放上去了，所以现在当前和候选两个解释器都读得懂
+# 这个值——分两次发布是 cross-release 规则要求的，不是绕路。
+#
+# provider 名就是 capability 名，所以 load_config 会拒绝"配了 local_tts 却没在
+# capabilities.provides 里声明"。
 [[settings.overlay]]
-document = "memory.yaml"
-path = "llm.model"
-value = "openai/deepseek-v4-flash"
-
-[[settings.overlay]]
-document = "memory.yaml"
-path = "llm.base_url"
-value = "https://api.deepseek.com/v1"
+document = "channel.yaml"
+path = "providers.tts_provider"
+value = "local_tts"

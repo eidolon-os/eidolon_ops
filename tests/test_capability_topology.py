@@ -554,23 +554,16 @@ def test_every_local_address_setting_names_a_capability_and_a_port_that_exist() 
         assert role in PORTS
 
 
-def test_the_board_config_asks_for_the_local_model_at_the_assigned_port() -> None:
-    """The Host this was built for, read as an operator would deploy it."""
-
+def test_the_local_board_backup_preserves_the_local_model_route() -> None:
     from eidolon_ops.config import load_config
     from eidolon_ops.source_assets import PORTS
 
-    config = load_config(Path("config/eidolon-rk3588.toml"))
-    overlay = {
-        (item.document, item.display): item.value for item in config.settings_overlay
-    }
-
+    config = load_config(Path("config/eidolon-rk3588.local-backup-20260910.toml"))
+    overlay = {(item.document, item.display): item.value for item in config.settings_overlay}
     assert "local_llm" in config.capabilities
     assert overlay[("agent.yaml", "llm.models[0].api_base")] == (
         f"http://127.0.0.1:{PORTS['llm_api']}/v1"
     )
-    # The default has to be the entry that was retargeted, or the Host runs the
-    # model and asks a provider anyway.
     assert overlay[("agent.yaml", "llm.default_model")] == (
         overlay[("agent.yaml", "llm.models[0].name")]
     )
