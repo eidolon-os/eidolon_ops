@@ -161,7 +161,6 @@ provides = ["rknpu2", "local_asr", "local_llm", "local_tts"]
 # provider 名就是 capability 名，所以 load_config 会拒绝"配了 local_asr 却没在
 # capabilities.provides 里声明"——两处必须一致。
 #
-# TTS 仍在云端：本地 TTS 还没有对应的服务和 provider。
 [[settings.overlay]]
 document = "channel.yaml"
 path = "providers.stt_provider"
@@ -200,3 +199,14 @@ value = "http://127.0.0.1:8769/v1"
 document = "agent.yaml"
 path = "llm.default_model"
 value = "openai/qwen3-1.7b"
+
+# 2026-09-09：TTS 也走本地。第一发（rk3588-20260909T055722）已经把认识 local_tts
+# 的 channel 和 eidolon-tts.service 放上去了，所以现在当前和候选两个解释器都读得懂
+# 这个值——分两次发布是 cross-release 规则要求的，不是绕路。
+#
+# provider 名就是 capability 名，所以 load_config 会拒绝"配了 local_tts 却没在
+# capabilities.provides 里声明"。
+[[settings.overlay]]
+document = "channel.yaml"
+path = "providers.tts_provider"
+value = "local_tts"
