@@ -485,3 +485,92 @@ def test_settings_that_are_not_provider_choices_are_left_alone() -> None:
     )
 
     _require_declared_capability_for_overlay(unrelated, frozenset())
+
+
+def test_an_address_on_a_host_that_does_not_run_the_service_is_refused() -> None:
+    """A URL cannot be compared to a capability name, so the pair is declared.
+
+    Without this the Host installs no such unit, starts no such service, and
+    then fails every turn at the first request — with the configuration
+    reading as though someone meant it.
+    """
+
+    from eidolon_ops.config import (
+        ConfigurationError,
+        _require_declared_capability_for_overlay,
+    )
+    from eidolon_ops.settings_overlay import OverlayAssignment, parse_path
+
+    local = (
+        OverlayAssignment(
+            "agent.yaml",
+            parse_path("llm.models[0].api_base", label="agent.yaml"),
+            "http://127.0.0.1:8769/v1",
+        ),
+    )
+
+    with pytest.raises(ConfigurationError) as error:
+        _require_declared_capability_for_overlay(local, frozenset())
+
+    assert "local_llm" in str(error.value)
+    # And accepted on a Host that does declare it.
+    _require_declared_capability_for_overlay(local, frozenset({"local_llm"}))
+
+
+def test_a_local_address_naming_another_port_than_the_registry_is_refused() -> None:
+    """The port is assigned in one place. This is the copy with nothing holding
+    it there, so it is held here."""
+
+    from eidolon_ops.config import (
+        ConfigurationError,
+        _require_declared_capability_for_overlay,
+    )
+    from eidolon_ops.settings_overlay import OverlayAssignment, parse_path
+    from eidolon_ops.source_assets import PORTS
+
+    wrong = (
+        OverlayAssignment(
+            "agent.yaml",
+            parse_path("llm.models[0].api_base", label="agent.yaml"),
+            f"http://127.0.0.1:{PORTS['llm_api'] + 1}/v1",
+        ),
+    )
+
+    with pytest.raises(ConfigurationError) as error:
+        _require_declared_capability_for_overlay(wrong, frozenset({"local_llm"}))
+
+    assert str(PORTS["llm_api"]) in str(error.value)
+
+
+def test_every_local_address_setting_names_a_capability_and_a_port_that_exist() -> None:
+    """Both halves of the pair are looked up, so neither may be a typo."""
+
+    from eidolon_ops.config import CAPABILITY_LOCAL_ADDRESS_SETTINGS
+    from eidolon_ops.source_assets import PORTS
+
+    assert CAPABILITY_LOCAL_ADDRESS_SETTINGS
+    for capability, role in CAPABILITY_LOCAL_ADDRESS_SETTINGS.values():
+        assert capability in HOST_CAPABILITIES
+        assert role in PORTS
+
+
+def test_the_board_config_asks_for_the_local_model_at_the_assigned_port() -> None:
+    """The Host this was built for, read as an operator would deploy it."""
+
+    from eidolon_ops.config import load_config
+    from eidolon_ops.source_assets import PORTS
+
+    config = load_config(Path("config/eidolon-rk3588.toml"))
+    overlay = {
+        (item.document, item.display): item.value for item in config.settings_overlay
+    }
+
+    assert "local_llm" in config.capabilities
+    assert overlay[("agent.yaml", "llm.models[0].api_base")] == (
+        f"http://127.0.0.1:{PORTS['llm_api']}/v1"
+    )
+    # The default has to be the entry that was retargeted, or the Host runs the
+    # model and asks a provider anyway.
+    assert overlay[("agent.yaml", "llm.default_model")] == (
+        overlay[("agent.yaml", "llm.models[0].name")]
+    )

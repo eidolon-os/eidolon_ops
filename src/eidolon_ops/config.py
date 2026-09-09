@@ -539,6 +539,19 @@ CAPABILITY_VALUED_SETTINGS: dict[tuple[str, str], str] = {
     ("channel.yaml", "providers.tts_provider"): "tts",
 }
 
+#: Settings whose value is an address on this Host, and what has to be true for
+#: it to be one: the capability whose service listens there, and the port role
+#: that service serves.
+#:
+#: A provider name can be compared to a capability name because they are the
+#: same string on purpose. A URL cannot, so the pair is stated here instead —
+#: and stating it buys the second check as well. The port a local service
+#: listens on is assigned in one place, and an address typed into a Host's
+#: config is the one copy of it with nothing holding it to that assignment.
+CAPABILITY_LOCAL_ADDRESS_SETTINGS: dict[tuple[str, str], tuple[str, str]] = {
+    ("agent.yaml", "llm.models[0].api_base"): ("local_llm", "llm_api"),
+}
+
 
 def _require_declared_capability_for_overlay(
     overlay: tuple[OverlayAssignment, ...],
@@ -555,8 +568,31 @@ def _require_declared_capability_for_overlay(
     capability name are the same string on purpose.
     """
 
+    # Imported here rather than at module scope: the port table lives with the
+    # source assets, which read this module.
+    from eidolon_ops.source_assets import PORTS
+
     for assignment in overlay:
         key = (assignment.document, assignment.display)
+        if key in CAPABILITY_LOCAL_ADDRESS_SETTINGS:
+            capability, role = CAPABILITY_LOCAL_ADDRESS_SETTINGS[key]
+            if capability not in capabilities:
+                raise ConfigurationError(
+                    f"settings.overlay points {assignment.document}:{assignment.display} "
+                    f"at a service only a Host declaring {capability!r} runs. Add "
+                    f"{capability!r} to capabilities.provides, or name an address "
+                    "outside this Host."
+                )
+            expected = f"http://127.0.0.1:{PORTS[role]}"
+            if not assignment.value.startswith(expected + "/"):
+                raise ConfigurationError(
+                    f"settings.overlay sets {assignment.document}:{assignment.display} to "
+                    f"{assignment.value!r}, which is not where this Host's {role!r} "
+                    f"listens. It is {expected}, and that port is assigned in one "
+                    "place — an address here that names another is a Host talking to "
+                    "nothing."
+                )
+            continue
         if key not in CAPABILITY_VALUED_SETTINGS:
             continue
         value = assignment.value

@@ -102,6 +102,7 @@ units = [
   "eidolon-channel-provider.service",
   "eidolon-channel.service",
   "eidolon-asr.service",
+  "eidolon-llm.service",
 ]
 
 [data]
@@ -137,8 +138,12 @@ memory_settings = "../.eidolon-ops/opi5max/inputs/memory.yaml"
 #
 # 注意 STT 的 provider 仍然指向云端（见下面的 overlay）：本地服务会跑起来，但
 # channel 里还没有把语音路由给它的 provider。
+# 2026-09-09：local_llm 加上。llama-server 由 foundation 带上来（钉住的 arm64
+# 二进制），权重由组件契约声明、工作站取件后搬过去（1.0 GB，板子自己下不可靠）。
+# 服务跑在 A55 0-3 上——NPU 留给 TTS，两个一起放 NPU 上共存不了（HOST-RK3588.md
+# §2.22）。实测 5.88 tok/s，对 3.43 的门槛有 1.7 倍余量（§2.23）。
 [capabilities]
-provides = ["rknpu2", "local_asr"]
+provides = ["rknpu2", "local_asr", "local_llm"]
 
 # 2026-09-09：STT 走本地。这台板子声明了 local_asr，release 因此带上
 # eidolon_models、装 eidolon-asr.service，eidolond 按 host.env 里的声明把它列进
@@ -159,3 +164,30 @@ path = "providers.stt_provider"
 # 第一发（rk3588-20260909T...）已经把认识 local_asr 的代码放上去了，所以现在
 # 当前 release 和候选 release 都读得懂这个值。
 value = "local_asr"
+
+# 2026-09-09：对话也走本地。Agent 侧没有一行代码是为此写的——llama-server 服务的
+# 是 OpenAI 那套形状，LiteLLM 本来就按 name + api_base 找模型，所以让这台主机自己
+# 回答问题是一个地址的事，不是一个适配器的事。
+#
+# 地址不是随手写的：load_config 会把它对着端口注册表里 llm_api 的分配核一遍，
+# 并且要求这台主机声明了 local_llm——否则就是一台对着没人监听的端口说话的主机。
+#
+# 同样分两次发布，和 STT 一个道理：候选 settings 必须被当前和候选两个解释器都读懂。
+# 这里读的是 Agent 的 settings，模型条目的形状两边一样，改的只是值，所以两边都读
+# 得懂——但组件链接和 settings 仍是两次独立的原子操作，先让代码和权重上去。
+[[settings.overlay]]
+document = "agent.yaml"
+path = "llm.models[0].name"
+# openai/ 前缀是 LiteLLM 用来"按 api_base 走 OpenAI 兼容协议"的写法，不是在调
+# OpenAI。后半是权重的身份，和契约里 install_root 的名字对得上。
+value = "openai/qwen3-1.7b"
+
+[[settings.overlay]]
+document = "agent.yaml"
+path = "llm.models[0].api_base"
+value = "http://127.0.0.1:8769/v1"
+
+[[settings.overlay]]
+document = "agent.yaml"
+path = "llm.default_model"
+value = "openai/qwen3-1.7b"
