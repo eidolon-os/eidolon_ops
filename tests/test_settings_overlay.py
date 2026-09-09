@@ -135,3 +135,57 @@ def test_a_sequence_item_further_out_has_left_the_block() -> None:
             text,
             OverlayAssignment("a.yaml", parse_path("outer.inner.stray", label="a.yaml"), "9"),
         )
+
+
+def test_the_first_key_of_a_sequence_item_is_addressable() -> None:
+    """It shares the dash's line, and YAML draws no distinction.
+
+    This was unreachable: `llm.models[0].api_base` on the second line resolved
+    and `llm.models[0].name` on the dash line did not, so a Host could be
+    pointed at a local model's address while still naming a provider's model.
+    """
+
+    text = "llm:\n  models:\n  - name: openai/deepseek\n    api_base: https://api.deepseek.com/v1\n"
+
+    result = apply_overlay(
+        text,
+        OverlayAssignment(
+            "agent.yaml", parse_path("llm.models[0].name", label="agent.yaml"), "openai/qwen3"
+        ),
+    )
+
+    assert result == (
+        "llm:\n  models:\n  - name: openai/qwen3\n    api_base: https://api.deepseek.com/v1\n"
+    )
+
+
+def test_a_bare_scalar_item_declares_no_key() -> None:
+    """`- value` is not `- key: value`, and asking for a key in it is refused
+    rather than matched against the value."""
+
+    text = "llm:\n  fallback_models:\n  - openai/deepseek\n"
+
+    with pytest.raises(SettingsOverlayError, match="no key"):
+        apply_overlay(
+            text,
+            OverlayAssignment(
+                "agent.yaml",
+                parse_path("llm.fallback_models[0].name", label="agent.yaml"),
+                "x",
+            ),
+        )
+
+
+def test_a_path_continues_through_a_key_on_the_dash_line() -> None:
+    """Descending from such a key indents from the key, not from the dash."""
+
+    text = "a:\n  items:\n  - opts:\n      deep: old\n    other: keep\n"
+
+    result = apply_overlay(
+        text,
+        OverlayAssignment(
+            "a.yaml", parse_path("a.items[0].opts.deep", label="a.yaml"), "new"
+        ),
+    )
+
+    assert result == "a:\n  items:\n  - opts:\n      deep: new\n    other: keep\n"

@@ -16,7 +16,9 @@ Not a YAML implementation. Ops carries these documents as exact Git objects and
 has no YAML dependency at runtime, so this walks the text and rewrites one
 scalar in place, leaving every other byte — comments and formatting included —
 as the component wrote it. What it understands is what the settings templates
-use: nested block mappings, and block sequences addressed by index.
+use: nested block mappings, and block sequences addressed by index — including
+a key written on a sequence item's own dash line, which is where templates
+usually put the first one.
 """
 
 from __future__ import annotations
@@ -99,6 +101,29 @@ def _refuse(assignment: OverlayAssignment, detail: str) -> SettingsOverlayError:
     return SettingsOverlayError(f"{assignment.document}: {assignment.display}: {detail}")
 
 
+def _mapping_at(line: str, indent: int) -> re.Match[str] | None:
+    """A key declared at ``indent``, dash or no dash.
+
+    ``- name: x`` declares ``name`` two columns in from the dash — exactly
+    where ``name: x`` on its own line would declare it. YAML draws no
+    distinction and neither does a key path, so the dash is normalised away for
+    matching and put back when the line is rewritten.
+
+    Without this the first key of every sequence item was unaddressable, which
+    is the key most templates put there: `llm.models[0].name` could not be
+    assigned while `llm.models[0].api_base`, one line below it, could.
+    """
+
+    matched = _MAPPING_LINE.match(line)
+    if matched is not None and len(matched.group("indent")) == indent:
+        return matched
+    item = _SEQUENCE_LINE.match(line)
+    if item is None or len(item.group("indent")) + 2 != indent:
+        return None
+    # A bare scalar item declares no key, and this returns None for it.
+    return _MAPPING_LINE.match(" " * indent + item.group("rest"))
+
+
 def _find_key(
     lines: list[str],
     start: int,
@@ -111,10 +136,8 @@ def _find_key(
 
     found: list[int] = []
     for number in range(start, stop):
-        matched = _MAPPING_LINE.match(lines[number])
-        if matched is None or len(matched.group("indent")) != indent:
-            continue
-        if matched.group("key") == key:
+        matched = _mapping_at(lines[number], indent)
+        if matched is not None and matched.group("key") == key:
             found.append(number)
     if not found:
         raise _refuse(assignment, f"no key {key!r} at indent {indent}")
@@ -174,10 +197,18 @@ def _block_end(
 
 
 def _descend(lines: list[str], line_no: int, stop: int) -> tuple[int, int, int]:
-    matched = _MAPPING_LINE.match(lines[line_no])
-    assert matched is not None
-    indent = len(matched.group("indent"))
-    end = _block_end(lines, line_no, stop, indent, sequence_belongs=True)
+    item = _SEQUENCE_LINE.match(lines[line_no])
+    if item is not None:
+        # A key on a sequence item's own line: its block is the rest of the
+        # item, and its children are indented from where the key sits, not
+        # from the dash.
+        indent = len(item.group("indent")) + 2
+        end = _block_end(lines, line_no, stop, len(item.group("indent")), sequence_belongs=False)
+    else:
+        matched = _MAPPING_LINE.match(lines[line_no])
+        assert matched is not None
+        indent = len(matched.group("indent"))
+        end = _block_end(lines, line_no, stop, indent, sequence_belongs=True)
     child = _first_indent(lines, line_no + 1, end, indent)
     return line_no + 1, end, child
 
@@ -202,11 +233,20 @@ def _first_indent(lines: list[str], start: int, stop: int, parent: int) -> int:
 
 
 def _rewrite_mapping(lines: list[str], line_no: int, assignment: OverlayAssignment) -> str:
-    matched = _MAPPING_LINE.match(lines[line_no])
+    item = _SEQUENCE_LINE.match(lines[line_no])
+    if item is not None:
+        indent = len(item.group("indent")) + 2
+        matched = _MAPPING_LINE.match(" " * indent + item.group("rest"))
+        # The dash goes back exactly where it was: everything else about the
+        # document, this line included, is left as the component wrote it.
+        prefix = f"{item.group('indent')}- "
+    else:
+        matched = _MAPPING_LINE.match(lines[line_no])
+        prefix = matched.group("indent") if matched is not None else ""
     assert matched is not None
     _require_scalar(matched.group("rest"), assignment)
     updated = list(lines)
-    updated[line_no] = f"{matched.group('indent')}{matched.group('key')}: {assignment.value}"
+    updated[line_no] = f"{prefix}{matched.group('key')}: {assignment.value}"
     return "\n".join(updated)
 
 
