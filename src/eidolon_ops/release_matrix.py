@@ -154,6 +154,14 @@ CAPABILITY_SYSTEMD_ASSETS: dict[str, tuple[SystemdAssetContract, ...]] = {
             "eidolon_models",
         ),
     ),
+    "local_llm": (
+        SystemdAssetContract(
+            "eidolon_models",
+            "deploy/systemd/eidolon-llm.service",
+            "eidolon-llm.service",
+            "eidolon_models",
+        ),
+    ),
 }
 
 

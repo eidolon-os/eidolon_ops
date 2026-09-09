@@ -66,6 +66,10 @@ PORTS = {
     # Provider's and was this service's default until the two were found to
     # collide by reading, which is not a mechanism -- see the drift tests.
     "asr_stream": 8768,
+    # Local generation, likewise. An OpenAI-compatible server, so the Agent
+    # reaches it as it reaches any other -- the port is the only thing about it
+    # that is ours to assign.
+    "llm_api": 8769,
     "admin": 9000,
     "admin_web": 9001,
     "local_api": 9002,

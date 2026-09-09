@@ -51,6 +51,7 @@ HOST_CAPABILITIES: frozenset[str] = frozenset({"rknpu2", "local_asr", "local_tts
 #: circular. eidolon_ops.config holds the same table and a test keeps them equal.
 CAPABILITY_UNITS: dict[str, tuple[str, ...]] = {
     "local_asr": ("eidolon-asr.service",),
+    "local_llm": ("eidolon-llm.service",),
 }
 
 
@@ -443,17 +444,28 @@ HOST_ENV_PATH = Path("/etc/eidolon/host.env")
 
 HOST_PORTS_PATH = Path("/etc/eidolon/generated/ports.yaml")
 
-#: Where the Host keeps sentence encoders. Under the state root rather than
-#: inside a release: a palace is built with one encoder and cannot be read with
-#: another, so the weights have to outlive the release that carried them.
-HOST_EMBEDDING_MODEL_ROOT = Path("/var/lib/eidolon/models")
-
-#: What a carried encoder directory calls the record of its own contents.
+#: Where the Host keeps the model files no release contains. Under the state
+#: root rather than inside a release: a palace is built with one encoder and
+#: cannot be read with another, and a gigabyte of chat weights that did not
+#: change should not be carried again on every update — so these outlive the
+#: release that carried them.
 #:
-#: Spelled here as well as on the operator side (`embedding_model.py`) because
-#: this package is shipped to the Host alone and may not import upward. A test
-#: asserts the two spellings are the same string, which is the only thing that
-#: keeps a rename from making the Host quietly refuse every carried model.
+#: Every carried artifact lands in a directory directly under this one, named
+#: by the component that declared it. The agent refuses any other destination,
+#: which is what keeps a contract from asking it to write somewhere else.
+HOST_MODEL_ROOT = Path("/var/lib/eidolon/models")
+
+#: The name the encoder code has always used for the directory above. One
+#: definition, because two would be two things to keep true.
+HOST_EMBEDDING_MODEL_ROOT = HOST_MODEL_ROOT
+
+#: What a carried artifact directory calls the record of its own contents.
+#:
+#: Spelled here as well as on the operator side (`component_artifacts.py`)
+#: because this package is shipped to the Host alone and may not import upward.
+#: A test asserts the two spellings are the same string, which is the only
+#: thing that keeps a rename from making the Host quietly refuse every carried
+#: model.
 EMBEDDING_DIGEST_RECORD = ".files-sha256"
 
 HOST_ENV_VALUE = (

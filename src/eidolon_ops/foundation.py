@@ -127,6 +127,10 @@ class FoundationArtifact:
     sha256: str
     kind: str
     executable: str
+    #: For `tar-tree`: the single directory the archive unpacks into. Named
+    #: rather than discovered, so an archive that grew a second top-level entry
+    #: is refused instead of half-installed.
+    top_level: str | None = None
 
 
 FOUNDATION_ARTIFACTS = (
@@ -168,6 +172,46 @@ FOUNDATION_ARTIFACTS = (
         executable="node",
     ),
 )
+
+
+#: What a capability adds to the artifacts above.
+#:
+#: Kept out of the baseline for the reason the capability mechanism exists at
+#: all: a Host that reaches a provider for conversation has no use for a chat
+#: model's server, and every Host would otherwise carry it. Same shape as
+#: `CAPABILITY_SOURCES` and `CAPABILITY_UNITS` — a baseline plus what a
+#: declaration adds.
+CAPABILITY_FOUNDATION_ARTIFACTS: dict[str, tuple[FoundationArtifact, ...]] = {
+    "local_llm": (
+        FoundationArtifact(
+            artifact_id="llama-server",
+            version="b10865",
+            url=(
+                "https://api.github.com/repos/ggml-org/llama.cpp/"
+                "releases/assets/550738865"
+            ),
+            sha256="1e5f497d80aedba65481457a8fc86c5c0fc659d30bf696623e3ccd526cb4edf8",
+            # Not `tar-binary`: this archive ships libggml and libllama beside
+            # the server, whose RUNPATH is `$ORIGIN`, so taking the executable
+            # alone leaves it unable to start. Verified on RK3588 that the
+            # linked binary finds them with no LD_LIBRARY_PATH.
+            kind="tar-tree",
+            executable="llama-server",
+            top_level="llama-b10865",
+        ),
+    ),
+}
+
+
+def foundation_artifacts(capabilities: frozenset[str]) -> tuple[FoundationArtifact, ...]:
+    """The pinned third-party binaries a Host with these capabilities installs."""
+
+    extra: list[FoundationArtifact] = []
+    for capability in sorted(capabilities):
+        for artifact in CAPABILITY_FOUNDATION_ARTIFACTS.get(capability, ()):
+            if artifact not in extra:
+                extra.append(artifact)
+    return (*FOUNDATION_ARTIFACTS, *extra)
 
 
 #: The interpreter a Host is given when its OS does not have one the release
@@ -438,11 +482,17 @@ def foundation_profile(profile_id: str) -> FoundationProfile:
 
 def foundation_payload(
     profile: FoundationProfile = RASPBERRY_PI_OS_TRIXIE,
+    capabilities: frozenset[str] = frozenset(),
 ) -> dict[str, object]:
     """Return the exact target-side contract, with no operator-controlled URL.
 
     The shape is the Host agent's wire contract and does not vary by profile;
     only the values in it do.
+
+    The capability additions are applied here rather than folded into a
+    profile: a profile is a reviewed statement about a board, and what a Host
+    declares it can do is not a property of the board's OS. Two Hosts on the
+    same profile differ by this and by nothing else in here.
     """
 
     return {
@@ -457,7 +507,25 @@ def foundation_payload(
         # Host as well so it can refuse a payload that differs from the profile
         # it was built against. test_foundation.py keeps the two equal.
         "journal_persistence": profile.journal_persistence_content,
-        "artifacts": [asdict(artifact) for artifact in profile.artifacts],
+        # What this Host says it can do, sent so the agent derives the
+        # artifacts below itself rather than taking the list on trust. The
+        # agent holds its own copy of what each capability brings; agreeing is
+        # the check.
+        "capabilities": sorted(capabilities),
+        "artifacts": [
+            # `top_level` is omitted when unset so the wire shape of every
+            # artifact that existed before `tar-tree` is byte-identical: a Host
+            # that declares nothing sees exactly the contract it saw before.
+            {key: value for key, value in asdict(artifact).items() if value is not None}
+            for artifact in (
+                *profile.artifacts,
+                *(
+                    artifact
+                    for capability in sorted(capabilities)
+                    for artifact in CAPABILITY_FOUNDATION_ARTIFACTS.get(capability, ())
+                ),
+            )
+        ],
     }
 
 

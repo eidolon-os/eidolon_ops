@@ -329,8 +329,51 @@ LOCAL_BIN = Path("/usr/local/bin")
 LOCAL_LIB = Path("/usr/local/lib")
 
 
+#: What a capability adds to the artifacts above. The agent's own copy, for the
+#: reason every other copy in this module exists: it runs on a Host with no
+#: access to the operator's package, and a contract it cannot independently
+#: derive is a contract it cannot refuse. A drift test in eidolon_ops keeps the
+#: two equal.
+CAPABILITY_FOUNDATION_ARTIFACTS: dict[str, tuple[dict[str, str], ...]] = {
+    "local_llm": (
+        {
+            "artifact_id": "llama-server",
+            "version": "b10865",
+            "url": (
+                "https://api.github.com/repos/ggml-org/llama.cpp/"
+                "releases/assets/550738865"
+            ),
+            "sha256": "1e5f497d80aedba65481457a8fc86c5c0fc659d30bf696623e3ccd526cb4edf8",
+            "kind": "tar-tree",
+            "executable": "llama-server",
+            "top_level": "llama-b10865",
+        },
+    ),
+}
+
+
+def declared_foundation_capabilities(payload: Mapping[str, object]) -> frozenset[str]:
+    """What the operator says this Host can do, as the foundation contract has it.
+
+    A payload naming none is one from before Hosts differed, and gets the
+    baseline — so an older workstation keeps working against a newer agent.
+    """
+
+    value = payload.get("foundation")
+    declared = value.get("capabilities", []) if isinstance(value, Mapping) else []
+    if not isinstance(declared, list) or not all(isinstance(item, str) for item in declared):
+        raise TargetError("foundation capabilities must be an array of strings")
+    # The closed set is not restated here. A name this table has no artifacts
+    # for adds none — and if the operator sent artifacts anyway, the contract
+    # comparison below refuses the whole thing. Where a misspelt capability
+    # actually matters is the install payload, and `contract.declared_
+    # capabilities` checks it against the closed set there.
+    return frozenset(declared)
+
+
 def expected_foundation(
     profile: AgentFoundationProfile | None = None,
+    capabilities: frozenset[str] = frozenset(),
 ) -> dict[str, object]:
     profile = profile or FOUNDATION_PROFILES[DEFAULT_FOUNDATION_PROFILE]
     return {
@@ -341,7 +384,18 @@ def expected_foundation(
         "apt_mirrors": dict(profile.apt_mirrors),
         "apt_packages": list(profile.apt_packages),
         "services": list(profile.services),
-        "artifacts": [dict(artifact) for artifact in profile.artifacts],
+        "capabilities": sorted(capabilities),
+        "artifacts": [
+            dict(artifact)
+            for artifact in (
+                *profile.artifacts,
+                *(
+                    artifact
+                    for capability in sorted(capabilities)
+                    for artifact in CAPABILITY_FOUNDATION_ARTIFACTS.get(capability, ())
+                ),
+            )
+        ],
         "journal_persistence": profile.journal_persistence_content,
     }
 
@@ -373,7 +427,9 @@ def requested_profile(payload: Mapping[str, object]) -> AgentFoundationProfile:
 
 def foundation_contract(payload: Mapping[str, object]) -> dict[str, object]:
     value = payload.get("foundation")
-    expected = expected_foundation(requested_profile(payload))
+    expected = expected_foundation(
+        requested_profile(payload), declared_foundation_capabilities(payload)
+    )
     if value != expected:
         raise TargetError("foundation contract differs from the reviewed pinned profile")
     return expected

@@ -599,7 +599,7 @@ class EidolonPiController:
                     "result": parse_json(bootstrap.stdout, "foundation bootstrap"),
                 }
             )
-        payload = {"foundation": foundation_payload(profile)}
+        payload = {"foundation": foundation_payload(profile, self.config.capabilities)}
         phases.begin("doctor")
         observed = self.transport.run_agent("foundation-doctor", payload, timeout=300)
         phases.append({"phase": "doctor", "result": observed})

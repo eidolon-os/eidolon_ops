@@ -48,6 +48,7 @@ CAPABILITY_SOURCES: dict[str, tuple[str, ...]] = {
 #: any contract is read, and refusing early is the point.
 CAPABILITY_UNITS: dict[str, tuple[str, ...]] = {
     "local_asr": ("eidolon-asr.service",),
+    "local_llm": ("eidolon-llm.service",),
 }
 
 PRODUCT_UNITS = (

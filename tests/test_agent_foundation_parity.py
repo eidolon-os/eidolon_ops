@@ -10,6 +10,7 @@ stops it.
 
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
 
 import pytest
@@ -125,7 +126,11 @@ def test_provision_sends_the_foundation_this_host_names() -> None:
     from eidolon_ops import controller
 
     source = inspect.getsource(controller.EidolonPiController.provision)
-    assert "foundation_payload(profile)" in source
+    assert "foundation_payload(profile" in source
+    # And the capabilities the same way: defaulting them would send a contract
+    # with no capability artifacts to a Host that declared some, and the agent
+    # would refuse the payload built for it.
+    assert "foundation_payload(profile, self.config.capabilities)" in source
     assert "python_bootstrap_script(profile)" in source
     assert "foundation_profile(self.config.foundation_profile)" in source
     # The defaults still exist for the agent, which has no config to read.
@@ -224,3 +229,54 @@ def test_the_interpreter_a_profile_carries_satisfies_every_repository() -> None:
             f"{profile.id} carries Python {profile.python_version}, "
             f"and the repositories pin {lower} <= python < {upper}"
         )
+
+
+def test_both_sides_know_the_same_capability_artifacts() -> None:
+    """Ops holds dataclasses, the agent holds plain dicts — one fact, two forms.
+
+    A capability whose artifacts only Ops knows would be carried and never
+    installed; one only the agent knows would make the agent expect a file the
+    release never brought.
+    """
+
+    assert set(agent.CAPABILITY_FOUNDATION_ARTIFACTS) == set(
+        ops.CAPABILITY_FOUNDATION_ARTIFACTS
+    )
+    for capability, artifacts in ops.CAPABILITY_FOUNDATION_ARTIFACTS.items():
+        mirrored = agent.CAPABILITY_FOUNDATION_ARTIFACTS[capability]
+        assert len(mirrored) == len(artifacts)
+        for source, copy in zip(artifacts, mirrored):
+            assert copy == {
+                key: value
+                for key, value in dataclasses.asdict(source).items()
+                if value is not None
+            }
+
+
+@pytest.mark.parametrize("capability", sorted(ops.CAPABILITY_FOUNDATION_ARTIFACTS))
+@pytest.mark.parametrize("profile_id", sorted(ops.FOUNDATION_PROFILES))
+def test_a_capability_does_not_change_what_the_two_sides_agree_on(
+    profile_id: str, capability: str
+) -> None:
+    """The same equality as the plain case, once the Host has asked for more.
+
+    Every capability a Host can declare has to survive this on its own, because
+    that is the payload the agent will be handed.
+    """
+
+    declared = frozenset({capability})
+    assert agent.expected_foundation(
+        agent.FOUNDATION_PROFILES[profile_id], declared
+    ) == ops.foundation_payload(ops.FOUNDATION_PROFILES[profile_id], declared)
+
+
+def test_capability_artifacts_are_only_the_ones_a_host_can_declare() -> None:
+    """These names are the closed capability set, checked where it lives.
+
+    A misspelt key here would be silently inert — the Host would declare the
+    real name, find no artifacts under it, and install nothing.
+    """
+
+    from eidolon_ops.config import HOST_CAPABILITIES
+
+    assert set(ops.CAPABILITY_FOUNDATION_ARTIFACTS) <= HOST_CAPABILITIES

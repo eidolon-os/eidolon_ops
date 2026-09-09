@@ -23,6 +23,7 @@ def download_verified(artifact: Mapping[str, str]) -> Path:
         "pip-wheel": ".whl",
         "python-tar": ".tar.gz",
         "tar-binary": ".tar.gz",
+        "tar-tree": ".tar.gz",
     }
     try:
         suffix = suffixes[artifact["kind"]]
@@ -160,6 +161,47 @@ def install_node(artifact: Mapping[str, str]) -> None:
             os.replace(extracted, destination)
     for executable in ("node", "npm", "npx", "corepack"):
         install_managed_link(foundation.LOCAL_BIN / executable, destination / "bin" / executable)
+
+
+def install_tar_tree(artifact: Mapping[str, str]) -> None:
+    """Install a whole archived directory, and link the executable it holds.
+
+    `install_tar_binary` beside this one takes exactly one file out of an
+    archive, which is right for a statically linked server and wrong for one
+    that ships its own shared libraries: llama-server's RUNPATH is `$ORIGIN`,
+    so the loader looks for libggml and libllama next to the binary it resolved
+    — and taking the binary alone leaves it unable to start.
+
+    Linking rather than copying into /usr/local/bin is what makes `$ORIGIN`
+    work through the link: the loader resolves it from the real path, so the
+    libraries are found beside the tree and nothing needs LD_LIBRARY_PATH.
+
+    Shaped after `install_python`: one top-level directory, every member
+    checked before extraction, replaced atomically, executable linked.
+    """
+
+    archive_path = download_verified(artifact)
+    top = artifact["top_level"]
+    executable = artifact["executable"]
+    destination = foundation.LOCAL_LIB / f"{artifact['artifact_id']}-{artifact['version']}"
+    if not destination.is_dir():
+        with tempfile.TemporaryDirectory(prefix="eidolon-tree-", dir=foundation.LOCAL_LIB) as raw:
+            stage = Path(raw)
+            with tarfile.open(archive_path, "r:gz") as archive:
+                members = archive.getmembers()
+                if not members or not all(safe_node_member(member, top) for member in members):
+                    raise TargetError(
+                        f"archive contains an unsafe member: {artifact['artifact_id']}"
+                    )
+                archive.extractall(stage, filter="data")
+            extracted = stage / top
+            if not (extracted / executable).is_file():
+                raise TargetError(
+                    f"archive is missing {executable}: {artifact['artifact_id']}"
+                )
+            os.chmod(extracted / executable, 0o755)
+            os.replace(extracted, destination)
+    install_managed_link(foundation.LOCAL_BIN / executable, destination / executable)
 
 
 def install_python(artifact: Mapping[str, str]) -> None:
@@ -385,6 +427,8 @@ def foundation_install(payload: Mapping[str, object]) -> dict[str, object]:
                 kind = artifact["kind"]
                 if kind == "tar-binary":
                     install_tar_binary(artifact)
+                elif kind == "tar-tree":
+                    install_tar_tree(artifact)
                 elif kind == "pip-wheel":
                     install_uv(artifact)
                 elif kind == "node-tar":
