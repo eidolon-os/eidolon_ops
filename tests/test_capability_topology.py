@@ -574,3 +574,38 @@ def test_the_board_config_asks_for_the_local_model_at_the_assigned_port() -> Non
     assert overlay[("agent.yaml", "llm.default_model")] == (
         overlay[("agent.yaml", "llm.models[0].name")]
     )
+
+
+def test_the_path_contract_check_reads_this_hosts_own_host_env(
+    tmp_path, monkeypatch
+) -> None:
+    """It compared against the module constant, so every Host that declared a
+    capability reported its own path contract as broken.
+
+    A false alarm rather than a wrong Host: host.env carries the capability
+    line the agent itself writes, and the baseline constant does not. It said
+    nothing true about the Host and hid whatever it would have said.
+    """
+
+    from eidolon_ops.hostagent import contract as agent, lifecycle
+
+    declared = frozenset({"local_asr", "local_llm"})
+    host_env = tmp_path / "host.env"
+    host_env.write_text(agent.host_env_value(declared), encoding="utf-8")
+    monkeypatch.setattr(agent, "HOST_ENV_PATH", host_env)
+
+    payload = {
+        "units": list(agent.expected_units(declared)),
+        "capabilities": sorted(declared),
+        "data": {name: str(path) for name, path in agent.FIXED_DATA.items()},
+        "remote_uv": "/usr/local/bin/uv",
+        "ports": "ports: {}\n",
+    }
+
+    checks = lifecycle.doctor_host(payload)["checks"]
+
+    assert checks["host_path_contract"] is True
+
+    # And a Host whose file really has drifted still fails.
+    host_env.write_text(agent.host_env_value(frozenset()), encoding="utf-8")
+    assert lifecycle.doctor_host(payload)["checks"]["host_path_contract"] is False

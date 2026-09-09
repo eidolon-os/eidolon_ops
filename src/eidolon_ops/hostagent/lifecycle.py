@@ -162,8 +162,14 @@ def doctor_host(payload: Mapping[str, object]) -> dict[str, object]:
         "systemd_analyze": Path("/usr/bin/systemd-analyze").is_file(),
         "python3": Path("/usr/bin/python3").is_file(),
         "uv": Path(remote_uv).is_file() and os.access(remote_uv, os.X_OK),
+        # Against the value for *this* Host's declaration, not the module
+        # constant. host.env carries the capability line, so comparing it to
+        # the baseline reported every Host that declares anything as failing
+        # its own path contract — a false alarm that arrived with the first
+        # capability and said nothing true about the Host.
         "host_path_contract": host_env.is_file()
-        and host_env.read_text(encoding="utf-8") == contract.HOST_ENV_VALUE,
+        and host_env.read_text(encoding="utf-8")
+        == contract.host_env_value(contract.declared_capabilities(payload)),
         "port_registry": contract.HOST_PORTS_PATH.is_file()
         and contract.HOST_PORTS_PATH.read_text(encoding="utf-8") == contract.fixed_port_registry(payload),
     }
