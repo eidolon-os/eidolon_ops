@@ -314,6 +314,12 @@ FOUNDATION_VERSION_PREFIXES = {
     # different build of the same version would also print, so both are here
     # for the same reason the others are.
     "python3.13": ("Python 3.13.15", "3.13.15"),
+    # `llama-server --version` says
+    #   version: 0.4.0-dev (build 10865, commit d4389a4dd)
+    # The leading number is a dev version string that moves between builds
+    # that are otherwise the same; the build number is the tag this artifact
+    # is pinned to, and the commit is what that tag resolved to.
+    "llama-server": ("build 10865", "commit d4389a4dd"),
 }
 
 FOUNDATION_EVIDENCE = Path("/var/lib/eidolon-ops/foundation-v2.json")

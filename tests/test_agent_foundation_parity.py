@@ -280,3 +280,33 @@ def test_capability_artifacts_are_only_the_ones_a_host_can_declare() -> None:
     from eidolon_ops.config import HOST_CAPABILITIES
 
     assert set(ops.CAPABILITY_FOUNDATION_ARTIFACTS) <= HOST_CAPABILITIES
+
+
+def test_every_artifact_any_host_can_install_has_version_evidence() -> None:
+    """Missing here, a doctor raises KeyError the moment the file exists.
+
+    The artifact was added and this was not, so the dry run passed — the
+    binary was absent and the check returns early — and the apply installed it
+    correctly and then failed comparing it against nothing. Found on a board,
+    which is the wrong place: every artifact any Host can be asked to install
+    is enumerable here.
+    """
+
+    executables = {
+        artifact.executable
+        for profile in ops.FOUNDATION_PROFILES.values()
+        for artifact in profile.artifacts
+    }
+    executables |= {
+        artifact.executable
+        for artifacts in ops.CAPABILITY_FOUNDATION_ARTIFACTS.values()
+        for artifact in artifacts
+    }
+
+    assert executables <= set(agent.FOUNDATION_VERSION_PREFIXES), sorted(
+        executables - set(agent.FOUNDATION_VERSION_PREFIXES)
+    )
+    # And nothing left behind by an artifact that is gone.
+    assert set(agent.FOUNDATION_VERSION_PREFIXES) <= executables, sorted(
+        set(agent.FOUNDATION_VERSION_PREFIXES) - executables
+    )
