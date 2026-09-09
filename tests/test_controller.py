@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import functools
+
 import dataclasses
 import hashlib
 import json
@@ -25,7 +27,6 @@ from eidolon_ops.controller import (
     _finalize_authority_restore_stage,
     _wait_for_restored_authority_readiness,
 )
-from eidolon_ops.embedding_model import PINNED_EMBEDDING_MODEL, embedding_model_digest
 from eidolon_ops.endpoints import HostEndpoint
 from eidolon_ops.host_application import (
     HOST_APPLICATION_STAGE_NAMES,
@@ -306,6 +307,26 @@ class ControllerRunner:
         return ProcessResult(0, "{}", "")
 
 
+@functools.cache
+def _declared_artifact_digests() -> dict[str, str]:
+    """Every declared artifact's destination and set digest, read once."""
+
+    from eidolon_ops.capabilities import HOST_CAPABILITIES
+    from eidolon_ops.component_artifacts import carried_artifacts, host_artifact_root
+    from eidolon_ops.component_contract import read_component_contracts
+    from eidolon_ops.config import expected_sources
+
+    root = Path(__file__).resolve().parents[2]
+    sources = {
+        source_id: root / source_id for source_id in sorted(expected_sources(HOST_CAPABILITIES))
+    }
+    topology = read_component_contracts(sources, HOST_CAPABILITIES)
+    return {
+        str(host_artifact_root(artifact)): artifact.digest
+        for artifact in carried_artifacts(topology)
+    }
+
+
 class FakeTransport:
     #: No link was chosen: these tests never open one, so status reports the
     #: configured name the way the real transport does when nothing answers.
@@ -331,6 +352,16 @@ class FakeTransport:
             return self.overrides[action]
         if action in self.fail_actions:
             raise self.fail_actions[action]
+        if action == "component-artifact-state":
+            # Answered from the contracts, so this stays hermetic without
+            # claiming a digest no declaration has: a canned single answer
+            # would match one artifact and send the others down the fetch path.
+            # Transfer of an absent artifact has its own suite.
+            return {
+                "status": "held",
+                "destination": payload["destination"],
+                "digest": _declared_artifact_digests()[payload["destination"]],
+            }
         if action == "reclaim-releases":
             return {
                 "status": {
@@ -448,13 +479,7 @@ class FakeTransport:
             },
             "release-cutover-restore": {"status": "host_cutover_restored"},
             "release-cutover-finalize": {"status": "cutover_recorded"},
-            # Controller tests stay hermetic; transfer of an absent encoder is
-            # covered by the dedicated embedding-model contract suite.
-            "embedding-model-state": {
-                "status": "held",
-                "digest": embedding_model_digest(PINNED_EMBEDDING_MODEL),
-            },
-            "install-embedding-model": {"status": "installed"},
+            "install-component-artifact": {"status": "installed"},
             # A Host that already holds every declared credential. Deploy asks
             # before it ships anything; a Host that answered otherwise is
             # covered by its own test below.
@@ -784,10 +809,10 @@ def test_deploy_defaults_to_prepare_and_dry_run(setup_controller) -> None:
         "upload_guard",
         "upload_finalize",
         "release_artifacts",
-        # The encoder is carried before the release is prepared: a Host that
-        # gets the code without the weights answers memory queries slowly and
-        # emptily, which reads like an Eidolon that remembers nothing.
-        "embedding_model",
+        # Weights are carried before the release is prepared: a Host that gets
+        # the code without them answers memory queries slowly and emptily, and
+        # starts a model server that exits for want of a model.
+        "component_artifacts",
         "prepare",
         "dry_run",
         "release_reclaim_retain",

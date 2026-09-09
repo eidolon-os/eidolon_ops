@@ -326,17 +326,17 @@ def cleanup_stage(payload: Mapping[str, object]) -> dict[str, object]:
     return {"status": "cleaned", "path": str(path)}
 
 
-def embedding_model_state(payload: Mapping[str, object]) -> dict[str, object]:
-    """What encoder this Host already holds at a destination, if any.
+def component_artifact_state(payload: Mapping[str, object]) -> dict[str, object]:
+    """What this Host already holds at a destination, if anything.
 
-    Asked before carrying a hundred megabytes across, and answered from the
-    digest the Host recorded rather than from the directory existing: a partial
-    copy is not a copy.
+    Asked before carrying a gigabyte across, and answered from the digest the
+    Host recorded rather than from the directory existing: a partial copy is
+    not a copy.
     """
 
     destination = payload.get("destination")
     if not isinstance(destination, str):
-        raise TargetError("embedding model destination is required")
+        raise TargetError("artifact destination is required")
     record = Path(destination) / contract.EMBEDDING_DIGEST_RECORD
     if not record.is_file():
         return {"status": "absent", "destination": destination}
@@ -347,29 +347,33 @@ def embedding_model_state(payload: Mapping[str, object]) -> dict[str, object]:
     }
 
 
-def install_embedding_model(payload: Mapping[str, object]) -> dict[str, object]:
-    """Move a carried encoder into the Host's durable model root.
+def install_component_artifact(payload: Mapping[str, object]) -> dict[str, object]:
+    """Move carried files into the Host's durable model root.
 
-    Root-owned and read-only afterwards: every service reads this and none of
-    them writes it, and a palace already built against these weights must not
-    find different ones there later. The destination carries the digest of what
-    it holds in its name, so installing a different pin adds a directory rather
-    than replacing the one a palace was built with.
+    Root-owned and read-only afterwards: every service reads these and none of
+    them writes any, and a palace already built against one encoder must not
+    find another there later. Each artifact has its own directory under the
+    model root, named by the component that declared it, so a second pin adds a
+    directory rather than replacing one something was built against.
+
+    The destination is checked rather than trusted. It arrives from a component
+    contract, which is a file in a repository, and the one thing this agent can
+    say about it is that nothing may write outside the root it owns.
     """
 
     staging = payload.get("staging")
     destination = payload.get("destination")
     if not isinstance(staging, str) or not isinstance(destination, str):
-        raise TargetError("embedding model staging and destination are required")
+        raise TargetError("artifact staging and destination are required")
     source = Path(staging)
     target = Path(destination)
-    if target.parent != contract.HOST_EMBEDDING_MODEL_ROOT:
-        raise TargetError(f"embedding model destination is outside the model root: {target}")
+    if target.parent != contract.HOST_MODEL_ROOT or target.name in {"", ".", ".."}:
+        raise TargetError(f"artifact destination is outside the model root: {target}")
     if not source.is_dir() or source.is_symlink():
-        raise TargetError("carried embedding model is missing")
+        raise TargetError("carried artifact is missing")
     record = source / contract.EMBEDDING_DIGEST_RECORD
     if not record.is_file():
-        raise TargetError("carried embedding model has no digest record")
+        raise TargetError("carried artifact has no digest record")
 
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.exists():

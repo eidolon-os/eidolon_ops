@@ -14,13 +14,13 @@ import tempfile
 import time
 from pathlib import Path
 
-from eidolon_ops.config import SOURCE_IDS, OperationsConfig
-from eidolon_ops.embedding_model import (
-    PINNED_EMBEDDING_MODEL,
-    embedding_model_digest,
-    ensure_workstation_embedding_model,
-    host_embedding_model_root,
+from eidolon_ops.component_artifacts import (
+    carried_artifacts,
+    ensure_workstation_artifact,
+    host_artifact_root,
 )
+from eidolon_ops.component_contract import read_component_contracts
+from eidolon_ops.config import SOURCE_IDS, OperationsConfig
 from eidolon_ops.errors import OperationsError
 from eidolon_ops.process import ProcessRunner, checked
 from eidolon_ops.progress import Journal
@@ -261,8 +261,10 @@ class BundleTransfer:
                     "result": self._carry_release_artifacts(output, transfer_id),
                 }
             )
-            phases.begin("embedding_model")
-            phases.append({"phase": "embedding_model", "result": self._carry_embedding_model()})
+            phases.begin("component_artifacts")
+            phases.append(
+                {"phase": "component_artifacts", "result": self._carry_component_artifacts()}
+            )
             phases.begin("prepare")
             phases.append({"phase": "prepare", "result": self._build_on_target(remote_bundle)})
         except Exception as exc:
@@ -322,38 +324,59 @@ class BundleTransfer:
     def _bundle_bytes(output: Path) -> int:
         return sum(path.stat().st_size for path in output.rglob("*") if path.is_file())
 
-    def _carry_embedding_model(self) -> dict[str, object]:
-        """Put the pinned encoder on the Host, once, and leave it there.
+    def _carry_component_artifacts(self) -> dict[str, object]:
+        """Put what no release contains on the Host, once, and leave it there.
 
-        Carried beside a release rather than inside one: the palace built with
-        this encoder outlives any single release, and a hundred megabytes that
-        did not change should not be paid for again on every update. Skipped
-        when the Host already holds this exact pin — which is asked of the
-        digest the Host recorded, not of the directory existing.
+        Which files those are is not decided here: every component declares its
+        own in ``ops/component.toml``, and the topology is read for this Host's
+        capabilities, so a board that does not run the models has nothing to
+        skip — the declarations were dropped where every other conditional
+        entry is.
+
+        Carried beside a release rather than inside one: an encoder a palace was
+        built against outlives any single release, and a gigabyte of chat
+        weights that did not change should not be paid for again on every
+        update. Skipped when the Host already holds this exact pin, which is
+        asked of the digest the Host recorded rather than of the directory
+        existing.
         """
 
-        artifact = PINNED_EMBEDDING_MODEL
-        destination = host_embedding_model_root(artifact)
-        expected = embedding_model_digest(artifact)
-        # With sudo, like every other question asked of Host state: the model
-        # root sits under /var/lib/eidolon, which the operator account cannot
-        # even traverse.
-        held = self.transport.run_agent(
-            "embedding-model-state",
-            {"destination": str(destination)},
-        )
-        if held.get("status") == "held" and held.get("digest") == expected:
-            return {"status": "already_held", "model": artifact.model_id}
+        sources = {source_id: source.path for source_id, source in self.config.sources.items()}
+        topology = read_component_contracts(sources, self.config.capabilities)
+        artifacts = carried_artifacts(topology)
+        if not artifacts:
+            return {"status": "none_declared", "artifacts": 0}
 
-        source = ensure_workstation_embedding_model(self.config.workspace.toolchain_root, artifact)
-        staging = f"/var/tmp/eidolon-encoder-{expected[:12]}"
-        self.transport.run(("rm", "-rf", staging))
-        self.transport.upload(source, staging, recursive=True)
-        self.transport.run_agent(
-            "install-embedding-model",
-            {"staging": staging, "destination": str(destination)},
-        )
-        return {"status": "carried", "model": artifact.model_id}
+        carried: list[dict[str, object]] = []
+        for artifact in artifacts:
+            destination = host_artifact_root(artifact)
+            expected = artifact.digest
+            # With sudo, like every other question asked of Host state: the
+            # model root sits under /var/lib/eidolon, which the operator
+            # account cannot even traverse.
+            held = self.transport.run_agent(
+                "component-artifact-state",
+                {"destination": str(destination)},
+            )
+            if held.get("status") == "held" and held.get("digest") == expected:
+                carried.append({"artifact": artifact.artifact_id, "status": "already_held"})
+                continue
+            source = ensure_workstation_artifact(
+                self.config.workspace.toolchain_root, artifact
+            )
+            staging = f"/var/tmp/eidolon-artifact-{expected[:12]}"
+            self.transport.run(("rm", "-rf", staging))
+            self.transport.upload(source, staging, recursive=True)
+            self.transport.run_agent(
+                "install-component-artifact",
+                {"staging": staging, "destination": str(destination)},
+            )
+            carried.append({"artifact": artifact.artifact_id, "status": "carried"})
+        return {
+            "status": "carried" if any(item["status"] == "carried" for item in carried) else "already_held",
+            "artifacts": len(carried),
+            "detail": carried,
+        }
 
     def _carry_release_artifacts(self, output: Path, transfer_id: str) -> dict[str, object]:
         """Install only content-addressed objects this Host does not hold.

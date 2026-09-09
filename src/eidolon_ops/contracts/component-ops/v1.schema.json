@@ -5,30 +5,57 @@
   "description": "What a component tells Ops about how it is operated. Owned and versioned by the component's own repository; Ops only consumes it, and checks the things no single component can check about itself.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "component_id", "contract_version"],
+  "required": [
+    "schema_version",
+    "component_id",
+    "contract_version"
+  ],
   "properties": {
-    "schema_version": {"const": 1},
+    "schema_version": {
+      "const": 1
+    },
     "component_id": {
       "description": "The source id Ops already knows this component by. Checked against the directory the file was found in, so a copied contract cannot make one component answer for another.",
       "type": "string",
       "pattern": "^[a-z][a-z0-9_-]{1,63}$"
     },
-    "contract_version": {"type": "string", "pattern": "^[0-9]+$"},
-
+    "contract_version": {
+      "type": "string",
+      "pattern": "^[0-9]+$"
+    },
     "units": {
       "description": "The systemd units this component owns. The unit files themselves still live in eidolon_kernel/deploy/systemd; this is the declaration Ops checks them against, so a unit pointing at the wrong venv or a stale port stops being something only a Host discovers.",
       "type": "array",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "kind", "exec"],
+        "required": [
+          "id",
+          "kind",
+          "exec"
+        ],
         "allOf": [
           {
             "if": {
-              "properties": {"kind": {"enum": ["service", "oneshot"]}},
-              "required": ["kind"]
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "service",
+                    "oneshot"
+                  ]
+                }
+              },
+              "required": [
+                "kind"
+              ]
             },
-            "then": {"properties": {"exec": {"pattern": "^[^/][^\\u0000]*$"}}}
+            "then": {
+              "properties": {
+                "exec": {
+                  "pattern": "^[^/][^\\u0000]*$"
+                }
+              }
+            }
           }
         ],
         "properties": {
@@ -38,8 +65,12 @@
             "pattern": "^[a-z][a-z0-9-]{0,63}$"
           },
           "kind": {
-            "description": "platform: a unit the host profile installs rather than a release — an upstream server with no repository of ours. It is the one kind allowed an absolute exec, because where it lives IS a platform fact.",
-            "enum": ["service", "oneshot", "platform"]
+            "description": "platform: a unit the host profile installs rather than a release \u2014 an upstream server with no repository of ours. It is the one kind allowed an absolute exec, because where it lives IS a platform fact.",
+            "enum": [
+              "service",
+              "oneshot",
+              "platform"
+            ]
           },
           "exec": {
             "description": "The executable, relative to this component's deployed root. Absolute paths are refused for anything a release ships: where a component is unpacked is a platform-profile fact, not the component's.",
@@ -47,7 +78,7 @@
             "pattern": "^[^\\u0000]+$"
           },
           "user": {
-            "description": "The account the unit runs as. Stated per unit because one component can own units with different accounts — Admin runs its bootstrap daemon as a separate user precisely so a compromise there cannot read the rest.",
+            "description": "The account the unit runs as. Stated per unit because one component can own units with different accounts \u2014 Admin runs its bootstrap daemon as a separate user precisely so a compromise there cannot read the rest.",
             "type": "string",
             "pattern": "^[a-z_][a-z0-9_-]{0,31}$"
           },
@@ -58,17 +89,23 @@
           "requires": {
             "description": "Units that must be pulled in and ordered before this one (systemd Wants= plus After=).",
             "type": "array",
-            "items": {"type": "string"}
+            "items": {
+              "type": "string"
+            }
           },
           "after": {
             "description": "Units this one is ordered behind without depending on (systemd After= alone).",
             "type": "array",
-            "items": {"type": "string"}
+            "items": {
+              "type": "string"
+            }
           },
           "serves": {
             "description": "Port roles this unit listens on, drawn from this component's own [ports].",
             "type": "array",
-            "items": {"type": "string"}
+            "items": {
+              "type": "string"
+            }
           },
           "requires_capability": {
             "description": "A Host capability this must find present, from the closed set eidolon_ops.capabilities defines. Omitted means every Host gets it. Named as a capability and never as a platform so that a component states what it needs and a Host states what it has, and neither has to know the other. The set is closed because an unknown name is provided by no Host, which would drop this entry everywhere without saying so.",
@@ -78,30 +115,51 @@
         }
       }
     },
-
     "ports": {
       "description": "Roles, not numbers. A component says it needs somewhere to listen and what that place is for; the number is a default the Host may override, because two Hosts may disagree and neither disagreement is the component's business.",
       "type": "object",
       "additionalProperties": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["default"],
+        "required": [
+          "default"
+        ],
         "properties": {
-          "default": {"type": "integer", "minimum": 1, "maximum": 65535},
-          "bind": {"enum": ["loopback", "lan"]},
-          "purpose": {"type": "string"}
+          "default": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "bind": {
+            "enum": [
+              "loopback",
+              "lan"
+            ]
+          },
+          "purpose": {
+            "type": "string"
+          }
         }
       },
-      "propertyNames": {"pattern": "^[a-z][a-z0-9_]{1,63}$"}
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9_]{1,63}$"
+      }
     },
-
     "inputs": {
-      "description": "The files Ops installs for this component before it can start: generated env files, settings overlays, key material. Names only — a contract is committed to a repository, so anything written here is public to everyone who can read it.",
+      "description": "The files Ops installs for this component before it can start: generated env files, settings overlays, key material. Names only \u2014 a contract is committed to a repository, so anything written here is public to everyone who can read it.",
       "type": "array",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["name", "install_path", "kind", "source", "owner", "group", "mode"],
+        "required": [
+          "name",
+          "install_path",
+          "kind",
+          "source",
+          "owner",
+          "group",
+          "mode"
+        ],
         "properties": {
           "name": {
             "description": "The id Ops stages this input under.",
@@ -113,16 +171,32 @@
             "type": "string",
             "pattern": "^/[^\\u0000]*[^/\\u0000]$"
           },
-          "owner": {"type": "string", "pattern": "^[a-z_][a-z0-9_-]{0,31}$"},
-          "group": {"type": "string", "pattern": "^[a-z_][a-z0-9_-]{0,31}$"},
-          "mode": {"type": "string", "pattern": "^0[0-7]{3}$"},
+          "owner": {
+            "type": "string",
+            "pattern": "^[a-z_][a-z0-9_-]{0,31}$"
+          },
+          "group": {
+            "type": "string",
+            "pattern": "^[a-z_][a-z0-9_-]{0,31}$"
+          },
+          "mode": {
+            "type": "string",
+            "pattern": "^0[0-7]{3}$"
+          },
           "kind": {
             "description": "secret: generated credentials. settings: a component settings file the Host overlay rewrites. identity: long-lived key material that survives reinstall.",
-            "enum": ["secret", "settings", "identity"]
+            "enum": [
+              "secret",
+              "settings",
+              "identity"
+            ]
           },
           "source": {
             "description": "operator: staged from the operator's private inputs directory, and an install cannot proceed without it. derived: Ops renders it on the way to the Host from a template in this repository, so there is nothing for an operator to supply.",
-            "enum": ["operator", "derived"]
+            "enum": [
+              "operator",
+              "derived"
+            ]
           },
           "template": {
             "description": "For derived inputs: the template's repository-relative path, so Ops does not have to know this component's layout. It is a path in THIS repository and there is no way to name another one: a component whose deployed defaults live in someone else's repository cannot change them without that repository's release, and the copy its own tests exercise is then not the copy a Host starts with. Hub was in exactly that position, and the two files had drifted before anyone read them side by side.",
@@ -132,34 +206,50 @@
           "required_by": {
             "description": "Unit ids that will not start without it.",
             "type": "array",
-            "items": {"type": "string"}
+            "items": {
+              "type": "string"
+            }
           }
         }
       }
     },
-
     "state": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "authority": {
-          "description": "What this component would be sorry to lose. Every entry has to say how it is backed up, and an entry that cannot be backed up has to say why — see the backup enum.",
+          "description": "What this component would be sorry to lose. Every entry has to say how it is backed up, and an entry that cannot be backed up has to say why \u2014 see the backup enum.",
           "type": "array",
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["path", "owner", "backup"],
+            "required": [
+              "path",
+              "owner",
+              "backup"
+            ],
             "properties": {
               "path": {
                 "description": "Absolute, because this is a Host location an operator will read in a report and type into a shell.",
                 "type": "string",
                 "pattern": "^/[^\\u0000]*$"
               },
-              "owner": {"type": "string", "pattern": "^[a-z_][a-z0-9_-]{0,31}$"},
-              "group": {"type": "string", "pattern": "^[a-z_][a-z0-9_-]{0,31}$"},
+              "owner": {
+                "type": "string",
+                "pattern": "^[a-z_][a-z0-9_-]{0,31}$"
+              },
+              "group": {
+                "type": "string",
+                "pattern": "^[a-z_][a-z0-9_-]{0,31}$"
+              },
               "backup": {
-                "description": "sqlite-online: snapshot consistently while the owning service keeps running. quiesce-copy: stop the units in quiesce_units, copy, start again. component-action: this component produces the copy itself through its own admin action, because its state is not a file an operator tool can understand — snapshot_action and restore_action name the routes. none: not carried, and uncovered_reason must say what would be needed.",
-                "enum": ["sqlite-online", "quiesce-copy", "component-action", "none"]
+                "description": "sqlite-online: snapshot consistently while the owning service keeps running. quiesce-copy: stop the units in quiesce_units, copy, start again. component-action: this component produces the copy itself through its own admin action, because its state is not a file an operator tool can understand \u2014 snapshot_action and restore_action name the routes. none: not carried, and uncovered_reason must say what would be needed.",
+                "enum": [
+                  "sqlite-online",
+                  "quiesce-copy",
+                  "component-action",
+                  "none"
+                ]
               },
               "snapshot_action": {
                 "description": "Required for component-action. The route Ops calls to have one copy produced, as METHOD /path with any id in braces. Declared here so a component that renames it breaks a test rather than a backup.",
@@ -171,7 +261,12 @@
                 "type": "string",
                 "pattern": "^(GET|POST) /[^\\u0000]*$"
               },
-              "quiesce_units": {"type": "array", "items": {"type": "string"}},
+              "quiesce_units": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
               "uncovered_reason": {
                 "description": "Required when backup is none. A backup that silently omits something restores into a system that looks whole and is not, which is worse than one that says what it left out.",
                 "type": "string",
@@ -180,16 +275,56 @@
             },
             "allOf": [
               {
-                "if": {"properties": {"backup": {"const": "none"}}, "required": ["backup"]},
-                "then": {"required": ["uncovered_reason"]}
+                "if": {
+                  "properties": {
+                    "backup": {
+                      "const": "none"
+                    }
+                  },
+                  "required": [
+                    "backup"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "uncovered_reason"
+                  ]
+                }
               },
               {
-                "if": {"properties": {"backup": {"const": "quiesce-copy"}}, "required": ["backup"]},
-                "then": {"required": ["quiesce_units"]}
+                "if": {
+                  "properties": {
+                    "backup": {
+                      "const": "quiesce-copy"
+                    }
+                  },
+                  "required": [
+                    "backup"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "quiesce_units"
+                  ]
+                }
               },
               {
-                "if": {"properties": {"backup": {"const": "component-action"}}, "required": ["backup"]},
-                "then": {"required": ["snapshot_action", "restore_action"]}
+                "if": {
+                  "properties": {
+                    "backup": {
+                      "const": "component-action"
+                    }
+                  },
+                  "required": [
+                    "backup"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "snapshot_action",
+                    "restore_action"
+                  ]
+                }
               }
             ]
           }
@@ -197,40 +332,63 @@
         "runtime": {
           "description": "Absolute paths that are safe to delete at any moment. Named so a reset does not have to guess which side of the line a directory falls on.",
           "type": "array",
-          "items": {"type": "string", "pattern": "^/[^\\u0000]*$"}
+          "items": {
+            "type": "string",
+            "pattern": "^/[^\\u0000]*$"
+          }
         }
       }
     },
-
     "schema": {
       "description": "How this component brings its own persistent schema up to date, if it has one. There is deliberately no way to declare a downgrade: incompatible legacy data is rebuilt rather than migrated backwards.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "gate": {"type": "string"}
+        "gate": {
+          "type": "string"
+        }
       }
     },
-
     "reset": {
       "description": "What a factory reset removes for this component. Ops refuses to run one at all while any component is silent, because a reset believed to be complete is worse than one known to be impossible.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "factory": {"type": "array", "items": {"type": "string", "pattern": "^/[^\\u0000]*$"}}
+        "factory": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^/[^\\u0000]*$"
+          }
+        }
       }
     },
-
     "artifacts": {
-      "description": "What this component needs on a Host that is not in its git tree — model weights, prebuilt binaries. Declared because a release is exact git commits, so whatever is not in git does not exist in a release, and that gap should be stated by the component rather than found by an operator on a board with no network.",
+      "description": "What this component needs on a Host that is not in its git tree \u2014 model weights, prebuilt binaries. Declared because a release is exact git commits, so whatever is not in git does not exist in a release, and that gap should be stated by the component rather than found by an operator on a board with no network.",
       "type": "array",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "kind", "install_root"],
+        "required": [
+          "id",
+          "kind",
+          "install_root"
+        ],
         "properties": {
-          "id": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]{1,63}$"},
-          "kind": {"enum": ["model", "binary"]},
-          "install_root": {"type": "string", "pattern": "^/[^\\u0000]*$"},
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_.-]{1,63}$"
+          },
+          "kind": {
+            "enum": [
+              "model",
+              "binary"
+            ]
+          },
+          "install_root": {
+            "type": "string",
+            "pattern": "^/[^\\u0000]*$"
+          },
           "requires_capability": {
             "description": "A Host capability this must find present, from the closed set eidolon_ops.capabilities defines. Omitted means every Host gets it. Named as a capability and never as a platform so that a component states what it needs and a Host states what it has, and neither has to know the other. The set is closed because an unknown name is provided by no Host, which would drop this entry everywhere without saying so.",
             "type": "string",
@@ -241,10 +399,24 @@
             "items": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["path", "sha256"],
+              "required": [
+                "path",
+                "sha256",
+                "url"
+              ],
               "properties": {
-                "path": {"type": "string"},
-                "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+                "path": {
+                  "type": "string"
+                },
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "url": {
+                  "description": "Where the pinned bytes come from. Required beside the digest: a hash with no source is a promise nothing can keep, and an operator on a board would be left to find the file by hand. Fetched on the workstation and carried over the same transport a release uses, never by the Host -- a Host may have no route to a model hub, and this is exactly the case the declaration exists to avoid.",
+                  "type": "string",
+                  "pattern": "^https://[^\\u0000]+$"
+                }
               }
             }
           }
