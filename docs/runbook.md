@@ -9,10 +9,24 @@ uv run eidolon-ops --config /absolute/path/hosts/pi5.toml <operation>
 
 ## New Pi: one command from SSH-ready OS to App-ready backend
 
-Preconditions: reviewed Debian/Raspberry Pi OS 13, known SSH host key, non-root account with non-interactive sudo, outbound
-package/download access, and the 14 local private inputs declared in config.
+Preconditions: reviewed Debian/Raspberry Pi OS 13, outbound package/download access, and the 14 local
+private inputs declared in config.
 
-Create those inputs once before the first plan. This is local-only and never contacts the Pi:
+Everything that used to be listed here as well — the Host's name, a non-root account with non-interactive
+sudo, the deploy key in it, and a wired link that does not spend its life waiting for a DHCP server that
+cannot answer — is no longer the operator's to remember. `bring-up` renders it from the Host profile, down
+whichever channel the board leaves open: its boot medium if it has never booted, a shell on it if it is
+already running. The host key is recorded by `trust-host-key`, in the profile's own `known_hosts`. Both are
+in the README under "从刷好的盘到可以被操作" and "换板子换的是信任".
+
+```bash
+uv run eidolon-ops --config /absolute/path/hosts/pi5.toml \
+  bring-up --via boot-medium --output /Volumes/bootfs --apply
+
+uv run eidolon-ops --config /absolute/path/hosts/pi5.toml trust-host-key --apply
+```
+
+Create the private inputs once before the first plan. This is local-only and never contacts the Pi:
 
 ```bash
 uv run eidolon-ops --config /absolute/path/hosts/pi5.toml init-inputs

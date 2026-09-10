@@ -37,9 +37,13 @@ Data V2 初始化、15 个产品服务启动，并要求 Host 达到手机 App c
 ./eidolon pi5 install --release-id 20260807-product-1 --apply
 ```
 
-“新 Pi”从 Raspberry Pi OS 已刷盘、SSH host key 已可信且操作账号具备 non-interactive sudo 开始；本工具
-不写 SD 卡镜像，也不自动制造云端 provider credential。Host identity、service token 和产品 settings
-来自 Mac 上 14 个 mode-0600 输入文件，值不会进入 TOML、argv、bundle、receipt 或诊断元数据。
+“新 Pi”从 Raspberry Pi OS 已刷盘开始。那之后到“可以被 ops 操作”之间的每一件事——Host 的名字、操作
+账号、免密 sudo、部署公钥、以及一条不在等一个不可能存在的 DHCP 服务器的有线链路——都由
+[`bring-up`](#从刷好的盘到可以被操作) 从 Host profile 渲染出来，而不是留给谁去记得。这台 Host 的
+host key 由 [`trust-host-key`](#换板子换的是信任) 记录，记在 profile 自己的 known_hosts 里。
+
+本工具不写 SD 卡镜像，也不自动制造云端 provider credential。Host identity、service token 和产品
+settings 来自 Mac 上 14 个 mode-0600 输入文件，值不会进入 TOML、argv、bundle、receipt 或诊断元数据。
 
 首次使用先从三个组件现有的本机 provider `.env` 白名单导入外部 LLM/STT/TTS key，并生成其余内部
 credential、32-byte raw Ed25519 Host identity 和精确提交派生的 Pi settings：
@@ -94,6 +98,117 @@ ingress 转发到 loopback Hub 8082。Pi 的 15 个 release unit 不被改写；
 `eidolon-hub-ingress.service` 与 Hub systemd 配置 overlay。LiveKit 可在显式开发 opt-in 后使用私网
 `ws://`；产品级 WSS 仍是独立门禁。这不是关闭 Mobile 的 Hub 证书校验，也不从 mDNS 学习信任。
 
+## 从刷好的盘到可以被操作
+
+Ops 能操作一台 Host 之前，那台 Host 必须已经有几件事成立。它们过去只写在
+`docs/runbook.md` 的一句 Preconditions 里，然后交给上次做这件事的人——于是被敲进了某一台
+笔记本的 imager 对话框，板子交给别人就一件都不剩。
+
+它们全都能从 Host profile 推导，profile 自己也一直在用同一批值。所以它们是一份**声明**，
+`src/eidolon_ops/bring_up.py` 里的 `BringUp`：
+
+| 要求 | 谁需要它 |
+|---|---|
+| hostname 是 profile 里的短名 | `endpoints.py` 按名字解析；`transport.py` 的 `HostKeyAlias` 按名字信任 host key |
+| `[host].user` 账号存在 | transport 以它连接 |
+| 部署公钥在它的 authorized_keys 里 | transport 是 `BatchMode=yes` 加指定 identity，没有口令通路 |
+| 该账号免密 sudo | transport 提权用 `sudo --non-interactive` |
+| sshd 与 mDNS 在跑 | transport 本身，以及名字解析 |
+| 有线口在点对点线上持有地址、在真网络上取租约 | 有线上传门禁，以及 `provision` 需要的出网路径 |
+
+这张表里**没有一条提到文件名、分区、网口名或命令**。那是刻意的：要求是产品决定，机制不是。
+
+### 变化的只有通道，而且由板子自己的状态决定
+
+```text
+从未启动过   ── 它的启动介质，从别处写入
+已经在运行   ── 它上面的一个 shell，怎么拿到的都行
+```
+
+只有这两种，因为在 ops 拥有账号之前，板子只有这两个表面。哪种介质（SD 卡、NVMe SSD、eMMC）
+和哪种 shell（SSH、HDMI 键盘、串口）都到不了代码里——那是操作者的事，而把设计钉在其中一种
+上，就是让“板子从 NVMe 启动”或“板子是别人烧的”变成没有出路的情况。
+
+```bash
+./eidolon pi5 bring-up --via boot-medium --output /Volumes/bootfs --apply
+./eidolon pi5 bring-up --via shell       --output ~/tmp --apply
+```
+
+输出目录是**指名的，不是探测的**。指向挂载的启动介质就是准备那个介质，指向别处就得到几个
+文件、用任何方式搬过去。去猜机器上哪个卷是板子的，是一个在每个人机器上会以不同方式出错的
+启发式，而猜错的失败是静默的。
+
+两种形态都是平台自己的约定——同一个 OS 既决定它的首启钩子，也决定配置一台运行中系统的命令
+——所以一个平台把两者**一起**声明，按 `foundation.profile` 索引，和 `foundation.py` 给包和固
+定制品用的是同一个键、同一种“查不到就带着已知选项拒绝”的写法。那个 id 里带着 OS 和修订号，
+所以 OS 换了约定是新 foundation 的新声明，老板子照旧能用。目前只声明了
+`raspberry-pi-os-debian-arm64-v2`：rk3588 走到这条命令会被明确拒绝，而不是拿到一份给
+`eth0` 写的配置——那块板子的网口叫 `enP3p49s0`。
+
+### 两件是问真机问出来的，不是照文档写的
+
+**首启钩子不是 `firstrun.sh`。** Raspberry Pi OS 13 从 boot 分区 seed cloud-init，载荷是
+`user-data` / `meta-data` / `network-config` 三个文件，而且正是 imager 写的那三个——所以写它
+们是替换，不是冲突。种子路径由镜像自带的 `rpi-cloud-init-mods` 声明
+（`/etc/cloud/cloud.cfg.d/99_raspberry-pi.cfg` 里的 `seedfrom: file:///boot/firmware`），所以
+不填任何 imager customisation 也生效。
+
+**有线口只改两个属性，两个都是量出来的。** `ipv4.link-local: "4"`（NM 的 fallback）：点对点线
+上没人应答 DHCP，默认行为是 NM 让连接失败并重试，那个拆建循环正是“板子一阵能连一阵不能、
+会话随时断”。`ipv6.method: "link-local"`：只改这一个键，设备状态从持续的
+`connecting (getting IP configuration)` 变成 `connected`——点对点线上没有 RA 也没有 DHCPv6 供
+`auto` 等待。IPv4 在两种设置下都能用，所以这正是只有真板子能告诉你的那类事实。
+
+其余都是镜像自己的默认值，照原样写出来，好让 ops 改动的那两处是可见的而不是埋在一次重写
+里。也不设 `never-default`：link-local 没有网关、抢不到默认路由，而设上它会让网线在真网络上
+无法成为出网路径。运行时零代价——出厂 Host 没有网线、没有 carrier，`optional: true` 之下这
+条连接根本不会激活。
+
+### shell 形态刻意不由 ops 执行
+
+transport 是 `BatchMode=yes` 加指定 identity，它**登不进一块还没有那把 key 的板子**——正是这
+个场景。补上这个缺口意味着 ops 持有口令，而第一次打开一块板子的凭据是操作者的，该由操作者
+使用。所以 ops 渲染脚本，人来跑。
+
+脚本按“状态”而不是“编辑”写，可以重复执行：已存在的账号不动；**公钥只在缺失时追加而不是覆盖
+文件**——操作者可能正以那个账号登录着，重写它的 `authorized_keys` 等于把人锁在他正在修的板子
+外面。网络放最后，因为 `nmcli con up` 会掐掉跑在那个网口上的会话。脚本结尾报出它使上面那张
+表里每一条成立与否。
+
+### 那份要求不渲染 Wi-Fi，也不渲染控制台口令
+
+Host 自己的 Wi-Fi 由手机的 BLE 路径配置，那是产品自带的能力；ops 再渲染一份就是同一个事实的
+第二条路，还要为此持有不属于它的凭据。所以 `provision` 之前的出网路径由操作者插线的地方决
+定——把网线接到有 DHCP 的网络上就有（`link-local` 是 fallback，真网络上正常取租约）。
+
+也不渲染控制台口令：`lock_passwd: true` 加 `ssh_pwauth: false`，公钥是唯一入口。代价是一块
+失去全部链路的板子只能重烧而不能在键盘前救回来，`bring-up` 的报告会明说这一点，而不是留给
+一块登不进去的板子来告知。
+
+## 换板子换的是信任
+
+host key 是按 Host 的**名字**信任的（`HostKeyAlias`），这正是“换链路不是信任决定”的由来。它同
+时意味着两块发布同一个名字的板子无法都被信任：换掉 `eidolon-pi5.local` 背后的板子，就是在一
+个已有 key 的名字下出示另一把，而在那之前每个操作都正确地拒绝。
+
+那个文件原来是操作者自己的 `~/.ssh/known_hosts`，改动不入库、和另外一百台主机混在一起，而且
+容易朝最糟的方向错：删错一行会当场报错，粘一把没核对过的 key 则永远静默。所以 profile 持有
+自己的文件，和它已有的私密输入放在一起：
+
+```bash
+./eidolon pi5 trust-host-key                                   # 打印指纹和当前信任的是什么
+./eidolon pi5 trust-host-key --apply                           # 此前没信任过任何 key
+./eidolon pi5 trust-host-key --apply --replace SHA256:...       # 已信任另一把时
+```
+
+它绕过严格 transport 直接 `ssh-keyscan`，因为这个操作存在的场景正是“transport 正确地拒绝了这
+台 Host”。只记 ed25519 一种：首次连接会存下三把，但那样操作者要核对的“那个指纹”就是三个，他
+比对的是随手读到的哪个。
+
+已信任另一把时，报告直接给出在板子本机读指纹的命令，并要求把那个指纹作为 `--replace` 的值指
+名出来。指名一把**不是**正在被出示的 key 会被拒绝——确认必须是关于这台 Host 的，否则就什么都
+没确认。换板子和机器在中间从这里看是同一幅画，而工作站上没有任何东西能分辨它们。
+
 ## 基础环境 profile
 
 `raspberry-pi-os-debian-arm64-v2` 会先只读检测，再在 `--apply` 时通过受限的 Debian 官方登记 HTTPS 镜像安装：
@@ -119,8 +234,12 @@ uv sync --all-extras
 
 Host profile 和 operations config 都在仓库里（`config/hosts/*.toml`、
 `config/eidolon-*.toml`）——一块板子是什么、能做什么、跑哪些 unit，都是评审过的
-产品决定，不该只存在一台机器上。里面唯一与本机有关的两个值是 SSH 私钥和
-known_hosts，写成 `~/.ssh/...`，各自的机器自己解析。
+产品决定，不该只存在一台机器上。里面唯一与本机有关的值是 SSH 私钥，写成
+`~/.ssh/...`，各自的机器自己解析。
+
+`known_hosts` 曾经也在那一行里，现在指向 `.eidolon-ops/<host>/known_hosts`——profile
+自己的，不是操作者的。理由见[换板子换的是信任](#换板子换的是信任)：文件仍然只在本机
+（那个目录一直是 gitignore 的），变的只是它的位置成了评审过的决定。
 
 要接一块新板子，从对应的 `*.example.toml` 复制一份改名，再把它加进仓库。
 
@@ -240,6 +359,8 @@ session：只能用一次，并把之前的窗口作废。它**不会自己过�
 ./eidolon mac debug prepare|validate|status|web-start|web-stop|web-restart|web-status
 
 # Pi release/install capabilities
+./eidolon pi5 bring-up --via boot-medium|shell --output DIR [--apply]
+./eidolon pi5 trust-host-key [--apply] [--replace SHA256:...]
 ./eidolon pi5 provision [--apply]
 ./eidolon pi5 init-inputs
 ./eidolon pi5 install --release-id ID [--resume] [--apply]
