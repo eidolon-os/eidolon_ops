@@ -349,6 +349,31 @@ def controller_reset(payload: Mapping[str, object]) -> dict[str, object]:
         raise TargetError("controller reset returned invalid evidence")
     return {"status": "reset", "controller_reset": document}
 
+
+#: What the Host's line report shows for a window that has no expiry. It
+#: renders the field with an f-string, so an absent deadline arrives here as
+#: the four characters Python spells ``None`` with, not as nothing at all.
+_NO_EXPIRY = frozenset({"", "None", "none", "null"})
+
+
+def _reported_expiry(reported: str) -> str | None:
+    """The deadline the Host published, or nothing when it published none.
+
+    A commissioning window stopped having a clock on it (``eidolon_admin``
+    ADR-0007): it closes by being consumed or by the next issuance superseding
+    it, and every session minted now carries ``expires_at: null``. Read
+    verbatim, that absence went out as ``"expires_at": "None"`` — a
+    timestamp-shaped answer to a question with no timestamp, which reads as a
+    deadline nobody can parse rather than as the deadline nobody set.
+
+    A real value still passes through untouched. The field is not vestigial
+    everywhere: a controller recovery window does expire, and a Host from
+    before that ADR put a time here too.
+    """
+
+    return None if reported in _NO_EXPIRY else reported
+
+
 def commissioning_code(payload: Mapping[str, object]) -> dict[str, object]:
     """Mint the one-time Setup code a phone types to claim this Host.
 
@@ -381,7 +406,7 @@ def commissioning_code(payload: Mapping[str, object]) -> dict[str, object]:
     )
     setup_code = ""
     commissioning_id = ""
-    expires_at = ""
+    expires_at: str | None = None
     for line in result.stdout.splitlines():
         label, separator, value = line.partition(":")
         if not separator:
@@ -391,7 +416,7 @@ def commissioning_code(payload: Mapping[str, object]) -> dict[str, object]:
         elif label.strip() == "Commissioning":
             commissioning_id = value.strip()
         elif label.strip() == "Expires":
-            expires_at = value.strip()
+            expires_at = _reported_expiry(value.strip())
     if not setup_code:
         raise TargetError("commissioning code issuance returned no Setup code")
     return {

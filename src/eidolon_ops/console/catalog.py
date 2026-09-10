@@ -235,14 +235,19 @@ CATALOG: tuple[Operation, ...] = (
     Operation(
         name="commissioning-code",
         label="Setup 码",
-        summary="签发一枚有寿命上限的一次性 Setup 码",
+        summary="签发一枚一次性 Setup 码，并作废之前的窗口",
         capability=Capability.COMMISSIONING_CODE,
         group="lifecycle",
         fields=(
             Field(
                 name="ttl_seconds",
                 kind=Kind.INTEGER,
-                label="有效期（秒）",
+                label="TTL（秒，遗留参数）",
+                # Still sent, and still checked here so a nonsense value
+                # fails where it was typed. The window it opens has no clock
+                # on it (eidolon_admin ADR-0007), which is why the report
+                # comes back with a null expires_at.
+                help="Host 已不再给认领窗口设时限；窗口只被消费，或被下一次签发顶掉",
                 default=600,
                 minimum=60,
                 maximum=86400,

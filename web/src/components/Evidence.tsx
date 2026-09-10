@@ -149,7 +149,7 @@ function Secret({ label, value }: { label: string; value: string }) {
         <code>{shown ? value : "•".repeat(Math.min(value.length, 12))}</code>
         <button onClick={() => setShown(!shown)}>{shown ? "隐藏" : "显示"}</button>
         <span className="muted" style={{ fontSize: "var(--fs-small)" }}>
-          一次性，有寿命上限；本页不保存，刷新即消失
+          一次性，下次签发即作废；本页不保存，刷新即消失
         </span>
       </div>
     </div>

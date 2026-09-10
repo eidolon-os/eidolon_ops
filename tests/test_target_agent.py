@@ -1860,6 +1860,51 @@ def test_a_named_setup_code_reaches_the_host_unexamined(monkeypatch, tmp_path) -
         )
 
 
+def test_a_window_with_no_deadline_is_reported_as_nothing_not_as_a_word(
+    monkeypatch, tmp_path
+) -> None:
+    """The Evidence may not put a timestamp-shaped word where no time exists.
+
+    A commissioning window stopped having a clock on it (``eidolon_admin``
+    ADR-0007): it closes by being consumed or superseded, and every session
+    minted now carries no deadline at all. The Host prints that field through
+    an f-string, so the absence reaches this parser as the four characters
+    ``None`` — and reading it verbatim published ``"expires_at": "None"``, an
+    answer no consumer can parse and one that reads as a deadline rather than
+    as the deadline nobody set.
+    """
+
+    monkeypatch.setattr(host_lifecycle, "BOOTSTRAP_CTL", tmp_path / "eidolon-bootstrapctl")
+    host_lifecycle.BOOTSTRAP_CTL.write_text("#!/bin/sh\n", encoding="utf-8")
+    host_lifecycle.BOOTSTRAP_CTL.chmod(0o755)
+    stdout = (
+        "Setup code: 99999990\n"
+        "Host: ehost-0123456789abcdefabcd\n"
+        "Commissioning: e2346cb6-edd8-4a6b-874a-71001228cce7\n"
+        "Expires: None\n"
+    )
+
+    def run(command, **_kwargs):
+        return subprocess.CompletedProcess(command, 0, stdout, "")
+
+    monkeypatch.setattr(primitives, "run", run)
+    payload = {"units": list(contract.PRODUCT_UNITS), "ttl_seconds": 600}
+
+    result = host_lifecycle.commissioning_code(payload)
+
+    assert result["expires_at"] is None
+    assert json.dumps(result, sort_keys=True).count('"expires_at": null') == 1
+    # The session is still named, so the code the operator reads has somewhere
+    # to be spent.
+    assert result["commissioning_id"] == "e2346cb6-edd8-4a6b-874a-71001228cce7"
+
+    # A Host that says nothing at all about a deadline is reporting the same
+    # fact, and the empty string may not stand in for a timestamp either.
+    stdout = stdout.replace("Expires: None\n", "")
+
+    assert host_lifecycle.commissioning_code(payload)["expires_at"] is None
+
+
 def test_a_setup_code_request_without_a_sane_lifetime_is_refused(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(host_lifecycle, "BOOTSTRAP_CTL", tmp_path / "eidolon-bootstrapctl")
     for ttl in (0, 59, 86401, "600", True, None):
