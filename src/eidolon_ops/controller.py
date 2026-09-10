@@ -582,16 +582,13 @@ class EidolonPiController:
                 "private key this profile already names, and the Host has to be given it "
                 "before it will accept the key Ops connects with."
             ) from exc
-        instance_id = boot_media.new_instance_id()
         payload = boot_media.render(
             hostname=self.config.host.hostname,
             user=self.config.host.user,
             authorized_key=authorized_key,
-            instance_id=instance_id,
         )
         report: dict[str, object] = {
             "output": str(output),
-            "instance_id": instance_id,
             "files": sorted(payload),
             "hostname": self.config.host.hostname,
             "user": self.config.host.user,

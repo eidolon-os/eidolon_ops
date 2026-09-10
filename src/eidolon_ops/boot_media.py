@@ -15,9 +15,14 @@ Raspberry Pi OS 13 seeds cloud-init from the boot partition (`ds=nocloud` in
 and they are the same three an imager writes — so writing them replaces the
 imager's, which is the whole intent and not a conflict.
 
-`instance-id` is the switch, not a label: cloud-init applies a per-instance
-configuration once and remembers, so a payload beside an unchanged id does
-nothing at all.
+`instance-id` is cloud-init's, and `meta-data` carries it because a NoCloud
+seed needs the file. It is derived from the Host's name and therefore stable:
+on a freshly flashed card the value cannot matter — `/var/lib/cloud` is empty
+and every module runs regardless — so a fresh id per rendering would buy
+nothing for the only case this serves, while costing reproducibility and
+making "silently reconfigure a card that already booted" the default. Stable
+means rendering twice gives the same bytes, and re-seeding a booted card is a
+no-op rather than a surprise.
 
 The wired link goes through `networkmanager.passthrough` with an explicit
 `renderer`. netplan's own `link-local` key does not round-trip here (setting
@@ -36,7 +41,6 @@ parse what this renders with a real parser.
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
 
 from eidolon_ops.errors import OperationsError
 
@@ -51,13 +55,7 @@ NETWORK_CONFIG = "network-config"
 WIRED_INTERFACE = "eth0"
 
 
-def new_instance_id(now: datetime | None = None) -> str:
-    """A fresh id, because an unchanged one means cloud-init does nothing."""
-
-    return f"eidolon-ops-{(now or datetime.now(UTC)).strftime('%Y%m%dT%H%M%SZ')}"
-
-
-def render(*, hostname: str, user: str, authorized_key: str, instance_id: str) -> dict[str, str]:
+def render(*, hostname: str, user: str, authorized_key: str) -> dict[str, str]:
     """The three files, keyed by the name cloud-init expects them under."""
 
     key = authorized_key.strip()
@@ -101,7 +99,7 @@ def render(*, hostname: str, user: str, authorized_key: str, instance_id: str) -
             "- [systemctl, enable, --now, ssh]\n"
             "- [systemctl, enable, --now, avahi-daemon]\n"
         ),
-        META_DATA: f"instance-id: {instance_id}\n",
+        META_DATA: f"instance-id: eidolon-ops-{name}\n",
         NETWORK_CONFIG: (
             "# Rendered by eidolon-ops from the Host profile.\n"
             "network:\n"

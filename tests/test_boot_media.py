@@ -9,13 +9,7 @@ from __future__ import annotations
 import pytest
 import yaml
 
-from eidolon_ops.boot_media import (
-    META_DATA,
-    NETWORK_CONFIG,
-    USER_DATA,
-    new_instance_id,
-    render,
-)
+from eidolon_ops.boot_media import META_DATA, NETWORK_CONFIG, USER_DATA, render
 from eidolon_ops.errors import OperationsError
 
 pytestmark = pytest.mark.unit
@@ -28,7 +22,6 @@ def _parsed(**overrides):
         "hostname": "eidolon-pi5.local",
         "user": "eidolon-pi5",
         "authorized_key": KEY,
-        "instance_id": "eidolon-ops-20260910T143000Z",
     }
     arguments.update(overrides)
     return {name: yaml.safe_load(text) for name, text in render(**arguments).items()}
@@ -77,16 +70,19 @@ def test_the_two_things_that_would_silently_ruin_the_card() -> None:
     assert ethernet["renderer"] == "NetworkManager"
 
 
-def test_the_instance_id_is_the_switch_and_is_fresh_each_time() -> None:
-    """cloud-init applies a per-instance config once, then remembers.
+def test_the_instance_id_is_derived_so_two_renderings_agree() -> None:
+    """Stable, not fresh. On a flashed card the value cannot matter.
 
-    A payload beside an unchanged id does nothing, which would be the quietest
-    possible failure.
+    `/var/lib/cloud` is empty there and every module runs regardless, so a
+    timestamp would buy nothing for the case this serves while making the
+    output irreproducible and turning "reconfigure a card that already booted"
+    into the silent default.
     """
 
-    assert _parsed()[META_DATA]["instance-id"] == "eidolon-ops-20260910T143000Z"
-    assert new_instance_id().startswith("eidolon-ops-")
-    assert new_instance_id() != "eidolon-ops-20260910T143000Z"
+    assert _parsed()[META_DATA]["instance-id"] == "eidolon-ops-eidolon-pi5"
+    assert render(hostname="a.local", user="u", authorized_key=KEY) == render(
+        hostname="a.local", user="u", authorized_key=KEY
+    )
 
 
 def test_a_key_only_host_does_not_also_accept_passwords() -> None:
