@@ -1,5 +1,7 @@
 # Pi5 本轮优化与真机验证
 
+最新状态：本轮代码修复已提交，当前过渡版本在修正 Owner 配置后健康，并通过 Wi-Fi 重启恢复验证。正式配置发布仍因板上 Owner generation 8 与工作站 generation 9 不匹配，等待身份处理选择。下文保留预检及失败恢复的完整过程。
+
 用户确认范围：先修复最近评审的 4 个问题及部署链路，再验证当前 USB 网口连接的 Pi5。本轮不包含统一发布事务、模型 CAS 迁移或增量构建重写。起点为 Ops `e77dd28`；工作期间已有的 LAN 观测改动由另一提交 `f1cd4b2` 纳入，保留并在其上修复歧义处理。
 
 ## 网络选择
@@ -62,3 +64,14 @@
 - 对实际过渡提交重新渲染后的配置，再次执行新旧解释器兼容性校验，通过；并清理私密暂存。已向用户提交具体激活确认，待确认后执行过渡升级和正式配置发布。过渡后正式发布计划使用无线固定端点，以验证日常更新可以脱离 USB 端点选择。
 
 后续执行所需的正式与过渡源码 pin、backup 报告及过渡预检日志已保存到 `.eidolon-ops/pi5/validation-20260910/`。当前状态仍为“代码优化与部署预检完成，实际升级激活及重启验证待确认”，不能表述为整体真机部署测试已通过。
+
+## 用户授权提交、激活后的结果
+
+- 本轮四项修复和链路简化已提交为 `036f400`。用户进一步明确授权部署，包括此前说明的 forward-only schema 升级。
+- 过渡版本在启动 Hub 时发现新的换板边界：当前板上数据库/anchor 是 Owner generation 8，工作站 Owner 材料是 generation 9。Host identity 相同、Owner domain 相同仍不能证明 Authority 世代相同。原 deploy 未复用已有的 authority_capability 前置检查，误将 generation 9 的配置写到 generation 8 数据之上；Hub 正确拒绝，激活报告 forward_fix_required。
+- 此时保留新代码和已跨越的 schema 屏障；没有回滚旧解释器，也没有修改 Hub 数据库、提高或降低工作站的 Owner generation、重新签发旧代描述。核对冷快照、板上数据库 marker、外部 anchor 完全一致且根证书与签名证书未改变后，只修正新 Hub 配置中的 Owner generation，并恢复冷快照内原有的签名描述。改前文件留存于板上私有诊断目录。
+- 修正后当前 `20260910-pi5-ops-bridge-1` 的 release doctor healthy；通过固定 Wi-Fi 端点执行 App-ready，24 项检查全部为 true。过渡版本仍仅暂时省略三个 Channel 可选配置字段，不能当作原定正式模板已恢复。
+- 新增部署前检查：deploy 的 plan/activate 都在封装和 Host 配置写入前复用 authority_capability(will_wipe=False, apply=False)，发现不同 Owner 世代或 state_id 即拒绝。真机 dry-run 已证明 generation 8/9 不一致会提前失败；没有生成该检查专用的候选版本。相关控制器测试 114 passed，最终全量 **1,099 passed（77.97 秒）**，Ruff 通过。
+- 最终正常发布仍需明确身份选择：保留该板现有 generation 8 数据/配对，或接受 Authority 重新初始化及已有 Claim/配对失效。不能通过回退工作站 generation 9、自动签发 generation 8 材料或绕过新门禁来声称部署通过。已向用户提交该选择；其到来前只继续只读检查与已授权的重启验证。
+
+- 重启验证已完成：通过 Wi-Fi 发出 reboot，重连后 boot_id 已改变；随后 Wi-Fi App-ready 的 24 项检查全部为 true。未执行手机真实语音对话、插话或逐项 Memory 功能测试，不能将服务就绪等同于端到端体验通过。

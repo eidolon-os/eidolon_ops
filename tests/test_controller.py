@@ -556,6 +556,7 @@ def _app() -> AppAccess:
 
 @pytest.fixture
 def setup_controller(config):
+    config.install_files["host_identity"].write_bytes(b"a" * 32)
     runner = ControllerRunner(config)
     transport = FakeTransport()
     controller = EidolonPiController(config, runner, transport=transport)
@@ -2416,6 +2417,7 @@ def test_allow_dirty_ships_the_committed_head_and_tells_the_host_it_did(config) 
 
     controller = _dirty_controller(config, allow_dirty=True)
     controller.host_layer.app = _app()
+    config.install_files["host_identity"].write_bytes(b"a" * 32)
     controller.host_layer.refresh = lambda release_id: {"status": "refreshed"}
     controller.releases._app_ready = lambda: {"status": "app_ready"}
 
@@ -2682,6 +2684,28 @@ def test_a_host_whose_hub_names_another_authority_is_refused_not_overwritten(
 
     with pytest.raises(OperationsError, match="AuthorityRecoveryRequired"):
         controller.authority_capability(will_wipe=False, apply=True)
+
+
+@pytest.mark.parametrize("activate", [False, True])
+def test_deploy_refuses_a_replacement_boards_different_owner_generation(config, activate):
+    transport = FakeTransport()
+    controller = _authority_controller(config, transport)
+    spent = _consume(controller)
+    previous = {
+        **spent,
+        "owner_domain_generation": spent["owner_domain_generation"] + 1,
+        "state_id": "authority-state_another-board",
+    }
+    transport.overrides["authority-lineage"] = {
+        "status": "observed", "marker": previous,
+        "anchor": previous, "established": previous,
+    }
+    with pytest.raises(OperationsError, match="AuthorityRecoveryRequired"):
+        controller.deploy(release_id="r1", resume=True, activate=activate)
+    assert _material_state(controller)["owner_domain_generation"] == spent["owner_domain_generation"]
+    actions = [call[0] for call in transport.agent_calls]
+    assert "authority-lineage" in actions
+    assert not {"release-cutover-snapshot", "refresh-host-application", "guard-upload"} & set(actions)
 
 
 def test_a_capability_the_host_proved_it_used_is_not_read_as_unconsumed(config) -> None:

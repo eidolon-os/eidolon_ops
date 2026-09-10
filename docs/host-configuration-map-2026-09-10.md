@@ -141,3 +141,8 @@ Pi 新机链路现在是：外部刷好 OS → bring-up 交付 → 板子启动/
 | 模型与配置备份 | 按其已有配置 | 本文第 3、5 节的云端正式路由、本地能力和备份引用问题仍成立 |
 
 已移除“从 YAML 的 node_ip 或旧日志证明 LiveKit 网络可用”的做法，但新门禁仍不等于手机 WebRTC 真机验证。本轮已让无默认路由、多候选场景报告歧义而不选择数字最小的 IP；已有显式 app.lan_ipv4 是解决此类歧义的配置入口。工作树修复与真机结果分别记录，不能混为线上已全部生效。
+
+
+## 10. 本次 Pi5 换板验证补充
+
+同一 Host identity 和 Owner root 仍可能对应不同 Authority generation/state_id。本次板上为 generation 8、工作站为 9；普通 deploy 刷新派生配置前必须先校验谱系。已在 ReleaseTransaction.deploy 复用 controller.authority_capability；不一致时应保留现有数据并选择恢复/重建流程，不能通过覆盖 generated/hub.yaml 或回退工作站 Owner state 代替明确的恢复决策。现场结果见[真机记录](pi5-optimization-validation-2026-09-10.md)。

@@ -338,3 +338,8 @@ P0 不必等 P1 的大范围拓扑收敛完成。优先做几个小而可验收�
 | 链路 | Pi 默认允许普通 LAN/Wi-Fi，有线可达时优先；保留显式强制有线选项，OPi 原策略不变；删除将历史带宽当作当前事实的发布提示 |
 
 实际板子有旧产品数据，不能按空白新机清盘。现已核对身份、保存在线权威备份和完整停服状态快照，并恢复旧服务。候选升级要求 Bootstrap schema 7→9、forward-only；是否已激活及完整真机验收结果以独立验证记录为准，不能由“代码修复完成”推断“整机测试完成”。
+
+
+### 10.1 真机追加发现：换板的 Authority 世代不能由 Host identity 推断
+
+授权部署后发现板上 generation 8 与工作站 generation 9 混用，原 deploy 到 Hub 启动阶段才拒绝，已补充部署前的 authority_capability 检查并以真实换板状态验证提前拒绝。原四项修复已提交 `036f400`；此次追加修复及现场结果见[真机记录](pi5-optimization-validation-2026-09-10.md)。Host 身份、Owner root 相同，也必须进一步核对 generation 与 state_id；不允许普通更新隐式重置 Authority。

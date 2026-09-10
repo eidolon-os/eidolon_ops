@@ -145,6 +145,13 @@ class ReleaseTransaction:
         # deploy after deploy reported success. Refusing here rather than warning,
         # because a warning in a release log is a thing nobody reads twice.
         local["install_input_contract"] = self._require_declared_credentials()
+        if self.host_layer.app is not None:
+            # A replacement board can share the Host key material yet retain a
+            # different Owner generation. Refuse that mismatch before preparing
+            # a candidate or overwriting its Hub settings and signed directory.
+            local["owner_authority_contract"] = self._authority_capability(
+                will_wipe=False, apply=False
+            )
         # Said before the bundle is sealed, not after something fails.
         #
         # A release is defined by what the repositories hold, which removed the
