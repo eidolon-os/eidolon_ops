@@ -1563,6 +1563,7 @@ def test_controller_reset_rejects_output_that_is_not_bootstrap_evidence(
 def test_a_host_without_a_declared_address_reports_the_one_it_has(monkeypatch) -> None:
     """An address a Host once had says nothing about reaching it now."""
 
+    monkeypatch.setattr(app_contract, "host_addresses", lambda: {"192.168.1.26"})
     monkeypatch.setattr(
         primitives,
         "run",
@@ -1581,7 +1582,7 @@ def test_a_host_with_no_routable_address_fails_closed(monkeypatch) -> None:
         lambda command, **kwargs: subprocess.CompletedProcess(command, 1, "", "unreachable"),
     )
 
-    with pytest.raises(TargetError, match="no routable IPv4"):
+    with pytest.raises(TargetError, match="no usable private IPv4"):
         app_contract.observed_lan_address()
 
 
@@ -1594,7 +1595,7 @@ def test_a_loopback_default_route_is_refused(monkeypatch) -> None:
         ),
     )
 
-    with pytest.raises(TargetError, match="must be private IPv4"):
+    with pytest.raises(TargetError, match="no usable private IPv4"):
         app_contract.observed_lan_address()
 
 
@@ -2836,3 +2837,12 @@ def test_a_database_without_its_anchor_is_reported_but_not_called_established(
     assert observed["marker"] == lineage
     assert observed["anchor"] is None
     assert observed["established"] is None
+
+
+def test_isolated_lan_needs_no_default_route(monkeypatch):
+    monkeypatch.setattr(primitives, "run", lambda command, **_kwargs:
+        subprocess.CompletedProcess(command, 1, "", "no route"))
+    monkeypatch.setattr(app_contract, "host_addresses", lambda: {
+        "127.0.0.1", "169.254.1.1", "192.168.1.37",
+    })
+    assert str(app_contract.observed_lan_address()) == "192.168.1.37"

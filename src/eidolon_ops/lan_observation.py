@@ -8,6 +8,7 @@ for a line in a log.
 
 from __future__ import annotations
 
+import ipaddress
 import re
 
 from eidolon_ops.process import ProcessRunner
@@ -25,6 +26,10 @@ def observed_lan_address(runner: ProcessRunner, addresses: set[str] | None = Non
 
     if addresses is None:
         addresses = interface_addresses(runner)
+    addresses = {value for value in addresses if not (
+        ipaddress.ip_address(value).is_loopback or ipaddress.ip_address(value).is_link_local
+        or ipaddress.ip_address(value).is_unspecified or ipaddress.ip_address(value).is_multicast
+    )}
     route = runner.run(("/sbin/route", "-n", "get", "default"), timeout=10)
     interface = ""
     for line in route.stdout.splitlines():
@@ -35,9 +40,9 @@ def observed_lan_address(runner: ProcessRunner, addresses: set[str] | None = Non
     if interface:
         detail = runner.run(("ifconfig", interface), timeout=10)
         found = _INET.search(detail.stdout)
-        if found is not None:
+        if found is not None and found.group(1) in addresses:
             return found.group(1)
-    routable = sorted(value for value in addresses if not value.startswith("127."))
+    routable = sorted(addresses, key=lambda value: int(ipaddress.ip_address(value)))
     return routable[0] if routable else ""
 
 

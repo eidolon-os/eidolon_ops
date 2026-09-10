@@ -17,25 +17,36 @@ from .primitives import TargetError
 
 
 def observed_lan_address() -> IPv4Address:
-    """The address this Host currently answers on, read from its default route."""
+    """A current local IPv4 candidate; default egress is only a preference."""
 
     route = primitives.run(("/usr/sbin/ip", "-4", "route", "get", "1.1.1.1"), timeout=15)
     if route.returncode != 0:
         route = primitives.run(("/sbin/ip", "-4", "route", "get", "1.1.1.1"), timeout=15)
     found = re.search(r"\bsrc\s+(\d+\.\d+\.\d+\.\d+)\b", route.stdout)
-    if found is None:
-        raise TargetError("Host has no routable IPv4 address")
-    address = ip_address(found.group(1))
-    if not isinstance(address, IPv4Address) or not address.is_private or address.is_loopback:
-        raise TargetError("Host default route address must be private IPv4")
-    return address
+    addresses = host_addresses()
+    usable = []
+    for value in addresses:
+        address = ip_address(value)
+        if (isinstance(address, IPv4Address) and address.is_private
+                and not address.is_loopback and not address.is_link_local
+                and not address.is_unspecified and not address.is_multicast):
+            usable.append(address)
+    usable.sort(key=int)
+    preferred = found.group(1) if found else None
+    for address in usable:
+        if str(address) == preferred:
+            return address
+    if usable:
+        return usable[0]
+    raise TargetError("Host has no usable private IPv4 interface address")
+
 
 def host_addresses() -> set[str]:
-    """Every IPv4 address this Host currently holds."""
+    """IPv4 addresses on interfaces the Host currently has up."""
 
-    result = primitives.run(("/usr/sbin/ip", "-4", "-o", "addr", "show"), timeout=15)
+    result = primitives.run(("/usr/sbin/ip", "-4", "-o", "addr", "show", "up"), timeout=15)
     if result.returncode != 0:
-        result = primitives.run(("/sbin/ip", "-4", "-o", "addr", "show"), timeout=15)
+        result = primitives.run(("/sbin/ip", "-4", "-o", "addr", "show", "up"), timeout=15)
     return set(re.findall(r"\binet\s+(\d+\.\d+\.\d+\.\d+)", result.stdout))
 
 def fixed_app(payload: Mapping[str, object]) -> dict[str, object]:
