@@ -45,6 +45,7 @@ READINESS_FACTS = (
     "device_removal_available",
     "hub_mdns_service",
     "local_api_mdns_service",
+    "livekit_network_current",
 )
 
 #: Which of the Local API's setup answers mean a phone could finish setup.
@@ -439,6 +440,9 @@ def app_ready(payload: Mapping[str, object]) -> dict[str, object]:
         },
         "exhausted": budget.exhausted(),
     }
+    media_service = primitives.unix_http_json(
+        Path("/run/eidolon/system.sock"), "/api/system/v1/services/livekit"
+    ) or {}
     checks = {
         "backend_healthy": all(
             value.get("ActiveState") == "active" and value.get("SubState") == "running"
@@ -527,6 +531,13 @@ def app_ready(payload: Mapping[str, object]) -> dict[str, object]:
             for fields in local_api_records
         ),
     }
+    # A reachable signalling socket cannot attest the running ICE transport.
+    # Older daemons/manifests must fail closed rather than imply freshness.
+    checks["livekit_network_current"] = (
+        media_service.get("service_id") == "livekit"
+        and media_service.get("runtime_state") == "ready"
+        and media_service.get("network_current") is True
+    )
     if tuple(checks) != READINESS_FACTS:
         raise TargetError("readiness report does not match the declared check set")
     return {
@@ -543,6 +554,7 @@ def app_ready(payload: Mapping[str, object]) -> dict[str, object]:
         "setup": setup,
         "hub_health": hub_health,
         "channel_worker": {**channel, "livekit_link": link},
+        "livekit_service": media_service,
         "waiting": waiting,
         "resolution": sorted(resolved),
         "mdns": {

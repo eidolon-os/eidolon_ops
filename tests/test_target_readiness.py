@@ -273,6 +273,9 @@ def _healthy_local_api(path: str) -> dict[str, object]:
 
 def _healthy_probe(monkeypatch, app: dict[str, object], tmp_path: Path) -> None:
     """Every readiness input reporting health, so one test can spoil exactly one."""
+    monkeypatch.setattr(primitives, "unix_http_json", lambda *_a: {
+        "service_id": "livekit", "runtime_state": "ready", "network_current": True,
+    })
 
     _materialize(monkeypatch, tmp_path / "host", app)
     monkeypatch.setattr(primitives, "private_file_check", lambda *_a, **_k: {"healthy": True})
@@ -340,6 +343,9 @@ def test_a_hub_that_cannot_admit_a_device_fails_the_gate(
     admitting nothing.
     """
 
+    monkeypatch.setattr(primitives, "unix_http_json", lambda *_a: {
+        "service_id": "livekit", "runtime_state": "ready", "network_current": True,
+    })
     app = _app()
     _materialize(monkeypatch, tmp_path / "host", app)
     monkeypatch.setattr(primitives, "private_file_check", lambda *_a, **_k: {"healthy": True})
@@ -796,3 +802,23 @@ def test_a_name_that_answers_with_the_other_interface_is_ready(
     report = probe.app_ready(_payload(app))
 
     assert report["checks"]["lan_name_resolves"] is True
+
+
+@pytest.mark.parametrize("service", [
+    None, {},
+    {"service_id": "livekit", "runtime_state": "ready"},
+    {"service_id": "livekit", "runtime_state": "ready", "network_current": False},
+    {"service_id": "livekit", "runtime_state": "starting", "network_current": True},
+    {"service_id": "nats", "runtime_state": "ready", "network_current": True},
+])
+def test_livekit_network_must_be_attested_even_when_signalling_is_healthy(
+    monkeypatch, tmp_path, bootstrap_socket, service,
+):
+    app = _app()
+    _healthy_probe(monkeypatch, app, tmp_path)
+    monkeypatch.setattr(primitives, "unix_http_json", lambda *_a: service)
+    result = probe.app_ready(_payload(app))
+    assert result["status"] == "degraded"
+    assert [name for name, ok in result["checks"].items() if not ok] == [
+        "livekit_network_current"
+    ]

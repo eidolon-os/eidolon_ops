@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from eidolon_ops import lan_observation, probes
+from eidolon_ops.hostagent import primitives
 from eidolon_ops.process import ProcessResult
 
 pytestmark = pytest.mark.unit
@@ -152,7 +153,8 @@ def test_a_published_name_is_resolved_rather_than_read_out_of_a_log() -> None:
     assert any(call[0] == "dscacheutil" for call in runner.calls)
 
 
-def test_unix_json_reads_real_service_response(tmp_path: Path) -> None:
+@pytest.mark.parametrize("reader", [probes.unix_http_json, primitives.unix_http_json])
+def test_unix_json_reads_real_service_response(tmp_path: Path, reader) -> None:
     import socket
     import tempfile
     import threading
@@ -169,11 +171,11 @@ def test_unix_json_reads_real_service_response(tmp_path: Path) -> None:
                 client.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: " + str(len(body)).encode() + b"\r\n\r\n" + body)
         thread = threading.Thread(target=serve, daemon=True)
         thread.start()
-        result = probes.unix_http_json(path, "/api/system/v1/services/livekit")
+        result = reader(path, "/api/system/v1/services/livekit")
         thread.join(timeout=3)
         assert result["runtime_state"] == "degraded"
     short.cleanup()
-    assert probes.unix_http_json(tmp_path / "missing", "/health") is None
+    assert reader(tmp_path / "missing", "/health") is None
 
 
 def test_the_delivered_agent_carries_every_module_of_the_package() -> None:

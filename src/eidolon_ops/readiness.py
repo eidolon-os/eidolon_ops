@@ -236,8 +236,7 @@ READINESS_CONTRACT: tuple[ReadinessCheck, ...] = (
         ReadinessFact.LOCAL_API_MDNS_SERVICE,
         "the Local API service record is published",
     ),
-    _only(
-        HostKind.SOURCE,
+    _both(
         ReadinessFact.LIVEKIT_NETWORK_CURRENT,
         "eidolond reports LiveKit running on the network it is configured for",
     ),
