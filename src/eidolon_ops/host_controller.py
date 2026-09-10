@@ -370,12 +370,6 @@ class HostController:
         report = release.controller_reset(apply=apply)
         return self._planned_or_applied(plan, report, applied=apply)
 
-    def authority_reset(self, *, apply: bool) -> Evidence:
-        plan = plans.authority_reset(self.profile.host_id, apply=apply)
-        release = self.adapter.require_release(Capability.AUTHORITY_RESET)
-        report = release.authority_reset(apply=apply)
-        return self._planned_or_applied(plan, report, applied=apply)
-
     def diagnose(self, *, output: Path) -> Evidence:
         plan = plans.diagnose(self.profile.host_id)
         release = self.adapter.require_release(Capability.DIAGNOSE)

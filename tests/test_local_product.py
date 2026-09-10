@@ -812,6 +812,9 @@ def _started_source_run(product: LocalProductSource) -> dict[str, object]:
     against what Hub left behind.
     """
 
+    if not product._host_identity_path().exists():
+        product._make_roots()
+        product._adopt_host_identity(product.config.install_files["host_identity"].parent)
     product._ensure_hub_tls_identity()
     lineage = _established_hub_authority(product)
     recorded = product.commit_owner_authority()
@@ -820,31 +823,17 @@ def _started_source_run(product: LocalProductSource) -> dict[str, object]:
     return lineage
 
 
-def test_a_wiped_source_run_rebuilds_its_authority_at_a_new_generation(
-    tmp_path: Path,
+def test_explicit_source_reset_creates_a_new_host_and_owner(
+    tmp_path: Path, config,
 ) -> None:
-    """``reset --wipe-authority-data`` + ``start`` is a ResetAuthority.
 
-    It destroys the Hub database and the lineage anchor while keeping the Owner
-    material that issued them, and nothing on this path used to say so. The
-    Owner material stayed ``bootstrap_pending`` at generation 1 forever, so
-    every wipe re-derived a byte-identical capability — same generation, same
-    state id — and the empty Hub wrote back the very marker just destroyed.
-    《设备生命周期状态机与恢复边》§3.6.1 forbids exactly that: a second, empty
-    Authority state behind the anti-rollback fence every prior Claim,
-    credential and database backup was issued under, indistinguishable from the
-    new authority.
-
-    The Owner Domain itself must survive all of it — the workstation root key is
-    deliberately kept — so what has to move is the generation and the state id,
-    and only those.
-    """
 
     product = _product(tmp_path, foundation_mode="external")
     _with_sources(product, tmp_path)
     product.profile.paths.config_root.mkdir(parents=True, exist_ok=True)
     product.profile.paths.config_root.chmod(0o700)
 
+    _with_reset_inputs(product, config, tmp_path)
     first = _started_source_run(product)
     product.reset(wipe_authority_data=True, apply=True)
     second = _started_source_run(product)
@@ -852,13 +841,13 @@ def test_a_wiped_source_run_rebuilds_its_authority_at_a_new_generation(
     third = _started_source_run(product)
 
     rebuilt = (first, second, third)
-    assert len({lineage["owner_domain_id"] for lineage in rebuilt}) == 1
-    assert [lineage["owner_domain_generation"] for lineage in rebuilt] == [1, 2, 3]
+    assert len({lineage["owner_domain_id"] for lineage in rebuilt}) == 3
+    assert [lineage["owner_domain_generation"] for lineage in rebuilt] == [1, 1, 1]
     assert len({lineage["state_id"] for lineage in rebuilt}) == 3
     # And the generation the Host is actually told about moved with it: the
     # signed descriptor, not just the controller-side journal.
-    assert product._owner_domain_generation() == 3
-    assert product._owner_domain_id() == first["owner_domain_id"]
+    assert product._owner_domain_generation() == 1
+    assert product._owner_domain_id() != first["owner_domain_id"]
 
 
 def test_a_bootstrapped_source_run_is_not_left_pending_a_reset_authority(
@@ -935,7 +924,7 @@ def test_a_source_run_refuses_to_start_over_an_authority_it_cannot_account_for(
 
     _write_hub_marker(product, {**lineage, "state_id": "authority-state_someone-else"})
 
-    with pytest.raises(OperationsError, match="AuthorityRecoveryRequired"):
+    with pytest.raises(OperationsError, match=r"AuthorityRecoveryRequired|AUTHORITY_RECOVERY_REQUIRED"):
         product._ensure_hub_tls_identity()
 
 
@@ -997,7 +986,7 @@ def test_reset_clears_what_it_generated_and_keeps_what_it_did_not(tmp_path: Path
     assert product._owner_domain_generation() == established["owner_domain_generation"]
 
 
-def test_reset_adds_the_authority_data_only_when_asked(tmp_path: Path) -> None:
+def test_reset_adds_the_authority_data_only_when_asked(tmp_path: Path, config) -> None:
     product = _product(tmp_path, foundation_mode="external")
     _with_sources(product, tmp_path)
     paths = product.profile.paths
@@ -1012,13 +1001,16 @@ def test_reset_adds_the_authority_data_only_when_asked(tmp_path: Path) -> None:
     assert str(paths.state_root) in plan["targets"]
     assert str(paths.state_root) not in plan["kept"]
 
+    _with_reset_inputs(product, config, tmp_path)
     product.reset(wipe_authority_data=True, apply=True)
 
     assert not database.exists()
     # This is the recovery for a Host behind the schema, and it must not also
     # retire the Owner: prepare has to come back to the same domain.
+    product._make_roots()
+    product._adopt_host_identity(product.config.install_files["host_identity"].parent)
     product._ensure_hub_tls_identity()
-    assert product._owner_domain_id() == owner_before
+    assert product._owner_domain_id() != owner_before
 
 
 def test_reset_refuses_to_reach_code_or_anything_outside_the_profile(tmp_path: Path) -> None:
@@ -1162,3 +1154,28 @@ def test_the_mac_says_so_when_no_kernel_can_be_asked(tmp_path: Path) -> None:
 
     with pytest.raises(OperationsError, match="Kernel schema inspection failed"):
         product.kernel_schema_reset(apply=False, forget_selections=None)
+
+
+def _with_reset_inputs(product, config, tmp_path):
+    from types import SimpleNamespace
+
+    from test_install_inputs import _config_for_init, _settings_reader
+
+    from eidolon_ops.install_inputs import initialize_install_inputs
+    configured = _config_for_init(config, tmp_path)
+    initialize_install_inputs(configured, _settings_reader)
+    product.config = configured
+    product._sources = SimpleNamespace(resolved_config=lambda: configured)
+    product._read_exact_file = _settings_reader
+
+
+def test_accidentally_lost_source_authority_never_rebuilds(tmp_path):
+    product = _product(tmp_path, foundation_mode="external")
+    _started_source_run(product)
+    root = product._owner_material_root()
+    before = {p.name: p.read_bytes() for p in root.iterdir()}
+    product._hub_database_path().unlink()
+    product._authority_anchor_path().unlink()
+    with pytest.raises(OperationsError, match=r"AuthorityRecoveryRequired|AUTHORITY_RECOVERY_REQUIRED"):
+        product._ensure_hub_tls_identity()
+    assert {p.name: p.read_bytes() for p in root.iterdir()} == before

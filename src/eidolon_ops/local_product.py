@@ -24,7 +24,7 @@ from eidolon_ops.host_identity import (
     livekit_client_url,
     livekit_client_url_at,
 )
-from eidolon_ops.hostagent.authority_reset import lineage_evidence
+from eidolon_ops.hostagent.authority_state import lineage_evidence
 from eidolon_ops.hostagent.kernel_schema import (
     absent_document,
     acknowledged_selections,
@@ -42,6 +42,7 @@ from eidolon_ops.hub_assets import (
     hub_settings_template,
     render_hub_settings,
 )
+from eidolon_ops.identity_replacement import replacement_inputs
 from eidolon_ops.install_inputs import validate_install_input_contract
 from eidolon_ops.owner_domain_assets import (
     AuthorityDecision,
@@ -52,9 +53,6 @@ from eidolon_ops.owner_domain_assets import (
     decide_owner_authority,
     ensure_owner_domain_assets,
     mark_authority_bootstrapped,
-)
-from eidolon_ops.owner_domain_assets import (
-    reset_owner_authority as advance_owner_authority,
 )
 from eidolon_ops.paths import AppAccess, HostProfile
 from eidolon_ops.private_files import atomic_private_file
@@ -202,8 +200,8 @@ class LocalProductSource:
 
         The narrow half of ``reset --wipe-authority-data``, and the reason this
         profile needed one. That flag is what a Host behind the Kernel schema had
-        to reach for, and it destroys every authority on the machine and advances
-        the Owner Domain generation — voiding every Claim — to move one file. Here
+        to reach for, and it destroys every authority on the machine and replaces
+        the Host/Owner identity — requiring new pairing — to move one file. Here
         the same Host loses one file, and keeps it.
 
         The workstation runs the Kernel out of its own worktree, so "the installed
@@ -288,49 +286,7 @@ class LocalProductSource:
     # -- reset ---------------------------------------------------------------
 
     def reset(self, *, wipe_authority_data: bool, apply: bool) -> dict[str, object]:
-        """Clear what this profile generated, and only that.
-
-        The product Host has had this since the day it could be installed, and
-        it is the missing half of a source run: Kernel and Hub both refuse to
-        migrate a database they do not recognize — deliberately, since a guessed
-        migration of an authority is worse than a refusal — so a Host that falls
-        behind the schema cannot start and cannot be repaired. The only way out
-        was to know which sqlite files to move aside by hand.
-
-        What is cleared and what is kept are different questions from the Pi's,
-        because the two Hosts hold different things in the same roles:
-
-        * The code is the operator's own worktrees, not an installed release.
-          Nothing here may touch them, and that is asserted rather than assumed.
-        * ``owner-domain-private`` is this Host's Owner root key — the workstation
-          material, which on a Pi install lives on the workstation and no reset
-          deletes. Keeping it means a reset re-derives the same Owner Domain
-          instead of quietly minting a new one that every enrolled device would
-          then fail to recognize.
-        * The Host identity under the Bootstrap roots is a separate ownership
-          boundary on both Hosts, and stays. Retiring it is what
-          ``init-inputs --new-identity`` is for.
-
-        ``wipe_authority_data`` adds the state root: the system database, Hub,
-        Kernel, Agent, Memory, NATS and the rest. That is the flag for a Host
-        behind the schema, and it is irreversible.
-
-        Nothing in the Bootstrap root has to be reached for this to leave a
-        coherent Host, which is a property rather than an accident: Bootstrap
-        records only what it can know by itself, so destroying the Data
-        authority cannot leave it asserting something about a Workspace. It
-        used to keep an Owner binding through exactly this operation, and a
-        Host that had been through it refused every phone at setup forever.
-
-        Irreversible in one more way than the file list shows. The state root is
-        where this Host keeps both halves of its Owner Authority lineage
-        evidence, so wiping it *is* a ``ResetAuthority``, and the next
-        ``prepare`` advances ``owner_domain_generation`` accordingly — see
-        ``_decided_owner_authority``. Every Claim and running credential issued
-        under the destroyed generation is thereby void, which is the point of
-        advancing rather than the cost of it: fenced off, they cannot be
-        mistaken for the new authority's.
-        """
+        """Clear generated files, or explicitly reset the whole Host including identity."""
 
         paths = self.profile.paths
         generated = [
@@ -342,8 +298,9 @@ class LocalProductSource:
             paths.runtime_root,
         ]
         authority = [paths.state_root] if wipe_authority_data else []
-        targets = [*generated, *authority]
-        self._require_removable(targets)
+        bootstrap = [paths.bootstrap_state_root, paths.bootstrap_runtime_root] if wipe_authority_data else []
+        targets = [*generated, *authority, *bootstrap]
+        self._require_removable(targets, include_bootstrap=wipe_authority_data)
         present = [path for path in targets if path.exists() or path.is_symlink()]
         report: dict[str, object] = {
             "profile": "product-source",
@@ -351,9 +308,8 @@ class LocalProductSource:
             "targets": [str(path) for path in targets],
             "present": [str(path) for path in present],
             "kept": [
-                str(self._owner_material_root()),
-                str(paths.bootstrap_state_root),
-                str(paths.bootstrap_runtime_root),
+                *([] if wipe_authority_data else [str(self._owner_material_root())]),
+                *([] if wipe_authority_data else [str(paths.bootstrap_state_root), str(paths.bootstrap_runtime_root)]),
                 str(paths.log_root),
                 str(paths.cache_root),
                 *(
@@ -362,28 +318,33 @@ class LocalProductSource:
                     else [str(paths.state_root)]
                 ),
             ],
-            "note": (
-                "the Owner Domain private material and the Host identity are kept, so "
-                "prepare re-derives the same Owner Domain and the same Host name"
-                + (
-                    "; the Authority state behind them is destroyed, so prepare "
-                    "advances owner_domain_generation and every existing device "
-                    "Claim and credential becomes void"
-                    if wipe_authority_data
-                    else ""
-                )
-            ),
+            "note": ("creates a new Host/Owner; Mobile and devices must pair again"
+                     if wipe_authority_data else "identity and all authorization state are preserved"),
         }
         if not apply:
             return {**report, "status": "planned"}
-        for path in present:
-            if path.is_dir() and not path.is_symlink():
-                shutil.rmtree(path)
-            else:
-                path.unlink()
-        return {**report, "status": "reset", "removed": [str(path) for path in present]}
+        def remove_present():
+            for path in present:
+                if path.is_dir() and not path.is_symlink():
+                    shutil.rmtree(path)
+                else:
+                    path.unlink()
 
-    def _require_removable(self, targets: Sequence[Path]) -> None:
+        identity = None
+        if wipe_authority_data:
+            with replacement_inputs(
+                self.sources.resolved_config(), self._read_exact_file,
+                owner_root=self._owner_material_root(), port=self._require_app_access().hub_https_port,
+            ) as replacement:
+                # New inputs are complete before deleting any user state.
+                remove_present()
+                identity = replacement.commit()
+        else:
+            remove_present()
+        return {**report, "status": "reset", "removed": [str(path) for path in present],
+                **({"identity": identity} if identity is not None else {})}
+
+    def _require_removable(self, targets: Sequence[Path], *, include_bootstrap: bool = False) -> None:
         """Prove nothing here can reach code or an unrelated tree.
 
         A source run's roots live inside the workspace that holds the eight
@@ -397,8 +358,7 @@ class LocalProductSource:
             paths.install_root,
             paths.current_root,
             self._owner_material_root(),
-            paths.bootstrap_state_root,
-            paths.bootstrap_runtime_root,
+            *([] if include_bootstrap else [paths.bootstrap_state_root, paths.bootstrap_runtime_root]),
             *(Path(source.path) for source in self.config.sources.values()),
         ]
         for target in targets:
@@ -410,7 +370,8 @@ class LocalProductSource:
                     )
             if not any(
                 target == root or target.is_relative_to(root)
-                for root in (paths.config_root, paths.runtime_root, paths.state_root)
+                for root in (paths.config_root, paths.runtime_root, paths.state_root,
+                             *([paths.bootstrap_state_root, paths.bootstrap_runtime_root] if include_bootstrap else []))
             ):
                 raise OperationsError(
                     f"a source-run reset target is outside this profile's roots: {target}"
@@ -950,31 +911,11 @@ class LocalProductSource:
             raise OperationsError(f"Mac Owner Authority lineage is unreadable: {exc}") from exc
 
     def _decided_owner_authority(self, current: OwnerDomainAssets) -> OwnerDomainAssets:
-        """Advance the Owner Authority generation when this Host's state is gone.
-
-        ``reset --wipe-authority-data`` destroys the state root, which is where
-        this Host keeps both halves of its Authority lineage evidence — the Hub
-        database marker and the external anchor — while deliberately keeping the
-        Owner material that issued them. That combination is a
-        ``ResetAuthority`` in fact, and nothing here used to say so: the Owner
-        material stayed ``bootstrap_pending`` at generation 1 forever, so every
-        wipe-and-start re-derived a byte-identical capability and an empty Hub
-        wrote back the very marker that had just been destroyed. 《设备生命周期
-        状态机与恢复边》§3.6.1 forbids exactly that — a second, empty Authority
-        state behind the anti-rollback fence every prior Claim, credential and
-        database backup was issued under — and says so for any operation that
-        destroys Hub Authority state, whatever the command is called.
-
-        The rules are the ones :func:`decide_owner_authority` states for every
-        such operation. Only two of them do work here, and both do it before a
-        descriptor or capability naming the result is rendered, let alone
-        placed: recording a capability this Host can prove it used, and
-        advancing past one whose state is gone. There is no ``will_wipe`` on
-        this path — a source run wipes and starts as two commands, so by the
-        time this runs the database really is absent rather than doomed.
-        """
+        """Preserve established identity; missing authorization requires recovery."""
 
         observed = self._observed_authority_lineage()
+        if observed["anchor"] is not None and observed["marker"] != observed["anchor"]:
+            raise OperationsError("AUTHORITY_RECOVERY_REQUIRED: database and saved authorization state disagree; restore the complete backup")
         decision = decide_owner_authority(
             current, marker=observed["marker"], established=observed["established"]
         )
@@ -987,24 +928,7 @@ class LocalProductSource:
             raise OperationsError(
                 self._authority_recovery_required(observed["marker"], current)
             )
-        if decision is not AuthorityDecision.ADVANCE_GENERATION:
-            return current
-        try:
-            # The same CAS primitive authority-reset uses: the new lineage is
-            # persisted before anything naming it is issued.
-            advance_owner_authority(
-                self._owner_material_root(),
-                expected_owner_domain_id=current.owner_domain_id,
-                expected_generation=current.owner_domain_generation,
-            )
-        except OwnerDomainAssetError as exc:
-            raise OperationsError(f"Mac Owner Authority reset failed: {exc}") from exc
-        advanced = self._issue_owner_domain_assets()
-        if not advanced.bootstrap_pending:
-            raise OperationsError(
-                "Mac Owner Authority rebuild has no pending bootstrap capability"
-            )
-        return advanced
+        return current
 
     def commit_owner_authority(self) -> dict[str, object]:
         """Record the one-shot capability as spent, against this Host's proof.
@@ -1026,6 +950,8 @@ class LocalProductSource:
 
         current = self._issue_owner_domain_assets()
         observed = self._observed_authority_lineage()
+        if observed["anchor"] is not None and observed["marker"] != observed["anchor"]:
+            raise OperationsError("AUTHORITY_RECOVERY_REQUIRED: database and saved authorization state disagree; restore the complete backup")
         decision = decide_owner_authority(
             current, marker=observed["marker"], established=observed["established"]
         )
@@ -1067,9 +993,7 @@ class LocalProductSource:
             authority_lineage(current),
             remedy=(
                 "A source run must not start past that. Restore the matching Hub "
-                "state, or rebuild deliberately with reset --wipe-authority-data "
-                "--apply, which advances the Owner Authority generation at the "
-                "next start."
+                "state, or explicitly create a new Host with reset --wipe-authority-data --apply."
             ),
         )
 

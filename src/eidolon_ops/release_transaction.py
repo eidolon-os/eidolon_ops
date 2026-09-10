@@ -37,16 +37,8 @@ _INSTALL_MUTATIONS = (
 )
 _RESET_MUTATIONS = (
     "stop and remove the existing Eidolon deployment",
-    "permanently wipe Eidolon and Bootstrap authority data",
+    "permanently wipe Eidolon and Bootstrap authority data and create a new Host/Owner",
 )
-#: Named separately because it is the one mutation an operator cannot undo by
-#: reinstalling: the Owner Domain's anti-rollback fence moves, and every Claim,
-#: credential and Authority backup issued under the old generation is void.
-_AUTHORITY_REBUILD_MUTATIONS = (
-    "advance owner_domain_generation and void every existing device Claim",
-)
-
-
 #: The transport must never be the first thing to give up on a deploy. A Host
 #: can legitimately spend its 300s readiness gate and then, if that gate fails,
 #: another 300s waiting for the release its rollback restores. Anything shorter
@@ -642,7 +634,8 @@ class ReleaseTransaction:
             local = self.preflight.run(require_install_files=False)
             foundation = self._provision(apply=False)
             reset = self._reset(wipe_authority_data=True, apply=False) if reset_existing else None
-            authority = self._authority_capability(will_wipe=reset_existing, apply=False)
+            authority = ({"decision": "new_host_identity"} if reset_existing
+                         else self._authority_capability(will_wipe=False, apply=False))
             return {
                 "status": "planned",
                 "release_id": release_id,
@@ -652,22 +645,14 @@ class ReleaseTransaction:
                 "authority": authority,
                 "mutations": [
                     *(_RESET_MUTATIONS if reset_existing else ()),
-                    *(
-                        _AUTHORITY_REBUILD_MUTATIONS
-                        if authority is not None
-                        and authority.get("decision") == "advance_generation"
-                        else ()
-                    ),
                     *_INSTALL_MUTATIONS,
                 ],
                 "next": "rerun with --apply after reviewing every planned mutation",
             }
         local = self.preflight.run(require_install_files=True)
         local["link"] = self._release_link_report()
-        # Decided before the Host is touched, and before a single asset is
-        # rendered from the Owner material: the descriptor, the bootstrap
-        # capability and local-api.env all name whichever generation this
-        # returns.
+        # Prepare local release inputs before a destructive reset. The reset
+        # stages fresh identity material before wiping; installation then uses it.
         phases = Journal(self.progress)
         if reset_existing:
             phases.begin("replacement_inputs")
@@ -675,7 +660,6 @@ class ReleaseTransaction:
                 release_id, reuse=resume,
             )})
             resume = True
-        authority = self._authority_capability(will_wipe=reset_existing, apply=True)
         if reset_existing:
             phases.begin("reset_existing")
             phases.append(
@@ -684,6 +668,7 @@ class ReleaseTransaction:
                     "result": self._reset(wipe_authority_data=True, apply=True),
                 }
             )
+        authority = self._authority_capability(will_wipe=False, apply=True)
         # The foundation is installed here but reported under its own key, so
         # it is announced as work in flight and never recorded as a phase: the
         # phase list is the plan's vocabulary, and the plan does not name it.

@@ -90,13 +90,13 @@ def _stage(root: Path, *, generation: int = 2) -> dict[str, object]:
 
 def test_restore_authority_preserves_complete_same_generation_state(tmp_path: Path) -> None:
     payload = _stage(tmp_path)
-    live = tmp_path / authority_restore.authority_reset.HUB_DATABASE.relative_to("/")
+    live = tmp_path / authority_restore.authority_state.HUB_DATABASE.relative_to("/")
     _database(live, generation=2)
     connection = sqlite3.connect(live)
     connection.execute("DELETE FROM hub_devices")
     connection.commit()
     connection.close()
-    _anchor(tmp_path / authority_restore.authority_reset.AUTHORITY_ANCHOR.relative_to("/"))
+    _anchor(tmp_path / authority_restore.authority_state.AUTHORITY_ANCHOR.relative_to("/"))
 
     result = authority_restore.restore(
         payload, root=tmp_path, manage_services=False
@@ -160,14 +160,14 @@ def test_restore_starts_and_requires_both_hub_and_ingress(tmp_path: Path) -> Non
     assert (
         "/usr/bin/systemctl",
         "start",
-        authority_restore.authority_reset.HUB_UNIT,
-        authority_restore.authority_reset.HUB_INGRESS_UNIT,
+        authority_restore.authority_state.HUB_UNIT,
+        authority_restore.authority_state.HUB_INGRESS_UNIT,
     ) in calls
     assert (
         "/usr/bin/systemctl",
         "is-active",
-        authority_restore.authority_reset.HUB_UNIT,
-        authority_restore.authority_reset.HUB_INGRESS_UNIT,
+        authority_restore.authority_state.HUB_UNIT,
+        authority_restore.authority_state.HUB_INGRESS_UNIT,
     ) in calls
 
 
@@ -189,7 +189,7 @@ def test_restore_authority_fails_closed_before_live_state_changes(
     else:
         payload["authority_restore"]["database_sha256"] = "0" * 64
 
-    live = tmp_path / authority_restore.authority_reset.HUB_DATABASE.relative_to("/")
+    live = tmp_path / authority_restore.authority_state.HUB_DATABASE.relative_to("/")
     _database(live, generation=2)
     before = live.read_bytes()
 
@@ -202,8 +202,8 @@ def test_restore_authority_fails_closed_before_live_state_changes(
 def test_authority_backup_refuses_marker_anchor_or_requested_generation_drift(
     tmp_path: Path,
 ) -> None:
-    database = tmp_path / authority_restore.authority_reset.HUB_DATABASE.relative_to("/")
-    anchor = tmp_path / authority_restore.authority_reset.AUTHORITY_ANCHOR.relative_to("/")
+    database = tmp_path / authority_restore.authority_state.HUB_DATABASE.relative_to("/")
+    anchor = tmp_path / authority_restore.authority_state.AUTHORITY_ANCHOR.relative_to("/")
     _database(database, generation=2)
     _anchor(anchor, generation=1)
     payload = {

@@ -18,7 +18,7 @@ import uuid
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
-from . import authority_reset, contract, primitives
+from . import authority_state, contract, primitives
 from .primitives import TargetError
 
 _BACKUP_FILE = "eidolon-hub.sqlite3"
@@ -152,8 +152,8 @@ def backup(payload: Mapping[str, object], *, root: Path = Path("/")) -> dict[str
     request = _request(payload, require_digests=False)
     expected = _expected(request)
     root = root.resolve()
-    database = primitives.host_path(root, authority_reset.HUB_DATABASE)
-    anchor = primitives.host_path(root, authority_reset.AUTHORITY_ANCHOR)
+    database = primitives.host_path(root, authority_state.HUB_DATABASE)
+    anchor = primitives.host_path(root, authority_state.AUTHORITY_ANCHOR)
     destination = _stage(root, release_id, "backup")
     lock = primitives.host_path(root, Path("/run/lock/eidolon-install.lock"))
     with primitives.exclusive(lock):
@@ -289,7 +289,7 @@ def restore_plan(
     return {
         "status": "authority_restore_planned",
         "authority": expected,
-        "replaces": [str(authority_reset.HUB_DATABASE), str(authority_reset.AUTHORITY_ANCHOR)],
+        "replaces": [str(authority_state.HUB_DATABASE), str(authority_state.AUTHORITY_ANCHOR)],
         "preserves": [
             "owner_domain_generation",
             "Host identity and release targets",
@@ -325,14 +325,14 @@ def restore(
     root = root.resolve()
     expected, source_database, source_anchor = _prepared(payload, root)
     lock = primitives.host_path(root, Path("/run/lock/eidolon-install.lock"))
-    database = primitives.host_path(root, authority_reset.HUB_DATABASE)
-    anchor = primitives.host_path(root, authority_reset.AUTHORITY_ANCHOR)
+    database = primitives.host_path(root, authority_state.HUB_DATABASE)
+    anchor = primitives.host_path(root, authority_state.AUTHORITY_ANCHOR)
     with primitives.exclusive(lock):
         expected, source_database, source_anchor = _prepared(payload, root)
         if manage_services:
             _checked(
                 command,
-                ("/usr/bin/systemctl", "stop", authority_reset.HUB_INGRESS_UNIT, authority_reset.HUB_UNIT),
+                ("/usr/bin/systemctl", "stop", authority_state.HUB_INGRESS_UNIT, authority_state.HUB_UNIT),
                 operation="Hub quiesce for Owner Authority restore",
             )
         database.parent.mkdir(parents=True, exist_ok=True)
@@ -354,8 +354,8 @@ def restore(
                 (
                     "/usr/bin/systemctl",
                     "start",
-                    authority_reset.HUB_UNIT,
-                    authority_reset.HUB_INGRESS_UNIT,
+                    authority_state.HUB_UNIT,
+                    authority_state.HUB_INGRESS_UNIT,
                 ),
                 operation="Hub start after Owner Authority restore",
             )
@@ -365,8 +365,8 @@ def restore(
                     (
                         "/usr/bin/systemctl",
                         "is-active",
-                        authority_reset.HUB_UNIT,
-                        authority_reset.HUB_INGRESS_UNIT,
+                        authority_state.HUB_UNIT,
+                        authority_state.HUB_INGRESS_UNIT,
                     ),
                     timeout=20,
                 )

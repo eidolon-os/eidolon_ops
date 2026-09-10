@@ -6,7 +6,7 @@ import json
 from collections.abc import Mapping
 from pathlib import Path
 
-from . import authority_reset, contract, primitives
+from . import authority_state, contract, primitives
 from .primitives import TargetError
 
 PRESERVED_INPUTS = (
@@ -19,7 +19,7 @@ PRESERVED_INPUTS = (
 
 def observe(payload: Mapping[str, object], *, root: Path = Path("/")) -> dict[str, object]:
     del payload
-    lineage = authority_reset.established_lineage(root=root)["established"]
+    lineage = authority_state.established_lineage(root=root)["established"]
     if not isinstance(lineage, dict):
         raise TargetError("installed Authority is inconsistent; restore its data before updating code")
     hashes: dict[str, str | None] = {}
@@ -31,7 +31,7 @@ def observe(payload: Mapping[str, object], *, root: Path = Path("/")) -> dict[st
         if path.is_symlink() or not path.is_file():
             raise TargetError(f"installed identity input is missing or unsafe: {name}")
         hashes[name] = primitives.file_sha256(path)
-    descriptor_path = primitives.host_path(root, authority_reset.OWNER_DESCRIPTOR)
+    descriptor_path = primitives.host_path(root, authority_state.OWNER_DESCRIPTOR)
     try:
         descriptor = json.loads(descriptor_path.read_text())
     except (ValueError, OSError) as exc:

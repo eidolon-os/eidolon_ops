@@ -11,9 +11,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROFILES_DIR="${EIDOLON_HOSTS_DIR:-${ROOT}/config/hosts}"
 UV_BIN="${EIDOLON_UV_BIN:-uv}"
 
-ALL_COMMANDS="abandon app-ready pending trust-host-key bring-up authority-backup authority-reset authority-restore backup commissioning-code controller-reset converge-inputs debug deploy diagnose doctor init-inputs install kernel-schema-reset logs provision reset restart restore rollback start status stop update"
+ALL_COMMANDS="abandon app-ready pending trust-host-key bring-up authority-backup authority-restore backup commissioning-code controller-reset converge-inputs debug deploy diagnose doctor init-inputs install kernel-schema-reset logs provision reset restart restore rollback start status stop update"
 MAC_COMMANDS="status doctor app-ready start stop restart logs commissioning-code reset kernel-schema-reset debug"
-PI_COMMANDS="abandon status pending trust-host-key bring-up doctor app-ready start stop restart logs commissioning-code provision init-inputs converge-inputs backup restore install controller-reset authority-reset authority-backup authority-restore reset kernel-schema-reset deploy update rollback diagnose"
+PI_COMMANDS="abandon status pending trust-host-key bring-up doctor app-ready start stop restart logs commissioning-code provision init-inputs converge-inputs backup restore install controller-reset authority-backup authority-restore reset kernel-schema-reset deploy update rollback diagnose"
 
 die() {
   printf '错误：%s\n' "$*" >&2
@@ -137,8 +137,8 @@ command_summary() {
     provision) printf '检查或安装 Pi 基础系统依赖' ;;
     init-inputs) printf '首次生成产品私密输入和 Host Identity' ;;
     converge-inputs) printf '补齐新增凭据，不修改已有值' ;;
-    backup) printf '备份所有可备份的 Host 数据' ;;
-    restore) printf '从完整 Host 备份恢复' ;;
+    backup) printf '备份声明支持的组件数据（非整机）' ;;
+    restore) printf '恢复同一 Host 的组件数据（非整机）' ;;
     install) printf '向新 Pi 安装指定 release' ;;
     deploy) printf '部署指定 release' ;;
     update) printf 'deploy 的同义入口，用于版本更新' ;;
@@ -149,9 +149,8 @@ command_summary() {
     trust-host-key) printf '记录这个 profile 信任哪把 host key(换板子时用)' ;;
     kernel-schema-reset) printf '把 Kernel 自己打不开的那份权威改名挪开(会先说清丢什么)' ;;
     controller-reset) printf '撤销全部手机管理者并重新开放认领' ;;
-    authority-reset) printf '推进 Owner Authority generation' ;;
-    authority-backup) printf '备份 Owner Authority' ;;
-    authority-restore) printf '恢复 Owner Authority' ;;
+    authority-backup) printf '备份 Hub 授权与离线 Owner 材料（非整机）' ;;
+    authority-restore) printf '恢复 Hub 授权与离线 Owner 材料（非整机）' ;;
     diagnose) printf '生成诊断报告压缩包' ;;
     *) printf 'Eidolon Host 操作' ;;
   esac

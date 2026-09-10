@@ -83,7 +83,7 @@ def initialize_inputs(host_id: str, *, new_identity: bool = False) -> Plan:
 
     steps = _steps(
         *(
-            (("retire", "retire this machine's Host identity"),)
+            (("retire", "retire this machine's Host and Owner identity"),)
             if new_identity
             else ()
         ),
@@ -195,7 +195,7 @@ def install(
     wipe_authority_data: bool,
 ) -> Plan:
     reset_steps = _steps(
-        ("reset_existing", "stop and remove the existing Eidolon deployment"),
+        ("reset_existing", "clear the old deployment and data; create a new Host/Owner requiring pairing"),
     )
     flags = {"--apply"} if apply else set()
     if reset_existing:
@@ -377,7 +377,8 @@ def reset(host_id: str, *, apply: bool, wipe_authority_data: bool) -> Plan:
         host_id=host_id,
         steps=_steps(
             ("stop", "disable and stop every product unit"),
-            ("remove", "remove the fixed Eidolon deployment namespace"),
+            ("remove", "remove the fixed Eidolon deployment namespace"
+             + (" and all authority data; create a new Host/Owner requiring pairing" if wipe_authority_data else "")),
         ),
         destructive=DestructiveLevel.IRREVERSIBLE,
         requires_flags=frozenset(flags),
@@ -395,23 +396,6 @@ def controller_reset(host_id: str, *, apply: bool) -> Plan:
         touches=frozenset({ActionKind.SECRET}),
     )
 
-
-def authority_reset(host_id: str, *, apply: bool) -> Plan:
-    return Plan(
-        operation="authority-reset",
-        host_id=host_id,
-        steps=_steps(
-            ("advance", "advance the controller-held Owner Authority generation"),
-            ("stage", "install the signed next-generation descriptor and one-shot capability"),
-            ("reset", "replace only Hub Authority state under an exact Host-local lock"),
-            ("prove", "match the Hub marker, external lineage anchor and controller journal"),
-        ),
-        destructive=DestructiveLevel.IRREVERSIBLE,
-        requires_flags=frozenset({"--apply"} if apply else set()),
-        touches=frozenset(
-            {ActionKind.CONFIG, ActionKind.SECRET, ActionKind.DATA, ActionKind.LIFECYCLE}
-        ),
-    )
 
 
 def diagnose(host_id: str) -> Plan:

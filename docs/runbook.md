@@ -85,7 +85,7 @@ uv run eidolon-ops --config /absolute/path/hosts/pi5.toml \
 
 `reset --apply` without the wipe flag removes the fixed code, unit, config, runtime, log and private staging paths,
 but preserves `/var/lib/eidolon` and `/var/lib/eidolon-bootstrap`; it is an uninstall boundary, not a schema migration.
-`--wipe-authority-data` additionally removes those authority roots and the old `/var/lib/eidolon-admin` root. It is
+`--wipe-authority-data` creates a new Host/Owner (Mobile and devices must pair again) and additionally removes those authority roots and the old `/var/lib/eidolon-admin` root. It is
 irreversible. Foundation packages/artifacts and service identities are preserved. Reset stops and disables only the
 fixed 15 units, refuses an active unit that cannot stop, refuses mounted deletion roots, reloads systemd and is
 idempotent when units or paths are already absent.
@@ -156,7 +156,7 @@ The operation refuses unless the installed Kernel itself says it will not open t
 sidecars to `<name>.stale-schema-<UTC timestamp>` beside themselves, and starts the reconciler again. Nothing
 is deleted, and no other authority is touched — in particular the Owner Domain generation does not advance,
 so every Claim and credential stays valid. Do not reach for `reset --wipe-authority-data` for this: it
-destroys every authority on the machine and advances that generation to solve the same one file.
+destroys every authority on the machine and creates a new Host/Owner requiring pairing.
 
 The same command exists on the Mac source run, where it moves that profile's own
 `<state root>/eidolon-kernel.sqlite3`.

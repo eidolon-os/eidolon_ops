@@ -14,7 +14,7 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
-from . import authority_reset, contract, host_application, identities, primitives, probe
+from . import authority_state, contract, host_application, identities, primitives, probe
 from .primitives import TargetError
 
 
@@ -151,7 +151,7 @@ class TargetInstaller:
                 raise
 
     def _established_lineage(self) -> dict[str, object] | None:
-        return authority_reset.established_lineage(root=self.root)["established"]
+        return authority_state.established_lineage(root=self.root)["established"]
 
     def _app_state(self) -> dict[str, object] | None:
         """Where the phone stands, reported and not required.

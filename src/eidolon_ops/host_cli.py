@@ -82,7 +82,6 @@ OPERATIONS: dict[str, Callable[[HostController, argparse.Namespace], object]] = 
     "controller-reset": lambda controller, a: controller.controller_reset(
         apply=a.apply
     ),
-    "authority-reset": lambda controller, a: controller.authority_reset(apply=a.apply),
     "authority-backup": lambda controller, a: controller.authority_backup(
         output=a.output
     ),
@@ -268,7 +267,7 @@ def _parser() -> argparse.ArgumentParser:
     init_inputs.add_argument(
         "--new-identity",
         action="store_true",
-        help="retire this machine's Host identity and mint a new one",
+        help="retire local Host/Owner identity and create a new pair for fresh installation",
     )
     converge_inputs = operations.add_parser(
         "converge-inputs",
@@ -350,19 +349,14 @@ def _parser() -> argparse.ArgumentParser:
         help="revoke every managing phone so a new one can claim this Host",
     )
     controller_reset.add_argument("--apply", action="store_true")
-    authority_reset = operations.add_parser(
-        "authority-reset",
-        help="advance Owner Authority and replace only Hub-owned authority state",
-    )
-    authority_reset.add_argument("--apply", action="store_true")
     authority_backup = operations.add_parser(
         "authority-backup",
-        help="capture a complete same-generation Owner Authority restore package",
+        help="back up Hub authorization and offline Owner material (not a full Host backup)",
     )
     authority_backup.add_argument("--output", type=Path, required=True)
     authority_restore = operations.add_parser(
         "authority-restore",
-        help="restore one complete Owner Authority package without generation advance",
+        help="restore matching Hub authorization and Owner material (not a full Host restore)",
     )
     authority_restore.add_argument("--source", type=Path, required=True)
     authority_restore.add_argument("--apply", action="store_true")

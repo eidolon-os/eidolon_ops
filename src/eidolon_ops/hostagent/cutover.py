@@ -17,7 +17,7 @@ import uuid
 from collections.abc import Mapping
 from pathlib import Path
 
-from . import authority_reset, contract, primitives
+from . import authority_state, contract, primitives
 from .primitives import TargetError
 
 _SCHEMA_VERSION = 1
@@ -69,7 +69,7 @@ def _authority(root: Path) -> dict[str, object]:
     file between the ``before`` and ``after`` readings.
     """
 
-    observed = authority_reset.established_lineage(root=root)
+    observed = authority_state.established_lineage(root=root)
     established = observed["established"]
     if not isinstance(established, dict):
         raise TargetError(

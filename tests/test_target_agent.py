@@ -18,7 +18,7 @@ from eidolon_ops.hostagent import __main__ as agent_main
 from eidolon_ops.hostagent import (
     app_contract,
     authorities,
-    authority_reset,
+    authority_state,
     contract,
     host_application,
     identities,
@@ -2121,116 +2121,12 @@ def test_public_owner_trust_does_not_grant_access_to_private_host_inputs() -> No
     assert contract.SECRET_INPUTS["local-api.env"][1:] == ("root", "root", 0o600)
 
 
-def _authority_reset_payload() -> dict[str, object]:
-    return {
-        "units": list(contract.PRODUCT_UNITS),
-        "authority_reset": {
-            "owner_domain_id": "owner-0123456789abcdefabcd",
-            "previous_generation": 1,
-            "next_generation": 2,
-            "state_id": "authority-state_0123456789abcdef",
-        },
-    }
 
 
-def _stage_authority_reset_inputs(root: Path) -> dict[str, object]:
-    request = _authority_reset_payload()["authority_reset"]
-    assert isinstance(request, dict)
-    expected = {
-        "contract_version": 1,
-        "owner_domain_id": request["owner_domain_id"],
-        "owner_domain_generation": request["next_generation"],
-        "state_id": request["state_id"],
-    }
-    descriptor = root / authority_reset.OWNER_DESCRIPTOR.relative_to("/")
-    descriptor.parent.mkdir(parents=True)
-    descriptor.write_text(
-        json.dumps(
-            {
-                "owner_domain_id": expected["owner_domain_id"],
-                "owner_domain_generation": expected["owner_domain_generation"],
-            }
-        ),
-        encoding="utf-8",
-    )
-    bootstrap = root / authority_reset.AUTHORITY_BOOTSTRAP.relative_to("/")
-    bootstrap.parent.mkdir(parents=True)
-    bootstrap.write_text(
-        json.dumps({"operation": "owner-authority.bootstrap", **expected}),
-        encoding="utf-8",
-    )
-    database = root / authority_reset.HUB_DATABASE.relative_to("/")
-    connection = sqlite3.connect(database)
-    connection.execute("CREATE TABLE legacy_devices (device_id TEXT PRIMARY KEY)")
-    connection.commit()
-    connection.close()
-    return expected
 
 
-def test_owner_authority_reset_is_targeted_monotonic_and_proven(tmp_path: Path) -> None:
-    expected = _stage_authority_reset_inputs(tmp_path)
-    database = tmp_path / authority_reset.HUB_DATABASE.relative_to("/")
-    unrelated = database.parent / "preserved.db"
-    unrelated.write_text("keep", encoding="utf-8")
-    calls: list[tuple[str, ...]] = []
-
-    def command(value, **_kwargs):
-        value = tuple(value)
-        calls.append(value)
-        if value[:3] == ("/usr/bin/systemctl", "start", authority_reset.HUB_UNIT):
-            connection = sqlite3.connect(database)
-            connection.execute(
-                "CREATE TABLE hub_authority_state ("
-                "singleton_id INTEGER PRIMARY KEY, owner_domain_id TEXT, "
-                "owner_domain_generation INTEGER, state_id TEXT)"
-            )
-            connection.execute(
-                "INSERT INTO hub_authority_state VALUES (1, ?, ?, ?)",
-                (
-                    expected["owner_domain_id"],
-                    expected["owner_domain_generation"],
-                    expected["state_id"],
-                ),
-            )
-            connection.commit()
-            connection.close()
-            anchor = tmp_path / authority_reset.AUTHORITY_ANCHOR.relative_to("/")
-            anchor.write_text(json.dumps(expected), encoding="utf-8")
-            (tmp_path / authority_reset.AUTHORITY_BOOTSTRAP.relative_to("/")).unlink()
-        if value[:2] == ("/usr/bin/systemctl", "is-active"):
-            return subprocess.CompletedProcess(value, 0, "active\n", "")
-        return subprocess.CompletedProcess(value, 0, "", "")
-
-    plan = authority_reset.authority_reset_plan(_authority_reset_payload(), root=tmp_path)
-    assert plan["status"] == "planned"
-    assert plan["destructive_work_required"] is True
-
-    result = authority_reset.reset_owner_authority(
-        _authority_reset_payload(), root=tmp_path, command=command
-    )
-
-    assert result["status"] == "authority_reset"
-    assert result["authority"] == expected
-    assert unrelated.read_text(encoding="utf-8") == "keep"
-    assert calls[0] == (
-        "/usr/bin/systemctl",
-        "stop",
-        authority_reset.HUB_INGRESS_UNIT,
-        authority_reset.HUB_UNIT,
-    )
-    assert (
-        authority_reset.authority_reset_plan(_authority_reset_payload(), root=tmp_path)["status"]
-        == "already_reset"
-    )
 
 
-def test_owner_authority_reset_refuses_partial_lineage(tmp_path: Path) -> None:
-    expected = _stage_authority_reset_inputs(tmp_path)
-    anchor = tmp_path / authority_reset.AUTHORITY_ANCHOR.relative_to("/")
-    anchor.write_text(json.dumps(expected), encoding="utf-8")
-
-    with pytest.raises(TargetError, match="partially committed"):
-        authority_reset.authority_reset_plan(_authority_reset_payload(), root=tmp_path)
 
 
 def _authority_fixture(tmp_path: Path, monkeypatch):
@@ -2762,7 +2658,7 @@ def _establish_lineage(root: Path, *, anchor: bool = True) -> dict[str, object]:
         "owner_domain_generation": 4,
         "state_id": "authority-state_0123456789abcdef",
     }
-    database = root / authority_reset.HUB_DATABASE.relative_to("/")
+    database = root / authority_state.HUB_DATABASE.relative_to("/")
     database.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(database)
     connection.execute(
@@ -2781,7 +2677,7 @@ def _establish_lineage(root: Path, *, anchor: bool = True) -> dict[str, object]:
     connection.commit()
     connection.close()
     if anchor:
-        (root / authority_reset.AUTHORITY_ANCHOR.relative_to("/")).write_text(
+        (root / authority_state.AUTHORITY_ANCHOR.relative_to("/")).write_text(
             json.dumps(lineage), encoding="utf-8"
         )
     return lineage
@@ -2790,7 +2686,7 @@ def _establish_lineage(root: Path, *, anchor: bool = True) -> dict[str, object]:
 def test_authority_lineage_reports_an_unowned_host_as_holding_nothing(
     tmp_path: Path,
 ) -> None:
-    observed = authority_reset.authority_lineage(
+    observed = authority_state.authority_lineage(
         {"units": list(contract.PRODUCT_UNITS)}, root=tmp_path
     )
 
@@ -2805,7 +2701,7 @@ def test_authority_lineage_reports_an_unowned_host_as_holding_nothing(
 def test_authority_lineage_reports_what_a_started_hub_established(tmp_path: Path) -> None:
     lineage = _establish_lineage(tmp_path)
 
-    observed = authority_reset.authority_lineage(
+    observed = authority_state.authority_lineage(
         {"units": list(contract.PRODUCT_UNITS)}, root=tmp_path
     )
 
@@ -2830,7 +2726,7 @@ def test_a_database_without_its_anchor_is_reported_but_not_called_established(
 
     lineage = _establish_lineage(tmp_path, anchor=False)
 
-    observed = authority_reset.authority_lineage(
+    observed = authority_state.authority_lineage(
         {"units": list(contract.PRODUCT_UNITS)}, root=tmp_path
     )
 

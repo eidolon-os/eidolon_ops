@@ -2620,49 +2620,24 @@ def _consume(controller: EidolonPiController) -> dict[str, object]:
     return lineage
 
 
-def test_wiping_a_started_host_rebuilds_the_authority_at_a_new_generation(config) -> None:
-    transport = FakeTransport()
-    controller = _authority_controller(config, transport)
-    spent = _consume(controller)
-    _host_has_established(controller, transport)
-
-    capability = controller.authority_capability(will_wipe=True, apply=True)
-
-    assert capability is not None
-    assert capability["decision"] == "advance_generation"
-    assert capability["generation_advanced"] is True
-    assert capability["previous_generation"] == spent["owner_domain_generation"]
-    assert capability["owner_domain_generation"] == spent["owner_domain_generation"] + 1
-    # The whole point: what this install now carries is a capability an empty
-    # Hub will accept, at a generation that fences every Claim the destroyed
-    # database issued.
-    owner = controller.host_layer.materializer().owner_assets()
-    assert json.loads(owner.authority_bootstrap) == {
-        "contract_version": 1,
-        "operation": "owner-authority.bootstrap",
-        "owner_domain_id": spent["owner_domain_id"],
-        "owner_domain_generation": spent["owner_domain_generation"] + 1,
-        "state_id": capability["lineage"]["state_id"],
-    }
-    assert capability["lineage"]["state_id"] != spent["state_id"]
-
-
-def test_retrying_a_failed_wipe_does_not_mint_a_second_generation(config) -> None:
+def test_missing_consumed_authority_requires_recovery_without_changing_identity(config):
     transport = FakeTransport()
     controller = _authority_controller(config, transport)
     _consume(controller)
-    _host_has_established(controller, transport)
-    first = controller.authority_capability(will_wipe=True, apply=True)
-    assert first is not None
-    # The wipe ran; the install then failed. The Host holds no lineage at all.
-    transport.overrides.pop("authority-lineage")
+    root = controller.host_layer.materializer().material_root
+    before = {p.name: p.read_bytes() for p in root.iterdir()}
+    for apply in (False, True):
+        with pytest.raises(OperationsError, match="AuthorityRecoveryRequired"):
+            controller.authority_capability(will_wipe=False, apply=apply)
+    assert {p.name: p.read_bytes() for p in root.iterdir()} == before
 
-    second = controller.authority_capability(will_wipe=True, apply=True)
 
-    assert second is not None
-    assert second["decision"] == "carry_pending_capability"
-    assert second["generation_advanced"] is False
-    assert second["lineage"] == first["lineage"]
+def test_wipe_cannot_reissue_an_existing_owner(config):
+    controller = _authority_controller(config, FakeTransport())
+    before = _consume(controller)
+    with pytest.raises(OperationsError, match="new Host identity"):
+        controller.authority_capability(will_wipe=True, apply=True)
+    assert _lineage_of(controller) == before
 
 
 def test_an_ordinary_install_keeps_the_generation_the_host_established(config) -> None:
@@ -2722,29 +2697,20 @@ def test_deploy_preserves_board_authority_without_reading_workstation_issuer(con
         assert {"hub.generated.yaml", "agent.yaml", "channel.yaml", "memory.yaml"} <= names
 
 
-def test_a_capability_the_host_proved_it_used_is_not_read_as_unconsumed(config) -> None:
-    """The window between Hub consuming the capability and this side recording it.
-
-    Reading a capability the Host has demonstrably spent as "still pending"
-    would hand a wiped Host the very state id its destroyed database carried —
-    a new, empty Authority behind the same anti-rollback fence.
-    """
-
+def test_used_capability_plan_is_read_only_and_apply_records_consumption(config):
     transport = FakeTransport()
     controller = _authority_controller(config, transport)
     established = _lineage_of(controller)
-    assert _material_state(controller)["bootstrap_pending"] is True
     _host_has_established(controller, transport)
+    capability = controller.authority_capability(will_wipe=False, apply=False)
+    assert capability["lineage"] == established
+    assert _material_state(controller)["bootstrap_pending"] is True
+    capability = controller.authority_capability(will_wipe=False, apply=True)
+    assert capability["lineage"] == established
+    assert _material_state(controller)["bootstrap_pending"] is False
 
-    capability = controller.authority_capability(will_wipe=True, apply=True)
 
-    assert capability is not None
-    assert capability["decision"] == "advance_generation"
-    assert capability["previous_generation"] == established["owner_domain_generation"]
-    assert capability["lineage"]["state_id"] != established["state_id"]
-
-
-def test_an_install_plan_names_the_generation_it_would_advance_without_advancing(
+def test_factory_install_plan_names_a_new_identity_without_changing_it(
     config,
 ) -> None:
     transport = FakeTransport()
@@ -2760,12 +2726,8 @@ def test_an_install_plan_names_the_generation_it_would_advance_without_advancing
     )
 
     authority = plan["authority"]
-    assert authority["decision"] == "advance_generation"
-    assert authority["generation_advanced"] is False
-    assert authority["owner_domain_generation"] == spent["owner_domain_generation"] + 1
-    assert (
-        "advance owner_domain_generation and void every existing device Claim" in plan["mutations"]
-    )
+    assert authority["decision"] == "new_host_identity"
+    assert any("new Host/Owner" in mutation for mutation in plan["mutations"])
     state = _material_state(controller)
     assert state["owner_domain_generation"] == spent["owner_domain_generation"]
     assert state["authority_state_id"] == spent["state_id"]
@@ -2822,6 +2784,8 @@ def test_a_wiped_host_is_reinstalled_end_to_end_with_a_fresh_capability(config) 
             self.staged: dict[str, bytes] = {}
 
         def run_agent(self, action, payload, **keywords):
+            if action == "reset-host":
+                self.overrides.pop("authority-lineage", None)
             if action == "install":
                 self.agent_calls.append((action, dict(payload), "", True))
                 # Hub started on whatever capability the install shipped.
@@ -2833,6 +2797,8 @@ def test_a_wiped_host_is_reinstalled_end_to_end_with_a_fresh_capability(config) 
             if not recursive:
                 self.staged[destination] = Path(source).read_bytes()
 
+    from test_install_inputs import _config_for_init
+    _config_for_init(config, config.workspace.bundle_root.parent)
     held: list[EidolonPiController] = []
     transport = LineageTransport(lambda: _lineage_of(held[0]))
     controller = _authority_controller(config, transport)
@@ -2849,19 +2815,19 @@ def test_a_wiped_host_is_reinstalled_end_to_end_with_a_fresh_capability(config) 
     )
 
     assert result["status"] == "installed"
-    assert result["authority"]["decision"] == "advance_generation"
-    assert result["authority"]["generation_advanced"] is True
+    assert result["authority"]["decision"] == "carry_pending_capability"
+    assert result["authority"]["owner_domain_id"] != spent["owner_domain_id"]
     staged = json.loads(transport.staged["/var/tmp/eidolon-secrets-r1/authority-bootstrap.json"])
     assert staged["operation"] == "owner-authority.bootstrap"
-    assert staged["owner_domain_generation"] == spent["owner_domain_generation"] + 1
+    assert staged["owner_domain_generation"] == 1
     assert result["authority_bootstrap"] == {
         "status": "authority_bootstrap_consumed",
         "authority": {key: value for key, value in staged.items() if key != "operation"},
     }
     assert _material_state(controller) == {
         "contract_version": 1,
-        "owner_domain_id": spent["owner_domain_id"],
-        "owner_domain_generation": spent["owner_domain_generation"] + 1,
+        "owner_domain_id": staged["owner_domain_id"],
+        "owner_domain_generation": 1,
         "authority_state_id": staged["state_id"],
         "bootstrap_pending": False,
     }
@@ -2876,3 +2842,18 @@ def test_reinstall_bundle_failure_precedes_wipe_and_generation_change(setup_cont
     with pytest.raises(OperationsError, match="preparation failed"):
         controller.install(release_id="r1", resume=False, apply=True, reset_existing=True, wipe_authority_data=True)
     assert not any(call[0] == "reset-host" for call in transport.agent_calls)
+
+
+@pytest.mark.parametrize("missing", ["marker", "anchor"])
+def test_consumed_authority_requires_both_copies_of_state(config, missing):
+    transport = FakeTransport()
+    controller = _authority_controller(config, transport)
+    lineage = _consume(controller)
+    transport.overrides["authority-lineage"] = {
+        "status": "observed", "marker": lineage, "anchor": lineage, "established": None,
+        missing: None,
+    }
+    before = _material_state(controller)
+    with pytest.raises(OperationsError, match=r"AuthorityRecoveryRequired|AUTHORITY_RECOVERY_REQUIRED"):
+        controller.authority_capability(will_wipe=False, apply=True)
+    assert _material_state(controller) == before

@@ -40,7 +40,6 @@ class SystemdSupervisor:
                 Capability.RESTORE,
                 Capability.RESET,
                 Capability.CONTROLLER_RESET,
-                Capability.AUTHORITY_RESET,
                 Capability.KERNEL_SCHEMA_RESET,
                 Capability.DIAGNOSE,
                 Capability.TRUST_HOST_KEY,

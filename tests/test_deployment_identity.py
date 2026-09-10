@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from eidolon_ops.hostagent import (
-    authority_reset,
+    authority_state,
     contract,
     deployment_identity,
     host_application,
@@ -49,13 +49,13 @@ def installed(tmp_path):
         path = tmp_path / contract.INSTALL_INPUTS[name][0].relative_to("/")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("original " + name)
-    db = tmp_path / authority_reset.HUB_DATABASE.relative_to("/")
+    db = tmp_path / authority_state.HUB_DATABASE.relative_to("/")
     db.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(db) as connection:
         connection.execute("CREATE TABLE hub_authority_state(singleton_id INTEGER, owner_domain_id TEXT, owner_domain_generation INTEGER, state_id TEXT)")
         connection.execute("INSERT INTO hub_authority_state VALUES (1, ?, 8, ?)", (lineage["owner_domain_id"], lineage["state_id"]))
-    (tmp_path / authority_reset.AUTHORITY_ANCHOR.relative_to("/")).write_text(json.dumps(lineage))
-    (tmp_path / authority_reset.OWNER_DESCRIPTOR.relative_to("/")).write_text(json.dumps({
+    (tmp_path / authority_state.AUTHORITY_ANCHOR.relative_to("/")).write_text(json.dumps(lineage))
+    (tmp_path / authority_state.OWNER_DESCRIPTOR.relative_to("/")).write_text(json.dumps({
         **lineage, "descriptor_uri": "https://eidolon-hub-test.local:9443/api/device-onboarding/v1/descriptor"}))
     return tmp_path
 
@@ -63,7 +63,7 @@ def installed(tmp_path):
 def test_observation_requires_descriptor_database_and_anchor_to_agree(installed):
     observed = deployment_identity.observe({}, root=installed)
     assert observed["authority"]["owner_domain_generation"] == 8
-    path = installed / authority_reset.OWNER_DESCRIPTOR.relative_to("/")
+    path = installed / authority_state.OWNER_DESCRIPTOR.relative_to("/")
     descriptor = json.loads(path.read_text())
     descriptor["owner_domain_generation"] = 9
     path.write_text(json.dumps(descriptor))

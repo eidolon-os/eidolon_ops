@@ -48,6 +48,8 @@ def initialize_install_inputs(
 
     target = target_directory(config)
     if target.exists() or target.is_symlink():
+        if new_identity:
+            raise InstallInputError("new identity requires the Host identity replacement workflow")
         return _validate_existing(target, config, read_exact_file)
     identity, identity_origin = _host_identity(target, new_identity=new_identity)
 
@@ -554,14 +556,8 @@ def validate_install_input_contract(
                 )
 
     data = envs["data.env"]
-    hub = envs["hub.env"]
-    kernel = envs["kernel.env"]
     admin = envs["admin.env"]
-    local_api = envs["local-api.env"]
-    agent = envs["agent.env"]
     channel = envs["channel.env"]
-    memory = envs["memory.env"]
-    livekit = envs["livekit.env"]
     for left_file, left_key, right_file, right_key, label in SHARED_CREDENTIALS:
         left = envs[left_file][left_key]
         right = envs[right_file][right_key]

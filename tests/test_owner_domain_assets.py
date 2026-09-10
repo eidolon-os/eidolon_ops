@@ -13,8 +13,6 @@ from eidolon_ops.host_identity import derive_host_lan_identity
 from eidolon_ops.owner_domain_assets import (
     OwnerDomainAssetError,
     ensure_owner_domain_assets,
-    mark_authority_bootstrapped,
-    reset_owner_authority,
 )
 
 NOW = datetime(2026, 8, 18, 12, 0, tzinfo=UTC)
@@ -218,42 +216,30 @@ def test_existing_host_tls_corruption_fails_closed(tmp_path: Path) -> None:
         ensure_owner_domain_assets(root, identity, 8443, now=NOW)
 
 
-def test_authority_reset_is_explicit_monotonic_and_issues_one_lineage(tmp_path: Path) -> None:
+
+
+@pytest.mark.parametrize("missing", [
+    ("owner-domain-state.json",),
+    ("owner-domain-root.key.pem", "owner-domain-root-ca.pem"),
+])
+def test_partial_owner_identity_is_not_reissued(tmp_path: Path, missing) -> None:
+    material = tmp_path / "owner-domain"
     identity = derive_host_lan_identity(b"a" * 32)
-    root = tmp_path / "owner-domain"
-    first = ensure_owner_domain_assets(root, identity, 8443, now=NOW)
+    ensure_owner_domain_assets(material, identity, 8443, now=NOW)
+    for name in missing:
+        (material / name).unlink()
+    before = {p.name: p.read_bytes() for p in material.iterdir()}
+    with pytest.raises(OwnerDomainAssetError, match="AUTHORITY_RECOVERY_REQUIRED"):
+        ensure_owner_domain_assets(material, identity, 8443, now=NOW)
+    assert {p.name: p.read_bytes() for p in material.iterdir()} == before
 
-    next_generation, next_state_id = reset_owner_authority(
-        root,
-        expected_owner_domain_id=first.owner_domain_id,
-        expected_generation=first.owner_domain_generation,
-    )
-    reset = ensure_owner_domain_assets(root, identity, 8443, now=NOW + timedelta(minutes=1))
 
-    assert next_generation == reset.owner_domain_generation == 2
-    assert next_state_id == reset.authority_state_id
-    assert reset.owner_domain_id == first.owner_domain_id
-    assert reset.owner_root_certificate == first.owner_root_certificate
-    assert json.loads(reset.descriptor)["directory_revision"] == 1
-    assert json.loads(reset.authority_bootstrap)["operation"] == (
-        "owner-authority.bootstrap"
-    )
-    assert reset.bootstrap_pending is True
-    with pytest.raises(OwnerDomainAssetError, match="reset target changed"):
-        reset_owner_authority(
-            root,
-            expected_owner_domain_id=first.owner_domain_id,
-            expected_generation=1,
-        )
-
-    mark_authority_bootstrapped(
-        root,
-        owner_domain_id=reset.owner_domain_id,
-        owner_domain_generation=reset.owner_domain_generation,
-        authority_state_id=reset.authority_state_id,
-    )
-    consumed = ensure_owner_domain_assets(root, identity, 8443, now=NOW + timedelta(minutes=1))
-    assert json.loads(consumed.authority_bootstrap)["operation"] == (
-        "owner-authority.bootstrap-consumed"
-    )
-    assert consumed.bootstrap_pending is False
+def test_invalid_owner_state_does_not_renew_signers(tmp_path: Path) -> None:
+    material = tmp_path / "owner-domain"
+    identity = derive_host_lan_identity(b"a" * 32)
+    ensure_owner_domain_assets(material, identity, 8443, now=NOW)
+    (material / "owner-domain-state.json").write_text("invalid")
+    before = {p.name: p.read_bytes() for p in material.iterdir()}
+    with pytest.raises(OwnerDomainAssetError, match="state is invalid"):
+        ensure_owner_domain_assets(material, identity, 8443, now=NOW + timedelta(days=400))
+    assert {p.name: p.read_bytes() for p in material.iterdir()} == before

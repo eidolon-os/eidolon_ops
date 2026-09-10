@@ -97,7 +97,6 @@ class Capability(StrEnum):
     RESTORE = "restore"
     RESET = "reset"
     CONTROLLER_RESET = "controller-reset"
-    AUTHORITY_RESET = "authority-reset"
     #: Set aside a Kernel authority this Host's own Kernel refuses to open.
     #: Its own capability rather than a flag on RESET: the two differ by an
     #: order of magnitude in what they destroy, and a Host that can do the

@@ -453,13 +453,38 @@ Mac product-source 在 canonical 7880 上直接管理 LiveKit 进程；`external
 
 所有有破坏性的入口默认计划/dry-run；`install --apply` 只接受全新 Eidolon namespace。旧部署不再走
 `/srv` 兼容迁移：先用 `reset` 查看精确删除范围；需要一条命令全新重装时，显式同时传入
-`--reset-existing --wipe-authority-data --apply`。这会永久删除 Eidolon/Bootstrap 权威数据，基础系统包、
+`--reset-existing --wipe-authority-data --apply`。这会永久删除 Eidolon/Bootstrap 权威数据并创建新 Host/Owner，需要重新配对。基础系统包、
 固定版本 NATS/LiveKit/Node/uv 和 service identity 保留并重新门禁。单独 `reset --apply` 默认只删除代码、
 unit、配置和运行态，保留 `/var/lib`；它不会让已有数据自动兼容新 schema。`deploy/update` 必须追加
 `--activate` 才切换，`rollback` 必须追加 `--apply` 才恢复。详细状态机见
 [`docs/runbook.md`](docs/runbook.md)，代码证据与方案选择见
 [`docs/architecture-audit.md`](docs/architecture-audit.md)，真实验证结果见
 [`docs/verification.md`](docs/verification.md)。
+
+## 授权状态、重置与备份
+
+日常更新沿用板端 Host/Owner 和配对关系。Ops 不再递增 `owner_domain_generation`；已有 8、9 等值
+作为签名协议兼容字段原样保留，不代表部署版本，也不需要与工作站数字对齐。
+
+授权库、状态标记或离线 Owner 材料意外缺失/损坏时，停止初始化并要求恢复；不能删除文件来触发
+自动重新认领。`authority-reset` 已移除。确实要放弃全部数据时，使用
+`reset --wipe-authority-data --apply`，或者安装命令的 `--reset-existing --wipe-authority-data --apply`。
+它们先准备全新 Host/Owner 与凭据，再清盘；之后 Mobile 和设备按新 Host 配对。
+`init-inputs --new-identity` 也同时更换本地 Host 与 Owner，供新安装使用，不会修改运行中的板子。
+旧本地私密输入保留在输入目录旁、权限为 0700 的 `retired-host-*` 目录；它不是用户数据备份。
+
+| 命令 | 覆盖范围 | 用途与限制 |
+| --- | --- | --- |
+| `backup` / `restore` | 声明可备份的组件状态；排除项见 `not_covered` | 同一 Host 的部分数据恢复，缺少完整身份/配置/运行状态 |
+| `authority-backup` / `authority-restore` | Hub 授权库、anchor、对应离线 Owner 材料 | 局部授权恢复，不包含 Bootstrap 手机管理授权或所有业务数据 |
+| 完整换板迁移 | 同一快照内的身份、全部授权/撤销记录、凭据、配置、业务数据 | 需要单独的完整快照及恢复验收；上述两类局部包都不能替代 |
+
+`authority-backup` 必须拿到与板端一致的离线 Owner 材料；如果工作站与板端状态不同，恢复匹配的
+原材料后再备份，不能靠改 generation 或重新签发来凑齐。旧格式授权包继续可恢复。
+恢复旧快照会回到备份时的授权状态，可能包含随后撤销的权限；恢复后需核对，原板同时退出使用。
+手机管理授权的 `controller-reset` 和逐设备撤销保持原有含义，不会改变全局 Host/Owner 身份。
+
+设计和验收见[授权恢复简化方案](docs/authorization-recovery-simplification-2026-09-11.md)。
 
 ## 同一份契约的第二个前端
 

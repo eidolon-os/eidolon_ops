@@ -16,6 +16,7 @@ import tarfile
 import tempfile
 import time
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 from pathlib import Path
 
 from eidolon_ops import bring_up as bring_up_module
@@ -31,6 +32,7 @@ from eidolon_ops.foundation import (
 )
 from eidolon_ops.host_layer import ASSET_ERRORS, HostLayer
 from eidolon_ops.hostagent.contract import RESET_AUTHORITY_ROOTS
+from eidolon_ops.identity_replacement import replacement_inputs
 from eidolon_ops.install_inputs import (
     add_missing_install_credentials,
     declared_secret_env_keys,
@@ -45,9 +47,6 @@ from eidolon_ops.owner_domain_assets import (
     decide_owner_authority,
     ensure_owner_domain_assets,
     mark_authority_bootstrapped,
-)
-from eidolon_ops.owner_domain_assets import (
-    reset_owner_authority as advance_owner_authority,
 )
 from eidolon_ops.paths import AppAccess
 from eidolon_ops.process import ProcessRunner
@@ -111,7 +110,7 @@ def _authority_recovery_required(marker: object, lineage: dict[str, object]) -> 
         lineage,
         remedy=(
             "An install must not ship past that. Restore the matching Authority "
-            "backup, or rebuild deliberately with authority-reset --apply or "
+            "backup, or create a new Host (all data is lost; Mobile must pair again) with "
             "install --reset-existing --wipe-authority-data --apply."
         ),
     )
@@ -810,6 +809,15 @@ class EidolonPiController:
 
         self.preflight.require_exact_commits(_SETTINGS_SOURCES)
         try:
+            if new_identity and self.app is not None:
+                with replacement_inputs(
+                    self.preflight.sources.resolved_config(), self.preflight.read_exact_source_file,
+                    owner_root=self.host_layer.materializer().material_root, port=self.app.hub_https_port,
+                ) as replacement:
+                    result = replacement.commit()
+                self.host_layer._deployment_identity = None
+                self.host_layer.prepare()
+                return {**result, "host_application": self.host_layer.public_contract()}
             result = initialize_install_inputs(
                 self.preflight.sources.resolved_config(),
                 self.preflight.read_exact_source_file,
@@ -953,20 +961,31 @@ class EidolonPiController:
             **self.host_layer.target_payload(),
             "wipe_authority_data": wipe_authority_data,
         }
-        # Everything that can refuse does so before the Host is touched.
+        # Validate the destructive scope before the Host is touched.
         authority = self._authority_to_remove() if wipe_authority_data else None
         plan = self.transport.run_agent("reset-plan", payload, timeout=180)
         if plan.get("status") != "planned":
             raise OperationsError("Host reset plan returned invalid evidence")
         if authority is not None:
             authority = self._attribute_authority(authority, plan)
-            plan = {**plan, "authority": authority}
+            plan = {**plan, "authority": authority, "identity": "creates a new Host/Owner; add it in Mobile after installation"}
         if not apply:
             return {**plan, "next": "rerun reset --apply after reviewing the detected paths"}
-        result = self.transport.run_agent("reset-host", payload, timeout=600)
-        if result.get("status") != "reset":
-            raise OperationsError("Host reset returned invalid evidence")
-        return result if authority is None else {**result, "authority": authority}
+        if wipe_authority_data and self.app is not None:
+            with replacement_inputs(
+                self.preflight.sources.resolved_config(), self.preflight.read_exact_source_file,
+                owner_root=self.host_layer.materializer().material_root, port=self.app.hub_https_port,
+            ) as replacement:
+                result = self.transport.run_agent("reset-host", payload, timeout=600)
+                if result.get("status") != "reset":
+                    raise OperationsError("Host reset returned invalid evidence")
+                result = {**result, "identity": replacement.commit()}
+                self.host_layer._deployment_identity = None
+        else:
+            result = self.transport.run_agent("reset-host", payload, timeout=600)
+            if result.get("status") != "reset":
+                raise OperationsError("Host reset returned invalid evidence")
+        return {**result, "authority": authority} if authority is not None else result
 
     @staticmethod
     def _attribute_authority(
@@ -1105,37 +1124,20 @@ class EidolonPiController:
         return observed
 
     def authority_capability(self, *, will_wipe: bool, apply: bool) -> dict[str, object] | None:
-        """Decide which Owner Authority capability an install must carry.
-
-        The bootstrap capability in an install is one-shot: Hub accepts it only
-        into an empty database, and deletes it on use.  The controller records
-        that use in its own Owner material, so what an install ships is a
-        *decision*, not a copy of a file — and until now nobody made it.  An
-        install shipped whatever the material root last said, which after any
-        successful Hub start is ``owner-authority.bootstrap-consumed``.  A Host
-        whose Hub had ever come up could therefore never be wiped and
-        reinstalled: the reset emptied the database and the install handed it a
-        capability Hub is right to refuse.
-
-        The decision is made from Host evidence, never from the flags alone.
-        The rules are stated once, in
-        :func:`eidolon_ops.owner_domain_assets.decide_owner_authority`, because
-        an install is not the only operation that reaches this fork: a Mac
-        source run reaches it from its own ``reset --wipe-authority-data``.
-
-        ``will_wipe`` is not one of those rules.  It only says the database this
-        observation found is about to be removed, so the decision is made
-        against the Host as it will be, not as it is.
-        """
+        """Bootstrap a new identity or preserve an established one; never rebuild implicitly."""
 
         if self.app is None:
             return None
+        if will_wipe:
+            raise OperationsError("factory reset must prepare a new Host identity before install")
         materializer = self.host_layer.materializer()
         try:
             current = materializer.owner_assets()
         except OwnerDomainAssetError as exc:
             raise OperationsError(str(exc)) from exc
         observed = self._observed_authority_lineage()
+        if observed["anchor"] is not None and observed["marker"] != observed["anchor"]:
+            raise OperationsError("AUTHORITY_RECOVERY_REQUIRED: database and saved authorization state disagree; restore the complete backup")
         # A capability the Host can prove it used, but whose use this
         # controller never got to record, is consumed. Reading it as pending
         # would hand a wiped Host the state id its destroyed database carried.
@@ -1148,17 +1150,18 @@ class EidolonPiController:
             is AuthorityDecision.RECORD_CONSUMED
         ):
             try:
-                mark_authority_bootstrapped(
-                    materializer.material_root,
-                    owner_domain_id=current.owner_domain_id,
-                    owner_domain_generation=current.owner_domain_generation,
-                    authority_state_id=current.authority_state_id,
-                )
-                current = materializer.owner_assets()
+                if apply:
+                    mark_authority_bootstrapped(
+                        materializer.material_root,
+                        owner_domain_id=current.owner_domain_id,
+                        owner_domain_generation=current.owner_domain_generation,
+                        authority_state_id=current.authority_state_id,
+                    )
+                current = replace(current, bootstrap_pending=False)
             except OwnerDomainAssetError as exc:
                 raise OperationsError(str(exc)) from exc
         lineage = authority_lineage(current)
-        marker = None if will_wipe else observed["marker"]
+        marker = observed["marker"]
         decision = decide_owner_authority(
             current, marker=marker, established=observed["established"]
         )
@@ -1176,43 +1179,7 @@ class EidolonPiController:
                 "observed": observed,
                 "lineage": lineage,
             }
-        if not apply:
-            return {
-                "decision": "advance_generation",
-                "owner_domain_id": current.owner_domain_id,
-                "owner_domain_generation": current.owner_domain_generation + 1,
-                "previous_generation": current.owner_domain_generation,
-                "generation_advanced": False,
-                "observed": observed,
-                "lineage": None,
-                "next": (
-                    "this install rebuilds an Authority whose state is gone; "
-                    "every existing device Claim and credential becomes void"
-                ),
-            }
-        try:
-            # Same CAS primitive as authority-reset: the new lineage evidence is
-            # persisted before any descriptor or capability naming it is
-            # rendered, let alone shipped.
-            advance_owner_authority(
-                materializer.material_root,
-                expected_owner_domain_id=current.owner_domain_id,
-                expected_generation=current.owner_domain_generation,
-            )
-            advanced = materializer.owner_assets()
-        except OwnerDomainAssetError as exc:
-            raise OperationsError(str(exc)) from exc
-        if not advanced.bootstrap_pending:
-            raise OperationsError("Owner Authority rebuild has no pending bootstrap capability")
-        return {
-            "decision": "advance_generation",
-            "owner_domain_id": advanced.owner_domain_id,
-            "owner_domain_generation": advanced.owner_domain_generation,
-            "previous_generation": current.owner_domain_generation,
-            "generation_advanced": True,
-            "observed": observed,
-            "lineage": authority_lineage(advanced),
-        }
+        raise OperationsError("AUTHORITY_RECOVERY_REQUIRED: restore the complete Host backup or explicitly initialize a new Host")
 
     def commit_authority_capability(
         self, capability: dict[str, object] | None, installed: object
@@ -1301,105 +1268,6 @@ class EidolonPiController:
             raise OperationsError("Kernel schema reset returned invalid evidence")
         return result
 
-    def authority_reset(self, *, apply: bool) -> dict[str, object]:
-        """Advance one Owner Authority generation and replace only Hub state.
-
-        A pending generation is a durable retry journal: once the controller
-        has advanced, a transport or Host failure retries the same state id
-        instead of minting another generation.  The target independently
-        proves the DB marker and external lineage anchor before the one-shot
-        bootstrap is marked consumed here.
-        """
-
-        self.preflight.validate_ssh_material()
-        if self.app is None:
-            raise OperationsError("Owner Authority reset requires the Pi Host app contract")
-        materializer = self.host_layer.materializer()
-        try:
-            current = materializer.owner_assets()
-        except OwnerDomainAssetError as exc:
-            raise OperationsError(str(exc)) from exc
-        retry = current.bootstrap_pending and current.owner_domain_generation > 1
-        next_generation = (
-            current.owner_domain_generation if retry else current.owner_domain_generation + 1
-        )
-        if not apply:
-            return {
-                "status": "planned",
-                "owner_domain_id": current.owner_domain_id,
-                "previous_generation": next_generation - 1,
-                "next_generation": next_generation,
-                "retry_pending_generation": retry,
-                "removes": "Hub database, SQLite sidecars and Authority lineage anchor only",
-                "preserves": [
-                    "Host identity, active release and Owner root",
-                    "network configuration and all non-Hub authorities",
-                    "Controller-side monotonic generation journal",
-                ],
-                "next": "rerun authority-reset --apply after reviewing the exact target",
-            }
-        try:
-            if not retry:
-                advance_owner_authority(
-                    materializer.material_root,
-                    expected_owner_domain_id=current.owner_domain_id,
-                    expected_generation=current.owner_domain_generation,
-                )
-            pending = materializer.owner_assets()
-        except OwnerDomainAssetError as exc:
-            raise OperationsError(str(exc)) from exc
-        if not pending.bootstrap_pending:
-            raise OperationsError("Owner Authority reset has no pending bootstrap capability")
-        request = {
-            "owner_domain_id": pending.owner_domain_id,
-            "previous_generation": pending.owner_domain_generation - 1,
-            "next_generation": pending.owner_domain_generation,
-            "state_id": pending.authority_state_id,
-        }
-        release_id = self._active_release("release_id")
-        # The expand release is active before this is called. Both interpreter
-        # checks therefore validate the same current parser; no N-1 process is
-        # restarted against a schema it cannot read.
-        refreshed = self.host_layer.refresh(release_id)
-        payload = {
-            **self.host_layer.target_payload(),
-            "authority_reset": request,
-        }
-        plan = self.transport.run_agent("authority-reset-plan", payload, timeout=180)
-        if plan.get("status") not in {"planned", "already_reset"}:
-            raise OperationsError("Owner Authority reset plan returned invalid evidence")
-        result = self.transport.run_agent("authority-reset", payload, timeout=420)
-        authority = result.get("authority")
-        if (
-            result.get("status") not in {"authority_reset", "already_reset"}
-            or not isinstance(authority, dict)
-            or authority.get("owner_domain_id") != pending.owner_domain_id
-            or authority.get("owner_domain_generation") != pending.owner_domain_generation
-            or authority.get("state_id") != pending.authority_state_id
-        ):
-            raise OperationsError("Owner Authority reset returned invalid lineage proof")
-        try:
-            mark_authority_bootstrapped(
-                materializer.material_root,
-                owner_domain_id=pending.owner_domain_id,
-                owner_domain_generation=pending.owner_domain_generation,
-                authority_state_id=pending.authority_state_id,
-            )
-        except OwnerDomainAssetError as exc:
-            raise OperationsError(str(exc)) from exc
-        consumed = self.host_layer.refresh(release_id)
-        reclaimed = self.bundles.reclaim(release_id, phase="commit")
-        self.bundles.require_reclamation(reclaimed, "committed")
-        ready = self.app_ready()
-        return {
-            **result,
-            "plan": plan,
-            "host_application": refreshed,
-            "bootstrap_tombstone": consumed,
-            "release_reclaim": reclaimed,
-            "app": ready,
-        }
-
     def authority_backup(self, *, output: Path) -> dict[str, object]:
         """Capture the Owner root package and the matching complete Hub state."""
 
@@ -1424,7 +1292,7 @@ class EidolonPiController:
             raise OperationsError(str(exc)) from exc
         if owner.bootstrap_pending:
             raise OperationsError(
-                "AUTHORITY_RESTORE_INCOMPLETE: pending ResetAuthority state cannot be backed up"
+                "AUTHORITY_RESTORE_INCOMPLETE: Host authorization has not completed initialization; only established state can be backed up"
             )
         release_id = self._active_release("release_id")
         request = {
@@ -1449,7 +1317,7 @@ class EidolonPiController:
         }:
             raise OperationsError("Owner Authority backup lineage evidence mismatched")
         destination = output / (
-            f"{release_id}-owner-authority-generation-{owner.owner_domain_generation}"
+            f"{release_id}-hub-authority"
         )
         if destination.exists() or destination.is_symlink():
             raise OperationsError(f"Owner Authority backup destination exists: {destination}")
@@ -1504,10 +1372,12 @@ class EidolonPiController:
             "authority": captured.get("authority"),
             "host_files": files,
             "owner_material_files": sorted(material_files),
+            "scope": "Hub authorization database, anchor, and matching offline Owner material",
+            "complete_host_backup": False,
         }
 
     def authority_restore(self, *, source: Path, apply: bool) -> dict[str, object]:
-        """Restore one complete same-generation Owner Authority package."""
+        """Restore Hub authorization and matching offline Owner material; not a whole Host."""
 
         self.preflight.validate_ssh_material()
         if self.app is None:
@@ -1793,7 +1663,9 @@ class EidolonPiController:
         destination.parent.mkdir(parents=True, exist_ok=True)
         self.transport.download(str(result["directory"]), destination, recursive=True)
         write_json(destination / "backup.json", result)
-        return {**result, "local_directory": str(destination)}
+        return {**result, "local_directory": str(destination),
+                "scope": "declared component state; see not_covered for exclusions",
+                "complete_host_backup": False}
 
     def restore(self, *, source: Path, apply: bool) -> dict[str, object]:
         """Put a backup back, after proving it belongs to this Host."""

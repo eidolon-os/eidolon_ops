@@ -2,8 +2,8 @@
 
 The Owner root and delegated directory signer live only in the controller-side
 private material directory.  A Host receives the signed directory, public
-certificates, and its own TLS leaf/key.  Host replacement therefore changes an
-endpoint and directory revision, never the Owner trust anchor.
+certificates, and its own TLS leaf/key.  A complete Host restore preserves this material. An explicit new Host receives
+a new Owner root; ordinary endpoint changes only revise its signed directory.
 """
 
 from __future__ import annotations
@@ -94,12 +94,19 @@ def ensure_owner_domain_assets(
         raise OwnerDomainAssetError("Owner Domain endpoint port is invalid")
     instant = (now or datetime.now(UTC)).astimezone(UTC)
     _require_private_material_root(material_root)
+    if any(material_root.iterdir()) and not all(
+        (material_root / name).is_file()
+        for name in (_ROOT_KEY, _ROOT_CERTIFICATE, _STATE)
+    ):
+        raise OwnerDomainAssetError(
+            "AUTHORITY_RECOVERY_REQUIRED: existing Owner identity is incomplete; restore its backup"
+        )
     root_key, root_certificate = _owner_root(material_root, instant)
+    owner_domain_id = _owner_domain_id(root_certificate)
+    authority_state = _authority_state(material_root, owner_domain_id)
     signer_key, signer_certificate = _directory_signer(
         material_root, root_key, root_certificate, instant
     )
-    owner_domain_id = _owner_domain_id(root_certificate)
-    authority_state = _authority_state(material_root, owner_domain_id)
     tls_certificate, tls_private_key = _host_tls(
         material_root, identity, root_key, root_certificate, instant
     )
@@ -164,7 +171,7 @@ def _authority_state(root: Path, owner_domain_id: str) -> _AuthorityState:
             or set(value) != expected_keys
             or value.get("contract_version") != 1
             or value.get("owner_domain_id") != owner_domain_id
-            or not isinstance(value.get("owner_domain_generation"), int)
+            or type(value.get("owner_domain_generation")) is not int
             or value["owner_domain_generation"] < 1
             or not isinstance(value.get("authority_state_id"), str)
             or not value["authority_state_id"].startswith("authority-state_")
@@ -184,42 +191,6 @@ def _authority_state(root: Path, owner_domain_id: str) -> _AuthorityState:
         (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode(),
     )
     return value
-
-
-def reset_owner_authority(
-    material_root: Path,
-    *,
-    expected_owner_domain_id: str,
-    expected_generation: int,
-) -> tuple[int, str]:
-    """Advance the Authority lineage under an exact, explicit CAS.
-
-    This does not touch a Host or a device. The caller must separately execute
-    the destructive target reset and must not expose the new generation until
-    every release input has been regenerated from this state.
-    """
-
-    _require_private_material_root(material_root)
-    root_certificate = _certificate(material_root / _ROOT_CERTIFICATE)
-    owner_domain_id = _owner_domain_id(root_certificate)
-    state = _authority_state(material_root, owner_domain_id)
-    if (
-        owner_domain_id != expected_owner_domain_id
-        or state["owner_domain_generation"] != expected_generation
-    ):
-        raise OwnerDomainAssetError("Owner Authority reset target changed")
-    next_state: _AuthorityState = {
-        "contract_version": 1,
-        "owner_domain_id": owner_domain_id,
-        "owner_domain_generation": expected_generation + 1,
-        "authority_state_id": "authority-state_" + secrets.token_urlsafe(24),
-        "bootstrap_pending": True,
-    }
-    write_private_file(
-        material_root / _STATE,
-        (json.dumps(next_state, sort_keys=True, separators=(",", ":")) + "\n").encode(),
-    )
-    return next_state["owner_domain_generation"], next_state["authority_state_id"]
 
 
 def mark_authority_bootstrapped(
@@ -253,7 +224,6 @@ class AuthorityDecision(StrEnum):
     RECORD_CONSUMED = "record_consumed_capability"
     CARRY_PENDING = "carry_pending_capability"
     KEEP_ESTABLISHED = "keep_established_lineage"
-    ADVANCE_GENERATION = "advance_generation"
     RECOVERY_REQUIRED = "recovery_required"
 
 
@@ -271,38 +241,10 @@ def authority_lineage(assets: OwnerDomainAssets) -> dict[str, object]:
 def decide_owner_authority(
     assets: OwnerDomainAssets, *, marker: object, established: object
 ) -> AuthorityDecision:
-    """Which capability an operation about to (re)start a Hub must carry.
+    """Only bootstrap a new identity, or continue its proven installed state.
 
-    Stated once, here, because every operation that can destroy Hub Authority
-    state has to reach the same answer and there is more than one such
-    operation: ``authority-reset``, a Pi ``install --reset-existing
-    --wipe-authority-data``, and a Mac source run's ``reset
-    --wipe-authority-data`` followed by ``start``.  《设备生命周期状态机与恢复边》
-    §3.6.1 admits exactly two recovery modes and no guessed middle one, so the
-    decision is made from Host evidence — the Hub database marker and the
-    external lineage anchor — never from the flags a command was given:
-
-    * unconsumed and the Host proves it established exactly this lineage — the
-      Host used the capability and nothing recorded it.  Record it, then decide
-      again; reading it as pending would later hand a wiped Host the state id
-      its destroyed database carried.
-    * unconsumed otherwise — reuse it.  A pending generation is a durable retry
-      journal: retrying a failed wipe must not mint a second generation.
-    * consumed and the Host holds no Hub Authority marker — that state is gone
-      and cannot be restored, so this is a ``ResetAuthority`` in fact and the
-      generation **must** advance.  Minting a second, empty Authority state at
-      an unchanged generation would put a new authority behind the same
-      anti-rollback fence every prior Claim, credential and database backup was
-      issued under.
-    * consumed and the Host holds this same lineage — nothing happened.  Carry
-      it unchanged; Hub ignores a spent capability once its database exists.
-    * anything else — the Host and this Owner material do not describe the same
-      Authority, which is the one case no operation may paper over.
-
-    ``marker`` is the caller's, not the Host's, in one respect: an operation
-    that is about to destroy the database this observation found passes ``None``
-    so the decision is made against the Host as it will be.  ``established``
-    stays as observed, because a capability's use is a fact about the past.
+    A consumed identity with missing state requires recovery. Explicit factory
+    reset creates another Host/Owner; it never reissues this identity at a new epoch.
     """
 
     lineage = authority_lineage(assets)
@@ -313,8 +255,8 @@ def decide_owner_authority(
             return AuthorityDecision.CARRY_PENDING
         return AuthorityDecision.RECOVERY_REQUIRED
     if marker is None:
-        return AuthorityDecision.ADVANCE_GENERATION
-    if marker == lineage:
+        return AuthorityDecision.RECOVERY_REQUIRED
+    if established == lineage:
         return AuthorityDecision.KEEP_ESTABLISHED
     return AuthorityDecision.RECOVERY_REQUIRED
 

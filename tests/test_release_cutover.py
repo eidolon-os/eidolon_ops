@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from eidolon_ops.hostagent import authority_reset, contract, cutover
+from eidolon_ops.hostagent import authority_state, contract, cutover
 from eidolon_ops.hostagent.primitives import TargetError
 
 _AUTHORITY = {
@@ -30,7 +30,7 @@ def _bootstrapped_hub(root: Path, authority: dict[str, object]) -> None:
     external lineage anchor.
     """
 
-    database = _path(root, authority_reset.HUB_DATABASE)
+    database = _path(root, authority_state.HUB_DATABASE)
     database.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(database)
     try:
@@ -51,7 +51,7 @@ def _bootstrapped_hub(root: Path, authority: dict[str, object]) -> None:
         connection.commit()
     finally:
         connection.close()
-    anchor = _path(root, authority_reset.AUTHORITY_ANCHOR)
+    anchor = _path(root, authority_state.AUTHORITY_ANCHOR)
     anchor.write_text(json.dumps(authority), encoding="utf-8")
     anchor.chmod(0o600)
 
@@ -375,7 +375,7 @@ def test_cutover_ignores_a_respent_bootstrap_capability_file(tmp_path: Path) -> 
 
 def test_cutover_refuses_a_host_that_cannot_prove_one_lineage(tmp_path: Path) -> None:
     _host(tmp_path)
-    anchor = _path(tmp_path, authority_reset.AUTHORITY_ANCHOR)
+    anchor = _path(tmp_path, authority_state.AUTHORITY_ANCHOR)
     anchor.write_text(
         json.dumps({**_AUTHORITY, "owner_domain_generation": 3}), encoding="utf-8"
     )
