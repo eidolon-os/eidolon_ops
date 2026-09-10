@@ -109,10 +109,11 @@ class Capability(StrEnum):
     #: to change it — which is what a replaced board needs and what a text
     #: editor should not be the interface for.
     TRUST_HOST_KEY = "trust-host-key"
-    #: Render the first-boot payload a flashed card needs. Only a Host that is
-    #: installed over SSH has one, and the point of it is that the board has
-    #: never booted — so nothing about it can be asked of the Host itself.
-    BOOT_MEDIA = "boot-media"
+    #: Express what Ops requires of a board so the board can be told it — down
+    #: whichever channel its own state leaves open, its boot medium or a shell
+    #: on it. Only a Host reached over SSH needs this, and nothing about it can
+    #: be asked of the Host, which is the situation it exists for.
+    BRING_UP = "bring-up"
     #: Workstation-only inspection of the source-run profile.
     SOURCE_PROFILE = "debug"
 

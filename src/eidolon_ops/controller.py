@@ -18,7 +18,8 @@ import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
-from eidolon_ops import boot_media, host_keys
+from eidolon_ops import bring_up as bring_up_module
+from eidolon_ops import host_keys
 from eidolon_ops.component_contract import read_component_contracts
 from eidolon_ops.config import OperationsConfig, validate_release_id
 from eidolon_ops.errors import OperationsError
@@ -561,16 +562,28 @@ class EidolonPiController:
 
         return self.provision(apply=apply, journal=Journal())
 
-    def boot_media(self, *, output: Path, apply: bool = False) -> dict[str, object]:
-        """Render the payload that makes a flashed card come up SSH-ready.
+    def bring_up(self, *, via: str, output: Path, apply: bool = False) -> dict[str, object]:
+        """Express what Ops requires of this Host, for the channel named.
 
         The output directory is named rather than discovered. Pointed at a
-        mounted card it prepares that card; pointed anywhere else it produces
-        three files to copy. Guessing which of a machine's volumes is the right
-        one is a heuristic that would be wrong differently on every operator's
-        machine, and a wrong guess fails silently.
+        mounted boot medium it prepares that medium; pointed anywhere else it
+        produces files to carry by any means — which is the same reason the
+        channel is a choice: guessing that every board is a card the
+        workstation can mount was what made this fit one situation only.
+
+        Ops writes files and does not apply them. For the medium the board is
+        not running, and for the shell the transport cannot log into a board
+        that does not yet hold the key it would log in with. Closing that gap
+        would mean Ops holding a password, and the credential that opens a
+        board for the first time is the operator's.
         """
 
+        if via not in (bring_up_module.BOOT_MEDIUM, bring_up_module.SHELL):
+            raise OperationsError(
+                f"{via!r} is not a channel a board has. A board that has never booted has "
+                f"its medium ({bring_up_module.BOOT_MEDIUM}); one that is running has a "
+                f"shell on it ({bring_up_module.SHELL})."
+            )
         public_key = self.config.host.identity_file.with_suffix(
             self.config.host.identity_file.suffix + ".pub"
         )
@@ -582,35 +595,44 @@ class EidolonPiController:
                 "private key this profile already names, and the Host has to be given it "
                 "before it will accept the key Ops connects with."
             ) from exc
-        bring_up = boot_media.BringUp(
+        required = bring_up_module.BringUp(
             hostname=self.config.host.hostname,
             user=self.config.host.user,
             authorized_key=authorized_key,
         )
-        payload = boot_media.render(bring_up, foundation=self.config.foundation_profile)
+        rendered = bring_up_module.render(
+            required, foundation=self.config.foundation_profile, via=via
+        )
         report: dict[str, object] = {
+            "via": via,
             "output": str(output),
-            "files": sorted(payload),
+            "files": sorted(rendered),
             "foundation": self.config.foundation_profile,
-            "hostname": bring_up.short_hostname,
-            "user": bring_up.user,
+            "hostname": required.short_hostname,
+            "user": required.user,
             "authorized_key": str(public_key),
-            "note": (
-                "This replaces the three files an imager writes, including whatever console "
+            "next": (
+                "Write these to the boot medium's own filesystem, then boot the board."
+                if via == bring_up_module.BOOT_MEDIUM
+                else f"Copy it to the board and run it as root: sudo sh {bring_up_module.SCRIPT}"
+            ),
+        }
+        if via == bring_up_module.BOOT_MEDIUM:
+            report["note"] = (
+                "This replaces the files an imager writes, including whatever console "
                 "password was typed into it: the Host it prepares accepts the deploy key and "
                 "nothing else, so a board that loses every link is re-flashed rather than "
                 "rescued at a keyboard."
-            ),
-        }
+            )
         if not apply:
             report["status"] = "rendered"
             return report
         try:
             output.mkdir(parents=True, exist_ok=True)
-            for name, text in sorted(payload.items()):
+            for name, text in sorted(rendered.items()):
                 (output / name).write_text(text, encoding="utf-8")
         except OSError as exc:
-            raise OperationsError(f"could not write the boot payload to {output}: {exc}") from exc
+            raise OperationsError(f"could not write the bring-up to {output}: {exc}") from exc
         report["status"] = "written"
         return report
 

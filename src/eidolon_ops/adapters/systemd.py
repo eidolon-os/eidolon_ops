@@ -44,7 +44,7 @@ class SystemdSupervisor:
                 Capability.KERNEL_SCHEMA_RESET,
                 Capability.DIAGNOSE,
                 Capability.TRUST_HOST_KEY,
-                Capability.BOOT_MEDIA,
+                Capability.BRING_UP,
             }
         )
 

@@ -9,10 +9,13 @@ from __future__ import annotations
 import pytest
 import yaml
 
-from eidolon_ops.boot_media import (
+from eidolon_ops.bring_up import (
+    BOOT_MEDIUM,
     META_DATA,
     NETWORK_CONFIG,
-    PAYLOADS,
+    PLATFORMS,
+    SCRIPT,
+    SHELL,
     USER_DATA,
     BringUp,
     render,
@@ -32,8 +35,12 @@ def _bring_up(**overrides) -> BringUp:
 
 
 def _parsed(**overrides):
-    payload = render(_bring_up(**overrides), foundation=FOUNDATION)
+    payload = render(_bring_up(**overrides), foundation=FOUNDATION, via=BOOT_MEDIUM)
     return {name: yaml.safe_load(text) for name, text in payload.items()}
+
+
+def _script(**overrides) -> str:
+    return render(_bring_up(**overrides), foundation=FOUNDATION, via=SHELL)[SCRIPT]
 
 
 def test_the_requirement_names_no_platform() -> None:
@@ -101,7 +108,8 @@ def test_the_instance_id_is_derived_so_two_renderings_agree() -> None:
     """
 
     assert _parsed()[META_DATA]["instance-id"] == "eidolon-ops-eidolon-pi5"
-    assert render(_bring_up(), foundation=FOUNDATION) == render(_bring_up(), foundation=FOUNDATION)
+    once = render(_bring_up(), foundation=FOUNDATION, via=BOOT_MEDIUM)
+    assert once == render(_bring_up(), foundation=FOUNDATION, via=BOOT_MEDIUM)
 
 
 def test_a_key_only_host_does_not_also_accept_passwords() -> None:
@@ -121,13 +129,81 @@ def test_a_foundation_with_no_declared_payload_is_refused() -> None:
     declared beside it rather than another's guessed at.
     """
 
-    assert set(PAYLOADS) == {FOUNDATION}
+    assert set(PLATFORMS) == {FOUNDATION}
 
-    with pytest.raises(OperationsError, match="no first-boot payload is declared"):
-        render(_bring_up(), foundation="ubuntu-2604-rk3588-arm64-v1")
+    for via in (BOOT_MEDIUM, SHELL):
+        with pytest.raises(OperationsError, match="no bring-up is declared"):
+            render(_bring_up(), foundation="ubuntu-2604-rk3588-arm64-v1", via=via)
 
 
 @pytest.mark.parametrize("value", ["not-a-key", f"{KEY}\nssh-ed25519 second"])
 def test_an_unusable_key_is_refused_here_not_discovered_on_a_board(value: str) -> None:
     with pytest.raises(OperationsError, match="one OpenSSH public key line"):
         _bring_up(authorized_key=value)
+
+
+# --- the second channel: a board that is already running --------------------
+
+
+def test_both_channels_carry_the_same_requirement() -> None:
+    """One requirement, two expressions — not two designs that drifted.
+
+    A board chooses the channel by its own state: never booted leaves only its
+    medium, already running leaves only a shell. Which medium and which shell
+    are the operator's business, which is why neither appears here.
+    """
+
+    script = _script()
+    documents = _parsed()
+    config = documents[USER_DATA]
+
+    # The same account, key and name, derived from the same profile.
+    assert config["user"]["name"] in script
+    assert KEY in script
+    assert config["hostname"] in script
+    # The same two measured NetworkManager properties.
+    passthrough = documents[NETWORK_CONFIG]["network"]["ethernets"]["eth0"]["networkmanager"][
+        "passthrough"
+    ]
+    assert passthrough == {"ipv4.link-local": "4", "ipv6.method": "link-local"}
+    assert "ipv4.link-local fallback" in script
+    assert "ipv6.method link-local" in script
+    # And the same non-interactive sudo the transport cannot elevate without.
+    assert "NOPASSWD:ALL" in script
+
+
+def test_the_script_is_a_shell_script_a_shell_accepts() -> None:
+    """Rendered as text, so something has to actually parse it."""
+
+    import subprocess
+    import tempfile
+
+    with tempfile.NamedTemporaryFile("w", suffix=".sh") as handle:
+        handle.write(_script())
+        handle.flush()
+        result = subprocess.run(["sh", "-n", handle.name], capture_output=True, text=True)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_the_script_cannot_lock_the_operator_out_of_the_board() -> None:
+    """It may be run as the very account the operator is logged in through.
+
+    Rewriting that account's `authorized_keys` would take away the access
+    being used to fix the board. Appending only when absent is what makes the
+    script safe to run twice, and safe to run at all.
+    """
+
+    script = _script()
+
+    assert "grep -qxF" in script, "the key is added only when it is not there"
+    assert ">> " in script and "authorized_keys" in script
+    # The network comes last: `nmcli con up` drops a session running over that
+    # interface, and by then everything else has been applied.
+    assert script.index("authorized_keys") < script.index("nmcli con up")
+    assert script.index("sudoers.d") < script.index("nmcli con up")
+
+
+def test_a_channel_a_board_does_not_have_is_refused() -> None:
+    with pytest.raises(KeyError):
+        PLATFORMS["no-such-foundation"]

@@ -62,10 +62,9 @@ OPERATIONS: dict[str, Callable[[HostController, argparse.Namespace], object]] = 
     "restore": lambda controller, a: controller.restore(
         source=a.source, apply=a.apply
     ),
-    "commissioning-code": lambda controller, a: controller.commissioning_code(
-        setup_code=a.code
-    ),
-    "boot-media": lambda controller, a: controller.boot_media(
+    "commissioning-code": lambda controller, a: controller.commissioning_code(setup_code=a.code),
+    "bring-up": lambda controller, a: controller.bring_up(
+        via=a.via,
         output=a.output,
         apply=a.apply,
     ),
@@ -299,23 +298,33 @@ def _parser() -> argparse.ArgumentParser:
             "app.setup_code is used, and without that the Host draws one"
         ),
     )
-    boot_media = operations.add_parser(
-        "boot-media",
-        help="render the first-boot payload a freshly flashed card needs",
+    bring_up = operations.add_parser(
+        "bring-up",
+        help="express what Ops requires of a board, for the channel it can be told down",
     )
-    boot_media.add_argument(
+    bring_up.add_argument(
+        "--via",
+        choices=["boot-medium", "shell"],
+        required=True,
+        help=(
+            "which channel this board leaves open. A board that has never booted has only "
+            "its boot medium, written from elsewhere; one that is already running has only "
+            "a shell on it, however that shell was obtained"
+        ),
+    )
+    bring_up.add_argument(
         "--output",
         type=Path,
         required=True,
         metavar="DIR",
         help=(
-            "where to write user-data, meta-data and network-config. Point it at a mounted "
-            "card's boot partition to prepare that card, or anywhere else to get three files "
-            "to copy. Named rather than discovered: guessing which volume is the card would "
-            "be wrong differently on every machine, and silently"
+            "where to write the rendered files. Point it at a mounted boot medium to prepare "
+            "that medium, or anywhere else to carry the files by other means. Named rather "
+            "than discovered: guessing which volume is the board's would be wrong "
+            "differently on every machine, and silently"
         ),
     )
-    boot_media.add_argument("--apply", action="store_true")
+    bring_up.add_argument("--apply", action="store_true")
     trust_host_key = operations.add_parser(
         "trust-host-key",
         help="record which host key this profile trusts, after showing you its fingerprint",
