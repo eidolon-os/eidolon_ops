@@ -239,7 +239,7 @@ READINESS_CONTRACT: tuple[ReadinessCheck, ...] = (
     _only(
         HostKind.SOURCE,
         ReadinessFact.LIVEKIT_NETWORK_CURRENT,
-        "LiveKit advertises the address its media will be answered on",
+        "eidolond reports LiveKit running on the network it is configured for",
     ),
 )
 
