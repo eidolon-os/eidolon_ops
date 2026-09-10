@@ -97,3 +97,21 @@ def test_a_key_only_host_does_not_also_accept_passwords() -> None:
 def test_an_unusable_key_is_refused_here_not_discovered_on_a_board(value: str) -> None:
     with pytest.raises(OperationsError, match="one OpenSSH public key line"):
         _parsed(authorized_key=value)
+
+
+def test_a_board_this_payload_does_not_describe_is_refused() -> None:
+    """The capability lives on the SSH/systemd adapter, which several boards use.
+
+    The rk3588 profile reached this command and would have been handed `eth0`
+    for an interface called `enP3p49s0` — a card that boots, comes up with no
+    wired link, and says nothing about why. Everything in the payload is one
+    platform's convention, so a Host declaring another foundation is refused
+    rather than guessed at.
+    """
+
+    from eidolon_ops.boot_media import FOUNDATION, require_supported_foundation
+
+    require_supported_foundation(FOUNDATION)
+
+    with pytest.raises(OperationsError, match="ubuntu-2604-rk3588-arm64-v1"):
+        require_supported_foundation("ubuntu-2604-rk3588-arm64-v1")

@@ -571,6 +571,7 @@ class EidolonPiController:
         machine, and the failure of a wrong guess is silent.
         """
 
+        boot_media.require_supported_foundation(self.config.foundation_profile)
         public_key = self.config.host.identity_file.with_suffix(
             self.config.host.identity_file.suffix + ".pub"
         )

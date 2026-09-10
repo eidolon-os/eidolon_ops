@@ -49,10 +49,34 @@ USER_DATA = "user-data"
 META_DATA = "meta-data"
 NETWORK_CONFIG = "network-config"
 
-#: Raspberry Pi OS's name for the Pi's built-in Ethernet. A platform that names
-#: it differently needs this rendered from its own profile rather than fixed
-#: here — this payload is the raspberry-pi one.
+#: Raspberry Pi OS's name for the Pi's built-in Ethernet.
 WIRED_INTERFACE = "eth0"
+
+#: The one foundation this payload is written for, and the reason there is a
+#: check rather than a default.
+#:
+#: Everything here is that platform's convention, not a general one: cloud-init
+#: seeded from a FAT32 boot partition, these three file names, netplan with the
+#: NetworkManager renderer, and `eth0`. The capability is declared on the
+#: SSH/systemd adapter, which more than one board uses — the rk3588 profile
+#: reached this and would have been handed `eth0` for an interface called
+#: `enP3p49s0`. That card boots, comes up with no wired link, and says nothing
+#: about why. A second platform gets its own payload declared beside its own
+#: foundation; until one exists, guessing on its behalf is worse than refusing.
+FOUNDATION = "raspberry-pi-os-debian-arm64-v2"
+
+
+def require_supported_foundation(foundation: str) -> None:
+    """Refuse a Host whose first boot this payload does not describe."""
+
+    if foundation != FOUNDATION:
+        raise OperationsError(
+            f"boot-media renders the {FOUNDATION!r} first boot, and this Host declares "
+            f"{foundation!r}. The payload is that platform's convention throughout — its "
+            f"boot partition layout, its first-boot mechanism and its interface name "
+            f"({WIRED_INTERFACE}) — so writing it for another board produces a card that "
+            "boots with no wired link and nothing saying why."
+        )
 
 
 def render(*, hostname: str, user: str, authorized_key: str) -> dict[str, str]:
