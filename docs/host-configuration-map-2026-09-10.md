@@ -116,15 +116,14 @@ Pi 新机链路现在是：外部刷好 OS → bring-up 交付 → 板子启动/
 
 已核实提交 `7860986` 新增：
 
-- [operations config 备份](/Users/manson/ai/eidolon/eidolon_ops/config/eidolon-rk3588.local-backup-20260910.toml)：保留本地 ASR/TTS 和本地对话 LLM 的路由配置、capabilities、sources、输入路径等。
-- [Host profile 备份](/Users/manson/ai/eidolon/eidolon_ops/config/hosts/rk3588.local-backup-20260910.toml)：保留机器身份、路径、App 配置和 operations config 引用。
+- [operations config 备份](/Users/manson/ai/eidolon/eidolon_ops/config/backups/20260910/opi5max/operations.toml)：保留本地 ASR/TTS 和本地对话 LLM 的路由配置、capabilities、sources、输入路径等。
+- [Host profile 备份](/Users/manson/ai/eidolon/eidolon_ops/config/backups/20260910/opi5max/host.toml)：保留机器身份、路径、App 配置和 operations config 引用。
 
 这两份是声明文件快照；它们不内含私密 `.env`、Host 私钥、owner-domain 签名材料、目标机 systemd drop-in、CPU 配置实况、模型权重或数据库。也不锁定当时所有源码 commit——sources 仍主要是路径，模型/模板/CPU 参数可随对应仓库 HEAD 改变。本文只确认这两份备份文件，不能据此断言另一个任务没有在其他位置做额外备份。
 
-有两个已确认的细节：
-
-1. 备份 Host profile 的 `adapter.operations_config` 仍是 `../eidolon-rk3588.toml`，指向当前云端路由配置，而非旁边的备份文件。因此直接选“备份 Host”不会恢复旧路由。
-2. `eidolon` 与 Console 都扫描 `config/hosts/*.toml` 且仅排除 `.example.toml`，这个备份文件会被当成 Host 候选，且与正式文件有相同 Host ID。备份目录应与活动 inventory 分离；本次仅记录，没有移动文件。
+原来发现的两处备份问题已修复：备份文件移到 `config/backups/20260910/opi5max/`，不再进入活动 inventory；
+`host.toml` 的 `adapter.operations_config` 指向同目录 `operations.toml`。搬迁时重新计算相对路径，并验证
+解析后的 operations 配置等价，保留 local_asr/local_llm/local_tts 路由与 capabilities。归档仍未封装模型或密钥。
 
 项目另外还有 `backup/restore`（组件 authority/Memory 数据快照）、`authority-backup/authority-restore`（权威恢复协议）、release/cutover snapshot（部署恢复）。这些都不应直接等同于“完整机器配置备份”。如果目标是完整复现一台 Host 的模型配置，需要一起记录 Host/operations 配置、源码 commit、渲染后配置摘要、CPU/服务覆盖配置、模型 manifest/摘要和私密材料的独立备份引用。
 
@@ -143,6 +142,17 @@ Pi 新机链路现在是：外部刷好 OS → bring-up 交付 → 板子启动/
 已移除“从 YAML 的 node_ip 或旧日志证明 LiveKit 网络可用”的做法，但新门禁仍不等于手机 WebRTC 真机验证。本轮已让无默认路由、多候选场景报告歧义而不选择数字最小的 IP；已有显式 app.lan_ipv4 是解决此类歧义的配置入口。工作树修复与真机结果分别记录，不能混为线上已全部生效。
 
 
-## 10. 本次 Pi5 换板验证补充
+## 10. 本次 Pi5 换板验证补充（历史临时方案）
 
-同一 Host identity 和 Owner root 仍可能对应不同 Authority generation/state_id。本次板上为 generation 8、工作站为 9；普通 deploy 刷新派生配置前必须先校验谱系。已在 ReleaseTransaction.deploy 复用 controller.authority_capability；不一致时应保留现有数据并选择恢复/重建流程，不能通过覆盖 generated/hub.yaml 或回退工作站 Owner state 代替明确的恢复决策。现场结果见[真机记录](pi5-optimization-validation-2026-09-10.md)。
+同一 Host identity 和 Owner root 仍可能对应不同 Authority generation/state_id。本次板上为 generation 8、工作站为 9，旧 deploy 会混用两者材料，因此曾临时在 ReleaseTransaction.deploy 复用 controller.authority_capability 并拒绝不一致。该临时方案已经由第 11 节的身份保留流程取代；普通更新不需要恢复/重建 Authority 来对齐工作站。现场结果见[真机记录](pi5-optimization-validation-2026-09-10.md)。
+
+
+## 11. 普通部署与授权材料分离后的流程
+
+`deploy/update` → `HostLayer.prepare_deployment` → 目标 `deployment-identity` 读取现有谱系和保留文件摘要 →
+`HostApplicationMaterializer.prepare_release` 仅渲染业务配置及 ingress → 目标 `refresh-release-configuration`
+复核保留文件未变化并用新旧真实解释器校验配置 → 现有发布事务激活。
+
+该路径不会调用本地 Owner 签发器，也不上传 Host/TLS/Owner/配对码/环境凭据。工作站 generation 9 与
+当前板上 generation 8 可以各自保留，普通更新只采用板上已建立的那套授权状态。generation 的协议含义
+和客户端对已接受世代的防回退判断没有改变；安装、显式重置与恢复继续走原有授权材料流程。

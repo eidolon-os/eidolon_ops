@@ -146,12 +146,7 @@ class ReleaseTransaction:
         # because a warning in a release log is a thing nobody reads twice.
         local["install_input_contract"] = self._require_declared_credentials()
         if self.host_layer.app is not None:
-            # A replacement board can share the Host key material yet retain a
-            # different Owner generation. Refuse that mismatch before preparing
-            # a candidate or overwriting its Hub settings and signed directory.
-            local["owner_authority_contract"] = self._authority_capability(
-                will_wipe=False, apply=False
-            )
+            local["installed_identity"] = self.host_layer.prepare_deployment()
         # Said before the bundle is sealed, not after something fails.
         #
         # A release is defined by what the repositories hold, which removed the
@@ -245,7 +240,7 @@ class ReleaseTransaction:
                 phases.append(
                     {
                         "phase": "host_application",
-                        "result": self.host_layer.refresh(release_id),
+                        "result": self.host_layer.refresh_release(release_id),
                     }
                 )
             phases.begin("activate")
@@ -673,8 +668,14 @@ class ReleaseTransaction:
         # rendered from the Owner material: the descriptor, the bootstrap
         # capability and local-api.env all name whichever generation this
         # returns.
-        authority = self._authority_capability(will_wipe=reset_existing, apply=True)
         phases = Journal(self.progress)
+        if reset_existing:
+            phases.begin("replacement_inputs")
+            phases.append({"phase": "replacement_inputs", "result": self.bundles.prepare_replacement_inputs(
+                release_id, reuse=resume,
+            )})
+            resume = True
+        authority = self._authority_capability(will_wipe=reset_existing, apply=True)
         if reset_existing:
             phases.begin("reset_existing")
             phases.append(

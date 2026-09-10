@@ -558,7 +558,7 @@ def test_the_local_board_backup_preserves_the_local_model_route() -> None:
     from eidolon_ops.config import load_config
     from eidolon_ops.source_assets import PORTS
 
-    config = load_config(Path("config/eidolon-rk3588.local-backup-20260910.toml"))
+    config = load_config(Path("config/backups/20260910/opi5max/operations.toml"))
     overlay = {(item.document, item.display): item.value for item in config.settings_overlay}
     assert "local_llm" in config.capabilities
     assert overlay[("agent.yaml", "llm.models[0].api_base")] == (
@@ -580,7 +580,8 @@ def test_the_path_contract_check_reads_this_hosts_own_host_env(
     nothing true about the Host and hid whatever it would have said.
     """
 
-    from eidolon_ops.hostagent import contract as agent, lifecycle
+    from eidolon_ops.hostagent import contract as agent
+    from eidolon_ops.hostagent import lifecycle
 
     declared = frozenset({"local_asr", "local_llm"})
     host_env = tmp_path / "host.env"
@@ -624,9 +625,7 @@ def test_a_capability_needing_hardware_is_refused_when_the_group_is_absent() -> 
     readiness three times before the cause was read off an strace.
     """
 
-    import inspect
 
-    from eidolon_ops.hostagent import install
 
     from eidolon_ops.hostagent import contract as agent
 

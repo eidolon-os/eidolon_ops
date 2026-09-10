@@ -161,17 +161,16 @@ class HostApplicationMaterializer:
             return value
         return environment.merge(value, replacements, label="Host application environment")
 
-    def public_contract(self) -> dict[str, object]:
+    def public_contract(self, *, owner_domain_id: str | None = None) -> dict[str, object]:
         identity = self.identity()
-        try:
-            owner = ensure_owner_domain_assets(
-                self.material_root, identity, self.app.hub_https_port
-            )
-        except OwnerDomainAssetError as exc:
-            raise HostApplicationError(str(exc)) from exc
+        if owner_domain_id is None:
+            try:
+                owner_domain_id = self.owner_assets(identity=identity).owner_domain_id
+            except OwnerDomainAssetError as exc:
+                raise HostApplicationError(str(exc)) from exc
         return {
             "host_id": identity.host_id,
-            "owner_domain_id": owner.owner_domain_id,
+            "owner_domain_id": owner_domain_id,
             "hub_hostname": identity.hub_hostname,
             "hub_https_port": self.app.hub_https_port,
             "hub_origin": identity.hub_origin(self.app.hub_https_port),
@@ -182,6 +181,18 @@ class HostApplicationMaterializer:
             ),
             "livekit_client_url": self._livekit_client_url(self.identity()),
             "allow_insecure_livekit": self.app.allow_insecure_livekit,
+        }
+
+    def prepare_release(self, template: str, authority: dict[str, object]) -> dict[str, bytes]:
+        """Only code-derived inputs. The installed issuer, TLS and credentials stay put."""
+        return {
+            "hub.generated.yaml": self._render_hub_settings(
+                template, str(authority["owner_domain_id"]),
+                int(authority["owner_domain_generation"]), self.identity(),
+            ).encode(),
+            "hub-ingress.py": self.ingress_source,
+            "hub-ingress.service": self._ingress_service().encode(),
+            "hub-service-override.conf": self._hub_service_override().encode(),
         }
 
     def _render_hub_settings(

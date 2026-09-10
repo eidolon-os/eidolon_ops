@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from eidolon_ops import component_artifacts
+from eidolon_ops.capabilities import HOST_CAPABILITIES
 from eidolon_ops.component_artifacts import (
     CarriedArtifact,
     CarriedFile,
@@ -21,7 +22,6 @@ from eidolon_ops.component_artifacts import (
     workstation_artifact_root,
 )
 from eidolon_ops.component_contract import read_component_contracts
-from eidolon_ops.capabilities import HOST_CAPABILITIES
 from eidolon_ops.errors import OperationsError
 from eidolon_ops.hostagent import contract, staging
 from eidolon_ops.hostagent.primitives import TargetError
@@ -198,6 +198,15 @@ def test_a_half_written_copy_is_fetched_again(tmp_path: Path, offline: list[str]
     assert len(offline) == 4
 
 
+def test_a_damaged_cached_file_is_refetched_despite_its_matching_record(tmp_path, offline):
+    artifact = _artifact()
+    root = ensure_workstation_artifact(tmp_path, artifact)
+    (root / "tokenizer.json").write_bytes(b"damaged")
+    ensure_workstation_artifact(tmp_path, artifact)
+    assert (root / "tokenizer.json").read_bytes() == _TOKENIZER
+    assert len(offline) == 4
+
+
 def test_files_that_do_not_match_the_pin_are_refused(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -255,32 +264,53 @@ def test_a_contract_asking_for_a_destination_outside_the_model_root_is_refused()
     assert "outside" in str(error.value)
 
 
-def test_the_host_reports_what_it_holds_by_digest(tmp_path: Path) -> None:
-    destination = tmp_path / "bge-small-zh"
-    absent = staging.component_artifact_state({"destination": str(destination)})
-    assert absent["status"] == "absent"
-
-    destination.mkdir()
-    (destination / ".files-sha256").write_text("d1", encoding="utf-8")
-    held = staging.component_artifact_state({"destination": str(destination)})
-    assert held == {
-        "status": "held",
-        "destination": str(destination),
-        "digest": "d1",
-    }
+def _manifest(root: Path) -> tuple[dict[str, str], str]:
+    files = {"onnx/model.onnx": hashlib.sha256(b"weights").hexdigest()}
+    digest = hashlib.sha256("\n".join(f"{name} {value}" for name, value in sorted(files.items())).encode()).hexdigest()
+    (root / "onnx").mkdir(parents=True)
+    (root / "onnx/model.onnx").write_bytes(b"weights")
+    (root / contract.EMBEDDING_DIGEST_RECORD).write_text(digest)
+    return files, digest
 
 
-def test_an_install_outside_the_model_root_is_refused(tmp_path: Path) -> None:
+def test_the_host_rehashes_content_even_when_the_digest_record_matches(tmp_path, monkeypatch):
+    monkeypatch.setattr(contract, "HOST_MODEL_ROOT", tmp_path)
+    destination = tmp_path / "encoder"
+    files, digest = _manifest(destination)
+    payload = {"destination": str(destination), "files": files}
+    assert staging.component_artifact_state(payload)["digest"] == digest
+    (destination / "onnx/model.onnx").write_bytes(b"damaged")
+    assert staging.component_artifact_state(payload)["status"] == "absent"
+
+
+def test_an_install_outside_the_model_root_is_refused(tmp_path):
     staged = tmp_path / "staged"
-    (staged / "onnx").mkdir(parents=True)
-    (staged / ".files-sha256").write_text("d1", encoding="utf-8")
+    files, _ = _manifest(staged)
+    with pytest.raises(TargetError, match="model root"):
+        staging.install_component_artifact({"staging": str(staged), "destination": str(tmp_path / "elsewhere"), "files": files})
 
-    with pytest.raises(TargetError) as error:
-        staging.install_component_artifact(
-            {"staging": str(staged), "destination": str(tmp_path / "elsewhere")}
-        )
 
-    assert "model root" in str(error.value)
+@pytest.mark.parametrize("fault", ["corrupt", "symlink", "extra", "occupied"])
+def test_bad_or_conflicting_models_leave_existing_content_untouched(tmp_path, monkeypatch, fault):
+    monkeypatch.setattr(contract, "HOST_MODEL_ROOT", tmp_path / "models")
+    monkeypatch.setattr(contract, "VAR_TMP", tmp_path)
+    staged = tmp_path / "eidolon-artifact-test"
+    files, _ = _manifest(staged)
+    destination = tmp_path / "models/encoder"
+    _manifest(destination)
+    if fault == "corrupt":
+        (staged / "onnx/model.onnx").write_bytes(b"bad")
+    elif fault == "symlink":
+        (staged / "onnx/model.onnx").unlink()
+        (staged / "onnx/model.onnx").symlink_to(destination / "onnx/model.onnx")
+    elif fault == "extra":
+        (staged / "extra").write_bytes(b"unexpected")
+    else:
+        (destination / "onnx/model.onnx").write_bytes(b"old pin")
+    before = (destination / "onnx/model.onnx").read_bytes()
+    with pytest.raises(TargetError):
+        staging.install_component_artifact({"staging": str(staged), "destination": str(destination), "files": files})
+    assert (destination / "onnx/model.onnx").read_bytes() == before
 
 
 def test_the_declared_encoder_is_the_one_the_host_env_selects(
@@ -360,33 +390,16 @@ def test_carrying_a_model_in_reports_the_digest_of_what_is_now_held(
     """
 
     monkeypatch.setattr(contract, "HOST_MODEL_ROOT", tmp_path / "models")
+    monkeypatch.setattr(contract, "VAR_TMP", tmp_path)
     monkeypatch.setattr(staging.os, "chown", lambda *args, **kwargs: None)
-
     staged = tmp_path / "eidolon-artifact-abc"
-    (staged / "onnx").mkdir(parents=True)
-    (staged / "onnx" / "model.onnx").write_bytes(b"weights")
-    (staged / contract.EMBEDDING_DIGEST_RECORD).write_text("d1\n", encoding="utf-8")
-    destination = tmp_path / "models" / "bge-small-zh"
-
-    result = staging.install_component_artifact(
-        {"staging": str(staged), "destination": str(destination)}
-    )
-
-    assert result == {
-        "status": "installed",
-        "destination": str(destination),
-        "digest": "d1",
-    }
-    # Moved, not copied: a staging directory left behind is what the next
-    # install would find half-written.
+    files, digest = _manifest(staged)
+    destination = tmp_path / "models/bge-small-zh"
+    result = staging.install_component_artifact({"staging": str(staged), "destination": str(destination), "files": files})
+    assert result["status"] == "installed" and result["digest"] == digest
     assert not staged.exists()
-    assert (destination / "onnx" / "model.onnx").read_bytes() == b"weights"
-    # And the Host now answers the same digest when asked what it holds.
-    assert staging.component_artifact_state({"destination": str(destination)}) == {
-        "status": "held",
-        "destination": str(destination),
-        "digest": "d1",
-    }
+    assert (destination / "onnx/model.onnx").read_bytes() == b"weights"
+    assert staging.component_artifact_state({"destination": str(destination), "files": files})["digest"] == digest
 
 
 def test_both_sides_spell_the_digest_record_the_same_way() -> None:

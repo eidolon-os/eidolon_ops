@@ -33,12 +33,13 @@ remote_uv = "/usr/local/bin/uv"
 require_wired_release_upload = true
 
 [workspace]
+toolchain_root = "../../../../.eidolon-ops/toolchain"
 # 2026-08-25: moved off /private/tmp. macOS purges it on its own schedule.
 # This directory holds in-flight outputs for --resume; successful install and
 # activation remove their output, and later successes sweep failures older than
 # 48 hours. The reusable uv cache lives under the durable toolchain root.
 bundle_root = "~/eidolon/release-bundles"
-release_cli = "../../eidolon_kernel/.venv/bin/eidolon-release"
+release_cli = "../../../../../eidolon_kernel/.venv/bin/eidolon-release"
 python_index_url = "https://pypi.org/simple"
 python_http_timeout_seconds = 120
 python_http_retries = 8
@@ -54,31 +55,31 @@ python_concurrent_downloads = 8
 # file. To reproduce a combination that already shipped, pass
 # `--revision source=<40hex>` for that run, which says so out loud.
 [sources.eidolon_kernel]
-path = "../../eidolon_kernel"
+path = "../../../../../eidolon_kernel"
 
 [sources.eidolon_data]
-path = "../../eidolon_data"
+path = "../../../../../eidolon_data"
 
 [sources.eidolon_hub]
-path = "../../eidolon_hub"
+path = "../../../../../eidolon_hub"
 
 [sources.eidolon_admin]
-path = "../../eidolon_admin"
+path = "../../../../../eidolon_admin"
 
 [sources.eidolon_agent]
-path = "../../eidolon_agent"
+path = "../../../../../eidolon_agent"
 
 [sources.eidolon_channel]
-path = "../../eidolon_channel"
+path = "../../../../../eidolon_channel"
 
 [sources.eidolon_memory]
-path = "../../eidolon_memory"
+path = "../../../../../eidolon_memory"
 
 [sources.eidolon_models]
-path = "../../eidolon_models"
+path = "../../../../../eidolon_models"
 
 [sources.eidolon_sdk]
-path = "../../eidolon_sdk"
+path = "../../../../../eidolon_sdk"
 
 [services]
 units = [
@@ -113,20 +114,20 @@ bootstrap_database = "/var/lib/eidolon-bootstrap/bootstrap.sqlite3"
 deployment_evidence = "/var/lib/eidolon/deployments"
 
 [install.files]
-data_env = "../.eidolon-ops/opi5max/inputs/data.env"
-hub_env = "../.eidolon-ops/opi5max/inputs/hub.env"
-kernel_env = "../.eidolon-ops/opi5max/inputs/kernel.env"
-admin_env = "../.eidolon-ops/opi5max/inputs/admin.env"
-local_api_env = "../.eidolon-ops/opi5max/inputs/local-api.env"
-bootstrap_env = "../.eidolon-ops/opi5max/inputs/bootstrap.env"
-host_identity = "../.eidolon-ops/opi5max/inputs/host_identity.ed25519"
-agent_env = "../.eidolon-ops/opi5max/inputs/agent.env"
-channel_env = "../.eidolon-ops/opi5max/inputs/channel.env"
-memory_env = "../.eidolon-ops/opi5max/inputs/memory.env"
-livekit_env = "../.eidolon-ops/opi5max/inputs/livekit.env"
-agent_settings = "../.eidolon-ops/opi5max/inputs/agent.yaml"
-channel_settings = "../.eidolon-ops/opi5max/inputs/channel.yaml"
-memory_settings = "../.eidolon-ops/opi5max/inputs/memory.yaml"
+data_env = "../../../../.eidolon-ops/opi5max/inputs/data.env"
+hub_env = "../../../../.eidolon-ops/opi5max/inputs/hub.env"
+kernel_env = "../../../../.eidolon-ops/opi5max/inputs/kernel.env"
+admin_env = "../../../../.eidolon-ops/opi5max/inputs/admin.env"
+local_api_env = "../../../../.eidolon-ops/opi5max/inputs/local-api.env"
+bootstrap_env = "../../../../.eidolon-ops/opi5max/inputs/bootstrap.env"
+host_identity = "../../../../.eidolon-ops/opi5max/inputs/host_identity.ed25519"
+agent_env = "../../../../.eidolon-ops/opi5max/inputs/agent.env"
+channel_env = "../../../../.eidolon-ops/opi5max/inputs/channel.env"
+memory_env = "../../../../.eidolon-ops/opi5max/inputs/memory.env"
+livekit_env = "../../../../.eidolon-ops/opi5max/inputs/livekit.env"
+agent_settings = "../../../../.eidolon-ops/opi5max/inputs/agent.yaml"
+channel_settings = "../../../../.eidolon-ops/opi5max/inputs/channel.yaml"
+memory_settings = "../../../../.eidolon-ops/opi5max/inputs/memory.yaml"
 
 # 这块板有 NPU，本地跑语音识别。声明 capability 才会把对应的 unit 加进拓扑、
 # 把 eidolon_models 加进源，三者由 load_config 一起校验（撤下过一轮，它依次拒绝了

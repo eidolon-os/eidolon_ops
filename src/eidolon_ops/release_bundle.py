@@ -174,6 +174,39 @@ class BundleTransfer:
             }
         return {"status": "removed", "path": str(output), "bytes": size}
 
+    def _prepare_local_bundle(self, output: Path, release_id: str, *, reuse: bool, cutover_mode: str):
+        output.parent.mkdir(parents=True, exist_ok=True)
+        if output.exists():
+            if not reuse:
+                raise OperationsError(
+                    f"bundle output already exists; use --resume or a new ID: {output}"
+                )
+            transfer_id = self.validate_existing(output, release_id, cutover_mode=cutover_mode)
+            bundle_result: dict[str, object] = {
+                "status": "reused_validated_bundle",
+                "manifest": str(output / "bundle.json"),
+                "sha256": transfer_id,
+            }
+        else:
+            bundle_result = self._seal(output, release_id, cutover_mode=cutover_mode)
+            transfer_id = self.validate_existing(output, release_id, cutover_mode=cutover_mode)
+        return bundle_result, transfer_id
+
+    def prepare_replacement_inputs(self, release_id: str, *, reuse: bool) -> dict[str, object]:
+        """Resolve costly local failures before an explicit wipe destroys the old installation."""
+        result, _digest = self._prepare_local_bundle(
+            self.config.workspace.bundle_root / release_id, release_id,
+            reuse=reuse, cutover_mode="reversible",
+        )
+        topology = read_component_contracts(
+            {name: item.path for name, item in self.config.sources.items()},
+            self.config.capabilities, read_contract=self.sources.component_contract,
+        )
+        artifacts = carried_artifacts(topology)
+        for artifact in artifacts:
+            ensure_workstation_artifact(self.config.workspace.toolchain_root, artifact)
+        return {"status": "prepared", "bundle": result, "models": len(artifacts)}
+
     def prepare(
         self,
         release_id: str,
@@ -204,20 +237,9 @@ class BundleTransfer:
             self.require_reclamation(reclaim, "ready")
             return phases
         phases.begin("bundle")
-        if output.exists():
-            if not reuse:
-                raise OperationsError(
-                    f"bundle output already exists; use --resume or a new ID: {output}"
-                )
-            transfer_id = self.validate_existing(output, release_id, cutover_mode=cutover_mode)
-            bundle_result: dict[str, object] = {
-                "status": "reused_validated_bundle",
-                "manifest": str(output / "bundle.json"),
-                "sha256": transfer_id,
-            }
-        else:
-            bundle_result = self._seal(output, release_id, cutover_mode=cutover_mode)
-            transfer_id = self.validate_existing(output, release_id, cutover_mode=cutover_mode)
+        bundle_result, transfer_id = self._prepare_local_bundle(
+            output, release_id, reuse=reuse, cutover_mode=cutover_mode,
+        )
         phases.append({"phase": "bundle", "result": bundle_result})
         phases.begin("release_reclaim_prepare")
         bundle_bytes = self._bundle_bytes(output)
@@ -342,7 +364,8 @@ class BundleTransfer:
         """
 
         sources = {source_id: source.path for source_id, source in self.config.sources.items()}
-        topology = read_component_contracts(sources, self.config.capabilities)
+        topology = read_component_contracts(sources, self.config.capabilities,
+                                            read_contract=self.sources.component_contract)
         artifacts = carried_artifacts(topology)
         if not artifacts:
             return {"status": "none_declared", "artifacts": 0}
@@ -356,7 +379,7 @@ class BundleTransfer:
             # account cannot even traverse.
             held = self.transport.run_agent(
                 "component-artifact-state",
-                {"destination": str(destination)},
+                {"destination": str(destination), "files": {item.path: item.sha256 for item in artifact.files}},
             )
             if held.get("status") == "held" and held.get("digest") == expected:
                 carried.append({"artifact": artifact.artifact_id, "status": "already_held"})
@@ -369,7 +392,7 @@ class BundleTransfer:
             self.transport.upload(source, staging, recursive=True)
             self.transport.run_agent(
                 "install-component-artifact",
-                {"staging": staging, "destination": str(destination)},
+                {"staging": staging, "destination": str(destination), "files": {item.path: item.sha256 for item in artifact.files}},
             )
             carried.append({"artifact": artifact.artifact_id, "status": "carried"})
         return {

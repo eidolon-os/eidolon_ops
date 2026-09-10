@@ -190,6 +190,7 @@ class EidolonPiController:
             app,
             read_exact_source_file=self.preflight.read_exact_source_file,
             source_revisions=self.preflight.sources.revisions,
+            read_component_contract=self.preflight.sources.component_contract,
         )
         self.releases = ReleaseTransaction(
             config,
@@ -1040,7 +1041,8 @@ class EidolonPiController:
         """
 
         sources = {source_id: source.path for source_id, source in self.config.sources.items()}
-        topology = read_component_contracts(sources, self.config.capabilities)
+        topology = read_component_contracts(sources, self.config.capabilities,
+                                            read_contract=self.preflight.sources.component_contract)
         if not topology.contracts:
             return {
                 "contracts": "absent",

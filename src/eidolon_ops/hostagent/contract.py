@@ -335,6 +335,10 @@ REFRESHABLE_HOST_APPLICATION_INPUTS = (
 #: target never edits or infers credentials while updating those fields.
 REFRESHABLE_HOST_BOUND_INPUTS = ("local-api.env", "channel.env")
 REFRESHABLE_PRODUCT_SETTINGS = ("agent.yaml", "channel.yaml", "memory.yaml")
+RELEASE_CONFIGURATION_INPUTS = (
+    "hub.generated.yaml", "hub-ingress.py", "hub-ingress.service",
+    "hub-service-override.conf", *REFRESHABLE_PRODUCT_SETTINGS,
+)
 REFRESHABLE_HOST_LAYER_INPUTS = (
     *REFRESHABLE_HOST_APPLICATION_INPUTS,
     *REFRESHABLE_HOST_BOUND_INPUTS,

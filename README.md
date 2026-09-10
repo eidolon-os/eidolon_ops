@@ -57,10 +57,28 @@ Admin/Local API、Agent/Channel、Memory 与 LiveKit 的共享 token 在一次�
 原子写入同一 mode-0700 目录，文件为 mode-0600，已有完整目录只验证不读取，partial/extra 文件或模板
 漂移一律拒绝，永不覆盖。
 
+## 普通更新保留身份与授权
+
+`deploy/update` 从已安装 Host 读取数据库 marker、lineage anchor 和签名目录，确认目标自身一致；
+然后用这套现有 Owner ID/generation 渲染本次精确提交的 Hub 配置。工作站 Owner 材料的 generation
+不参与普通代码更新，更新也不会读取本地 issuer 来生成另一份描述。
+
+普通更新只写 Hub/Agent/Channel/Memory 业务配置及 ingress 程序和 unit；Host identity、TLS 私钥和
+证书、Owner 签名描述和根证书、配对码、`local-api.env`/`channel.env` 等凭据保持原样。预检与实际
+配置写入之间再次比较保留文件摘要，发现身份变化时重试操作。Host identity 或签名入口 URI 不同
+属于迁移，不能靠普通更新隐式换身份。安装、显式 authority reset/restore 继续使用对应的授权材料流程。
+
+模型文件按本次源码提交中的 `ops/component.toml` 逐文件校验，工作站缓存和目标缓存都重算内容摘要；
+已有目标目录内容冲突或损坏时不自动覆盖。新制品在目标目录旁完成校验后才发布。显式重装先完成
+本地封装和模型准备，再改变 Owner 世代或 wipe；这不代表目标依赖安装和服务启动已经验证成功。
+
+历史配置归档放在 `config/backups/`，不进入 `config/hosts/*.toml` 活动列表。OPi 本地模型备份入口为
+[host.toml](config/backups/20260910/opi5max/host.toml)，它引用同目录的备份 operations 配置。
+
 ## 完整产品范围
 
-正式后端是 15 个 systemd unit：Bootstrap、eidolond、Data、Data Workspace、Hub、Kernel、Local API、
-Admin、NATS、LiveKit、Memory Supervisor、Memory Discovery、Agent、Channel Provider、Channel。发布输入固定为 8 个完整
+正式后端 unit 集合由 Host capabilities 与组件契约决定，包括 Bootstrap、eidolond、Data、Hub、Kernel、
+Local API、Admin、NATS、LiveKit、Memory、Agent 和 Channel 及其配套服务。发布输入固定为 8 个完整
 Git commit；7 个运行 component 一起切换，SDK 只作构建输入。
 
 这套后端支持手机 App 对 Host 的 BLE/Wi-Fi/Host proof/pinned HTTPS/claim/Workspace onboarding 管理路径。

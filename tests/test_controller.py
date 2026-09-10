@@ -30,6 +30,7 @@ from eidolon_ops.endpoints import HostEndpoint
 from eidolon_ops.host_application import (
     HOST_APPLICATION_STAGE_NAMES,
 )
+from eidolon_ops.host_identity import derive_host_lan_identity
 from eidolon_ops.hub_assets import HUB_SETTINGS_TEMPLATE as HUB_SETTINGS_TEMPLATE_CONTRACT
 from eidolon_ops.paths import AppAccess
 from eidolon_ops.process import ProcessResult
@@ -144,6 +145,9 @@ class ControllerRunner:
     def run(self, command, **kwargs):
         command = tuple(command)
         self.calls.append(command)
+        if "ls-tree" in command and command[-1] == "ops/component.toml":
+            path = self.config.sources[self._source(command)].path / "ops/component.toml"
+            return ProcessResult(0, "ops/component.toml\n" if path.is_file() else "", "")
         if "ls-tree" in command:
             # A synthetic eidolon_deploy tree; the digest below must agree.
             return ProcessResult(0, DEPLOY_TREE_LISTING, "")
@@ -172,6 +176,8 @@ class ControllerRunner:
             source, path = _read_target(command)
             if (source, path) == (HUB_SETTINGS_TEMPLATE_SOURCE, HUB_SETTINGS_TEMPLATE_PATH):
                 return ProcessResult(0, HUB_SETTINGS_TEMPLATE, "")
+            if path == "ops/component.toml":
+                return ProcessResult(0, (self.config.sources[source].path / path).read_text(), "")
             if path == "config/settings.yaml":
                 # Component settings are read from the pinned commit whenever the
                 # derived inputs are refreshed.
@@ -479,6 +485,14 @@ class FakeTransport:
             },
             "commissioning-code": {"status": "issued", "setup_code": "123456"},
             "refresh-host-application": {"status": "refreshed", "changed": []},
+            "refresh-release-configuration": {"status": "refreshed", "changed": []},
+            "deployment-identity": {
+                "status": "observed",
+                "authority": {"contract_version": 1, "owner_domain_id": "owner-" + "a" * 20,
+                              "owner_domain_generation": 8, "state_id": "authority-state_board"},
+                "descriptor_uri": derive_host_lan_identity(b"a" * 32).hub_origin(8443) + "/api/device-onboarding/v1/descriptor",
+                "preserved_files": {"host_identity.ed25519": hashlib.sha256(b"a" * 32).hexdigest()},
+            },
             "release-cutover-snapshot": {
                 "status": "host_cutover_snapshotted",
                 "host_snapshot": "/var/lib/eidolon/deployments/r1-host-" + "b" * 32,
@@ -1008,7 +1022,7 @@ def test_deploy_prestages_host_application_before_component_activation(
     monkeypatch.setattr(controller.releases, "_remote_json", observed_remote_json)
     monkeypatch.setattr(
         controller.host_layer,
-        "refresh",
+        "refresh_release",
         lambda release_id: (
             events.append(f"host application {release_id}") or {"status": "refreshed"}
         ),
@@ -1039,7 +1053,7 @@ def test_forward_only_activation_failure_requires_same_schema_fix_without_abort(
     controller, _runner, transport = setup_controller
     controller.host_layer.app = _app()
     monkeypatch.setattr(
-        controller.host_layer, "refresh", lambda release_id: {"status": "refreshed"}
+        controller.host_layer, "refresh_release", lambda release_id: {"status": "refreshed"}
     )
     monkeypatch.setattr(
         controller.releases,
@@ -1079,7 +1093,7 @@ def test_forward_only_health_gate_failure_never_restores_old_interpreters(
 
     transport.run = degraded
     monkeypatch.setattr(
-        controller.host_layer, "refresh", lambda release_id: {"status": "refreshed"}
+        controller.host_layer, "refresh_release", lambda release_id: {"status": "refreshed"}
     )
     monkeypatch.setattr(
         controller.releases,
@@ -1108,7 +1122,7 @@ def test_reversible_activation_failure_restores_host_layer_before_candidate_abor
     controller, _runner, transport = setup_controller
     controller.host_layer.app = _app()
     monkeypatch.setattr(
-        controller.host_layer, "refresh", lambda release_id: {"status": "refreshed"}
+        controller.host_layer, "refresh_release", lambda release_id: {"status": "refreshed"}
     )
 
     def fail_activation(*args, **kwargs):
@@ -1135,7 +1149,7 @@ def test_forward_only_failure_before_barrier_restores_host_layer_and_aborts(
     controller, _runner, transport = setup_controller
     controller.host_layer.app = _app()
     monkeypatch.setattr(
-        controller.host_layer, "refresh", lambda release_id: {"status": "refreshed"}
+        controller.host_layer, "refresh_release", lambda release_id: {"status": "refreshed"}
     )
 
     def fail_before_barrier(*args, **kwargs):
@@ -1677,7 +1691,7 @@ def test_install_can_reset_and_wipe_existing_host_before_provision(setup_control
         "reset-host",
         "foundation-doctor",
     ]
-    assert result["phases"][0]["phase"] == "reset_existing"
+    assert [phase["phase"] for phase in result["phases"][:2]] == ["replacement_inputs", "reset_existing"]
 
 
 def test_install_release_matrix_failure_happens_before_destructive_reset(config) -> None:
@@ -2418,7 +2432,7 @@ def test_allow_dirty_ships_the_committed_head_and_tells_the_host_it_did(config) 
     controller = _dirty_controller(config, allow_dirty=True)
     controller.host_layer.app = _app()
     config.install_files["host_identity"].write_bytes(b"a" * 32)
-    controller.host_layer.refresh = lambda release_id: {"status": "refreshed"}
+    controller.host_layer.refresh_release = lambda release_id: {"status": "refreshed"}
     controller.releases._app_ready = lambda: {"status": "app_ready"}
 
     controller.deploy(release_id="r1", resume=True, activate=True)
@@ -2687,25 +2701,25 @@ def test_a_host_whose_hub_names_another_authority_is_refused_not_overwritten(
 
 
 @pytest.mark.parametrize("activate", [False, True])
-def test_deploy_refuses_a_replacement_boards_different_owner_generation(config, activate):
+def test_deploy_preserves_board_authority_without_reading_workstation_issuer(config, activate, monkeypatch):
     transport = FakeTransport()
     controller = _authority_controller(config, transport)
     spent = _consume(controller)
-    previous = {
-        **spent,
-        "owner_domain_generation": spent["owner_domain_generation"] + 1,
-        "state_id": "authority-state_another-board",
-    }
-    transport.overrides["authority-lineage"] = {
-        "status": "observed", "marker": previous,
-        "anchor": previous, "established": previous,
-    }
-    with pytest.raises(OperationsError, match="AuthorityRecoveryRequired"):
-        controller.deploy(release_id="r1", resume=True, activate=activate)
+    before = {p.name: p.read_bytes() for p in controller.host_layer.materializer().material_root.iterdir()}
+    def no_issuer(*args, **kwargs):
+        raise AssertionError("ordinary deploy must not read or issue Owner material")
+    monkeypatch.setattr(controller_module, "ensure_owner_domain_assets", no_issuer)
+    from eidolon_ops.host_application import HostApplicationMaterializer
+    monkeypatch.setattr(HostApplicationMaterializer, "owner_assets", no_issuer)
+    result = controller.deploy(release_id="r1", resume=True, activate=activate)
+    assert result["status"] == ("activated" if activate else "dry_run")
+    assert result["local"]["installed_identity"]["authority"]["owner_domain_generation"] == 8
     assert _material_state(controller)["owner_domain_generation"] == spent["owner_domain_generation"]
-    actions = [call[0] for call in transport.agent_calls]
-    assert "authority-lineage" in actions
-    assert not {"release-cutover-snapshot", "refresh-host-application", "guard-upload"} & set(actions)
+    assert {p.name: p.read_bytes() for p in controller.host_layer.materializer().material_root.iterdir()} == before
+    names = {Path(destination).name for _, destination, _ in transport.uploads}
+    assert not {"hub.key", "hub.crt", "owner-domain-descriptor.json", "authority-bootstrap.json", "local-api.env", "channel.env", "factory_setup_code"} & names
+    if activate:
+        assert {"hub.generated.yaml", "agent.yaml", "channel.yaml", "memory.yaml"} <= names
 
 
 def test_a_capability_the_host_proved_it_used_is_not_read_as_unconsumed(config) -> None:
@@ -2851,3 +2865,14 @@ def test_a_wiped_host_is_reinstalled_end_to_end_with_a_fresh_capability(config) 
         "authority_state_id": staged["state_id"],
         "bootstrap_pending": False,
     }
+
+
+def test_reinstall_bundle_failure_precedes_wipe_and_generation_change(setup_controller, monkeypatch):
+    controller, _runner, transport = setup_controller
+    def failed(*args, **kwargs):
+        raise OperationsError("model or bundle preparation failed")
+    monkeypatch.setattr(controller.bundles, "_seal", failed)
+    monkeypatch.setattr(controller.releases, "_authority_capability", lambda **_: pytest.fail("must not alter Owner state before preparing inputs"))
+    with pytest.raises(OperationsError, match="preparation failed"):
+        controller.install(release_id="r1", resume=False, apply=True, reset_existing=True, wipe_authority_data=True)
+    assert not any(call[0] == "reset-host" for call in transport.agent_calls)

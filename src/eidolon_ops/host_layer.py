@@ -8,6 +8,7 @@ refreshed without a reinstall.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import tempfile
 from pathlib import Path
@@ -75,6 +76,7 @@ class HostLayer:
         *,
         read_exact_source_file,
         source_revisions,
+        read_component_contract=None,
     ) -> None:
         self.config = config
         self.transport = transport
@@ -84,6 +86,8 @@ class HostLayer:
         #: ships is resolved once per operation, and a second reader deriving
         #: its own answer is the shape of the bug this replaced.
         self._source_revisions = source_revisions
+        self._read_component_contract = read_component_contract
+        self._deployment_identity: dict[str, object] | None = None
 
     def _port_registry(self) -> str:
         """The registry a Host is given: the reviewed baseline, plus the port
@@ -137,9 +141,9 @@ class HostLayer:
         """
 
         sources = {source_id: source.path for source_id, source in self.config.sources.items()}
-        without = read_component_contracts(sources, frozenset()).port_roles
+        without = read_component_contracts(sources, frozenset(), read_contract=self._read_component_contract).port_roles
         with_capabilities = read_component_contracts(
-            sources, self.config.capabilities
+            sources, self.config.capabilities, read_contract=self._read_component_contract
         ).port_roles
         return {
             role: port
@@ -179,13 +183,56 @@ class HostLayer:
         identity_path = self.config.install_files.get("host_identity")
         if self.app is not None and identity_path is not None and identity_path.is_file():
             try:
-                payload["app"] = self.materializer().public_contract()
+                payload["app"] = self.public_contract()
             except ASSET_ERRORS as exc:
                 raise OperationsError(str(exc)) from exc
         return payload
 
     def public_contract(self) -> dict[str, object]:
-        return self.materializer().public_contract()
+        owner = None
+        if self._deployment_identity is not None:
+            owner = self._deployment_identity["authority"]["owner_domain_id"]
+        return self.materializer().public_contract(owner_domain_id=owner)
+
+    def prepare_deployment(self) -> dict[str, object]:
+        """Use this board's established authority, without consulting the local issuer."""
+        context = self.transport.run_agent("deployment-identity", {}, timeout=30)
+        materializer = self.materializer()
+        identity = materializer.identity()
+        expected_uri = identity.hub_origin(self.app.hub_https_port) + "/api/device-onboarding/v1/descriptor"
+        identity_hash = hashlib.sha256(self.config.install_files["host_identity"].read_bytes()).hexdigest()
+        if (
+            context.get("status") != "observed"
+            or not isinstance(context.get("authority"), dict)
+            or context.get("descriptor_uri") != expected_uri
+            or context.get("preserved_files", {}).get("host_identity.ed25519") != identity_hash
+        ):
+            raise OperationsError("installed Host identity or endpoint differs; use the explicit Host migration workflow")
+        self._deployment_identity = context
+        return context
+
+    def refresh_release(self, release_id: str) -> dict[str, object]:
+        if self._deployment_identity is None:
+            raise OperationsError("deployment identity preflight is missing")
+        template = hub_settings_template(self._source_revisions(), self._read_exact_source_file)
+        files = self.materializer().prepare_release(template.text, self._deployment_identity["authority"])
+        stage = f"/var/tmp/eidolon-secrets-{release_id}"
+        self.transport.run_agent("cleanup-stage", {"release_id": release_id})
+        self.transport.run(("/usr/bin/install", "-d", "-m", "0700", stage), sudo=False,
+                           operation="release configuration staging directory creation")
+        with tempfile.TemporaryDirectory(prefix="eidolon-release-config-") as temporary:
+            for name, content in files.items():
+                source = Path(temporary) / name
+                source.write_bytes(content)
+                source.chmod(0o600)
+                self.transport.upload(source, f"{stage}/{name}")
+            for name in PRODUCT_SETTINGS_INPUTS:
+                self.transport.upload(self.config.install_files[name], f"{stage}/{_STAGED_INSTALL_NAMES[name]}")
+        return self.transport.run_agent(
+            "refresh-release-configuration",
+            {**self.target_payload(), "release_id": release_id, "deployment_identity": self._deployment_identity},
+            timeout=180,
+        )
 
     def materializer(self) -> HostApplicationMaterializer:
         if self.app is None:

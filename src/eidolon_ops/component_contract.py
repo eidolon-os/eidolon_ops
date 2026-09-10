@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import tomllib
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from pathlib import Path
@@ -437,7 +438,8 @@ def load_platform_contract() -> ComponentContract:
 
 
 def read_component_contracts(
-    sources: dict[str, Path], capabilities: frozenset[str] = frozenset()
+    sources: dict[str, Path], capabilities: frozenset[str] = frozenset(),
+    *, read_contract: Callable[[str], str | None] | None = None,
 ) -> ContractTopology:
     """Load every contract and check what only the whole set can answer.
 
@@ -450,7 +452,19 @@ def read_component_contracts(
     declared: list[ComponentContract] = []
     silent: list[str] = []
     for component_id, repository in sorted(sources.items()):
-        contract = load_component_contract(repository, component_id)
+        if read_contract is None:
+            contract = load_component_contract(repository, component_id)
+        else:
+            text = read_contract(component_id)
+            contract = None
+            if text is not None:
+                source = repository / COMPONENT_CONTRACT_PATH
+                try:
+                    document = tomllib.loads(text)
+                except tomllib.TOMLDecodeError as exc:
+                    raise OperationsError(f"pinned component contract is invalid: {source}") from exc
+                contract = _validated(document, source, component_id)
+                _refuse_internal_contradictions(contract)
         if contract is None:
             silent.append(component_id)
         else:

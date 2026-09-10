@@ -17,7 +17,7 @@ bootstrap_state_root = "/var/lib/eidolon-bootstrap"
 bootstrap_runtime_root = "/run/eidolon-bootstrap"
 
 [adapter]
-operations_config = "../eidolon-rk3588.toml"
+operations_config = "operations.toml"
 
 [app]
 hub_https_port = 9443
@@ -47,4 +47,4 @@ allow_insecure_livekit = true
 # 主机安装时用的其他每一个 secret 放在一起（`.eidolon-ops/` 一直是 gitignore
 # 的）。新 checkout 上这个文件不存在，install 会明确报出来——和另外 14 个
 # install 输入的行为一致。
-setup_code_file = "../../.eidolon-ops/opi5max/inputs/factory_setup_code"
+setup_code_file = "../../../../.eidolon-ops/opi5max/inputs/factory_setup_code"

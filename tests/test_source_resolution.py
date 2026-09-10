@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from dataclasses import replace
 from pathlib import Path
 from types import MappingProxyType
@@ -10,10 +11,33 @@ import pytest
 
 from eidolon_ops.config import SOURCE_IDS, OperationsConfig
 from eidolon_ops.errors import OperationsError
-from eidolon_ops.process import ProcessResult
+from eidolon_ops.process import ProcessResult, SubprocessRunner
 from eidolon_ops.source_resolution import SourceResolver
 
 pytestmark = pytest.mark.unit
+
+
+def test_contract_comes_from_pinned_commit_even_with_different_worktree(config, tmp_path):
+    repo = tmp_path / "repository"
+    repo.mkdir()
+    def git(*args):
+        return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True).stdout.strip()
+    git("init", "-q")
+    (repo / "ops").mkdir()
+    path = repo / "ops/component.toml"
+    path.write_text("version = 'A'\n")
+    git("add", ".")
+    git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "A")
+    revision = git("rev-parse", "HEAD")
+    path.write_text("version = 'B'\n")
+    git("add", ".")
+    git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "B")
+    declared = replace(config.sources["eidolon_hub"], path=repo, revision=revision)
+    selected = replace(config, sources={"eidolon_hub": declared})
+    resolver = SourceResolver(selected, SubprocessRunner())
+    assert resolver.component_contract("eidolon_hub") == "version = 'A'\n"
+    path.unlink()
+    assert resolver.component_contract("eidolon_hub") == "version = 'A'\n"
 
 HEADS = {source_id: f"{index:040x}" for index, source_id in enumerate(SOURCE_IDS, start=1)}
 

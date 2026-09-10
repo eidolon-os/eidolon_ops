@@ -115,6 +115,7 @@ class SourceResolver:
         self.allow_dirty = allow_dirty
         self._resolved: Mapping[str, ResolvedSource] | None = None
         self._resolved_config: OperationsConfig | None = None
+        self._contracts: dict[str, str | None] = {}
 
     # -- resolution ----------------------------------------------------------
 
@@ -143,6 +144,26 @@ class SourceResolver:
 
     def revisions(self) -> dict[str, str]:
         return {source_id: item.revision for source_id, item in self.resolve().items()}
+
+    def component_contract(self, source_id: str) -> str | None:
+        """Contract bytes belong to the selected commit, just like its code."""
+        if source_id not in self._contracts:
+            repository = self.config.sources[source_id].path
+            revision = self.revision(source_id)
+            path = "ops/component.toml"
+            prefix = (self.git, "-C", str(repository))
+            present = checked("pinned component contract lookup", self.runner.run(
+                (*prefix, "ls-tree", "--name-only", revision, "--", path)
+            )).stdout.strip()
+            if not present:
+                self._contracts[source_id] = None
+            elif present != path:
+                raise OperationsError(f"invalid component contract tree entry: {source_id}@{revision}")
+            else:
+                self._contracts[source_id] = checked("pinned component contract read", self.runner.run(
+                    (*prefix, "show", f"{revision}:{path}")
+                )).stdout
+        return self._contracts[source_id]
 
     def provenance(self) -> dict[str, dict[str, object]]:
         return {source_id: item.provenance for source_id, item in self.resolve().items()}

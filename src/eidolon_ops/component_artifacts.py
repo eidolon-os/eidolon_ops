@@ -133,13 +133,19 @@ def workstation_artifact_root(toolchain_root: Path, artifact: CarriedArtifact) -
 def ensure_workstation_artifact(toolchain_root: Path, artifact: CarriedArtifact) -> Path:
     """Return the pinned files on this workstation, fetching them if absent.
 
-    What decides "already here" is the recorded digest, not a file with the
-    right name — a half-written download is fetched again rather than carried
-    to a Host and trusted there.
+    The record and every file must match the pinned manifest. A matching
+    record cannot hide a damaged or partial download.
     """
 
     root = workstation_artifact_root(toolchain_root, artifact)
-    if _recorded_digest(root) == artifact.digest:
+    if (
+        not root.is_symlink() and _recorded_digest(root) == artifact.digest
+        and not any(path.is_symlink() for path in root.rglob("*"))
+        and {path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file()}
+        == {DIGEST_RECORD, *(item.path for item in artifact.files)}
+        and all((root / item.path).is_file() and not (root / item.path).is_symlink()
+                and _digest_of(root / item.path) == item.sha256 for item in artifact.files)
+    ):
         return root
     return _materialize(root, artifact)
 

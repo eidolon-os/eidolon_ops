@@ -343,3 +343,22 @@ P0 不必等 P1 的大范围拓扑收敛完成。优先做几个小而可验收�
 ### 10.1 真机追加发现：换板的 Authority 世代不能由 Host identity 推断
 
 授权部署后发现板上 generation 8 与工作站 generation 9 混用，原 deploy 到 Hub 启动阶段才拒绝，已补充部署前的 authority_capability 检查并以真实换板状态验证提前拒绝。原四项修复已提交 `036f400`；此次追加修复及现场结果见[真机记录](pi5-optimization-validation-2026-09-10.md)。Host 身份、Owner root 相同，也必须进一步核对 generation 与 state_id；不允许普通更新隐式重置 Authority。
+
+
+## 11. 普通更新保留授权，以及原计划第二阶段实施
+
+用户进一步授权简化 generation 问题并继续原计划。本节取代 10.1 中把本地/目标谱系相等作为普通 deploy 前提的临时方案。
+
+| 事项 | 当前实现 | 验证边界 |
+| --- | --- | --- |
+| 普通更新与授权分离 | 读取板上已建立的谱系和保留文件摘要；只生成业务配置与 ingress，安装/重置/恢复仍使用显式授权材料流程 | 工作站与目标 generation 不同仍可更新，不推进或回退任何一方；目标身份自身不一致或发生并发变化时拒绝 |
+| 精确提交契约 | 制品、能力端口、reset 范围的组件契约均由 SourceResolver 从选定提交读取 | 真 Git 测试：工作树 B / pin A 读取 A；缺失契约沿用已有明确 absent/partial 规则，不能退回 B 的文件 |
+| 模型内容校验 | 工作站与目标重算 manifest 中每个文件；目标新目录校验后发布，已有冲突目录拒绝自动覆盖 | 损坏内容、软链接、额外文件、旧目录冲突有行为测试；保持现有路径和记录格式，尚非模型 CAS/GC 重构 |
+| 备份隔离 | OPi 两份 TOML 迁入 config/backups，Host backup 指向对应 operations backup，相对路径重算 | 解析后的配置等价，活动 inventory 不再重复发现 OPi 备份；Pi 专用 HIL profile 仍是显式独立测试入口 |
+| wipe 前准备 | 显式重装先完成本地封装和模型准备，再推进 Owner 世代或清理旧安装 | 模拟封装失败时不 wipe、不改变 Owner；目标安装阶段仍可能失败，不能宣称重装已经具有完整事务保证 |
+| 实际配置校验 | 修正 Hub 校验环境变量为 EIDOLON_HUB_SETTINGS_YAML，并校验渲染后的 Owner ID/generation | 用真实 Hub 解释器执行暂存配置验证；消除加载默认配置产生的假通过 |
+
+原计划第三至第五阶段仍需独立推进：跨代码/配置的完整事务和恢复、统一目标 mutation 锁/持久日志、配置声明去重与 OPi 起机支持，以及经过冷/热测量再决定的构建缓存和局部重启。现有代码未被描述为这些事项已经完成。
+
+
+本批验收：1,111 项测试通过；正式 Pi5 release `20260910-pi5-ops-final-wifi-1` 通过固定 Wi-Fi 端点部署（214.7 秒），随后完成重启恢复复验，doctor healthy、App-ready 24/24。部署和重启前后板上授权材料、工作站 Owner 文件均保持不变。手机端到端与其他平台真机覆盖仍未完成，详见[验证报告](pi5-optimization-validation-2026-09-10.md)。

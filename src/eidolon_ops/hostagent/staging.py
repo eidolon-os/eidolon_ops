@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -326,70 +327,73 @@ def cleanup_stage(payload: Mapping[str, object]) -> dict[str, object]:
     return {"status": "cleaned", "path": str(path)}
 
 
-def component_artifact_state(payload: Mapping[str, object]) -> dict[str, object]:
-    """What this Host already holds at a destination, if anything.
-
-    Asked before carrying a gigabyte across, and answered from the digest the
-    Host recorded rather than from the directory existing: a partial copy is
-    not a copy.
-    """
-
+def _artifact_contract(payload: Mapping[str, object]) -> tuple[Path, dict[str, str], str]:
     destination = payload.get("destination")
-    if not isinstance(destination, str):
-        raise TargetError("artifact destination is required")
-    record = Path(destination) / contract.EMBEDDING_DIGEST_RECORD
-    if not record.is_file():
-        return {"status": "absent", "destination": destination}
-    return {
-        "status": "held",
-        "destination": destination,
-        "digest": record.read_text(encoding="utf-8").strip(),
-    }
+    files = payload.get("files")
+    if not isinstance(destination, str) or not isinstance(files, dict) or not files:
+        raise TargetError("artifact destination and pinned file manifest are required")
+    target = Path(destination)
+    if target.parent != contract.HOST_MODEL_ROOT or target.name in {"", ".", ".."}:
+        raise TargetError("artifact destination is outside the model root")
+    for name, digest in files.items():
+        path = Path(name) if isinstance(name, str) else Path("/")
+        if (path.is_absolute() or not path.parts or any(part in {".", ".."} for part in path.parts)
+                or str(path) != name or name == contract.EMBEDDING_DIGEST_RECORD
+                or not isinstance(digest, str) or contract.SHA256.fullmatch(digest) is None):
+            raise TargetError("artifact file manifest is invalid")
+    joined = "\n".join(f"{name} {digest}" for name, digest in sorted(files.items()))
+    return target, files, hashlib.sha256(joined.encode()).hexdigest()
+
+
+def _artifact_matches(root: Path, files: dict[str, str], digest: str) -> bool:
+    if root.is_symlink() or not root.is_dir():
+        return False
+    record = root / contract.EMBEDDING_DIGEST_RECORD
+    if record.is_symlink() or not record.is_file() or record.read_text().strip() != digest:
+        return False
+    present = set()
+    for path in root.rglob("*"):
+        if path.is_symlink() or not (path.is_file() or path.is_dir()):
+            return False
+        if path.is_file():
+            present.add(path.relative_to(root).as_posix())
+    if present != {*files, contract.EMBEDDING_DIGEST_RECORD}:
+        return False
+    return all(primitives.file_sha256(root / name) == expected for name, expected in files.items())
+
+
+def component_artifact_state(payload: Mapping[str, object]) -> dict[str, object]:
+    target, files, digest = _artifact_contract(payload)
+    status = "held" if _artifact_matches(target, files, digest) else "absent"
+    return {"status": status, "destination": str(target), "digest": digest if status == "held" else None}
 
 
 def install_component_artifact(payload: Mapping[str, object]) -> dict[str, object]:
-    """Move carried files into the Host's durable model root.
-
-    Root-owned and read-only afterwards: every service reads these and none of
-    them writes any, and a palace already built against one encoder must not
-    find another there later. Each artifact has its own directory under the
-    model root, named by the component that declared it, so a second pin adds a
-    directory rather than replacing one something was built against.
-
-    The destination is checked rather than trusted. It arrives from a component
-    contract, which is a file in a repository, and the one thing this agent can
-    say about it is that nothing may write outside the root it owns.
-    """
-
+    target, files, digest = _artifact_contract(payload)
     staging = payload.get("staging")
-    destination = payload.get("destination")
-    if not isinstance(staging, str) or not isinstance(destination, str):
-        raise TargetError("artifact staging and destination are required")
+    if not isinstance(staging, str):
+        raise TargetError("artifact staging is required")
     source = Path(staging)
-    target = Path(destination)
-    if target.parent != contract.HOST_MODEL_ROOT or target.name in {"", ".", ".."}:
-        raise TargetError(f"artifact destination is outside the model root: {target}")
-    if not source.is_dir() or source.is_symlink():
-        raise TargetError("carried artifact is missing")
-    record = source / contract.EMBEDDING_DIGEST_RECORD
-    if not record.is_file():
-        raise TargetError("carried artifact has no digest record")
-
+    if source.parent != contract.VAR_TMP or not source.name.startswith("eidolon-artifact-"):
+        raise TargetError("artifact staging is outside the private upload root")
+    if not _artifact_matches(source, files, digest):
+        raise TargetError("carried artifact content does not match its pinned manifest")
+    if target.exists() or target.is_symlink():
+        if _artifact_matches(target, files, digest):
+            return {"status": "installed", "destination": str(target), "digest": digest}
+        raise TargetError("model destination already contains different or damaged data; choose a new model path or explicitly repair it")
     target.parent.mkdir(parents=True, exist_ok=True)
-    if target.exists():
-        shutil.rmtree(target)
-    shutil.move(str(source), str(target))
-    for path in (target, *target.rglob("*")):
-        os.chown(path, 0, 0)
-        os.chmod(path, 0o755 if path.is_dir() else 0o644)
-    # Read from where the record now is, not from where it was. `record` points
-    # into the staging directory, and the move above took that directory away —
-    # reading it afterwards raised FileNotFoundError and failed an install whose
-    # weights were already correctly in place. Reading the installed copy also
-    # says the truer thing: this digest is what the Host now holds.
-    installed_record = target / contract.EMBEDDING_DIGEST_RECORD
-    return {
-        "status": "installed",
-        "destination": str(target),
-        "digest": installed_record.read_text(encoding="utf-8").strip(),
-    }
+    temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        shutil.copytree(source, temporary)
+        if not _artifact_matches(temporary, files, digest):
+            raise TargetError("model content changed while copying")
+        for path in (temporary, *temporary.rglob("*")):
+            os.chown(path, 0, 0)
+            os.chmod(path, 0o755 if path.is_dir() else 0o644)
+        os.rename(temporary, target)
+    finally:
+        if temporary.exists():
+            shutil.rmtree(temporary)
+    shutil.rmtree(source)
+    return {"status": "installed", "destination": str(target), "digest": digest}

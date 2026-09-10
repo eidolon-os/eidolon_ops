@@ -12,7 +12,7 @@ import uuid
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
-from . import contract, primitives
+from . import contract, deployment_identity, primitives
 from .primitives import TargetError
 
 #: The name the Hub advertises, and why this Host must not also claim it.
@@ -79,7 +79,16 @@ def await_host_application(run: Callable[..., object], root: Path = Path("/")) -
         time.sleep(0.5)
 
 
-def refresh_host_application(payload: Mapping[str, object]) -> dict[str, object]:
+def refresh_release_configuration(payload: Mapping[str, object]) -> dict[str, object]:
+    context = payload.get("deployment_identity")
+    if not isinstance(context, dict) or context != deployment_identity.observe({}):
+        raise TargetError("installed identity changed since deployment preflight; retry the update")
+    return refresh_host_application(payload, preserved_context=context)
+
+
+def refresh_host_application(
+    payload: Mapping[str, object], *, preserved_context: dict[str, object] | None = None,
+) -> dict[str, object]:
     """Deliver the Host layer the operator derived, without a reinstall.
 
     An activation replaces components and leaves this layer alone, so a fix to
@@ -96,8 +105,12 @@ def refresh_host_application(payload: Mapping[str, object]) -> dict[str, object]
         raise TargetError("secret staging path is unsafe")
     if not stage.is_dir() or stage.is_symlink():
         raise TargetError("Host application staging directory is missing")
-    _validate_hub_settings_compatibility(stage, release_id)
+    _validate_hub_settings_compatibility(
+        stage, release_id, None if preserved_context is None else preserved_context["authority"]
+    )
     _validate_product_settings_compatibility(stage, release_id)
+    if preserved_context is not None and preserved_context != deployment_identity.observe({}):
+        raise TargetError("installed identity changed during configuration validation")
     # A refresh is the deployment path for Host-owned contract changes, not
     # merely a byte copier.  Reconcile the path contract before replacing
     # files so a new public/private classification (including parent traversal
@@ -138,7 +151,10 @@ def refresh_host_application(payload: Mapping[str, object]) -> dict[str, object]
     # Every Host application input is required now. What used to be placed
     # first here was a per-device commissioning registry that belonged to no
     # sealed release; nothing installs a per-device file any more.
-    selected_inputs: list[str] = list(contract.REFRESHABLE_HOST_LAYER_INPUTS)
+    selected_inputs = (
+        contract.RELEASE_CONFIGURATION_INPUTS if preserved_context is not None
+        else contract.REFRESHABLE_HOST_LAYER_INPUTS
+    )
     for name in selected_inputs:
         source = stage / name
         if not source.is_file():
@@ -227,7 +243,9 @@ def withdraw_hub_hostname(root: Path = Path("/")) -> list[str]:
     return [str(_AVAHI_HOSTS)]
 
 
-def _validate_hub_settings_compatibility(stage: Path, release_id: str) -> None:
+def _validate_hub_settings_compatibility(
+    stage: Path, release_id: str, authority: dict[str, object] | None = None,
+) -> None:
     """Require one rendered config to load in both sides of the cutover.
 
     The Host layer is installed before component symlinks switch.  A strict
@@ -240,6 +258,12 @@ def _validate_hub_settings_compatibility(stage: Path, release_id: str) -> None:
     if not settings.is_file() or settings.is_symlink():
         raise TargetError("rendered Hub settings were not staged safely")
     script = "from hub.config import HubConfig; HubConfig.load()"
+    if authority is not None:
+        script = (
+            "from hub.config import HubConfig; c = HubConfig.load(); "
+            f"assert c.onboarding.owner_domain_id == {authority['owner_domain_id']!r}; "
+            f"assert c.onboarding.owner_domain_generation == {authority['owner_domain_generation']!r}"
+        )
     interpreters = (
         Path("/opt/eidolon/current/eidolon_hub/.venv/bin/python"),
         Path(f"/opt/eidolon/releases/{release_id}/eidolon_hub/.venv/bin/python"),
@@ -249,7 +273,7 @@ def _validate_hub_settings_compatibility(stage: Path, release_id: str) -> None:
             "cross-release Hub settings validation",
             (
                 "/usr/bin/env",
-                f"EIDOLON_HUB_SETTINGS_PATH={settings}",
+                f"EIDOLON_HUB_SETTINGS_YAML={settings}",
                 str(interpreter),
                 "-c",
                 script,
