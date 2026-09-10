@@ -283,7 +283,7 @@ def test_every_flag_the_cli_offers_binds_to_the_real_controller_signature() -> N
         "restore": {"source": Path("/tmp/backup.tar.gz"), "apply": True},
         "authority_backup": {"output": Path("/tmp/authority")},
         "authority_restore": {"source": Path("/tmp/authority"), "apply": True},
-        "commissioning_code": {"ttl_seconds": 600},
+        "commissioning_code": {"setup_code": None},
         "install": {
             "release_id": "r-1",
             "resume": False,

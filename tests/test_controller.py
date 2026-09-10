@@ -2173,7 +2173,7 @@ def test_which_setup_code_gets_named(setup_controller) -> None:
 def test_a_setup_code_and_a_boundary_action_reach_the_host(setup_controller) -> None:
     controller, _runner, _transport = setup_controller
 
-    assert controller.commissioning_code(ttl_seconds=600)["status"] == "issued"
+    assert controller.commissioning_code()["status"] == "issued"
     assert controller.lifecycle("restart", dry_run=True)["status"] == "planned"
     assert controller.lifecycle("start", dry_run=False)["status"] == "started"
     with pytest.raises(OperationsError, match="unknown lifecycle action"):

@@ -238,25 +238,12 @@ CATALOG: tuple[Operation, ...] = (
         summary="签发一枚一次性 Setup 码，并作废之前的窗口",
         capability=Capability.COMMISSIONING_CODE,
         group="lifecycle",
-        fields=(
-            Field(
-                name="ttl_seconds",
-                kind=Kind.INTEGER,
-                label="TTL（秒，遗留参数）",
-                # Still sent, and still checked here so a nonsense value
-                # fails where it was typed. The window it opens has no clock
-                # on it (eidolon_admin ADR-0007), which is why the report
-                # comes back with a null expires_at.
-                help="Host 已不再给认领窗口设时限；窗口只被消费，或被下一次签发顶掉",
-                default=600,
-                minimum=60,
-                maximum=86400,
-            ),
-        ),
+        # No inputs. A claim window has no clock on it (eidolon_admin
+        # ADR-0007), so the lifetime this used to ask for decided nothing —
+        # it could only refuse the operation over a value the Host discards.
+        fields=(),
         plan=lambda host_id, _params: plans.commissioning_code(host_id),
-        invoke=lambda controller, params: controller.commissioning_code(
-            ttl_seconds=params["ttl_seconds"]
-        ),
+        invoke=lambda controller, _params: controller.commissioning_code(),
         sensitive_keys=("setup_code",),
     ),
     Operation(

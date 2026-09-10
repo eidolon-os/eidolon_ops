@@ -163,8 +163,8 @@ class StubController:
     def lifecycle(self, action, *, dry_run) -> Evidence:
         return self._evidence(action, Outcome.APPLIED, dry_run=dry_run)
 
-    def commissioning_code(self, *, ttl_seconds) -> Evidence:
-        return self._evidence("commissioning-code", Outcome.APPLIED, ttl_seconds=ttl_seconds)
+    def commissioning_code(self) -> Evidence:
+        return self._evidence("commissioning-code", Outcome.APPLIED)
 
     def reset(self, *, wipe_authority_data, apply) -> Evidence:
         return self._evidence(
@@ -315,7 +315,6 @@ def test_a_parameter_the_operation_never_declared_is_refused() -> None:
         ("logs", {"lines": 99999}, "at most 5000"),
         ("logs", {"lines": "200"}, "must be an integer"),
         ("backup", {"output": "relative/path.tar.gz"}, "absolute path"),
-        ("commissioning-code", {"ttl_seconds": 5}, "at least 60"),
         ("debug", {"profile_operation": "rm -rf"}, "must be one of"),
         ("reset", {"apply": "yes"}, "must be a boolean"),
     ],

@@ -1799,11 +1799,12 @@ def test_a_setup_code_is_issued_through_the_hosts_own_control_socket(monkeypatch
 
     monkeypatch.setattr(primitives, "run", run)
 
-    result = host_lifecycle.commissioning_code(
-        {"units": list(contract.PRODUCT_UNITS), "ttl_seconds": 600}
-    )
+    result = host_lifecycle.commissioning_code({"units": list(contract.PRODUCT_UNITS)})
 
-    assert calls[0][1:] == ("commissioning-code", "--ttl", "600")
+    # The verb and nothing else. `--ttl` is optional on the Host's own CLI and
+    # bounded a window that has no clock, so asking for one was asking for
+    # something the Host discards (eidolon_admin ADR-0007).
+    assert calls[0][1:] == ("commissioning-code",)
     assert result["setup_code"] == "48273916"
     # The phone needs the session as well as the code; the code alone has
     # nowhere to be spent.
@@ -1842,19 +1843,17 @@ def test_a_named_setup_code_reaches_the_host_unexamined(monkeypatch, tmp_path) -
     result = host_lifecycle.commissioning_code(
         {
             "units": list(contract.PRODUCT_UNITS),
-            "ttl_seconds": 600,
             "setup_code": "99999990",
         }
     )
 
-    assert calls[0][1:] == ("commissioning-code", "--ttl", "600", "--code", "99999990")
+    assert calls[0][1:] == ("commissioning-code", "--code", "99999990")
     assert result["setup_code"] == "99999990"
 
     with pytest.raises(TargetError, match="setup_code must be a string"):
         host_lifecycle.commissioning_code(
             {
                 "units": list(contract.PRODUCT_UNITS),
-                "ttl_seconds": 600,
                 "setup_code": 99999990,
             }
         )
@@ -1888,7 +1887,7 @@ def test_a_window_with_no_deadline_is_reported_as_nothing_not_as_a_word(
         return subprocess.CompletedProcess(command, 0, stdout, "")
 
     monkeypatch.setattr(primitives, "run", run)
-    payload = {"units": list(contract.PRODUCT_UNITS), "ttl_seconds": 600}
+    payload = {"units": list(contract.PRODUCT_UNITS)}
 
     result = host_lifecycle.commissioning_code(payload)
 
@@ -1903,15 +1902,6 @@ def test_a_window_with_no_deadline_is_reported_as_nothing_not_as_a_word(
     stdout = stdout.replace("Expires: None\n", "")
 
     assert host_lifecycle.commissioning_code(payload)["expires_at"] is None
-
-
-def test_a_setup_code_request_without_a_sane_lifetime_is_refused(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr(host_lifecycle, "BOOTSTRAP_CTL", tmp_path / "eidolon-bootstrapctl")
-    for ttl in (0, 59, 86401, "600", True, None):
-        with pytest.raises(TargetError, match="TTL must be between"):
-            host_lifecycle.commissioning_code(
-                {"units": list(contract.PRODUCT_UNITS), "ttl_seconds": ttl}
-            )
 
 
 def test_the_derived_host_layer_is_delivered_without_a_reinstall(tmp_path, monkeypatch) -> None:

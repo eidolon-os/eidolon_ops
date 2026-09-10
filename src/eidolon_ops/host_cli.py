@@ -63,7 +63,7 @@ OPERATIONS: dict[str, Callable[[HostController, argparse.Namespace], object]] = 
         source=a.source, apply=a.apply
     ),
     "commissioning-code": lambda controller, a: controller.commissioning_code(
-        ttl_seconds=a.ttl_seconds, setup_code=a.code
+        setup_code=a.code
     ),
     "boot-media": lambda controller, a: controller.boot_media(
         output=a.output,
@@ -291,7 +291,6 @@ def _parser() -> argparse.ArgumentParser:
     restore.add_argument("--source", type=Path, required=True)
     restore.add_argument("--apply", action="store_true")
     commissioning_code = operations.add_parser("commissioning-code")
-    commissioning_code.add_argument("--ttl-seconds", type=int, default=600)
     commissioning_code.add_argument(
         "--code",
         default=None,

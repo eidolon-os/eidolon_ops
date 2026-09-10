@@ -168,22 +168,23 @@ class HostController:
             return Evidence(plan=plan, outcome=Outcome.PLANNED, report=report)
         return self._applied(plan, report)
 
-    def commissioning_code(self, *, ttl_seconds: int, setup_code: str | None = None) -> Evidence:
+    def commissioning_code(self, *, setup_code: str | None = None) -> Evidence:
         """Issue the Setup code a phone types, on whichever Host this profile is.
 
         ``setup_code`` names the value for this one run. Left out, the profile's
         ``app.setup_code`` is used if it pins one, and otherwise the Host draws
         a code — which is the only difference a pinned value makes: an operator
         who already knows the digits never has to read this command's output.
+
+        There is no lifetime to ask for. A claim window has no clock on it
+        (``eidolon_admin`` ADR-0007), so the ``--ttl-seconds`` this used to
+        take could only ever be refused here for being out of a range that
+        decided nothing — an operation failing over a value the Host discards.
         """
 
-        if not 60 <= ttl_seconds <= 86400:
-            raise OperationsError("commissioning-code TTL must be between 60 and 86400 seconds")
         plan = plans.commissioning_code(self.profile.host_id)
         self.adapter.require(Capability.COMMISSIONING_CODE)
-        report = self.adapter.supervisor.commissioning_code(
-            ttl_seconds=ttl_seconds, setup_code=setup_code
-        )
+        report = self.adapter.supervisor.commissioning_code(setup_code=setup_code)
         return self._applied(plan, report)
 
     def local_profile(

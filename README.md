@@ -219,9 +219,10 @@ port 的组合推导），所以“这台 Host 能做什么”是问出来的，
 `commissioning-code` 可以**指名**要签的码，而不是让 Host 自己抽：命令行 `--code`，或者在 profile 里
 写 `app.setup_code`（`pi5.toml` 现在钉的是 `99999990`）。钉住的只有取值——Host 照样开一个普通
 session：只能用一次，并把之前的窗口作废。它**不会自己过期**：认领窗口在 ADR-0007 之后没有时钟，
-关掉它的只有“被消费”和“被下一次签发顶掉”，所以 `--ttl-seconds` 已是遗留参数，Evidence 里的
-`expires_at` 恒为 `null`——那个 null 就是“你要的时限没有被采纳”这句话本身，不是取不到值。错码也
-不再吊销窗口（对一个无期限的行，那等于开箱即砖），只把 `failed_attempts` 加一留作证据。它买到的是
+关掉它的只有“被消费”和“被下一次签发顶掉”。所以这条命令不收时限——`--ttl-seconds` 已经删掉了，
+因为 **ops 不提供 Host 不会执行的输入**，这是“ops 不编造 Host 没报的事实”的另一半。Evidence 里的
+`expires_at` 恒为 `null`，那就是“这个窗口没有时钟”本身，不是取不到值。错码也不再吊销窗口（对一个
+无期限的行，那等于开箱即砖），只把 `failed_attempts` 加一留作证据。它买到的是
 **不用再查码**：命令变成一条不必读输出的命令，手机上敲的永远是同一串数字。Host 仍然是权威，会拒绝
 一个它自己不会抽出来的码（八位数字、不能全同、不能是顺子或倒顺子），profile 解析时也先按同一条规则
 挡一遍，好让错误出现在写下这个值的地方而不是三跳之外。
@@ -231,7 +232,7 @@ session：只能用一次，并把之前的窗口作废。它**不会自己过�
 
 ```text
 ./eidolon HOST status|doctor
-./eidolon HOST commissioning-code [--ttl-seconds 600] [--code DIGITS]
+./eidolon HOST commissioning-code [--code DIGITS]
 ./eidolon HOST start|stop|restart [--dry-run]
 ./eidolon HOST logs [--service SERVICE] [--lines N] [--since TEXT]
 

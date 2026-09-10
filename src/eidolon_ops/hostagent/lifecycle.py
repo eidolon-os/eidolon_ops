@@ -403,9 +403,6 @@ def commissioning_code(payload: Mapping[str, object]) -> dict[str, object]:
     """
 
     contract.fixed_units(payload)
-    ttl = payload.get("ttl_seconds")
-    if not isinstance(ttl, int) or isinstance(ttl, bool) or not 60 <= ttl <= 86400:
-        raise TargetError("commissioning code TTL must be between 60 and 86400 seconds")
     setup_code = payload.get("setup_code")
     if setup_code is not None and not isinstance(setup_code, str):
         raise TargetError("commissioning setup_code must be a string")
@@ -414,7 +411,10 @@ def commissioning_code(payload: Mapping[str, object]) -> dict[str, object]:
     # Passed straight through rather than checked here. The Host owns the rule
     # about what a usable code is, and a second opinion on this hop could only
     # ever disagree with it.
-    command = [str(BOOTSTRAP_CTL), "commissioning-code", "--ttl", str(ttl)]
+    # No `--ttl`: the flag is optional on the Host's own CLI and the window it
+    # would bound has no clock (ADR-0007). Passing one meant this hop asked for
+    # something the Host discards, and then reported a null deadline for it.
+    command = [str(BOOTSTRAP_CTL), "commissioning-code"]
     if setup_code is not None:
         command += ["--code", setup_code]
     result = primitives.checked(

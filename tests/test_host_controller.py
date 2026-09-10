@@ -166,29 +166,25 @@ def test_local_controller_exposes_product_app_ready(tmp_path: Path) -> None:
     assert controller.app_ready().outcome is Outcome.DEGRADED
 
 
-def test_local_controller_issues_bounded_commissioning_code(tmp_path: Path) -> None:
+def test_local_controller_issues_a_commissioning_code(tmp_path: Path) -> None:
     controller = HostController(_profile(tmp_path), Runner())
     _with_product(controller, SimpleNamespace())
 
-    result = controller.commissioning_code(ttl_seconds=300)
+    result = controller.commissioning_code()
 
     assert result.outcome is Outcome.APPLIED
+    # Nothing but the verb: a claim window has no clock on it, so there is no
+    # lifetime to ask the Host for (eidolon_admin ADR-0007).
+    assert controller.runner.calls[-1][0][-2:] == (
+        "product-source",
+        "commissioning-code",
+    )
+
+    # A named code travels as the same flag on this Host as on a remote one.
+    controller.commissioning_code(setup_code="99999990")
     assert controller.runner.calls[-1][0][-4:] == (
         "product-source",
         "commissioning-code",
-        "--ttl",
-        "300",
-    )
-    with pytest.raises(OperationsError, match="TTL"):
-        controller.commissioning_code(ttl_seconds=30)
-
-    # A named code travels as the same flag on this Host as on a remote one.
-    controller.commissioning_code(ttl_seconds=300, setup_code="99999990")
-    assert controller.runner.calls[-1][0][-6:] == (
-        "product-source",
-        "commissioning-code",
-        "--ttl",
-        "300",
         "--code",
         "99999990",
     )
@@ -313,7 +309,7 @@ def test_pi_adapter_delegates_every_remote_capability(monkeypatch, tmp_path: Pat
     controller.backup(output=tmp_path / "backups")
     controller.restore(source=tmp_path / "backups/r1", apply=False)
     controller.controller_reset(apply=True)
-    controller.commissioning_code(ttl_seconds=600)
+    controller.commissioning_code()
     controller.diagnose(output=tmp_path / "report.tar.gz")
     assert controller.doctor(release_id="r1").report["status"] == "healthy"
     controller.lifecycle("restart", dry_run=True)

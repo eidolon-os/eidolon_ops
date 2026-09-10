@@ -177,14 +177,10 @@ class SupervisordSupervisor:
             output[str(path.relative_to(root))] = content[-lines:]
         return {"status": "ok", "host_id": self.profile.host_id, "logs": output}
 
-    def commissioning_code(
-        self, *, ttl_seconds: int, setup_code: str | None = None
-    ) -> dict[str, object]:
+    def commissioning_code(self, *, setup_code: str | None = None) -> dict[str, object]:
         # The Mac source run reaches bootstrapctl through its own profile
         # script, so the code travels as the same flag the Pi passes over SSH.
-        arguments = ("--ttl", str(ttl_seconds))
-        if setup_code is not None:
-            arguments += ("--code", setup_code)
+        arguments = () if setup_code is None else ("--code", setup_code)
         return self.profile_operation("commissioning-code", arguments=arguments)
 
     def profile_operation(

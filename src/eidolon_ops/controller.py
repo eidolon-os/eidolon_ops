@@ -872,12 +872,7 @@ class EidolonPiController:
             timeout=300,
         )
 
-    def commissioning_code(
-        self,
-        *,
-        ttl_seconds: int,
-        setup_code: str | None = None,
-    ) -> dict[str, object]:
+    def commissioning_code(self, *, setup_code: str | None = None) -> dict[str, object]:
         """Mint the one-time Setup code a phone types to claim this Host.
 
         SSH to the Host is what authorises this, the same way it authorises
@@ -886,16 +881,14 @@ class EidolonPiController:
 
         A profile may pin the value (``app.setup_code``) so the operator never
         has to look one up. Only the value is pinned: the Host still opens one
-        ordinary session for it, which expires, is spent once, and supersedes
-        any window before it.
+        ordinary session for it, which is spent once and supersedes any window
+        before it. It does not expire — a claim window has no clock on it
+        (``eidolon_admin`` ADR-0007), which is why no lifetime is sent.
         """
 
         self.preflight.validate_ssh_material()
         named = setup_code if setup_code is not None else self._configured_setup_code()
-        payload: dict[str, object] = {
-            **self.host_layer.target_payload(),
-            "ttl_seconds": ttl_seconds,
-        }
+        payload: dict[str, object] = {**self.host_layer.target_payload()}
         if named is not None:
             payload["setup_code"] = named
         return self.transport.run_agent(
