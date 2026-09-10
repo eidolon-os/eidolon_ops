@@ -195,6 +195,12 @@ class HostConfig:
     #: and a deadline too short turns a healthy release into a rolled-back one.
     #: A platform property, so it is stated per Host rather than compiled in.
     readiness_timeout_seconds: int = 240
+    #: Every operator public key this Host accepts, as a path to a tracked
+    #: authorized_keys-format file. Separate from ``identity_file`` because
+    #: that field was carrying two facts — which private key this machine
+    #: connects with, and which keys the board trusts. While they were one, a
+    #: second operator had to be handed somebody's private key.
+    operator_keys_file: Path | None = None
 
     @property
     def target(self) -> str:
@@ -344,7 +350,11 @@ def load_config(path: Path) -> OperationsConfig:
             "connect_timeout_seconds",
             "remote_uv",
         },
-        optional={"readiness_timeout_seconds", "require_wired_release_upload"},
+        optional={
+            "readiness_timeout_seconds",
+            "require_wired_release_upload",
+            "operator_keys_file",
+        },
         label="host",
     )
     user = _string(host_wire["user"], "host.user")
@@ -503,6 +513,11 @@ def load_config(path: Path) -> OperationsConfig:
             connect_timeout_seconds=timeout,
             remote_uv=remote_uv,
             require_wired_release_upload=require_wired_release_upload,
+            operator_keys_file=(
+                _local_path(host_wire["operator_keys_file"], base, "host.operator_keys_file")
+                if "operator_keys_file" in host_wire
+                else None
+            ),
             readiness_timeout_seconds=readiness,
         ),
         workspace=workspace,

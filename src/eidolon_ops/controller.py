@@ -584,21 +584,28 @@ class EidolonPiController:
                 f"its medium ({bring_up_module.BOOT_MEDIUM}); one that is running has a "
                 f"shell on it ({bring_up_module.SHELL})."
             )
-        public_key = self.config.host.identity_file.with_suffix(
-            self.config.host.identity_file.suffix + ".pub"
-        )
+        declaration = self.config.host.operator_keys_file
+        if declaration is None:
+            raise OperationsError(
+                "host.operator_keys_file is not declared, so there is no set of operators "
+                "to give this board. It names a tracked authorized_keys-format file: one "
+                "line per operator public key. Deliberately not defaulted to the public "
+                "half of host.identity_file — that would keep the board trusting exactly "
+                "one key, which is what made a second operator need somebody's private one."
+            )
         try:
-            authorized_key = public_key.read_text(encoding="utf-8")
+            text = declaration.read_text(encoding="utf-8")
         except OSError as exc:
             raise OperationsError(
-                f"the deploy public key is not readable at {public_key}. It sits beside the "
-                "private key this profile already names, and the Host has to be given it "
-                "before it will accept the key Ops connects with."
+                f"host.operator_keys_file names {declaration}, which is not readable. It is "
+                "the set of operators who can reach this Host, and it is tracked in the "
+                "repository because public keys are public and who may operate a board is "
+                "a reviewed decision."
             ) from exc
         required = bring_up_module.BringUp(
             hostname=self.config.host.hostname,
             user=self.config.host.user,
-            authorized_key=authorized_key,
+            authorized_keys=bring_up_module.read_operator_keys(text, label=str(declaration)),
         )
         rendered = bring_up_module.render(
             required, foundation=self.config.foundation_profile, via=via
@@ -610,7 +617,8 @@ class EidolonPiController:
             "foundation": self.config.foundation_profile,
             "hostname": required.short_hostname,
             "user": required.user,
-            "authorized_key": str(public_key),
+            "operator_keys_file": str(declaration),
+            "operator_keys": len(required.authorized_keys),
             "next": (
                 "Write these to the boot medium's own filesystem, then boot the board."
                 if via == bring_up_module.BOOT_MEDIUM

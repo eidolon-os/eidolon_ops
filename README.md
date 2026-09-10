@@ -111,7 +111,7 @@ Ops 能操作一台 Host 之前，那台 Host 必须已经有几件事成立。�
 |---|---|
 | hostname 是 profile 里的短名 | `endpoints.py` 按名字解析；`transport.py` 的 `HostKeyAlias` 按名字信任 host key |
 | `[host].user` 账号存在 | transport 以它连接 |
-| 部署公钥在它的 authorized_keys 里 | transport 是 `BatchMode=yes` 加指定 identity，没有口令通路 |
+| 每个被声明的操作者公钥都在它的 authorized_keys 里 | transport 是 `BatchMode=yes` 加指定 identity，板子没被给过的 key 就是那个操作者连不上的板子 |
 | 该账号免密 sudo | transport 提权用 `sudo --non-interactive` |
 | sshd 与 mDNS 在跑 | transport 本身，以及名字解析 |
 | 有线口在点对点线上持有地址、在真网络上取租约 | 有线上传门禁，以及 `provision` 需要的出网路径 |
@@ -185,6 +185,40 @@ Host 自己的 Wi-Fi 由手机的 BLE 路径配置，那是产品自带的能力
 失去全部链路的板子只能重烧而不能在键盘前救回来，`bring-up` 的报告会明说这一点，而不是留给
 一块登不进去的板子来告知。
 
+## 谁可以操作这台 Host
+
+`host.identity_file` 曾经兼着两件事：**这台机器用哪把私钥连**，和**板子该信谁**。
+只要它们是同一个字段，板子就只可能信一把 key——于是第二个操作者必须被交付某个人的
+私钥。那是最不该拷的东西，而且它把审计一起带走了：板子只看得见一个身份，撤销一个人
+等于换掉那把 key 再同步每台机器。
+
+拆开之后，`identity_file` 仍然只是这台机器自己的私钥，而这台 Host 接受哪些操作者
+是一份**入库的声明**，authorized_keys 格式、一人一行：
+
+```toml
+identity_file = "~/.ssh/id_ed25519_eidolon_pi"     # 这台机器的，本机的
+operator_keys_file = "eidolon-pi.operators"        # 板子接受谁，入库的
+```
+
+入库是刻意的：公钥是公开的，而"谁能操作这块板子"正该是 Git 里看得见、评审得到的事
+实，而不是某台笔记本 `~/.ssh` 里恰好有什么。加人是加一行，撤人是删一行，**谁都不碰
+任何私钥**。
+
+`bring-up` 从此只读这份声明，完全不读 `identity_file`——所以一个新的操作者可以在没有
+任何人私钥的情况下给板子做 bring-up。它也不为缺失的声明回落到 `identity_file` 的公钥
+一半：那会把刚拆开的两件事重新粘上，所以没有声明就明确拒绝。
+
+板子上那个 `authorized_keys` 被**对账成等于声明**，不是往里追加。只追加在只有一把 key
+时是安全的，但它让撤人变得不可能——声明里删掉的一行永远到不了板子，那声明就不是决定
+谁能登录的东西了。所以那个文件归 ops：它等于声明，而脚本会打印它删掉了哪一行。有人
+往 ops 账号的 `authorized_keys` 里留的私人 key 从来没有被声明批准过，失去它正是有声明
+的意义。
+
+实测过（同一块板子）：把第二个操作者的公钥加进声明、跑一次 `bring-up --via shell`，
+他用**自己的**私钥连上并且免密 sudo 可用；从声明里删掉那一行再跑一次，脚本报
+`removing key not in the declaration`，他随即被 `Permission denied (publickey)` 拒绝，
+而我自己不受影响。
+
 ## 换板子换的是信任
 
 host key 是按 Host 的**名字**信任的（`HostKeyAlias`），这正是“换链路不是信任决定”的由来。它同
@@ -235,7 +269,8 @@ uv sync --all-extras
 Host profile 和 operations config 都在仓库里（`config/hosts/*.toml`、
 `config/eidolon-*.toml`）——一块板子是什么、能做什么、跑哪些 unit，都是评审过的
 产品决定，不该只存在一台机器上。里面唯一与本机有关的值是 SSH 私钥，写成
-`~/.ssh/...`，各自的机器自己解析。
+`~/.ssh/...`，各自的机器自己解析——**而"这台 Host 接受哪些操作者"是另一件事**，
+见[谁可以操作这台 Host](#谁可以操作这台-host)。
 
 `known_hosts` 曾经也在那一行里，现在指向 `.eidolon-ops/<host>/known_hosts`——profile
 自己的，不是操作者的。理由见[换板子换的是信任](#换板子换的是信任)：文件仍然只在本机

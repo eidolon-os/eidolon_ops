@@ -18,6 +18,7 @@ from eidolon_ops.bring_up import (
     SHELL,
     USER_DATA,
     BringUp,
+    read_operator_keys,
     render,
 )
 from eidolon_ops.errors import OperationsError
@@ -29,7 +30,7 @@ FOUNDATION = "raspberry-pi-os-debian-arm64-v2"
 
 
 def _bring_up(**overrides) -> BringUp:
-    arguments = {"hostname": "eidolon-pi5.local", "user": "eidolon-pi5", "authorized_key": KEY}
+    arguments = {"hostname": "eidolon-pi5.local", "user": "eidolon-pi5", "authorized_keys": (KEY,)}
     arguments.update(overrides)
     return BringUp(**arguments)
 
@@ -52,7 +53,7 @@ def test_the_requirement_names_no_platform() -> None:
     first-boot hook the OS had already replaced.
     """
 
-    assert set(BringUp.__dataclass_fields__) == {"hostname", "user", "authorized_key"}
+    assert set(BringUp.__dataclass_fields__) == {"hostname", "user", "authorized_keys"}
     assert _bring_up().short_hostname == "eidolon-pi5"
 
 
@@ -138,8 +139,13 @@ def test_a_foundation_with_no_declared_payload_is_refused() -> None:
 
 @pytest.mark.parametrize("value", ["not-a-key", f"{KEY}\nssh-ed25519 second"])
 def test_an_unusable_key_is_refused_here_not_discovered_on_a_board(value: str) -> None:
-    with pytest.raises(OperationsError, match="one OpenSSH public key line"):
-        _bring_up(authorized_key=value)
+    with pytest.raises(OperationsError, match="not an OpenSSH public key line"):
+        _bring_up(authorized_keys=(value,))
+
+
+def test_a_host_nobody_can_log_into_is_refused() -> None:
+    with pytest.raises(OperationsError, match="accepts no operator keys"):
+        _bring_up(authorized_keys=())
 
 
 # --- the second channel: a board that is already running --------------------
@@ -207,3 +213,55 @@ def test_the_script_cannot_lock_the_operator_out_of_the_board() -> None:
 def test_a_channel_a_board_does_not_have_is_refused() -> None:
     with pytest.raises(KeyError):
         PLATFORMS["no-such-foundation"]
+
+
+# --- who may operate this Host, declared rather than implied ----------------
+
+SECOND = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKHhyMtoqOaGzBaKm4ldkGggu8LWslWg4n0s second@elsewhere"
+
+
+def test_every_declared_operator_reaches_both_channels() -> None:
+    """Nobody needs anybody else's private key.
+
+    `host.identity_file` was carrying two facts: which private key this
+    machine connects with, and which key the board trusts. While they were one
+    field the board could trust exactly one key, so a second operator had to
+    be handed a private one — the thing least worth copying, and it takes the
+    audit trail with it. Declared separately, each operator keeps their own.
+    """
+
+    both = _bring_up(authorized_keys=(KEY, SECOND))
+
+    medium = render(both, foundation=FOUNDATION, via=BOOT_MEDIUM)
+    assert yaml.safe_load(medium[USER_DATA])["user"]["ssh_authorized_keys"] == [KEY, SECOND]
+
+    script = render(both, foundation=FOUNDATION, via=SHELL)[SCRIPT]
+    assert KEY in script and SECOND in script
+
+
+def test_the_board_is_reconciled_to_the_declaration_so_revocation_works() -> None:
+    """Append-only was safe with one key and made removal impossible.
+
+    A line deleted from the declaration has to reach the board, or the
+    declaration is not what decides who can log in.
+    """
+
+    script = _script()
+
+    assert 'printf \'%s\\n\' "$KEYS" > "$AUTHORIZED"' in script, "made equal, not added to"
+    assert "removing key not in the declaration" in script
+    # Still last, because it drops a session running over that interface.
+    assert script.index("AUTHORIZED") < script.index("nmcli con up")
+
+
+def test_the_declaration_is_read_as_the_format_the_board_wants() -> None:
+    """authorized_keys format: comments and blanks skipped, order kept."""
+
+    assert read_operator_keys(
+        f"# who can reach this Host\n{KEY}\n\n{SECOND}\n", label="operators"
+    ) == (KEY, SECOND)
+
+    with pytest.raises(OperationsError, match="operators:2 is not an OpenSSH public key"):
+        read_operator_keys(f"{KEY}\nnot-a-key\n", label="operators")
+    with pytest.raises(OperationsError, match="declares no operator keys"):
+        read_operator_keys("# nobody yet\n", label="operators")

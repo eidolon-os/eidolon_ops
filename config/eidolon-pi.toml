@@ -13,7 +13,13 @@ user = "eidolon-pi5"
 # than configured by hand.
 hostname = "eidolon-pi5.local"
 port = 22
+# This machine's own private key — the only value here that is machine-local.
 identity_file = "~/.ssh/id_ed25519_eidolon_pi"
+# And, separately, which operators the board accepts. That used to be implied
+# by the public half of the key above, which meant the board could trust
+# exactly one key and a second operator had to be handed a private one. This
+# file is tracked; see its own header.
+operator_keys_file = "eidolon-pi.operators"
 # The profile's own, not the operator's. Trust is granted under the Host's
 # name (`HostKeyAlias`), which is what keeps changing link from being a trust
 # decision — and also what makes two boards publishing this one name unable to

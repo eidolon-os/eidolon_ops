@@ -67,8 +67,9 @@ class BringUp:
     * ``hostname`` — `endpoints.py` resolves the Host by the name it publishes,
       and `transport.py` trusts its host key under that name via HostKeyAlias.
     * ``user`` — the account the transport connects as.
-    * ``authorized_key`` — the transport is ``BatchMode=yes`` with an explicit
-      identity, so a key it did not install is a Host it cannot reach.
+    * ``authorized_keys`` — every operator public key this Host accepts. The
+      transport is ``BatchMode=yes`` with an explicit identity, so a key the
+      board was not given is a board that operator cannot reach.
     * non-interactive sudo for that account — the transport elevates with
       ``sudo --non-interactive``.
     * sshd and mDNS running — the transport at all, and name resolution.
@@ -88,19 +89,23 @@ class BringUp:
 
     hostname: str
     user: str
-    authorized_key: str
+    authorized_keys: tuple[str, ...]
 
     def __post_init__(self) -> None:
-        key = self.authorized_key.strip()
-        # The one value worth checking: the others come from a profile this
+        # The one value worth checking here: the rest comes from a profile this
         # package already parsed, while an unusable key is a board that boots
         # perfectly and lets nobody in.
-        if not key.startswith(("ssh-", "ecdsa-", "sk-")) or "\n" in key:
+        if not self.authorized_keys:
             raise OperationsError(
-                f"{self.authorized_key[:40]!r} is not one OpenSSH public key line. It is "
-                "what the Host will accept, so an unusable value here is a board nothing "
-                "can log into."
+                "this Host accepts no operator keys, which is a board nobody can log into"
             )
+        for key in self.authorized_keys:
+            if not key.startswith(("ssh-", "ecdsa-", "sk-")) or "\n" in key:
+                raise OperationsError(
+                    f"{key[:40]!r} is not an OpenSSH public key line. These are what the "
+                    "Host will accept, so an unusable value here is a board an operator "
+                    "cannot log into."
+                )
 
     @property
     def short_hostname(self) -> str:
@@ -111,6 +116,47 @@ class BringUp:
         """
 
         return self.hostname.removesuffix(".local")
+
+
+def read_operator_keys(text: str, *, label: str) -> tuple[str, ...]:
+    """The operator public keys this Host accepts, from an authorized_keys file.
+
+    A list rather than one key, and a declaration rather than a machine-local
+    file, because two facts were living in `host.identity_file`: which private
+    key *this* machine connects with, and which key the *board* accepts. While
+    they were one field the board could only ever trust one key, so a second
+    operator had to be handed somebody's private key — the one thing least
+    worth copying, and it takes the audit trail with it.
+
+    Split, each operator keeps their own private key and the Host's accepted
+    set is a reviewed product decision: adding a person is a line, removing
+    one is a line, and the board's own `authorized_keys` shows how many people
+    can reach it. Public keys are public, so this file belongs in the
+    repository — that is the point, not an oversight.
+
+    Read in authorized_keys format because that is the format the board wants;
+    there is no translation to get wrong, and a review reads as one line per
+    person.
+    """
+
+    keys: list[str] = []
+    for number, raw in enumerate(text.splitlines(), start=1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if not line.startswith(("ssh-", "ecdsa-", "sk-")):
+            raise OperationsError(
+                f"{label}:{number} is not an OpenSSH public key line. This file is the set "
+                "of operators who can reach this Host; a line that is not a key is either "
+                "a mistake or an operator who silently will not be able to."
+            )
+        keys.append(line)
+    if not keys:
+        raise OperationsError(
+            f"{label} declares no operator keys. Every key that can reach this Host is "
+            "named here, so an empty set is a board nobody can log into."
+        )
+    return tuple(keys)
 
 
 @dataclass(frozen=True, slots=True)
@@ -229,7 +275,8 @@ def _raspberry_pi_os_trixie_medium(bring_up: BringUp) -> dict[str, str]:
             "  groups: [sudo]\n"
             '  sudo: ["ALL=(ALL) NOPASSWD:ALL"]\n'
             "  ssh_authorized_keys:\n"
-            f"  - {json.dumps(bring_up.authorized_key.strip())}\n"
+            + "".join(f"  - {json.dumps(key)}\n" for key in bring_up.authorized_keys)
+            +
             # No console password is rendered, so the account has none rather
             # than a guessable one. The operation's report says what that costs.
             "  lock_passwd: true\n"
@@ -282,10 +329,15 @@ def _raspberry_pi_os_trixie_shell(bring_up: BringUp) -> str:
     first time is the operator's, used by the operator.
 
     Written to be run twice. Every step is a state, not an edit: an account
-    that exists is left alone, and the key is appended only when absent rather
-    than replacing the file — the operator may be running this as the very
-    account they are logged in through, and rewriting its `authorized_keys`
-    would lock them out of the board they are fixing.
+    that exists is left alone, and `authorized_keys` is reconciled to exactly
+    the declared operator set.
+
+    Reconciled, not appended. Append-only was safe while there was one key,
+    but it makes removing an operator impossible — a line deleted from the
+    declaration would never reach the board. So this file is Ops's: it equals
+    the declared set, and the script prints any line it dropped. A personal
+    key someone left in the Ops account's `authorized_keys` was never
+    sanctioned by the declaration, and losing it is the point of having one.
 
     The network comes last on purpose. `nmcli con up` on the interface a
     session is running over drops that session, and by then everything else
@@ -294,7 +346,7 @@ def _raspberry_pi_os_trixie_shell(bring_up: BringUp) -> str:
 
     user = shlex.quote(bring_up.user)
     name = shlex.quote(bring_up.short_hostname)
-    key = shlex.quote(bring_up.authorized_key.strip())
+    keys = "\n".join(bring_up.authorized_keys)
     return f"""#!/bin/sh
 # Rendered by eidolon-ops from the Host profile. Run as root on the board:
 #
@@ -305,7 +357,10 @@ set -eu
 
 USER={user}
 HOSTNAME={name}
-KEY={key}
+KEYS=$(cat <<'EIDOLON_OPERATOR_KEYS'
+{keys}
+EIDOLON_OPERATOR_KEYS
+)
 
 [ "$(id -u)" = 0 ] || {{ echo "run this as root" >&2; exit 1; }}
 
@@ -318,13 +373,23 @@ id -u "$USER" >/dev/null 2>&1 || useradd --create-home --shell /bin/bash "$USER"
 usermod --append --groups sudo "$USER"
 HOME_DIR=$(getent passwd "$USER" | cut -d: -f6)
 
-# The deploy key, appended rather than written over: this may be the account
-# the operator is logged in through.
+# The declared operator set. This file is Ops's, so it is made equal to the
+# declaration rather than added to — otherwise a line removed from the
+# declaration would never reach the board, and nobody could be revoked.
 install -d -m 700 -o "$USER" -g "$USER" "$HOME_DIR/.ssh"
-touch "$HOME_DIR/.ssh/authorized_keys"
-grep -qxF "$KEY" "$HOME_DIR/.ssh/authorized_keys" || printf '%s\n' "$KEY" >> "$HOME_DIR/.ssh/authorized_keys"
-chown "$USER:$USER" "$HOME_DIR/.ssh/authorized_keys"
-chmod 600 "$HOME_DIR/.ssh/authorized_keys"
+AUTHORIZED="$HOME_DIR/.ssh/authorized_keys"
+touch "$AUTHORIZED"
+printf '%s\\n' "$KEYS" | while IFS= read -r line; do
+  [ -n "$line" ] || continue
+  grep -qxF "$line" "$AUTHORIZED" || echo "adding operator key: $(echo "$line" | cut -c1-40)..."
+done
+while IFS= read -r line; do
+  [ -n "$line" ] || continue
+  printf '%s\\n' "$KEYS" | grep -qxF "$line" || echo "removing key not in the declaration: $(echo "$line" | cut -c1-40)..."
+done < "$AUTHORIZED"
+printf '%s\\n' "$KEYS" > "$AUTHORIZED"
+chown "$USER:$USER" "$AUTHORIZED"
+chmod 600 "$AUTHORIZED"
 
 # Non-interactive sudo. The transport elevates with `sudo --non-interactive`
 # and stops at the first elevation without it.
@@ -354,7 +419,7 @@ echo "===== what Ops will find ====="
 hostname
 id -un "$USER" >/dev/null 2>&1 && echo "account: $USER"
 sudo -n -u "$USER" true 2>/dev/null && echo "sudo: non-interactive" || echo "sudo: NOT non-interactive"
-grep -qxF "$KEY" "$HOME_DIR/.ssh/authorized_keys" && echo "deploy key: installed"
+echo "operator keys: $(grep -c . "$AUTHORIZED") accepted"
 systemctl is-active ssh avahi-daemon | tr '\n' ' '; echo
 ip -4 -br addr show "$DEVICE"
 """

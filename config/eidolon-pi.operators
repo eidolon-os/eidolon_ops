@@ -1,0 +1,10 @@
+# Which operators can reach this Host, in authorized_keys format — one line per
+# person. Tracked on purpose: a public key is public, and who may operate a
+# board is a reviewed decision rather than whatever happens to sit in one
+# laptop's ~/.ssh. Adding somebody is a line; removing them is a line, and
+# `bring-up` makes the board's own authorized_keys equal this file.
+#
+# Nobody needs anybody else's private key. Each operator keeps their own and
+# puts its public half here — which is the whole reason this file exists apart
+# from host.identity_file.
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKTKp2ZMbC8xKgqcun/TKj2lUDUYR7sghfQD4uRJtAL2 eidolon-pi-192.168.1.26
