@@ -125,6 +125,36 @@ def converge_inputs(host_id: str, *, apply: bool = False) -> Plan:
     )
 
 
+def trust_host_key(host_id: str, *, apply: bool, replacing: bool) -> Plan:
+    """Record which host key this profile trusts.
+
+    Destructive only in the one case that matters. Trusting a key the profile
+    has never seen adds a fact; replacing a different key that is already
+    trusted withdraws one, and that is the shape of both a swapped board and a
+    machine-in-the-middle. The plan cannot tell those apart, so it says which
+    one it found and makes the operator name the fingerprint they checked.
+    """
+
+    flags = {"--apply"} if apply else set()
+    if replacing:
+        flags.add("--replace")
+    return Plan(
+        operation="trust-host-key",
+        host_id=host_id,
+        steps=_steps(
+            ("scan", "read the key this Host presents, outside the strict transport"),
+            ("compare", "against every key already trusted under this Host's name"),
+            ("record", "write the profile's own known_hosts"),
+        ),
+        # Walked back by pointing the profile at the other board and running
+        # this again; what cannot be walked back is having trusted the wrong
+        # key in between, which is what the acknowledgement is for.
+        destructive=DestructiveLevel.REVERSIBLE if replacing else DestructiveLevel.NONE,
+        requires_flags=frozenset(flags),
+        touches=frozenset({ActionKind.SECRET}) if apply else frozenset(),
+    )
+
+
 def commissioning_code(host_id: str) -> Plan:
     return Plan(
         operation="commissioning-code",

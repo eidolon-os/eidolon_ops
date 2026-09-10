@@ -18,6 +18,7 @@ import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
+from eidolon_ops import host_keys
 from eidolon_ops.component_contract import read_component_contracts
 from eidolon_ops.config import OperationsConfig, validate_release_id
 from eidolon_ops.errors import OperationsError
@@ -559,6 +560,69 @@ class EidolonPiController:
         """
 
         return self.provision(apply=apply, journal=Journal())
+
+    def trust_host_key(
+        self, *, apply: bool = False, replace: str | None = None
+    ) -> dict[str, object]:
+        """Record which host key this profile trusts, having looked at it.
+
+        Read outside the strict transport on purpose: the situation this exists
+        for is a Host whose recorded key is wrong, and every other operation
+        refuses that Host correctly. Nothing here can tell a swapped board from
+        a machine-in-the-middle, so it reports what it found and lets the
+        operator, who can check the Host itself, be the one who decides.
+        """
+
+        alias = self.config.host.hostname
+        path = self.config.host.known_hosts_file
+        host_key, endpoint = host_keys.scan(
+            self.runner,
+            self.transport.candidates(),
+            port=self.config.host.port,
+            timeout=self.config.host.connect_timeout_seconds,
+        )
+        existing = host_keys.recorded(path, alias)
+        trusted = host_keys.fingerprints(self.runner, existing)
+        already = host_key.fingerprint in trusted
+        report: dict[str, object] = {
+            "hostname": alias,
+            "known_hosts": str(path),
+            "endpoint": endpoint.describe(),
+            "key_type": host_key.key_type,
+            "fingerprint": host_key.fingerprint,
+            "trusted_fingerprints": list(trusted),
+        }
+        if already and len(existing) == 1:
+            report["status"] = "trusted"
+            report["detail"] = "this profile already trusts exactly this key; nothing to write"
+            return report
+        replacing = bool(existing) and not already
+        if replacing:
+            report["status"] = "differs"
+            report["detail"] = (
+                f"this profile already trusts a different key under {alias!r}. That is what a "
+                "replaced board looks like, and also what a machine-in-the-middle looks like — "
+                "confirm the fingerprint on the Host itself "
+                "(`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`), then name it: "
+                f"--replace {host_key.fingerprint} --apply"
+            )
+        else:
+            report["status"] = "untrusted" if not existing else "incomplete"
+        if not apply:
+            return report
+        if replacing:
+            if replace is None:
+                raise OperationsError(str(report["detail"]))
+            if replace != host_key.fingerprint:
+                raise OperationsError(
+                    f"--replace names {replace!r}, but this Host is presenting "
+                    f"{host_key.fingerprint!r}. Nothing was written. Either the key changed again "
+                    "since the plan ran, or the fingerprint being confirmed is not this Host's."
+                )
+        host_keys.write(path, alias, host_key)
+        report["status"] = "recorded"
+        report["detail"] = f"{alias} now trusts {host_key.fingerprint} and nothing else"
+        return report
 
     def provision(self, *, apply: bool, journal: Journal | None = None) -> dict[str, object]:
         """Detect or install the pinned non-Eidolon foundation this Host names.

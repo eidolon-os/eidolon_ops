@@ -89,6 +89,17 @@ class SSHTransport:
         endpoint = self._endpoint
         return endpoint.describe() if endpoint else self.host.hostname
 
+    def candidates(self) -> tuple[HostEndpoint, ...]:
+        """Every address this Host's name resolves to, best link first.
+
+        Public because one operation has to reach a Host this transport is
+        right to refuse: recording which host key to trust. The addresses to
+        try are the same ones, and resolving them twice — once here, once in a
+        caller with its own idea of how — is how the two disagree.
+        """
+
+        return tuple(self._endpoints(self.host.hostname, self.host.port))
+
     def _bind_options(self) -> tuple[str, ...]:
         """Force this session out of the interface the endpoint chose.
 

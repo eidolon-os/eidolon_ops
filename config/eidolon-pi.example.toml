@@ -8,7 +8,13 @@ user = "eidolon-pi5"
 hostname = "192.168.100.15"
 port = 22
 identity_file = "/absolute/path/to/id_ed25519_eidolon_pi"
-known_hosts_file = "/absolute/path/to/eidolon_pi_known_hosts"
+# The profile's own file, not the operator's ~/.ssh/known_hosts. Trust is
+# granted under the Host's name, so two boards publishing one name cannot both
+# be trusted — and a board swap in a shared file is an untracked hand edit
+# among unrelated hosts. Populate it with `trust-host-key`, which shows the
+# fingerprint first; the directory is gitignored, so only the location is a
+# reviewed decision, never the key.
+known_hosts_file = "../.eidolon-ops/<host>/known_hosts"
 connect_timeout_seconds = 10
 remote_uv = "/usr/local/bin/uv"
 # Fail before sealing or upload if endpoint discovery did not select a wired

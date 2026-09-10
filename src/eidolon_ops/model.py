@@ -104,6 +104,11 @@ class Capability(StrEnum):
     #: narrow one is not thereby offering the wide one.
     KERNEL_SCHEMA_RESET = "kernel-schema-reset"
     DIAGNOSE = "diagnose"
+    #: Record which host key this profile trusts. Only a Host reached over SSH
+    #: has one, and only a profile that owns its own known_hosts can be told
+    #: to change it — which is what a replaced board needs and what a text
+    #: editor should not be the interface for.
+    TRUST_HOST_KEY = "trust-host-key"
     #: Workstation-only inspection of the source-run profile.
     SOURCE_PROFILE = "debug"
 

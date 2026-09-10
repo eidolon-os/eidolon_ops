@@ -13,7 +13,16 @@ user = "eidolon-pi5"
 hostname = "eidolon-pi5.local"
 port = 22
 identity_file = "~/.ssh/id_ed25519_eidolon_pi"
-known_hosts_file = "~/.ssh/known_hosts"
+# The profile's own, not the operator's. Trust is granted under the Host's
+# name (`HostKeyAlias`), which is what keeps changing link from being a trust
+# decision — and also what makes two boards publishing this one name unable to
+# both be trusted. In `~/.ssh/known_hosts` a board swap was an untracked hand
+# edit among a hundred unrelated hosts, where deleting the wrong line fails
+# loudly and pasting an unverified key fails silently and forever. Here it is
+# `trust-host-key`, which shows the fingerprint and makes replacing a
+# different one an acknowledged act. The directory is gitignored, so the file
+# stays machine-local; only its location is now a reviewed decision.
+known_hosts_file = "../.eidolon-ops/pi5/known_hosts"
 connect_timeout_seconds = 10
 remote_uv = "/usr/local/bin/uv"
 # Release payloads must never fall back to Wi-Fi, where this workstation's VPN

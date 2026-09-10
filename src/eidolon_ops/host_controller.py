@@ -201,6 +201,18 @@ class HostController:
 
     # -- release and authority operations ------------------------------------
 
+    def trust_host_key(self, *, apply: bool = False, replace: str | None = None) -> Evidence:
+        plan = plans.trust_host_key(
+            self.profile.host_id, apply=apply, replacing=replace is not None
+        )
+        release = self.adapter.require_release(Capability.TRUST_HOST_KEY)
+        report = release.trust_host_key(apply=apply, replace=replace)
+        # A key this profile already trusted is a read: reporting it as applied
+        # would put a write in the run ledger that never happened.
+        return self._planned_or_applied(
+            plan, report, applied=apply and report.get("status") == "recorded"
+        )
+
     def provision(self, *, apply: bool) -> Evidence:
         plan = plans.provision(self.profile.host_id, apply=apply)
         release = self.adapter.require_release(Capability.PROVISION)

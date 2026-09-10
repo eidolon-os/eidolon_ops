@@ -65,6 +65,10 @@ OPERATIONS: dict[str, Callable[[HostController, argparse.Namespace], object]] = 
     "commissioning-code": lambda controller, a: controller.commissioning_code(
         ttl_seconds=a.ttl_seconds, setup_code=a.code
     ),
+    "trust-host-key": lambda controller, a: controller.trust_host_key(
+        apply=a.apply,
+        replace=a.replace,
+    ),
     "install": lambda controller, a: controller.install(
         release_id=a.release_id,
         resume=a.resume,
@@ -290,6 +294,20 @@ def _parser() -> argparse.ArgumentParser:
         help=(
             "name the code for this one run; without it the profile's "
             "app.setup_code is used, and without that the Host draws one"
+        ),
+    )
+    trust_host_key = operations.add_parser(
+        "trust-host-key",
+        help="record which host key this profile trusts, after showing you its fingerprint",
+    )
+    trust_host_key.add_argument("--apply", action="store_true")
+    trust_host_key.add_argument(
+        "--replace",
+        metavar="SHA256:...",
+        help=(
+            "the fingerprint you confirmed on the Host itself. Required only when this "
+            "profile already trusts a different key under this name — a replaced board and "
+            "a machine-in-the-middle look identical from here, so the confirmation is yours"
         ),
     )
     install = operations.add_parser("install")
