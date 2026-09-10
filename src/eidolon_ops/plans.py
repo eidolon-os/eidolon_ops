@@ -125,6 +125,29 @@ def converge_inputs(host_id: str, *, apply: bool = False) -> Plan:
     )
 
 
+def boot_media(host_id: str, *, apply: bool) -> Plan:
+    """Write the first-boot payload a flashed card needs.
+
+    Reversible: the card is re-flashable and the payload is re-renderable. What
+    it does do is replace the three files an imager wrote, which is the intent
+    — and which also removes whatever console password was typed into that
+    imager, leaving a key-only Host. The report says so rather than leaving it
+    to be discovered by a board that will not let anyone in.
+    """
+
+    return Plan(
+        operation="boot-media",
+        host_id=host_id,
+        steps=_steps(
+            ("render", "derive the cloud-init payload from this Host's profile"),
+            ("write", "place user-data, meta-data and network-config in the output directory"),
+        ),
+        destructive=DestructiveLevel.REVERSIBLE if apply else DestructiveLevel.NONE,
+        requires_flags=frozenset({"--apply"} if apply else set()),
+        touches=frozenset({ActionKind.CONFIG}) if apply else frozenset(),
+    )
+
+
 def trust_host_key(host_id: str, *, apply: bool, replacing: bool) -> Plan:
     """Record which host key this profile trusts.
 

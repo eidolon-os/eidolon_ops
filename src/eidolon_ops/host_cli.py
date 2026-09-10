@@ -65,6 +65,10 @@ OPERATIONS: dict[str, Callable[[HostController, argparse.Namespace], object]] = 
     "commissioning-code": lambda controller, a: controller.commissioning_code(
         ttl_seconds=a.ttl_seconds, setup_code=a.code
     ),
+    "boot-media": lambda controller, a: controller.boot_media(
+        output=a.output,
+        apply=a.apply,
+    ),
     "trust-host-key": lambda controller, a: controller.trust_host_key(
         apply=a.apply,
         replace=a.replace,
@@ -296,6 +300,23 @@ def _parser() -> argparse.ArgumentParser:
             "app.setup_code is used, and without that the Host draws one"
         ),
     )
+    boot_media = operations.add_parser(
+        "boot-media",
+        help="render the first-boot payload a freshly flashed card needs",
+    )
+    boot_media.add_argument(
+        "--output",
+        type=Path,
+        required=True,
+        metavar="DIR",
+        help=(
+            "where to write user-data, meta-data and network-config. Point it at a mounted "
+            "card's boot partition to prepare that card, or anywhere else to get three files "
+            "to copy. Named rather than discovered: guessing which volume is the card would "
+            "be wrong differently on every machine, and silently"
+        ),
+    )
+    boot_media.add_argument("--apply", action="store_true")
     trust_host_key = operations.add_parser(
         "trust-host-key",
         help="record which host key this profile trusts, after showing you its fingerprint",

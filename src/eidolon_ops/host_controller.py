@@ -201,6 +201,12 @@ class HostController:
 
     # -- release and authority operations ------------------------------------
 
+    def boot_media(self, *, output: Path, apply: bool = False) -> Evidence:
+        plan = plans.boot_media(self.profile.host_id, apply=apply)
+        release = self.adapter.require_release(Capability.BOOT_MEDIA)
+        report = release.boot_media(output=output, apply=apply)
+        return self._planned_or_applied(plan, report, applied=apply)
+
     def trust_host_key(self, *, apply: bool = False, replace: str | None = None) -> Evidence:
         plan = plans.trust_host_key(
             self.profile.host_id, apply=apply, replacing=replace is not None

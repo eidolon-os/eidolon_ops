@@ -18,7 +18,7 @@ import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
-from eidolon_ops import host_keys
+from eidolon_ops import boot_media, host_keys
 from eidolon_ops.component_contract import read_component_contracts
 from eidolon_ops.config import OperationsConfig, validate_release_id
 from eidolon_ops.errors import OperationsError
@@ -560,6 +560,60 @@ class EidolonPiController:
         """
 
         return self.provision(apply=apply, journal=Journal())
+
+    def boot_media(self, *, output: Path, apply: bool = False) -> dict[str, object]:
+        """Render the payload that makes a flashed card come up SSH-ready.
+
+        The output directory is named rather than discovered. Pointed at a
+        mounted card it prepares that card; pointed anywhere else it produces
+        three files to copy. Guessing which of a machine's volumes is the right
+        one is a heuristic that would be wrong differently on every operator's
+        machine, and the failure of a wrong guess is silent.
+        """
+
+        public_key = self.config.host.identity_file.with_suffix(
+            self.config.host.identity_file.suffix + ".pub"
+        )
+        try:
+            authorized_key = public_key.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise OperationsError(
+                f"the deploy public key is not readable at {public_key}. It sits beside the "
+                "private key this profile already names, and the Host has to be given it "
+                "before it will accept the key Ops connects with."
+            ) from exc
+        instance_id = boot_media.new_instance_id()
+        payload = boot_media.render(
+            hostname=self.config.host.hostname,
+            user=self.config.host.user,
+            authorized_key=authorized_key,
+            instance_id=instance_id,
+        )
+        report: dict[str, object] = {
+            "output": str(output),
+            "instance_id": instance_id,
+            "files": sorted(payload),
+            "hostname": self.config.host.hostname,
+            "user": self.config.host.user,
+            "authorized_key": str(public_key),
+            "note": (
+                "This replaces the three files an imager writes, including whatever console "
+                "password was typed into it: the Host it prepares accepts the deploy key and "
+                "nothing else, so a board that loses both links is re-flashed rather than "
+                "rescued at a keyboard."
+            ),
+        }
+        if not apply:
+            report["status"] = "rendered"
+            return report
+        try:
+            output.mkdir(parents=True, exist_ok=True)
+            for name, text in sorted(payload.items()):
+                (output / name).write_text(text, encoding="utf-8")
+        except OSError as exc:
+            raise OperationsError(f"could not write the boot payload to {output}: {exc}") from exc
+        report["status"] = "written"
+        return report
 
     def trust_host_key(
         self, *, apply: bool = False, replace: str | None = None

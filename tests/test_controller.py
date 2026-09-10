@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import functools
-
 import dataclasses
+import functools
 import hashlib
 import json
 import os
