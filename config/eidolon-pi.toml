@@ -25,6 +25,13 @@ identity_file = "~/.ssh/id_ed25519_eidolon_pi"
 known_hosts_file = "../.eidolon-ops/pi5/known_hosts"
 connect_timeout_seconds = 10
 remote_uv = "/usr/local/bin/uv"
+# The network a card prepared by `boot-media` reaches the internet through.
+# Declared rather than assumed: `provision` installs Debian packages and the
+# pinned NATS/LiveKit/Node/uv artifacts, so a board with no route out fails
+# there rather than at the card, with nothing having said so. Only the path is
+# here — the SSID and PSK live beside the other private inputs, in a directory
+# that is gitignored, because an in-repository credential is everybody's.
+wifi_credentials_file = "../.eidolon-ops/pi5/inputs/wifi.env"
 # Release payloads must never fall back to Wi-Fi, where this workstation's VPN
 # accounts for the transfer. Status and maintenance commands remain reachable.
 require_wired_release_upload = true

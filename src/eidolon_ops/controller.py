@@ -568,10 +568,9 @@ class EidolonPiController:
         mounted card it prepares that card; pointed anywhere else it produces
         three files to copy. Guessing which of a machine's volumes is the right
         one is a heuristic that would be wrong differently on every operator's
-        machine, and the failure of a wrong guess is silent.
+        machine, and a wrong guess fails silently.
         """
 
-        boot_media.require_supported_foundation(self.config.foundation_profile)
         public_key = self.config.host.identity_file.with_suffix(
             self.config.host.identity_file.suffix + ".pub"
         )
@@ -583,24 +582,37 @@ class EidolonPiController:
                 "private key this profile already names, and the Host has to be given it "
                 "before it will accept the key Ops connects with."
             ) from exc
-        payload = boot_media.render(
+        bring_up = boot_media.BringUp(
             hostname=self.config.host.hostname,
             user=self.config.host.user,
             authorized_key=authorized_key,
+            wifi=self._declared_wifi(),
         )
+        payload = boot_media.render(bring_up, foundation=self.config.foundation_profile)
         report: dict[str, object] = {
             "output": str(output),
             "files": sorted(payload),
-            "hostname": self.config.host.hostname,
-            "user": self.config.host.user,
+            "foundation": self.config.foundation_profile,
+            "hostname": bring_up.short_hostname,
+            "user": bring_up.user,
             "authorized_key": str(public_key),
             "note": (
                 "This replaces the three files an imager writes, including whatever console "
                 "password was typed into it: the Host it prepares accepts the deploy key and "
-                "nothing else, so a board that loses both links is re-flashed rather than "
+                "nothing else, so a board that loses every link is re-flashed rather than "
                 "rescued at a keyboard."
             ),
         }
+        if bring_up.wifi is None:
+            # The one requirement a payload can be complete without meeting,
+            # and the one whose absence is not visible until `provision`
+            # reaches for the package index.
+            report["unmet"] = [
+                "a route out: host.wifi_credentials_file is not declared, so this card "
+                "carries no network. Ops can reach the board over the cable, but provision "
+                "installs Debian packages and pinned artifacts and will fail until the "
+                "board can reach the internet."
+            ]
         if not apply:
             report["status"] = "rendered"
             return report
@@ -612,6 +624,22 @@ class EidolonPiController:
             raise OperationsError(f"could not write the boot payload to {output}: {exc}") from exc
         report["status"] = "written"
         return report
+
+    def _declared_wifi(self) -> boot_media.WifiCredentials | None:
+        """The network this profile says a prepared board joins, if it says one."""
+
+        path = self.config.host.wifi_credentials_file
+        if path is None:
+            return None
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise OperationsError(
+                f"host.wifi_credentials_file names {path}, which is not readable. It holds "
+                "the network a prepared board reaches the internet through; the path is in "
+                "the profile and the value stays out of it."
+            ) from exc
+        return boot_media.read_wifi_credentials(text, label=str(path))
 
     def trust_host_key(
         self, *, apply: bool = False, replace: str | None = None
