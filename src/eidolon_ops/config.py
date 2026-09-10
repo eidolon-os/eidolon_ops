@@ -195,12 +195,6 @@ class HostConfig:
     #: and a deadline too short turns a healthy release into a rolled-back one.
     #: A platform property, so it is stated per Host rather than compiled in.
     readiness_timeout_seconds: int = 240
-    #: The network a freshly prepared board reaches the internet through, as a
-    #: path to a private ``KEY=value`` file. Optional because a board on a
-    #: wired DHCP network needs nothing here; declared rather than assumed
-    #: because `provision` installs Debian packages and pinned artifacts, and
-    #: a board with no route out fails there instead of at the card.
-    wifi_credentials_file: Path | None = None
 
     @property
     def target(self) -> str:
@@ -350,11 +344,7 @@ def load_config(path: Path) -> OperationsConfig:
             "connect_timeout_seconds",
             "remote_uv",
         },
-        optional={
-            "readiness_timeout_seconds",
-            "require_wired_release_upload",
-            "wifi_credentials_file",
-        },
+        optional={"readiness_timeout_seconds", "require_wired_release_upload"},
         label="host",
     )
     user = _string(host_wire["user"], "host.user")
@@ -513,13 +503,6 @@ def load_config(path: Path) -> OperationsConfig:
             connect_timeout_seconds=timeout,
             remote_uv=remote_uv,
             require_wired_release_upload=require_wired_release_upload,
-            wifi_credentials_file=(
-                _local_path(
-                    host_wire["wifi_credentials_file"], base, "host.wifi_credentials_file"
-                )
-                if "wifi_credentials_file" in host_wire
-                else None
-            ),
             readiness_timeout_seconds=readiness,
         ),
         workspace=workspace,

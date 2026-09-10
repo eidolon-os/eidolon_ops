@@ -8,8 +8,9 @@ user = "eidolon-pi5"
 # The Host's name, not one of its addresses: it answers here over whichever
 # link is up, and Ops picks the best one that responds — the wire first, which
 # measured 100 MB/s against 3.9 MB/s over Wi-Fi. Neither end configures a
-# subnet: both self-assign into 169.254/16 when the cable is in, and the Pi's
-# "eidolon-wired" profile is never-default so Wi-Fi keeps the route out.
+# subnet on the bench cable: nothing serves DHCP there, so both ends fall back
+# to 169.254/16. The board's side of that is rendered by `boot-media` rather
+# than configured by hand.
 hostname = "eidolon-pi5.local"
 port = 22
 identity_file = "~/.ssh/id_ed25519_eidolon_pi"
@@ -25,13 +26,6 @@ identity_file = "~/.ssh/id_ed25519_eidolon_pi"
 known_hosts_file = "../.eidolon-ops/pi5/known_hosts"
 connect_timeout_seconds = 10
 remote_uv = "/usr/local/bin/uv"
-# The network a card prepared by `boot-media` reaches the internet through.
-# Declared rather than assumed: `provision` installs Debian packages and the
-# pinned NATS/LiveKit/Node/uv artifacts, so a board with no route out fails
-# there rather than at the card, with nothing having said so. Only the path is
-# here — the SSID and PSK live beside the other private inputs, in a directory
-# that is gitignored, because an in-repository credential is everybody's.
-wifi_credentials_file = "../.eidolon-ops/pi5/inputs/wifi.env"
 # Release payloads must never fall back to Wi-Fi, where this workstation's VPN
 # accounts for the transfer. Status and maintenance commands remain reachable.
 require_wired_release_upload = true

@@ -29,33 +29,12 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
-from eidolon_ops import environment
 from eidolon_ops.errors import OperationsError
 
 #: cloud-init's file names on a NoCloud seed. Its choice, not ours.
 USER_DATA = "user-data"
 META_DATA = "meta-data"
 NETWORK_CONFIG = "network-config"
-
-#: Keys the private Wi-Fi input must carry, and only these.
-WIFI_SSID = "EIDOLON_WIFI_SSID"
-WIFI_PSK = "EIDOLON_WIFI_PSK"
-WIFI_COUNTRY = "EIDOLON_WIFI_COUNTRY"
-
-
-@dataclass(frozen=True, slots=True)
-class WifiCredentials:
-    """The network a prepared board reaches the internet through.
-
-    Not decoration: `provision` installs Debian packages and pinned artifacts,
-    so a board with no route out fails there. It is separate from the cable
-    because the two have opposite jobs — this one carries the default route,
-    the cable carries releases and must never take it.
-    """
-
-    ssid: str
-    psk: str
-    country: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,22 +52,23 @@ class BringUp:
     * non-interactive sudo for that account — the transport elevates with
       ``sudo --non-interactive``.
     * sshd and mDNS running — the transport at all, and name resolution.
-    * a wired link holding IPv4 without waiting for DHCP and never taking the
-      default route — the wired-upload gate, and the flapping link that gate
-      was diagnosing.
-    * ``wifi`` — a route out, for `provision`. Optional: a board on a wired
-      DHCP network has one already, and one with neither simply cannot be
-      provisioned, which the operation reports rather than discovering later.
+    * a wired link that holds an address on a point-to-point cable and takes
+      a lease on a real network — the wired-upload gate, the flapping link
+      that gate was diagnosing, and the route out `provision` needs.
 
-    The last four are properties of the rendered payload rather than fields:
+    The last three are properties of the rendered payload rather than fields:
     every renderer must produce them, and a renderer that does not is wrong in
     a way its own platform's validator will not catch.
+
+    The Host's own Wi-Fi is deliberately absent. The product configures it
+    over BLE from the phone, so rendering it here would be a second path to
+    one fact — and would make Ops hold a credential for something it does not
+    own.
     """
 
     hostname: str
     user: str
     authorized_key: str
-    wifi: WifiCredentials | None = None
 
     def __post_init__(self) -> None:
         key = self.authorized_key.strip()
@@ -111,23 +91,6 @@ class BringUp:
         """
 
         return self.hostname.removesuffix(".local")
-
-
-def read_wifi_credentials(text: str, *, label: str) -> WifiCredentials:
-    """The declared network, from the private ``KEY=value`` input."""
-
-    values = environment.parse(text, label=label)
-    missing = sorted({WIFI_SSID, WIFI_PSK, WIFI_COUNTRY} - set(values))
-    extra = sorted(set(values) - {WIFI_SSID, WIFI_PSK, WIFI_COUNTRY})
-    if missing or extra:
-        raise OperationsError(
-            f"{label} must carry exactly {WIFI_SSID}, {WIFI_PSK} and {WIFI_COUNTRY}"
-            + (f"; missing {', '.join(missing)}" if missing else "")
-            + (f"; unexpected {', '.join(extra)}" if extra else "")
-        )
-    return WifiCredentials(
-        ssid=values[WIFI_SSID], psk=values[WIFI_PSK], country=values[WIFI_COUNTRY]
-    )
 
 
 def render(bring_up: BringUp, *, foundation: str) -> dict[str, str]:
@@ -165,8 +128,22 @@ def _raspberry_pi_os_trixie(bring_up: BringUp) -> dict[str, str]:
     rendering would buy nothing there while costing reproducibility and making
     "silently reconfigure a card that already booted" the default.
 
-    The wired link goes through `networkmanager.passthrough` with an explicit
-    renderer. netplan's own `link-local` key does not round-trip here — setting
+    The wired link is `auto` with link-local as its fallback, which is one
+    configuration for two jobs. On a real network it takes a lease and carries
+    the route out that `provision` needs; on the point-to-point bench cable
+    nothing answers DHCP, so after the timeout NetworkManager assigns a
+    link-local address and — this is the part that matters — keeps the
+    connection activated instead of tearing it down and starting again. That
+    teardown loop was the Host that answered in bursts and dropped every
+    session. Measured on this board: `ipv4.link-local=fallback` settles on
+    169.254/16 and then 30 consecutive probes over 90 seconds, none lost.
+
+    `never-default` is deliberately not set. A link-local address has no
+    gateway and cannot take a default route, so it costs nothing there, while
+    setting it would stop the cable from being the route out on a real network
+    — which is the case that made this configuration necessary.
+
+    It goes through `networkmanager.passthrough` with an explicit renderer. netplan's own `link-local` key does not round-trip here — setting
     `ipv4.method=link-local` on a running Host leaves it absent from `netplan
     get` while NetworkManager holds it — and netplan refuses a device carrying
     `networkmanager` settings without a renderer: "networkmanager backend
@@ -213,39 +190,24 @@ def _raspberry_pi_os_trixie(bring_up: BringUp) -> dict[str, str]:
             "  ethernets:\n"
             f"    {interface}:\n"
             "      renderer: NetworkManager\n"
-            # Nothing serves DHCP on a point-to-point cable, so asking for it
-            # is 45 seconds of waiting and then a torn-down link, repeatedly —
-            # which is what a Host answering in bursts actually is.
-            "      dhcp4: false\n"
+            "      dhcp4: true\n"
             "      dhcp6: false\n"
+            # Or a cable that is legitimately absent on a shipped Host holds
+            # up the boot waiting for it.
             "      optional: true\n"
             "      networkmanager:\n"
             "        passthrough:\n"
-            '          ipv4.method: "link-local"\n'
+            '          ipv4.method: "auto"\n'
+            # 4 is NetworkManager's "fallback": try DHCP, and assign a
+            # link-local address if nothing answers.
+            '          ipv4.link-local: "4"\n'
+            # Shorter than the 45s default, because on the bench this is dead
+            # time before the Host becomes reachable at all.
+            '          ipv4.dhcp-timeout: "20"\n'
             '          ipv6.method: "link-local"\n'
-            '          ipv4.never-default: "true"\n'
-            '          ipv6.never-default: "true"\n'
             '          connection.autoconnect: "true"\n'
-            f"{_wifi(bring_up.wifi)}"
         ),
     }
-
-
-def _wifi(wifi: WifiCredentials | None) -> str:
-    if wifi is None:
-        return ""
-    return (
-        "  wifis:\n"
-        "    wlan0:\n"
-        "      renderer: NetworkManager\n"
-        "      dhcp4: true\n"
-        "      dhcp6: false\n"
-        "      optional: true\n"
-        f"      regulatory-domain: {json.dumps(wifi.country)}\n"
-        "      access-points:\n"
-        f"        {json.dumps(wifi.ssid)}:\n"
-        f"          password: {json.dumps(wifi.psk)}\n"
-    )
 
 
 #: Which platform's first boot Ops knows how to describe. Keyed by

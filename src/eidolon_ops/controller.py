@@ -586,7 +586,6 @@ class EidolonPiController:
             hostname=self.config.host.hostname,
             user=self.config.host.user,
             authorized_key=authorized_key,
-            wifi=self._declared_wifi(),
         )
         payload = boot_media.render(bring_up, foundation=self.config.foundation_profile)
         report: dict[str, object] = {
@@ -603,16 +602,6 @@ class EidolonPiController:
                 "rescued at a keyboard."
             ),
         }
-        if bring_up.wifi is None:
-            # The one requirement a payload can be complete without meeting,
-            # and the one whose absence is not visible until `provision`
-            # reaches for the package index.
-            report["unmet"] = [
-                "a route out: host.wifi_credentials_file is not declared, so this card "
-                "carries no network. Ops can reach the board over the cable, but provision "
-                "installs Debian packages and pinned artifacts and will fail until the "
-                "board can reach the internet."
-            ]
         if not apply:
             report["status"] = "rendered"
             return report
@@ -624,22 +613,6 @@ class EidolonPiController:
             raise OperationsError(f"could not write the boot payload to {output}: {exc}") from exc
         report["status"] = "written"
         return report
-
-    def _declared_wifi(self) -> boot_media.WifiCredentials | None:
-        """The network this profile says a prepared board joins, if it says one."""
-
-        path = self.config.host.wifi_credentials_file
-        if path is None:
-            return None
-        try:
-            text = path.read_text(encoding="utf-8")
-        except OSError as exc:
-            raise OperationsError(
-                f"host.wifi_credentials_file names {path}, which is not readable. It holds "
-                "the network a prepared board reaches the internet through; the path is in "
-                "the profile and the value stays out of it."
-            ) from exc
-        return boot_media.read_wifi_credentials(text, label=str(path))
 
     def trust_host_key(
         self, *, apply: bool = False, replace: str | None = None

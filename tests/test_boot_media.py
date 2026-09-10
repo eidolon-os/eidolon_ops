@@ -15,8 +15,6 @@ from eidolon_ops.boot_media import (
     PAYLOADS,
     USER_DATA,
     BringUp,
-    WifiCredentials,
-    read_wifi_credentials,
     render,
 )
 from eidolon_ops.errors import OperationsError
@@ -47,7 +45,7 @@ def test_the_requirement_names_no_platform() -> None:
     first-boot hook the OS had already replaced.
     """
 
-    assert set(BringUp.__dataclass_fields__) == {"hostname", "user", "authorized_key", "wifi"}
+    assert set(BringUp.__dataclass_fields__) == {"hostname", "user", "authorized_key"}
     assert _bring_up().short_hostname == "eidolon-pi5"
 
 
@@ -67,27 +65,33 @@ def test_the_five_manual_facts_are_all_in_the_payload() -> None:
     assert "avahi-daemon" in config["packages"]
     assert ["systemctl", "enable", "--now", "ssh"] in config["runcmd"]
     assert ["systemctl", "enable", "--now", "avahi-daemon"] in config["runcmd"]
-    passthrough = documents[NETWORK_CONFIG]["network"]["ethernets"]["eth0"]["networkmanager"][
-        "passthrough"
-    ]
-    assert passthrough["ipv4.method"] == "link-local"
-    assert passthrough["ipv4.never-default"] == "true"
+    assert "eth0" in documents[NETWORK_CONFIG]["network"]["ethernets"]
 
 
-def test_the_two_things_that_would_silently_ruin_the_card() -> None:
-    """A flapping link, and a config netplan refuses to read.
+def test_one_wired_configuration_serves_both_of_its_jobs() -> None:
+    """A lease on a real network, a link-local address on the bench cable.
 
-    `dhcp4: true` on a point-to-point cable is 45 seconds of waiting and then a
-    torn-down link, repeatedly. `networkmanager` settings without a renderer
-    make netplan refuse the device — "networkmanager backend settings found but
-    renderer is not NetworkManager" — and the image's global renderer file is
-    not in scope when the seed is parsed alone.
+    `auto` alone flaps on a point-to-point cable: nothing answers DHCP, so
+    NetworkManager tears the connection down and starts again, which is what a
+    Host answering in bursts was. `link-local` alone can never carry the route
+    out that `provision` needs. Fallback is both — measured on the board:
+    169.254/16 after the timeout, connection still activated, 30 probes over
+    90 seconds with none lost.
     """
 
     ethernet = _parsed()[NETWORK_CONFIG]["network"]["ethernets"]["eth0"]
+    passthrough = ethernet["networkmanager"]["passthrough"]
 
-    assert ethernet["dhcp4"] is False
-    assert ethernet["dhcp6"] is False
+    assert ethernet["dhcp4"] is True
+    assert passthrough["ipv4.method"] == "auto"
+    # NetworkManager's "fallback": try DHCP, assign link-local if unanswered.
+    assert passthrough["ipv4.link-local"] == "4"
+    # A link-local address has no gateway and cannot take a default route, so
+    # never-default costs nothing there — and setting it would stop the cable
+    # being the route out on a real network, the case this exists for.
+    assert "ipv4.never-default" not in passthrough
+    # netplan refuses a device with `networkmanager` settings and no renderer,
+    # and the image's global renderer file is not in scope for a lone seed.
     assert ethernet["renderer"] == "NetworkManager"
 
 
@@ -109,46 +113,6 @@ def test_a_key_only_host_does_not_also_accept_passwords() -> None:
     assert config["ssh_pwauth"] is False
     assert config["user"]["lock_passwd"] is True
     assert "passwd" not in config["user"]
-
-
-def test_the_declared_network_carries_the_route_out_and_the_cable_never_does() -> None:
-    """`provision` needs the internet; the cable must stay off the default route."""
-
-    wifi = WifiCredentials(ssid="别连我", psk="0123456789abcdef", country="CN")
-
-    network = _parsed(wifi=wifi)[NETWORK_CONFIG]["network"]
-
-    access = network["wifis"]["wlan0"]["access-points"]
-    assert list(access) == ["别连我"], "a non-ASCII SSID has to survive quoting"
-    assert access["别连我"]["password"] == "0123456789abcdef"
-    assert network["wifis"]["wlan0"]["dhcp4"] is True
-    assert (
-        network["ethernets"]["eth0"]["networkmanager"]["passthrough"]["ipv4.never-default"]
-        == "true"
-    )
-
-
-def test_without_a_declared_network_nothing_pretends_there_is_one() -> None:
-    assert "wifis" not in _parsed()[NETWORK_CONFIG]["network"]
-
-
-def test_the_private_wifi_input_is_exactly_three_keys() -> None:
-    """A typo in a secret file is a board that silently has no network."""
-
-    credentials = read_wifi_credentials(
-        "EIDOLON_WIFI_SSID=home\nEIDOLON_WIFI_PSK=secret\nEIDOLON_WIFI_COUNTRY=CN\n",
-        label="wifi.env",
-    )
-    assert credentials == WifiCredentials(ssid="home", psk="secret", country="CN")
-
-    with pytest.raises(OperationsError, match="missing EIDOLON_WIFI_COUNTRY"):
-        read_wifi_credentials("EIDOLON_WIFI_SSID=home\nEIDOLON_WIFI_PSK=secret\n", label="w.env")
-    with pytest.raises(OperationsError, match="unexpected EIDOLON_WIFI_PASSWORD"):
-        read_wifi_credentials(
-            "EIDOLON_WIFI_SSID=home\nEIDOLON_WIFI_PSK=s\nEIDOLON_WIFI_COUNTRY=CN\n"
-            "EIDOLON_WIFI_PASSWORD=s\n",
-            label="w.env",
-        )
 
 
 def test_a_foundation_with_no_declared_payload_is_refused() -> None:
