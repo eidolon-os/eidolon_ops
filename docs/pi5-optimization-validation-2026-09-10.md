@@ -1,6 +1,8 @@
 # Pi5 本轮优化与真机验证
 
-最新状态：普通更新已与 Owner 材料签发分离，正式版本 `20260910-pi5-ops-final-wifi-1` 已通过固定 Wi-Fi 端点部署，release doctor healthy、App-ready 24 项通过。板上 generation 8 和工作站 generation 9 均保持不变，二者不同不再阻塞普通更新。正式版本重启后复查同样通过。最终验证与本轮新增范围见文末；此前失败与临时方案保留为历史记录。
+2026-09-11 追加：授权简化后的普通部署已通过，当前 release 为 `20260911-pi5-authority-simplification-1`；doctor healthy、App-ready 24/24，身份与授权材料保持不变。见[本轮收尾验收](authorization-recovery-simplification-2026-09-11.md)。
+
+2026-09-10 状态：普通更新已与 Owner 材料签发分离，正式版本 `20260910-pi5-ops-final-wifi-1` 已通过固定 Wi-Fi 端点部署，release doctor healthy、App-ready 24 项通过。板上 generation 8 和工作站 generation 9 均保持不变，二者不同不再阻塞普通更新。正式版本重启后复查同样通过。最终验证与本轮新增范围见文末；此前失败与临时方案保留为历史记录。
 
 用户确认范围：先修复最近评审的 4 个问题及部署链路，再验证当前 USB 网口连接的 Pi5。本轮不包含统一发布事务、模型 CAS 迁移或增量构建重写。起点为 Ops `e77dd28`；工作期间已有的 LAN 观测改动由另一提交 `f1cd4b2` 纳入，保留并在其上修复歧义处理。
 

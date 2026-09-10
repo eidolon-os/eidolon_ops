@@ -46,3 +46,19 @@ Owner 与逻辑 Host 一一对应；Mobile 可以保存多个独立 Host。物�
 仍需独立完成的产品能力：完整快照的加密保存、整机恢复/换板以及真实恢复后的手机无感验收。本次没有把局部备份拼接成未经验证的整机恢复，也没有承诺撤销记录回滚或双实例克隆能自动解决。
 
 另在人工检查入口时发现现有 `rk3588` profile 与顶层交互脚本的平台列表不匹配，影响汇总帮助；Pi 命令列表正常。这是独立的平台接入问题，未混入本次授权生命周期改造。
+
+## 后续范围确认（2026-09-11）
+
+用户确认整机备份还原留到后续统一实施，入口在 Mobile，由用户自助操作；本轮收尾不包含该能力。详见[Mobile 整机备份还原需求](mobile-host-backup-restore-backlog.md)。本轮追加 Pi5 普通部署验收，继续保留身份和数据。
+
+
+## Pi5 部署收尾验收（2026-09-11）
+
+- 使用 Ops `c5c3dd0`，通过固定 Wi-Fi `192.168.100.15` 执行普通部署，沿用上轮验证的精确产品源码 pins，不混入各仓库后续开发提交。
+- 新 release：`20260911-pi5-authority-simplification-1`，已激活。候选准备及 dry-run 104.3 秒，复用候选后的激活与门禁 134.9 秒；分两次调用测量，不包含后续独立复查耗时。
+- 激活记录：`cutover_mode=reversible`，`database_migrations=[]`，`persistent_state_mutated=false`。这是无数据库迁移的普通更新，未清盘或更换身份。
+- 激活后再次独立验证：doctor healthy；App-ready 24/24；所报告产品服务均 active。板端身份及受保护的授权材料与部署前一致，工作站 Owner 材料哈希一致。
+- 私密证据：`.eidolon-ops/pi5/validation-20260910/authorization-20260911-{baseline,plan,apply,apply-preservation,health}.json`。
+- 本次未操作手机完成真实对话/交互，未进行破坏性真机恢复、刷机或换板实验；这些不计为已验收。
+
+结论：generation/授权生命周期简化及 Pi5 普通部署验证已完成，可以收尾。用户确认的 Mobile 整机备份还原按独立后续需求推进。

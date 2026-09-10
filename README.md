@@ -485,6 +485,8 @@ unit、配置和运行态，保留 `/var/lib`；它不会让已有数据自动�
 手机管理授权的 `controller-reset` 和逐设备撤销保持原有含义，不会改变全局 Host/Owner 身份。
 
 设计和验收见[授权恢复简化方案](docs/authorization-recovery-simplification-2026-09-11.md)。
+[Mobile 自助整机备份与还原](docs/mobile-host-backup-restore-backlog.md) 已列为后续独立需求，
+由用户在手机发起；当前局部运维备份不作为该产品能力的替代。
 
 ## 同一份契约的第二个前端
 
