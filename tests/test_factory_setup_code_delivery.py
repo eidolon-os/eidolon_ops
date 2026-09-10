@@ -14,8 +14,9 @@ from __future__ import annotations
 
 import dataclasses
 
+from test_controller import FakeTransport, _app
+
 from eidolon_ops.hostagent.contract import OPTIONAL_INSTALL_INPUTS, SECRET_INPUTS
-from tests.test_controller import FakeTransport, _app
 
 STAGED_NAME = "factory_setup_code"
 
@@ -28,8 +29,9 @@ def test_the_decision_is_the_profile_and_nothing_else(config) -> None:
     the switch.
     """
 
+    from test_controller import ControllerRunner
+
     from eidolon_ops.controller import EidolonPiController
-    from tests.test_controller import ControllerRunner
 
     with_code = EidolonPiController(
         config,
