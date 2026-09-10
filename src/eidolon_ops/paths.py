@@ -166,10 +166,38 @@ class AppAccess:
     #: would not have drawn itself. Nothing about the mechanism changes: the
     #: code still opens one ordinary session that expires, is spent once, dies
     #: after five wrong tries, and supersedes any window before it.
-    #: Read from ``setup_code_file`` when the profile names one, so the value
-    #: itself need not be in a tracked file. Both spellings produce this same
-    #: field: nothing downstream knows or cares which one the operator used.
+    #: The literal, when the profile pins one inline. That spelling belongs to
+    #: an example rather than a tracked profile — a code in a tracked file is a
+    #: code everybody has — so it is validated while this file is being read,
+    #: which is where a reviewer would look for the mistake.
     setup_code: str | None = None
+    #: Or the path the value lives at, which is where a tracked profile points.
+    #: Read by `factory_setup_code` when something needs the code, not here.
+    #:
+    #: Lazily on purpose, and for the same reason the 15 install inputs are:
+    #: they are machine-local secrets, and their absence is a failure of the
+    #: operation that needs them rather than of every operation. Reading this
+    #: one eagerly meant a fresh checkout could not run `status` — it failed on
+    #: a pairing code `status` has no use for.
+    setup_code_file: Path | None = None
+
+    def factory_setup_code(self) -> str | None:
+        """The code `commissioning-code` names, read at the moment it is wanted."""
+
+        if self.setup_code is not None:
+            return self.setup_code
+        if self.setup_code_file is None:
+            return None
+        try:
+            code = self.setup_code_file.read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            raise HostProfileError(
+                f"app.setup_code_file cannot be read: {self.setup_code_file}. This Host's "
+                "factory pairing code lives with its other secrets rather than in this "
+                "profile; create it there, or drop the field to ship without one."
+            ) from exc
+        _require_usable_setup_code(code)
+        return code
 
 
 @dataclass(frozen=True, slots=True)
@@ -374,6 +402,17 @@ def _member(enumeration: type[Any], value: object, label: str) -> Any:
 SETUP_CODE_DIGITS = 8
 
 
+def _require_usable_setup_code(code: str) -> None:
+    """One rule, wherever the value came from."""
+
+    if not _is_usable_setup_code(code):
+        raise HostProfileError(
+            "app.setup_code must be a code the Host would have drawn: "
+            f"{SETUP_CODE_DIGITS} digits, not all the same, and not the "
+            "plain run up or down"
+        )
+
+
 def _is_usable_setup_code(value: str) -> bool:
     if len(value) != SETUP_CODE_DIGITS or not value.isdigit() or not value.isascii():
         return False
@@ -426,32 +465,24 @@ def _app_access(
     if "setup_code" in document and "setup_code_file" in document:
         raise HostProfileError("app may name setup_code or setup_code_file, not both")
     setup_code: str | None = None
+    setup_code_file: Path | None = None
     if "setup_code" in document:
+        # Inline and therefore tracked: mirrored from the Host's own rule so a
+        # bad value is caught while reading this file rather than three hops
+        # away on the machine. The Host re-checks it and stays the authority.
         setup_code = _text(document["setup_code"], "app.setup_code")
+        _require_usable_setup_code(setup_code)
     elif "setup_code_file" in document:
-        path = _local_path(document["setup_code_file"], base, "app.setup_code_file")
-        try:
-            setup_code = path.read_text(encoding="utf-8").strip()
-        except OSError as exc:
-            raise HostProfileError(
-                f"app.setup_code_file cannot be read: {path}. This Host's factory "
-                "pairing code lives with its other secrets rather than in this "
-                "profile; create it there, or drop the field to ship without one."
-            ) from exc
-    # Mirrored from the Host's own rule so a bad value is caught while reading
-    # this file rather than three hops away on the machine. The Host re-checks
-    # it and stays the authority.
-    if setup_code is not None and not _is_usable_setup_code(setup_code):
-        raise HostProfileError(
-            "app.setup_code must be a code the Host would have drawn: "
-            f"{SETUP_CODE_DIGITS} digits, not all the same, and not the "
-            "plain run up or down"
-        )
+        # Declared here, read when wanted. The declaration is what this file
+        # can be reviewed for; the value is one operator's machine-local
+        # secret, like the 15 install inputs beside it.
+        setup_code_file = _local_path(document["setup_code_file"], base, "app.setup_code_file")
     return AppAccess(
         lan_ipv4=address,
         hub_https_port=port,
         allow_insecure_livekit=allow_insecure,
         setup_code=setup_code,
+        setup_code_file=setup_code_file,
     )
 
 

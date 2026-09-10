@@ -72,8 +72,16 @@ class ReleasePreflight:
         validate_private_local_file(self.config.host.identity_file, label="host.identity_file")
         known_hosts = self.config.host.known_hosts_file
         if not known_hosts.is_file() or known_hosts.is_symlink() or known_hosts.stat().st_size == 0:
+            # Naming the operation that creates it, because the state this
+            # catches is now a first run rather than a mistake: the file is the
+            # profile's own and gitignored, so a fresh checkout has none until
+            # a host key is trusted. Without this sentence that is a dead end
+            # on the one machine most likely to hit it.
             raise ConfigurationError(
-                f"host.known_hosts_file must be a non-empty regular file: {known_hosts}"
+                f"host.known_hosts_file must be a non-empty regular file: {known_hosts}. "
+                "A fresh checkout has no key trusted for this Host yet — "
+                "`trust-host-key` reads the key the Host is presenting, shows you its "
+                "fingerprint to check against the Host itself, and records it"
             )
         if stat.S_IMODE(known_hosts.stat().st_mode) & 0o022:
             raise ConfigurationError("host.known_hosts_file must not be group/world writable")

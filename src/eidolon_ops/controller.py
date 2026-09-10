@@ -929,7 +929,7 @@ class EidolonPiController:
 
     def _configured_setup_code(self) -> str | None:
         app = self.app
-        return None if app is None else app.setup_code
+        return None if app is None else app.factory_setup_code()
 
     def reset(self, *, wipe_authority_data: bool, apply: bool) -> dict[str, object]:
         """Plan or remove only the fixed Eidolon Host deployment namespace."""

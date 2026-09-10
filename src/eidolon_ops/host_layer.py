@@ -268,7 +268,7 @@ class HostLayer:
         """
 
         app = self.app
-        return None if app is None else app.setup_code
+        return None if app is None else app.factory_setup_code()
 
 
     def refresh(self, release_id: str) -> dict[str, object]:

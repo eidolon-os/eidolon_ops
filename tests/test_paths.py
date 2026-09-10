@@ -549,3 +549,59 @@ def test_a_report_resolves_the_deferred_livekit_host_for_the_operator() -> None:
         livekit_client_url_at("ws://192.168.1.25:7880", "10.0.0.7")
         == "ws://192.168.1.25:7880"
     )
+
+
+def test_a_declared_code_file_is_read_when_wanted_not_when_loaded(tmp_path: Path) -> None:
+    """A machine-local secret must not take every command down with it.
+
+    The 15 install inputs are declared here and read by the operation that
+    needs them; this one was read while the profile loaded, so a fresh
+    checkout could not run `status` — it failed on a pairing code `status` has
+    no use for. The declaration is what this file can be reviewed for.
+    """
+
+    script = tmp_path / "run.sh"
+    script.write_text("#!/bin/sh\n", encoding="utf-8")
+    code = tmp_path / "factory_setup_code"
+    path = _write_mac_profile(
+        tmp_path, script=script, overrides=f'setup_code_file = "{code}"'
+    )
+
+    # Loads with the file absent, because loading is not what needs the value.
+    profile = load_host_profile(path)
+    assert profile.app is not None
+    assert profile.app.setup_code is None
+    assert profile.app.setup_code_file == code
+
+    # And the operation that does need it says exactly what is missing.
+    with pytest.raises(HostProfileError, match=r"app\.setup_code_file cannot be read"):
+        profile.app.factory_setup_code()
+
+    code.write_text("99999990\n", encoding="utf-8")
+    assert profile.app.factory_setup_code() == "99999990"
+
+
+def test_one_rule_for_the_code_whichever_spelling_carried_it(tmp_path: Path) -> None:
+    """The Host would not draw 11111111, so neither spelling may name it.
+
+    An inline code is tracked text, so it is refused while this file is read —
+    where a reviewer would look. A code in a machine-local file is refused when
+    it is read, which is the first moment anything could have known.
+    """
+
+    script = tmp_path / "run.sh"
+    script.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    with pytest.raises(HostProfileError, match="a code the Host would have drawn"):
+        load_host_profile(
+            _write_mac_profile(tmp_path, script=script, overrides='setup_code = "11111111"')
+        )
+
+    code = tmp_path / "bad_code"
+    code.write_text("11111111\n", encoding="utf-8")
+    profile = load_host_profile(
+        _write_mac_profile(tmp_path, script=script, overrides=f'setup_code_file = "{code}"')
+    )
+    assert profile.app is not None
+    with pytest.raises(HostProfileError, match="a code the Host would have drawn"):
+        profile.app.factory_setup_code()
