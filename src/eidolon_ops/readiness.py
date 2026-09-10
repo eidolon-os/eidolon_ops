@@ -102,7 +102,7 @@ class ReadinessFact(StrEnum):
     DEVICE_REMOVAL_AVAILABLE = "device_removal_available"
     LIVEKIT_CLIENT_ORIGIN = "livekit_client_origin"
     LIVEKIT_LAN_REACHABLE = "livekit_lan_reachable"
-    LIVEKIT_RTC_ADVERTISED = "livekit_rtc_advertised"
+    LIVEKIT_NETWORK_CURRENT = "livekit_network_current"
     CHANNEL_WORKER_HEALTHY = "channel_worker_healthy"
     CHANNEL_WORKER_DISPATCH_IDENTITY = "channel_worker_dispatch_identity"
     CHANNEL_WORKER_LIVEKIT_LINK = "channel_worker_livekit_link"
@@ -238,7 +238,7 @@ READINESS_CONTRACT: tuple[ReadinessCheck, ...] = (
     ),
     _only(
         HostKind.SOURCE,
-        ReadinessFact.LIVEKIT_RTC_ADVERTISED,
+        ReadinessFact.LIVEKIT_NETWORK_CURRENT,
         "LiveKit advertises the address its media will be answered on",
     ),
 )

@@ -9,13 +9,11 @@ for a line in a log.
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
 from eidolon_ops.process import ProcessRunner
 
 _INET = re.compile(r"\binet\s+(\d+\.\d+\.\d+\.\d+)\b")
 _DSCACHE_ADDRESS = re.compile(r"\bip_address:\s*(\d+\.\d+\.\d+\.\d+)\b")
-_LIVEKIT_NODE_IP = re.compile(r"(?m)^\s*node_ip:\s*(\d+\.\d+\.\d+\.\d+)\s*$")
 
 
 def interface_addresses(runner: ProcessRunner) -> set[str]:
@@ -55,12 +53,3 @@ def name_resolves_to(runner: ProcessRunner, hostname: str, address: str) -> bool
         return False
     result = runner.run(("dscacheutil", "-q", "host", "-a", "name", hostname), timeout=10)
     return address in _DSCACHE_ADDRESS.findall(result.stdout)
-
-
-def livekit_node_ip(generated: Path | None) -> str:
-    """The address LiveKit advertises for its media, as it wrote it down."""
-
-    if generated is None or not generated.is_file():
-        return ""
-    match = _LIVEKIT_NODE_IP.search(generated.read_text(encoding="utf-8"))
-    return match.group(1) if match else ""

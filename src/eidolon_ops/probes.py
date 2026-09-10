@@ -7,6 +7,7 @@ implementation — a probe that guesses is a gate that lies.
 
 from __future__ import annotations
 
+import http.client
 import json
 import re
 import socket
@@ -68,6 +69,23 @@ def unix_http_health(path: Path) -> dict[str, object]:
     match = _STATUS_LINE.match(response)
     status = int(match.group(1)) if match else None
     return {"healthy": status == 200, "http_status": status}
+
+
+def unix_http_json(path: Path, resource: str) -> dict[str, object] | None:
+    request = f"GET {resource} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n".encode()
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.settimeout(_HTTP_TIMEOUT)
+            client.connect(str(path))
+            client.sendall(request)
+            with http.client.HTTPResponse(client) as response:
+                response.begin()
+                if response.status != 200:
+                    return None
+                document = json.loads(response.read(1024 * 1024))
+                return document if isinstance(document, dict) else None
+    except (OSError, ValueError, http.client.HTTPException):
+        return None
 
 
 def tcp_health(host: str, port: int) -> dict[str, object]:

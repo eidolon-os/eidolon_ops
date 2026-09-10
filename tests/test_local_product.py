@@ -399,6 +399,9 @@ def test_app_ready_requires_device_reachable_contract(monkeypatch, tmp_path: Pat
         lambda _url: {"healthy": True, "http_status": 200},
     )
     monkeypatch.setattr(probes, "tcp_health", lambda *_a: {"healthy": True})
+    monkeypatch.setattr(probes, "unix_http_json", lambda *_a: {
+        "service_id": "livekit", "runtime_state": "ready", "network_current": True,
+    })
     monkeypatch.setattr(
         probes,
         "http_json",
@@ -426,6 +429,19 @@ def test_app_ready_requires_device_reachable_contract(monkeypatch, tmp_path: Pat
     assert result["status"] == "app_ready"
     assert all(result["checks"].values())
     assert result["setup"]["state"] == "ready"
+    # A running old daemon (or an old manifest) cannot assert this new fact.
+    monkeypatch.setattr(probes, "unix_http_json", lambda *_a: {
+        "service_id": "livekit", "runtime_state": "ready",
+    })
+    assert product.app_ready()["checks"]["livekit_network_current"] is False
+
+    monkeypatch.setattr(probes, "unix_http_json", lambda *_a: {
+        "service_id": "livekit", "runtime_state": "degraded",
+    })
+    assert product.app_ready()["checks"]["livekit_network_current"] is False
+    monkeypatch.setattr(probes, "unix_http_json", lambda *_a: {
+        "service_id": "livekit", "runtime_state": "ready", "network_current": True,
+    })
 
     # A Local API still running the build it started with does not answer the
     # setup route at all. Same verdict as a Host whose halves disagree, because
@@ -1026,7 +1042,7 @@ def test_reset_refuses_to_reach_code_or_anything_outside_the_profile(tmp_path: P
         product._owner_material_root(),
         paths.bootstrap_state_root,
     ):
-        with pytest.raises(OperationsError, match="does not own|outside this profile"):
+        with pytest.raises(OperationsError, match=r"does not own|outside this profile"):
             product._require_removable([target])
 
     with pytest.raises(OperationsError, match="outside this profile"):

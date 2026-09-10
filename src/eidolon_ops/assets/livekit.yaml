@@ -18,9 +18,8 @@ turn:
   udp_port: 3478
 
 rtc:
-  # node_ip is dynamic in local/LAN dev. The supervisor wrapper renders
-  # var/livekit/livekit.generated.yaml at LiveKit process start and injects the
-  # current LAN IP there, so this source config stays portable.
+  # Native ICE gathers the eligible NICs. eidolond refreshes the transport
+  # when the network changes; only explicit NAT policy sets node_ip.
   use_external_ip: false
   ips:
     excludes:

@@ -23,8 +23,8 @@ bootstrap_runtime_root = "~/ai/eidolon/.eidolon/mac-product/bootstrap/run"
 [adapter]
 lifecycle_script = "../../deploy/dev/run_all.sh"
 operations_config = "../eidolon-pi.toml"
-# Mac reuses the already-running NATS/LiveKit after health and
-# credential-coherence checks; Ops owns the remaining source services.
+# Mac shares the existing NATS. LiveKit is managed through eidolond and
+# supervisord; its private credentials remain in the Host state root.
 foundation_mode = "external"
 external_livekit_config = "../../../eidolon_admin/var/livekit/livekit.generated.yaml"
 
@@ -33,7 +33,8 @@ external_livekit_config = "../../../eidolon_admin/var/livekit/livekit.generated.
 # currently answers on; declare it only for a statically addressed Host.
 # A discovered address forbids a literal one in livekit_client_url, which
 # would go stale the same way.
-lan_ipv4 = "192.168.1.25"
+# Static deployment override only:
+# lan_ipv4 = "192.168.1.25"
 hub_https_port = 8443
 allow_insecure_livekit = true
 

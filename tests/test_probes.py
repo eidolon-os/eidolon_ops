@@ -152,14 +152,28 @@ def test_a_published_name_is_resolved_rather_than_read_out_of_a_log() -> None:
     assert any(call[0] == "dscacheutil" for call in runner.calls)
 
 
-def test_livekit_advertises_the_address_it_wrote_down(tmp_path: Path) -> None:
-    generated = tmp_path / "livekit.generated.yaml"
-    assert lan_observation.livekit_node_ip(None) == ""
-    assert lan_observation.livekit_node_ip(generated) == ""
-    generated.write_text("rtc:\n  node_ip: 192.168.1.25\n", encoding="utf-8")
-    assert lan_observation.livekit_node_ip(generated) == "192.168.1.25"
-    generated.write_text("rtc:\n  use_external_ip: false\n", encoding="utf-8")
-    assert lan_observation.livekit_node_ip(generated) == ""
+def test_unix_json_reads_real_service_response(tmp_path: Path) -> None:
+    import socket
+    import tempfile
+    import threading
+    short = tempfile.TemporaryDirectory(prefix="eid-net-", dir="/tmp")
+    path = Path(short.name) / "system.sock"
+    with socket.socket(socket.AF_UNIX) as server:
+        server.bind(str(path))
+        server.listen(1)
+        def serve():
+            with server.accept()[0] as client:
+                request = client.recv(4096)
+                assert b"/api/system/v1/services/livekit" in request
+                body = b'{"service_id":"livekit","runtime_state":"degraded"}'
+                client.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: " + str(len(body)).encode() + b"\r\n\r\n" + body)
+        thread = threading.Thread(target=serve, daemon=True)
+        thread.start()
+        result = probes.unix_http_json(path, "/api/system/v1/services/livekit")
+        thread.join(timeout=3)
+        assert result["runtime_state"] == "degraded"
+    short.cleanup()
+    assert probes.unix_http_json(tmp_path / "missing", "/health") is None
 
 
 def test_the_delivered_agent_carries_every_module_of_the_package() -> None:

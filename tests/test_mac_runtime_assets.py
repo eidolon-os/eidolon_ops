@@ -78,8 +78,9 @@ def test_livekit_credentials_reject_malformed_persistent_input(
     assert "abcdefghijklmnop" not in result.stderr
 
 
+@pytest.mark.parametrize("override", ["", "192.0.2.5"])
 def test_livekit_runtime_config_is_generated_without_source_credentials(
-    tmp_path: Path,
+    tmp_path: Path, override: str,
 ) -> None:
     template = ROOT / "src/eidolon_ops/assets/livekit.yaml"
     generated = tmp_path / "livekit.generated.yaml"
@@ -96,7 +97,7 @@ def test_livekit_runtime_config_is_generated_without_source_credentials(
             EIDOLON_RUNTIME_ROOT=str(tmp_path / "run"),
             EIDOLON_LIVEKIT_TEMPLATE_CONFIG=str(template),
             EIDOLON_LIVEKIT_GENERATED_CONFIG=str(generated),
-            EIDOLON_LIVEKIT_NODE_IP="192.0.2.5",
+            EIDOLON_LIVEKIT_NODE_IP=override,
             EIDOLON_LIVEKIT_GENERATE_ONLY="1",
             LIVEKIT_API_KEY=api_key,
             LIVEKIT_API_SECRET=api_secret,
@@ -107,7 +108,9 @@ def test_livekit_runtime_config_is_generated_without_source_credentials(
     assert result.returncode == 0
     assert template.read_bytes() == source
     assert "keys:" not in template.read_text(encoding="utf-8")
-    assert "node_ip: 192.0.2.5" in rendered
+    assert ("node_ip:" in rendered) == bool(override)
+    if override:
+        assert f"node_ip: {override}" in rendered
     assert f"{api_key}: {api_secret}" in rendered
     assert stat.S_IMODE(generated.stat().st_mode) == 0o600
     assert api_key not in result.stdout + result.stderr

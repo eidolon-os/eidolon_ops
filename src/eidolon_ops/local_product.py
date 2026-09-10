@@ -659,6 +659,10 @@ class LocalProductSource:
         settings = (self.profile.paths.config_root / "settings/hub.yaml").read_text(
             encoding="utf-8"
         )
+        media_service = probes.unix_http_json(
+            self.profile.paths.runtime_root / "system.sock",
+            "/api/system/v1/services/livekit",
+        ) or {}
         checks = {
             str(ReadinessFact.BACKEND_HEALTHY): backend["status"] == "healthy",
             # A declared address must still be one this Host has; a discovered
@@ -701,10 +705,12 @@ class LocalProductSource:
                 == ("1" if app.allow_insecure_livekit else "0")
             ),
             str(ReadinessFact.LIVEKIT_LAN_REACHABLE): bool(livekit["healthy"]),
-            # WebRTC has to advertise a reachable address, so this compares
-            # against the one the Host actually answers on, not a declaration.
-            str(ReadinessFact.LIVEKIT_RTC_ADVERTISED): (
-                lan_observation.livekit_node_ip(self.profile.external_livekit_config) == address
+            # The lifecycle owner reports whether the running process has
+            # consumed current network inputs. YAML and TCP alone cannot.
+            str(ReadinessFact.LIVEKIT_NETWORK_CURRENT): (
+                media_service.get("service_id") == "livekit"
+                and media_service.get("runtime_state") == "ready"
+                and media_service.get("network_current") is True
             ),
             str(ReadinessFact.CHANNEL_WORKER_HEALTHY): bool(channel["healthy"]),
             str(ReadinessFact.CHANNEL_WORKER_DISPATCH_IDENTITY): bool(
