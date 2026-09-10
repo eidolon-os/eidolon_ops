@@ -11,6 +11,7 @@ from eidolon_ops.endpoints import (
     LocalInterface,
     first_reachable,
     local_interfaces,
+    rank_addresses,
     resolve_endpoints,
 )
 from eidolon_ops.process import ProcessResult
@@ -196,6 +197,9 @@ def test_the_upload_says_which_link_it_is_about_to_take() -> None:
         def endpoint(self) -> HostEndpoint | None:
             return self._endpoint
 
+        def prefer_wired_link(self) -> None:
+            """This fake is the link the test gave it; nothing to re-ask."""
+
         def describe(self) -> str:
             self.described += 1
             return "resolved"
@@ -221,3 +225,36 @@ def test_the_upload_says_which_link_it_is_about_to_take() -> None:
     # A Host that answers on neither is a different failure, and the upload
     # itself will report it. This says what it knows and does not invent a link.
     assert report(None)["status"] == "unresolved"
+
+
+def test_addresses_the_host_reports_are_ranked_by_this_machines_links() -> None:
+    """Which addresses exist is the Host's fact; which link is good is ours.
+
+    The same rule has to apply however the addresses arrived, or asking the
+    Host would introduce a second, quieter ordering.
+    """
+
+    local = (
+        LocalInterface(
+            name="en0", kind="wireless", networks=(ipaddress.IPv4Network("192.168.0.0/22"),)
+        ),
+        LocalInterface(
+            name="en7", kind="wired", networks=(ipaddress.IPv4Network("169.254.0.0/16"),)
+        ),
+    )
+
+    ranked = rank_addresses(
+        ["192.168.1.37", "169.254.182.252", "10.9.9.9", "192.168.1.37"],
+        interfaces=lambda: local,
+    )
+
+    assert [(item.address, item.link) for item in ranked] == [
+        ("169.254.182.252", "wired"),
+        ("10.9.9.9", "unknown"),
+        ("192.168.1.37", "wireless"),
+    ]
+    # A repeated answer is one link, not two.
+    assert len(ranked) == 3
+    assert ranked[0].bind_interface == "en7"
+    # Only link-local routing is ambiguous; the rest is the kernel's own call.
+    assert ranked[2].bind_interface is None

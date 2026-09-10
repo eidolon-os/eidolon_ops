@@ -190,8 +190,7 @@ class ControllerRunner:
                 # body here would only pass a check that no longer exists.
                 return ProcessResult(
                     0,
-                    "[Unit]\nDescription=test\n"
-                    "[Socket]\nListenStream=/run/test.sock\n",
+                    "[Unit]\nDescription=test\n[Socket]\nListenStream=/run/test.sock\n",
                     "",
                 )
             executable = (
@@ -334,6 +333,14 @@ class FakeTransport:
 
     def describe(self) -> str:
         return self.endpoint.describe() if self.endpoint else "pi.example"
+
+    def prefer_wired_link(self) -> None:
+        """A fake Host has exactly the link the test gave it.
+
+        The real transport asks the Host for addresses the resolver may have
+        omitted; there is nothing here that could answer differently, so the
+        choice stands and a wireless-only Host still refuses.
+        """
 
     def __init__(self) -> None:
         self.agent_calls: list[tuple[str, dict[str, object], str, bool]] = []

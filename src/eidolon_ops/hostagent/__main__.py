@@ -36,6 +36,7 @@ from .primitives import TargetError, decode_payload
 #: an operation is defined — and the one place a test replaces it.
 ACTIONS: dict[str, tuple[ModuleType, str]] = {
     "status": (lifecycle, "status"),
+    "host-addresses": (lifecycle, "host_addresses"),
     "foundation-doctor": (foundation, "foundation_doctor"),
     "foundation-install": (foundation_install, "foundation_install"),
     "app-ready": (probe, "app_ready"),

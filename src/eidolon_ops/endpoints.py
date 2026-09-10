@@ -10,6 +10,21 @@ hundred times the wireless one on a release upload — measured, on this Pi: 120
 in 2s over USB Ethernet against 205s over Wi-Fi. That is the whole reason this
 module exists, so wired candidates come first and the rest follow.
 
+The resolver is not the authority on how many links a Host has. On macOS a
+Host that answers on both Wi-Fi and a point-to-point cable resolves to the
+Wi-Fi record alone once avahi's unsolicited announcement has aged out of the
+cache: the wire is never offered, so it can never be ranked, and a release
+bound for the cable is refused for being wireless while the cable is plugged
+in and carrying SSH. Both self-assigned link-local addresses being present
+does not fix it — that was measured, on this workstation, with 169.254 on both
+ends.
+
+So the Host is asked. It already publishes every non-loopback IPv4 it answers
+on, because `status` prints them; `rank_addresses` exists to rank that list
+with the same rule, and the transport reaches for it when the resolver's best
+candidate is not the wire. Which addresses exist is the Host's fact. Which of
+them is the good link stays this machine's.
+
 Only IPv4 candidates are offered. The transport also has to move a release
 bundle, and the rsync macOS ships (openrsync) reads ``host::path`` as its
 daemon syntax — every IPv6 literal collides with it, brackets included. An
@@ -90,25 +105,23 @@ class HostEndpoint:
         return self.interface if parsed.is_link_local else None
 
 
-def resolve_endpoints(
-    hostname: str,
-    port: int,
+def rank_addresses(
+    addresses: Iterable[str],
     *,
-    resolver: Callable[..., list] | None = None,
     interfaces: Callable[[], tuple[LocalInterface, ...]] | None = None,
 ) -> tuple[HostEndpoint, ...]:
-    """Every IPv4 address ``hostname`` resolves to, best link first."""
+    """Given addresses, attribute each to a local link and order them best first.
 
-    resolve = resolver or socket.getaddrinfo
-    try:
-        answers = resolve(hostname, port, socket.AF_INET, socket.SOCK_STREAM)
-    except OSError:
-        return ()
+    Ranking is the workstation's job wherever the addresses came from: only
+    this machine knows which of its interfaces can reach them and which of
+    those is the wire. Duplicates are dropped, because a resolver answering
+    twice is not two links.
+    """
+
     local = (interfaces or local_interfaces)()
     endpoints: list[HostEndpoint] = []
     seen: set[str] = set()
-    for _family, _type, _proto, _canonname, sockaddr in answers:
-        address = str(sockaddr[0])
+    for address in addresses:
         if address in seen:
             continue
         seen.add(address)
@@ -121,6 +134,30 @@ def resolve_endpoints(
             )
         )
     return tuple(sorted(endpoints, key=lambda item: LINK_RANK.get(item.link, 1)))
+
+
+def resolve_endpoints(
+    hostname: str,
+    port: int,
+    *,
+    resolver: Callable[..., list] | None = None,
+    interfaces: Callable[[], tuple[LocalInterface, ...]] | None = None,
+) -> tuple[HostEndpoint, ...]:
+    """Every IPv4 address ``hostname`` resolves to, best link first.
+
+    This is what the workstation's own resolver knows, and it is not always
+    every link the Host has — see the note on asking the Host in the module
+    docstring.
+    """
+
+    resolve = resolver or socket.getaddrinfo
+    try:
+        answers = resolve(hostname, port, socket.AF_INET, socket.SOCK_STREAM)
+    except OSError:
+        return ()
+    return rank_addresses(
+        (str(sockaddr[0]) for *_unused, sockaddr in answers), interfaces=interfaces
+    )
 
 
 def _owning_interface(address: str, interfaces: Sequence[LocalInterface]) -> LocalInterface | None:

@@ -10,10 +10,16 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 from eidolon_ops.config import HostConfig
-from eidolon_ops.endpoints import HostEndpoint, first_reachable, resolve_endpoints
+from eidolon_ops.endpoints import (
+    HostEndpoint,
+    LocalInterface,
+    first_reachable,
+    rank_addresses,
+    resolve_endpoints,
+)
 from eidolon_ops.hostagent_delivery import injected_script
 from eidolon_ops.ports import TransportKind
-from eidolon_ops.process import ProcessResult, ProcessRunner, checked
+from eidolon_ops.process import ProcessError, ProcessResult, ProcessRunner, checked
 
 _REMOTE_TOKEN = re.compile(r"^[A-Za-z0-9_./:=+@,-]+$")
 
@@ -35,6 +41,7 @@ class SSHTransport:
         rsync: str = "rsync",
         endpoints: Callable[[str, int], Sequence[HostEndpoint]] | None = None,
         probe: Callable[[HostEndpoint, int, float], bool] | None = None,
+        interfaces: Callable[[], tuple[LocalInterface, ...]] | None = None,
     ) -> None:
         self.host = host
         self.runner = runner
@@ -43,6 +50,7 @@ class SSHTransport:
         self.rsync = rsync
         self._endpoints = endpoints or resolve_endpoints
         self._probe = probe
+        self._interfaces = interfaces
         self._endpoint: HostEndpoint | None = None
         self._resolved = False
 
@@ -105,6 +113,67 @@ class SSHTransport:
             timeout=self.host.connect_timeout_seconds,
             probe=self._probe or self._answers_over_ssh,
         )
+
+    def prefer_wired_link(self) -> None:
+        """Ask the Host for its own addresses when the resolver found no wire.
+
+        The resolver can be missing a link entirely rather than ranking it
+        badly: a Host on Wi-Fi and a cable resolves to the Wi-Fi record alone
+        once the cable's mDNS announcement has aged out, and then the wire is
+        not a candidate at all. Refusing the release at that point reports a
+        wireless link over a cable that is plugged in and carrying this very
+        session.
+
+        So when the best candidate is not the wire, the Host is asked which
+        addresses it has — it publishes them already — and those are attributed
+        to local links by the same rule. Only a wired one replaces the choice,
+        and only if it answers over SSH like any other candidate.
+
+        Wired and not merely better-ranked: "unknown" outranks Wi-Fi in the
+        resolver's ordering because an unattributable address might be the
+        cable, but here it would trade a link that is known for one that could
+        be the VPN this policy exists to keep a release off. Nothing but the
+        wire is worth changing a working choice for.
+
+        Best effort on purpose. A Host that cannot answer leaves the resolver's
+        choice standing, because this decides how fast an upload is, not
+        whether it is allowed: `require_wired_release_upload` is still the gate
+        and still refuses on its own.
+
+        Asked for rather than automatic, and only by the release path. The
+        round trip can only pay for itself where the link decides how long the
+        work takes; on a Host that genuinely has one link, charging every
+        `status` and `logs` for the same unhelpful answer is just slower.
+        """
+
+        self._resolve()
+        endpoint = self._endpoint
+        if endpoint is None or endpoint.link == "wired":
+            return
+        try:
+            report = self.run_agent(
+                "host-addresses", {}, timeout=self.host.connect_timeout_seconds + 30
+            )
+        except (ProcessError, TransportError, OSError):
+            return
+        reported = report.get("addresses")
+        if not isinstance(reported, list):
+            return
+        wired = [
+            candidate
+            for candidate in rank_addresses(
+                (str(value) for value in reported), interfaces=self._interfaces
+            )
+            if candidate.link == "wired"
+        ]
+        found = first_reachable(
+            wired,
+            self.host.port,
+            timeout=self.host.connect_timeout_seconds,
+            probe=self._probe or self._answers_over_ssh,
+        )
+        if found is not None:
+            self._endpoint = found
 
     def _answers_over_ssh(self, endpoint: HostEndpoint, port: int, timeout: float) -> bool:
         """Whether the Host answers on this candidate — asked by SSH itself.

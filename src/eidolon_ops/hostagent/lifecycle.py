@@ -81,6 +81,24 @@ def status(payload: Mapping[str, object]) -> dict[str, object]:
     }
 
 
+def host_addresses(payload: Mapping[str, object]) -> dict[str, object]:
+    """Every non-loopback IPv4 this Host answers on, as the Host observes them.
+
+    The workstation's resolver cannot be trusted to name them all — a Host on
+    both Wi-Fi and a point-to-point cable resolves to the Wi-Fi record alone
+    once the cable's mDNS announcement has aged out — and the address it then
+    fails to offer is the one a release has to travel over. Which addresses
+    exist is a fact only this machine holds; ranking them by link quality
+    remains the workstation's job, so this reports and does not choose.
+
+    The same reading `status` already publishes, without the units, receipts
+    and installation history that make that report expensive to ask for.
+    """
+
+    del payload
+    return _network_status()
+
+
 def _network_status() -> dict[str, object]:
     """Addresses observed on the product Host without making status fragile."""
 

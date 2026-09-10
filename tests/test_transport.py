@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import ipaddress
 from pathlib import Path
 
 import pytest
 
-from eidolon_ops.endpoints import HostEndpoint
+from eidolon_ops.endpoints import HostEndpoint, LocalInterface
 from eidolon_ops.process import ProcessError, ProcessResult
 from eidolon_ops.transport import SSHTransport, TransportError
 
@@ -382,3 +383,101 @@ def test_the_link_is_probed_with_ssh_and_not_with_a_socket_of_our_own(config) ->
     assert transport.endpoint is not None
     assert transport.endpoint.address == "192.168.1.10"
     assert f"{config.host.user}@192.168.1.10" in runner.calls[2]["command"]
+
+
+def _two_link_workstation():
+    """A workstation with a wire and Wi-Fi, so link-local means the cable."""
+
+    return (
+        LocalInterface(
+            name="en7", kind="wired", networks=(ipaddress.IPv4Network("169.254.0.0/16"),)
+        ),
+        LocalInterface(
+            name="en0", kind="wireless", networks=(ipaddress.IPv4Network("192.168.0.0/22"),)
+        ),
+    )
+
+
+def test_the_host_is_asked_for_a_link_the_resolver_never_offered(config) -> None:
+    # The resolver knows only Wi-Fi: on macOS the cable's mDNS record ages out
+    # of the cache and the wire stops being a candidate at all, so ranking
+    # cannot save it. The Host still knows it has both.
+    runner = RecordingRunner(
+        [
+            ProcessResult(0, '{"addresses": ["169.254.182.252", "192.168.1.37"]}', ""),
+            ProcessResult(0, "", ""),
+        ]
+    )
+    transport = SSHTransport(
+        config.host,
+        runner,
+        endpoints=lambda *_: (
+            HostEndpoint(address="192.168.1.37", interface="en0", link="wireless"),
+        ),
+        probe=lambda *_: True,
+        interfaces=_two_link_workstation,
+    )
+
+    transport.prefer_wired_link()
+
+    assert transport.endpoint is not None
+    assert transport.endpoint.address == "169.254.182.252"
+    assert transport.endpoint.link == "wired"
+    # Link-local routes are ambiguous, so the upgraded choice has to carry the
+    # interface the transport must bind to or the packets can leave by Wi-Fi.
+    assert transport.endpoint.bind_interface == "en7"
+    assert "host-addresses" in " ".join(runner.calls[0]["command"])
+
+
+def test_a_host_that_cannot_answer_leaves_the_resolver_choice_standing(config) -> None:
+    # Best effort: this decides how fast an upload is, not whether it is
+    # allowed. require_wired_release_upload is still the gate.
+    runner = RecordingRunner([ProcessResult(1, "", "no such action")])
+    offered = HostEndpoint(address="192.168.1.37", interface="en0", link="wireless")
+    transport = SSHTransport(
+        config.host,
+        runner,
+        endpoints=lambda *_: (offered,),
+        probe=lambda *_: True,
+        interfaces=_two_link_workstation,
+    )
+
+    transport.prefer_wired_link()
+
+    assert transport.endpoint == offered
+
+
+def test_an_already_wired_choice_is_not_worth_a_round_trip(config) -> None:
+    wired = HostEndpoint(address="169.254.182.252", interface="en7", link="wired")
+    runner = RecordingRunner([ProcessResult(0, "{}", "")])
+    transport = SSHTransport(
+        config.host,
+        runner,
+        endpoints=lambda *_: (wired,),
+        probe=lambda *_: True,
+        interfaces=_two_link_workstation,
+    )
+
+    transport.prefer_wired_link()
+
+    assert transport.endpoint == wired
+    assert runner.calls == []
+
+
+def test_a_reported_address_this_machine_cannot_reach_is_not_an_upgrade(config) -> None:
+    # The Host lists a link that is real for it and unreachable from here — a
+    # second LAN, or the cable in someone else's workstation. Unattributable
+    # ranks "unknown", which must not displace a link that answers.
+    runner = RecordingRunner([ProcessResult(0, '{"addresses": ["10.9.9.9", "192.168.1.37"]}', "")])
+    offered = HostEndpoint(address="192.168.1.37", interface="en0", link="wireless")
+    transport = SSHTransport(
+        config.host,
+        runner,
+        endpoints=lambda *_: (offered,),
+        probe=lambda *_: True,
+        interfaces=_two_link_workstation,
+    )
+
+    transport.prefer_wired_link()
+
+    assert transport.endpoint == offered

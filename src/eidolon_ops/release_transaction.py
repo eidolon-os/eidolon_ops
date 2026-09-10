@@ -399,6 +399,12 @@ class ReleaseTransaction:
             endpoint = self.transport.endpoint
         if endpoint is None:
             return {"status": "unresolved", "hostname": self.preflight.config.host.hostname}
+        if endpoint.link != "wired":
+            # The resolver can omit the wire rather than rank it low, and this
+            # is the one decision that turns that omission into a refusal. Ask
+            # the Host which links it has before answering for it.
+            self.transport.prefer_wired_link()
+            endpoint = self.transport.endpoint or endpoint
         report: dict[str, object] = {
             "status": endpoint.link,
             "endpoint": endpoint.describe(),
