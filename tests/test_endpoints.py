@@ -220,7 +220,8 @@ def test_the_upload_says_which_link_it_is_about_to_take() -> None:
 
     wireless = report(HostEndpoint(address="192.168.3.40", interface="en0", link="wireless"))
     assert wireless["status"] == "wireless"
-    assert "cable" in wireless["note"]
+    assert "wireless" in wireless["note"]
+    assert "missing artifacts" in wireless["note"]
 
     # A Host that answers on neither is a different failure, and the upload
     # itself will report it. This says what it knows and does not invent a link.

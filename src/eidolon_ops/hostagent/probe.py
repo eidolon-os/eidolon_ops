@@ -48,6 +48,23 @@ READINESS_FACTS = (
     "livekit_network_current",
 )
 
+
+def readiness_compatibility(payload: Mapping[str, object]) -> dict[str, object]:
+    """Read the active runtime's evidence before an authority restore changes state."""
+    del payload
+    service = primitives.unix_http_json(
+        Path("/run/eidolon/system.sock"), "/api/system/v1/services/livekit"
+    )
+    supported = (
+        isinstance(service, dict)
+        and service.get("service_id") == "livekit"
+        and isinstance(service.get("network_current"), bool)
+    )
+    return {
+        "status": "compatible" if supported else "unavailable" if service is None else "unsupported",
+        "livekit_network_observation": supported,
+    }
+
 #: Which of the Local API's setup answers mean a phone could finish setup.
 #: The copy of ``readiness.HOST_SETUP_COMPLETABLE_STATES`` this agent needs
 #: because it runs alone on the Host; a drift test keeps the two identical.

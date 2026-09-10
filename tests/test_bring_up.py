@@ -6,6 +6,10 @@ implementation. That is only safe if something parses it properly.
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+
 import pytest
 import yaml
 
@@ -192,22 +196,81 @@ def test_the_script_is_a_shell_script_a_shell_accepts() -> None:
     assert result.returncode == 0, result.stderr
 
 
-def test_the_script_cannot_lock_the_operator_out_of_the_board() -> None:
-    """It may be run as the very account the operator is logged in through.
-
-    Rewriting that account's `authorized_keys` would take away the access
-    being used to fix the board. Appending only when absent is what makes the
-    script safe to run twice, and safe to run at all.
-    """
+def test_authorization_is_reconciled_before_the_network_can_disconnect() -> None:
+    """Declared keys replace previous ones before network activation."""
 
     script = _script()
 
-    assert "grep -qxF" in script, "the key is added only when it is not there"
-    assert ">> " in script and "authorized_keys" in script
     # The network comes last: `nmcli con up` drops a session running over that
     # interface, and by then everything else has been applied.
     assert script.index("authorized_keys") < script.index("nmcli con up")
     assert script.index("sudoers.d") < script.index("nmcli con up")
+
+
+def _execute_with_fake_board(tmp_path, *, failure="", keys=(KEY,)):
+    """Execute the generated shell with temp paths and fake system commands."""
+    board = tmp_path / "board"
+    board.mkdir(exist_ok=True)
+    (board / "sudoers.d").mkdir(exist_ok=True)
+    (board / "hosts").touch()
+    home = board / "home"
+    home.mkdir(exist_ok=True)
+    binaries = tmp_path / "bin"
+    binaries.mkdir(exist_ok=True)
+    stub = binaries / "stub"
+    stub.write_text(f"#!{sys.executable}\n" + '''
+import os, sys
+from pathlib import Path
+name = Path(sys.argv[0]).name
+args = sys.argv[1:]
+failure = os.environ.get("BOARD_FAILURE", "")
+if name == "id": print("0" if args[0] == "-u" else "operator")
+elif name == "getent": print("operator:x:1000:1000::" + os.environ["BOARD_HOME"] + ":/bin/sh")
+elif name == "install": Path(args[-1]).mkdir(parents=True, exist_ok=True)
+elif name == "su":
+    assert args == ["-s", "/bin/sh", "eidolon-pi5", "-c", "sudo -n -u root true"]
+    sys.exit(1 if failure == "sudo" else 0)
+elif name == "nmcli":
+    if "DEVICE,TYPE" in args: print("eth0:ethernet")
+    elif "NAME,DEVICE" in args: print("wired:eth0")
+    elif args[:2] == ["con", "up"]: sys.exit(1 if failure == "activation" else 0)
+elif name == "systemctl" and args[0] == "is-active":
+    sys.exit(1 if failure == "service" else 0)
+elif name == "ip":
+    if failure != "address": print("2: eth0 inet 169.254.1.2/16 scope link eth0")
+elif name == "hostname": print("eidolon-pi5")
+''')
+    stub.chmod(0o755)
+    for name in ("id", "getent", "install", "su", "nmcli", "systemctl", "ip", "hostname",
+                 "hostnamectl", "useradd", "usermod", "chown", "chmod", "visudo", "avahi-daemon"):
+        path = binaries / name
+        if not path.exists():
+            path.symlink_to(stub)
+    script = _script(authorized_keys=keys).replace("/etc/hosts", str(board / "hosts"))
+    script = script.replace("/etc/sudoers.d", str(board / "sudoers.d"))
+    result = subprocess.run(
+        ["/bin/sh"], input=script, text=True, capture_output=True,
+        env={**os.environ, "PATH": f"{binaries}:/usr/bin:/bin", "BOARD_HOME": str(home), "BOARD_FAILURE": failure},
+    )
+    return result, home / ".ssh/authorized_keys"
+
+
+@pytest.mark.parametrize("failure,exit_code", [("activation", 75), ("sudo", 1), ("service", 1), ("address", 1)])
+def test_shell_reports_failed_postconditions_in_its_exit_status(tmp_path, failure, exit_code):
+    result, _ = _execute_with_fake_board(tmp_path, failure=failure)
+    assert result.returncode == exit_code, result.stderr
+
+
+def test_shell_applies_and_revokes_the_declared_keys_and_can_be_repeated(tmp_path):
+    result, authorized = _execute_with_fake_board(tmp_path, keys=(KEY, SECOND))
+    assert result.returncode == 0, result.stderr
+    assert authorized.read_text().splitlines() == [KEY, SECOND]
+    result, authorized = _execute_with_fake_board(tmp_path, keys=(SECOND,))
+    assert result.returncode == 0, result.stderr
+    assert authorized.read_text().splitlines() == [SECOND]
+    assert "removing key not in the declaration" in result.stdout
+    result, _ = _execute_with_fake_board(tmp_path, keys=(SECOND,))
+    assert result.returncode == 0, result.stderr
 
 
 def test_a_channel_a_board_does_not_have_is_refused() -> None:

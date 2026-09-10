@@ -36,8 +36,13 @@ def observed_lan_address() -> IPv4Address:
     for address in usable:
         if str(address) == preferred:
             return address
-    if usable:
+    if len(usable) == 1:
         return usable[0]
+    if usable:
+        raise TargetError(
+            "Host LAN address is ambiguous without a usable default route; "
+            "set app.lan_ipv4 to the device-facing address"
+        )
     raise TargetError("Host has no usable private IPv4 interface address")
 
 

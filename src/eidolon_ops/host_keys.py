@@ -38,7 +38,7 @@ from pathlib import Path
 
 from eidolon_ops.endpoints import HostEndpoint
 from eidolon_ops.errors import OperationsError
-from eidolon_ops.process import ProcessRunner
+from eidolon_ops.process import ProcessRunner, SubprocessRunner
 
 #: What a first connection would have stored, narrowed on purpose. See the
 #: module docstring: three fingerprints make the one an operator checks
@@ -124,19 +124,41 @@ def _fingerprint(runner: ProcessRunner, key_type: str, key: str, *, keygen: str)
     raise OperationsError("ssh-keygen did not report a SHA256 fingerprint for the scanned host key")
 
 
-def recorded(path: Path, alias: str) -> tuple[str, ...]:
-    """Every key already trusted under ``alias``, as raw ``type key`` pairs."""
-
+def _matching_lines(path: Path, alias: str) -> tuple[str, ...]:
+    """Let OpenSSH identify its own hashed hosts, patterns and markers."""
     if not path.exists():
         return ()
+    result = SubprocessRunner().run(("ssh-keygen", "-F", alias, "-f", str(path)), timeout=30)
+    if result.returncode not in {0, 1} or result.stderr.strip():
+        raise OperationsError(f"could not inspect SSH trust for {alias!r} in {path}")
+    return tuple(
+        line.strip() for line in result.stdout.splitlines()
+        if line.strip() and not line.startswith("#")
+    )
+
+
+def _plain_entry(line: str) -> list[str]:
+    fields = line.split()
+    if len(fields) < 3 or fields[0].startswith("@"):
+        raise OperationsError(
+            "trust-host-key cannot replace a revoked or certificate-authority entry; "
+            "review this Host's known_hosts policy explicitly before changing its key"
+        )
+    # A broad pattern represents a policy for other Hosts too, not one key to replace.
+    if not fields[0].startswith("|1|") and any(c in fields[0] for c in "*?!"):
+        raise OperationsError(
+            "trust-host-key cannot replace a wildcard or negated host pattern; "
+            "give this Host an explicit known_hosts entry first"
+        )
+    return fields
+
+
+def recorded(path: Path, alias: str) -> tuple[str, ...]:
+    """Every key already trusted under ``alias``, as raw ``type key`` pairs."""
     entries: list[str] = []
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        fields = line.split()
-        if len(fields) >= 3 and alias in fields[0].split(","):
-            entries.append(f"{fields[1]} {fields[2]}")
+    for line in _matching_lines(path, alias):
+        fields = _plain_entry(line)
+        entries.append(f"{fields[1]} {fields[2]}")
     return tuple(entries)
 
 
@@ -165,15 +187,23 @@ def write(path: Path, alias: str, host_key: HostKey) -> None:
     """
 
     path.parent.mkdir(parents=True, exist_ok=True)
+    matched = set(_matching_lines(path, alias))
+    for line in matched:
+        _plain_entry(line)
     kept: list[str] = []
     if path.exists():
         for raw in path.read_text(encoding="utf-8").splitlines():
             line = raw.strip()
             if not line:
                 continue
-            fields = line.split()
-            if line.startswith("#") or not fields or alias not in fields[0].split(","):
-                kept.append(line)
+            if line not in matched:
+                kept.append(raw)
+                continue
+            fields = _plain_entry(line)
+            if not fields[0].startswith("|1|"):
+                remaining = [name for name in fields[0].split(",") if name.casefold() != alias.casefold()]
+                if remaining:
+                    kept.append(" ".join([",".join(remaining), *fields[1:]]))
     kept.append(host_key.line(alias))
     handle, temporary = tempfile.mkstemp(dir=path.parent, prefix=".known_hosts-")
     try:

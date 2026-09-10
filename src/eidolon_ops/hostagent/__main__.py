@@ -40,6 +40,7 @@ ACTIONS: dict[str, tuple[ModuleType, str]] = {
     "foundation-doctor": (foundation, "foundation_doctor"),
     "foundation-install": (foundation_install, "foundation_install"),
     "app-ready": (probe, "app_ready"),
+    "readiness-compatibility": (probe, "readiness_compatibility"),
     "doctor-host": (lifecycle, "doctor_host"),
     "guard-upload": (staging, "guard_upload"),
     "finalize-upload": (staging, "finalize_upload"),

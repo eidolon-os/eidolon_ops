@@ -143,6 +143,12 @@ def test_a_host_with_no_default_route_falls_back_to_a_routable_address() -> None
     assert lan_observation.observed_lan_address(Runner({}), set()) == ""
 
 
+def test_no_default_route_does_not_choose_a_virtual_network_by_ip_order() -> None:
+    assert lan_observation.observed_lan_address(
+        Runner({}), {"10.0.0.1", "192.168.1.37", "169.254.1.1", "127.0.0.1"}
+    ) == ""
+
+
 def test_a_published_name_is_resolved_rather_than_read_out_of_a_log() -> None:
     runner = Runner({"dscacheutil": "name: host\nip_address: 192.168.1.25\n"})
 

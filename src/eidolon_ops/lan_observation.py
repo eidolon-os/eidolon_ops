@@ -43,7 +43,9 @@ def observed_lan_address(runner: ProcessRunner, addresses: set[str] | None = Non
         if found is not None and found.group(1) in addresses:
             return found.group(1)
     routable = sorted(addresses, key=lambda value: int(ipaddress.ip_address(value)))
-    return routable[0] if routable else ""
+    # A stable order is not evidence that phones can reach the first address.
+    # The profile's existing explicit LAN address resolves multi-interface ambiguity.
+    return routable[0] if len(routable) == 1 else ""
 
 
 def name_resolves_to(runner: ProcessRunner, hostname: str, address: str) -> bool:

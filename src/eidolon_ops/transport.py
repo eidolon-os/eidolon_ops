@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import ipaddress
 import json
 import re
 import shlex
@@ -157,7 +158,15 @@ class SSHTransport:
         `status` and `logs` for the same unhelpful answer is just slower.
         """
 
+        # A literal endpoint is an operator's explicit route choice. Discovery
+        # may improve a hostname's candidates, but must not replace a named IP.
         self._resolve()
+        try:
+            ipaddress.ip_address(self.host.hostname)
+        except ValueError:
+            pass
+        else:
+            return
         endpoint = self._endpoint
         if endpoint is None or endpoint.link == "wired":
             return

@@ -31,7 +31,7 @@ Ops 是唯一入口，不是唯一实现。三层各自拥有不可替代的事�
 `.release/bin/{eidolon-release,python}` 寻址——不依赖任何组件目录名或 Git 工作树。
 
 对一台刚刷好系统、已开放 SSH 的新 Pi，下面一条命令会完成基础环境检测/安装、精确提交发布、
-Data V2 初始化、15 个产品服务启动，并要求 Host 达到手机 App commissioning 门禁：
+Data V2 初始化、产品服务启动与 release doctor 校验，并记录手机 App commissioning 的就绪状态：
 
 ```bash
 ./eidolon pi5 install --release-id 20260807-product-1 --apply
@@ -72,8 +72,9 @@ Git commit；7 个运行 component 一起切换，SDK 只作构建输入。
 `src/eidolon_ops/readiness.py` 里的 `READINESS_CONTRACT` 是**唯一**的检查集定义：一组具名事实，加上
 “哪种 Host 负责作证哪一条”的表。Mac source-run 在本机求值，Pi 由下发的 agent 求值——探针必须在各自能
 跑的地方，契约不必。事实集随 payload 下发（与 `port_registry` 同一模式）；agent 只允许作证它收到的那
-一组，多一条少一条都 fail closed，因为“门禁悄悄少查了一项”比“门禁报红”更危险：它正是 release 回滚
-所依据的那份报告。
+一组，多一条少一条都 fail closed。普通 install/deploy 将 App-ready 作为观测，不因返回 degraded 而
+回滚；发布健康由服务门禁和 release doctor 判断。authority-restore 则要求恢复后 App-ready，并在
+写入恢复状态前检查当前 eidolond 能否报告所需的 LiveKit 网络事实。
 
 其中三条 Channel 事实的存在是因为端口探活、unit `active` 与旧 `app-ready` 曾同时全绿，而 worker 对
 LiveKit 已经不可接活：
@@ -170,10 +171,10 @@ transport 是 `BatchMode=yes` 加指定 identity，它**登不进一块还没有
 个场景。补上这个缺口意味着 ops 持有口令，而第一次打开一块板子的凭据是操作者的，该由操作者
 使用。所以 ops 渲染脚本，人来跑。
 
-脚本按“状态”而不是“编辑”写，可以重复执行：已存在的账号不动；**公钥只在缺失时追加而不是覆盖
-文件**——操作者可能正以那个账号登录着，重写它的 `authorized_keys` 等于把人锁在他正在修的板子
-外面。网络放最后，因为 `nmcli con up` 会掐掉跑在那个网口上的会话。脚本结尾报出它使上面那张
-表里每一条成立与否。
+脚本可以重复执行：已存在的账号不动；Ops 账号的 `authorized_keys` 收敛到入库声明，新增和撤销
+操作者都会生效。网络放最后，因为 `nmcli con up` 可能掐掉当前会话。激活失败返回 75，表示配置
+已写入但需要重连验证；其余检查失败返回非零。成功前检查目标账号能无交互提权到 root、SSH/mDNS
+服务活跃，以及有线口确实有 IPv4 地址。写出脚本不等于板子已通过这些检查。
 
 ### 那份要求不渲染 Wi-Fi，也不渲染控制台口令
 
@@ -244,6 +245,22 @@ host key 是按 Host 的**名字**信任的（`HostKeyAlias`），这正是“�
 没确认。换板子和机器在中间从这里看是同一幅画，而工作站上没有任何东西能分辨它们。
 
 ## 基础环境 profile
+
+### 部署链路
+
+Pi5 默认允许通过普通局域网部署（`require_wired_release_upload = false`），有可达的有线端点时仍优先
+使用它。USB 直连是可选加速/起机通道，不是发布前提；需要强制有线的 Host 可以显式将该字段设为 true。
+OPi 的既有显式策略不随 Pi5 一起修改。发布开始时报告选中端点，不能将历史带宽当成当前速度。
+若 hostname 显式填写 IP，则固定使用该端点，不再探测并替换成另一条接口；填主机名时保留有线优先发现。
+
+日常使用可先选择已有局域网：Wi-Fi 最省接线；Pi 接路由器或交换机的网口可获得常规 DHCP 地址，避免
+USB 点对点连接的 link-local 地址和接口绑定。Mac 仍走 Wi-Fi 时，整条链路不会因为 Pi 插了网线就变成
+全程千兆。首次大制品传输和重复更新分别测量；缓存命中后还需关注 prepare 和 activate 的耗时。
+
+无默认路由的隔离 LAN 仍可使用；存在多个候选地址时需用 profile 的 `app.lan_ipv4` 明确设备接入地址，
+不能通过 IP 数字排序猜测手机所在网络。这个字段与 SSH 部署端点分开。
+
+### 安装要求
 
 `raspberry-pi-os-debian-arm64-v2` 会先只读检测，再在 `--apply` 时通过受限的 Debian 官方登记 HTTPS 镜像安装：
 

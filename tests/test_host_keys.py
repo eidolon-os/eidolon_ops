@@ -7,6 +7,8 @@ allowed to look at a key the strict transport is right to refuse.
 
 from __future__ import annotations
 
+import subprocess
+
 import pytest
 
 from eidolon_ops import host_keys
@@ -121,6 +123,26 @@ def test_a_missing_file_trusts_nothing(tmp_path) -> None:
     assert host_keys.recorded(tmp_path / "absent", ALIAS) == ()
 
 
+def test_replacing_one_alias_preserves_other_hosts_on_the_same_line(tmp_path) -> None:
+    path = tmp_path / "known_hosts"
+    path.write_text(f"{ALIAS},other.local ssh-ed25519 {OLD_KEY} shared\n")
+    host_keys.write(path, ALIAS, host_keys.HostKey("ssh-ed25519", NEW_KEY, NEW_PRINT))
+    assert host_keys.recorded(path, "other.local") == (f"ssh-ed25519 {OLD_KEY}",)
+    assert host_keys.recorded(path, ALIAS) == (f"ssh-ed25519 {NEW_KEY}",)
+
+
+@pytest.mark.parametrize("host_pattern", ["*.local", f"@revoked {ALIAS}", f"@cert-authority {ALIAS}"])
+def test_broad_or_marked_trust_is_never_treated_as_a_new_host(tmp_path, host_pattern) -> None:
+    path = tmp_path / "known_hosts"
+    original = f"{host_pattern} ssh-ed25519 {OLD_KEY}\n"
+    path.write_text(original)
+    with pytest.raises(OperationsError, match="cannot replace"):
+        host_keys.recorded(path, ALIAS)
+    with pytest.raises(OperationsError, match="cannot replace"):
+        host_keys.write(path, ALIAS, host_keys.HostKey("ssh-ed25519", NEW_KEY, NEW_PRINT))
+    assert path.read_text() == original
+
+
 # --- the operation: what it takes to change what is trusted -----------------
 
 
@@ -208,3 +230,16 @@ def test_a_different_key_is_refused_until_its_fingerprint_is_named(tmp_path, con
     report = controller.trust_host_key(apply=True, replace=NEW_PRINT)
     assert report["status"] == "recorded"
     assert host_keys.recorded(path, ALIAS) == (f"ssh-ed25519 {NEW_KEY}",)
+
+
+def test_hashed_trust_requires_confirmation_and_revokes_only_the_old_key(tmp_path, config) -> None:
+    controller, path = _controller(tmp_path, config, {WIRED.address: NEW_KEY}, recorded=OLD_KEY)
+    subprocess.run(("ssh-keygen", "-H", "-f", str(path)), check=True, capture_output=True)
+    original = path.read_bytes()
+    assert controller.trust_host_key()["status"] == "differs"
+    with pytest.raises(OperationsError, match="already trusts a different key"):
+        controller.trust_host_key(apply=True)
+    assert path.read_bytes() == original
+    controller.trust_host_key(apply=True, replace=NEW_PRINT)
+    assert host_keys.recorded(path, ALIAS) == (f"ssh-ed25519 {NEW_KEY}",)
+    assert "|1|" not in path.read_text()

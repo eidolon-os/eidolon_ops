@@ -2846,3 +2846,11 @@ def test_isolated_lan_needs_no_default_route(monkeypatch):
         "127.0.0.1", "169.254.1.1", "192.168.1.37",
     })
     assert str(app_contract.observed_lan_address()) == "192.168.1.37"
+
+
+def test_isolated_multihomed_host_does_not_guess_the_lowest_address(monkeypatch):
+    monkeypatch.setattr(primitives, "run", lambda command, **_kwargs:
+        subprocess.CompletedProcess(command, 1, "", "no route"))
+    monkeypatch.setattr(app_contract, "host_addresses", lambda: {"10.0.0.1", "192.168.1.37"})
+    with pytest.raises(TargetError, match=r"ambiguous.*app\.lan_ipv4"):
+        app_contract.observed_lan_address()

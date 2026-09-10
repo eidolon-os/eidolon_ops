@@ -413,9 +413,8 @@ class ReleaseTransaction:
         if endpoint.link != "wired":
             report["note"] = (
                 f"this release is about to be uploaded over the {endpoint.link} link. "
-                "The wire measured 120MB in 2s against 205s over Wi-Fi on this Host, "
-                "and a bundle is around a gigabyte. If the cable is meant to be in, "
-                "it is not the link this Host is answering on."
+                "Transfer time depends on "
+                "the missing artifacts and the current connection."
             )
         return report
 

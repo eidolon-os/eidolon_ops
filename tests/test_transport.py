@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ipaddress
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -427,6 +428,19 @@ def test_the_host_is_asked_for_a_link_the_resolver_never_offered(config) -> None
     # interface the transport must bind to or the packets can leave by Wi-Fi.
     assert transport.endpoint.bind_interface == "en7"
     assert "host-addresses" in " ".join(runner.calls[0]["command"])
+
+
+def test_an_explicit_ip_is_not_replaced_with_another_interface(config) -> None:
+    offered = HostEndpoint(address="192.168.1.37", interface="en0", link="wireless")
+    runner = RecordingRunner()
+    transport = SSHTransport(
+        replace(config.host, hostname=offered.address), runner,
+        endpoints=lambda *_: (offered,), probe=lambda *_: True,
+        interfaces=_two_link_workstation,
+    )
+    transport.prefer_wired_link()
+    assert transport.endpoint == offered
+    assert runner.calls == []
 
 
 def test_a_host_that_cannot_answer_leaves_the_resolver_choice_standing(config) -> None:

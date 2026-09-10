@@ -413,14 +413,21 @@ CONNECTION=$(nmcli -t -f NAME,DEVICE con show | awk -F: -v d="$DEVICE" '$2==d{{p
   CONNECTION=eidolon-wired
 }}
 nmcli con modify "$CONNECTION" ipv4.method auto ipv4.link-local fallback ipv6.method link-local
-nmcli con up "$CONNECTION" || true
+if ! nmcli con up "$CONNECTION"; then
+  echo "configuration written; wired activation failed or disconnected; reconnect and rerun to verify" >&2
+  exit 75
+fi
 
 echo "===== what Ops will find ====="
 hostname
 id -un "$USER" >/dev/null 2>&1 && echo "account: $USER"
-sudo -n -u "$USER" true 2>/dev/null && echo "sudo: non-interactive" || echo "sudo: NOT non-interactive"
+su -s /bin/sh "$USER" -c 'sudo -n -u root true' || {{ echo "sudo: target account cannot elevate" >&2; exit 1; }}
+echo "sudo: non-interactive root elevation verified"
 echo "operator keys: $(grep -c . "$AUTHORIZED") accepted"
-systemctl is-active ssh avahi-daemon | tr '\n' ' '; echo
+for SERVICE in ssh avahi-daemon; do
+  systemctl is-active --quiet "$SERVICE" || {{ echo "$SERVICE is not active" >&2; exit 1; }}
+done
+ip -4 -o addr show dev "$DEVICE" | grep -q ' inet ' || {{ echo "wired interface has no IPv4 address" >&2; exit 1; }}
 ip -4 -br addr show "$DEVICE"
 """
 

@@ -483,6 +483,19 @@ class EidolonPiController:
             timeout=READINESS_TRANSPORT_TIMEOUT_SECONDS,
         )
 
+    def _require_authority_restore_readiness(self) -> dict[str, object]:
+        report = self.transport.run_agent("readiness-compatibility", {}, timeout=30)
+        if (
+            report.get("status") != "compatible"
+            or report.get("livekit_network_observation") is not True
+        ):
+            raise OperationsError(
+                "AUTHORITY_RESTORE_READINESS_INCOMPATIBLE: the active runtime cannot "
+                "attest LiveKit network state. Start or upgrade eidolond and its matching "
+                "service manifest, then retry authority-restore; no restore state was changed"
+            )
+        return report
+
     def doctor(self, *, release_id: str | None = None) -> dict[str, object]:
         # A dirty sibling repository is reported here, not refused: this is the
         # command an operator runs to find out what is wrong, and it must be
@@ -1679,9 +1692,14 @@ class EidolonPiController:
             "database_sha256": host_files["database"]["sha256"],
             "anchor_sha256": host_files["anchor"]["sha256"],
         }
+        # Both plan and apply establish this before staging, importing authority
+        # material or refreshing Host configuration. App-ready itself remains an
+        # observation on ordinary deploy; authority restore has a stricter contract.
+        readiness = self._require_authority_restore_readiness()
         if not apply:
             return {
                 "status": "authority_restore_planned",
+                "readiness_compatibility": readiness,
                 "authority": authority,
                 "owner_root_import_required": not materializer.material_root.exists(),
                 "generation_advanced": False,
