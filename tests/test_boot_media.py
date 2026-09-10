@@ -82,14 +82,11 @@ def test_one_wired_configuration_serves_both_of_its_jobs() -> None:
     ethernet = _parsed()[NETWORK_CONFIG]["network"]["ethernets"]["eth0"]
     passthrough = ethernet["networkmanager"]["passthrough"]
 
-    assert ethernet["dhcp4"] is True
-    assert passthrough["ipv4.method"] == "auto"
-    # NetworkManager's "fallback": try DHCP, assign link-local if unanswered.
-    assert passthrough["ipv4.link-local"] == "4"
-    # A link-local address has no gateway and cannot take a default route, so
-    # never-default costs nothing there — and setting it would stop the cable
-    # being the route out on a real network, the case this exists for.
-    assert "ipv4.never-default" not in passthrough
+    # Two properties, both measured on a board. Nothing else: `method: auto`
+    # restates `dhcp4`, `connection.autoconnect` is already the default, and
+    # `dhcp-timeout` only changes how long the first boot waits.
+    assert passthrough == {"ipv4.link-local": "4", "ipv6.method": "link-local"}
+    assert (ethernet["dhcp4"], ethernet["optional"]) == (True, True)
     # netplan refuses a device with `networkmanager` settings and no renderer,
     # and the image's global renderer file is not in scope for a lone seed.
     assert ethernet["renderer"] == "NetworkManager"

@@ -128,22 +128,37 @@ def _raspberry_pi_os_trixie(bring_up: BringUp) -> dict[str, str]:
     rendering would buy nothing there while costing reproducibility and making
     "silently reconfigure a card that already booted" the default.
 
-    The wired link is `auto` with link-local as its fallback, which is one
-    configuration for two jobs. On a real network it takes a lease and carries
-    the route out that `provision` needs; on the point-to-point bench cable
-    nothing answers DHCP, so after the timeout NetworkManager assigns a
-    link-local address and — this is the part that matters — keeps the
-    connection activated instead of tearing it down and starting again. That
-    teardown loop was the Host that answered in bursts and dropped every
-    session. Measured on this board: `ipv4.link-local=fallback` settles on
-    169.254/16 and then 30 consecutive probes over 90 seconds, none lost.
+    Two properties change what the image would have done with the network,
+    and both were measured on a board rather than reasoned about. Everything
+    else is the image's own default, restated so the deviation is visible.
 
-    `never-default` is deliberately not set. A link-local address has no
-    gateway and cannot take a default route, so it costs nothing there, while
-    setting it would stop the cable from being the route out on a real network
-    — which is the case that made this configuration necessary.
+    `ipv4.link-local=4` is NetworkManager's "fallback". On a point-to-point
+    cable nothing answers DHCP, and by default NetworkManager fails the
+    connection and retries — a teardown loop that is the Host answering in
+    bursts and dropping every session. With fallback it assigns a link-local
+    address and holds it: 169.254/16, then 30 consecutive probes over 90
+    seconds with none lost.
 
-    It goes through `networkmanager.passthrough` with an explicit renderer. netplan's own `link-local` key does not round-trip here — setting
+    `ipv6.method=link-local` is what lets the connection finish activating.
+    Changing that one property and nothing else moved the device from
+    "connecting (getting IP configuration)", where it stayed indefinitely, to
+    "connected" — a cable carries no router advertisement and no DHCPv6 for
+    `auto` to wait for. IPv4 worked either way, which is exactly why this is
+    the kind of thing only a board can tell you.
+
+    It is not free to leave out, and it is not needed at runtime either. This
+    workstation reaches a wired endpoint only over that cable — on a shared
+    LAN the board's address belongs to Wi-Fi as far as `endpoints.py` is
+    concerned — and `require_wired_release_upload` makes a wired endpoint
+    mandatory for a release. A shipped Host has no cable, no carrier, and
+    therefore no activated connection: `optional: true` and an absent link
+    cost it nothing.
+
+    `never-default` is deliberately not set: a link-local address has no
+    gateway and cannot take a default route, while setting it would stop the
+    cable being the route out on a real network.
+
+    The passthrough needs an explicit renderer. netplan's own `link-local` key does not round-trip here — setting
     `ipv4.method=link-local` on a running Host leaves it absent from `netplan
     get` while NetworkManager holds it — and netplan refuses a device carrying
     `networkmanager` settings without a renderer: "networkmanager backend
@@ -190,22 +205,20 @@ def _raspberry_pi_os_trixie(bring_up: BringUp) -> dict[str, str]:
             "  ethernets:\n"
             f"    {interface}:\n"
             "      renderer: NetworkManager\n"
+            # The image's own defaults, restated so the two properties Ops
+            # does change are visible rather than buried in a rewrite.
             "      dhcp4: true\n"
-            "      dhcp6: false\n"
-            # Or a cable that is legitimately absent on a shipped Host holds
-            # up the boot waiting for it.
             "      optional: true\n"
             "      networkmanager:\n"
             "        passthrough:\n"
-            '          ipv4.method: "auto"\n'
             # 4 is NetworkManager's "fallback": try DHCP, and assign a
             # link-local address if nothing answers.
             '          ipv4.link-local: "4"\n'
-            # Shorter than the 45s default, because on the bench this is dead
-            # time before the Host becomes reachable at all.
-            '          ipv4.dhcp-timeout: "20"\n'
+            # Not carried over from an earlier design — measured. With
+            # `ipv6.method=auto` the device sits in "connecting (getting IP
+            # configuration)" indefinitely, because a point-to-point cable
+            # carries no router advertisement and no DHCPv6 to wait for.
             '          ipv6.method: "link-local"\n'
-            '          connection.autoconnect: "true"\n'
         ),
     }
 
