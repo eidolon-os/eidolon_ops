@@ -17,6 +17,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from eidolon_ops import environment, lan_observation, probes, source_assets
 from eidolon_ops.config import OperationsConfig
 from eidolon_ops.errors import InstallInputError, OperationsError
+from eidolon_ops.host_delivery import bind_delivery
 from eidolon_ops.host_identity import (
     HostIdentityError,
     HostLanIdentity,
@@ -25,6 +26,7 @@ from eidolon_ops.host_identity import (
     livekit_client_url_at,
 )
 from eidolon_ops.hostagent.authority_state import lineage_evidence
+from eidolon_ops.hostagent.hardware import observe_hardware
 from eidolon_ops.hostagent.kernel_schema import (
     absent_document,
     acknowledged_selections,
@@ -398,9 +400,10 @@ class LocalProductSource:
     def _adopt_host_identity(self, source_inputs: Path) -> None:
         destination = self._host_identity_path()
         if not destination.exists():
-            atomic_private_file(
-                destination, source_inputs.joinpath("host_identity.ed25519").read_bytes()
-            )
+            raw = source_inputs.joinpath("host_identity.ed25519").read_bytes()
+            identity = derive_host_lan_identity(raw)
+            bind_delivery(source_inputs.parent, identity.host_id, observe_hardware())
+            atomic_private_file(destination, raw)
             return
         if (
             destination.is_symlink()

@@ -29,6 +29,13 @@ from eidolon_ops.process import ProcessResult, SubprocessRunner
 from eidolon_ops.source_schema import migrate_data_schema
 
 
+@pytest.fixture(autouse=True)
+def host_hardware(monkeypatch):
+    monkeypatch.setattr(local_product_module, "observe_hardware", lambda: {
+        "kind": "apple-platform-uuid", "fingerprint": "sha256:" + "a" * 64,
+    })
+
+
 @dataclass(frozen=True)
 class _FakeSource:
     path: Path

@@ -81,6 +81,7 @@ class IdentityReplacement:
             (self.target, retired / "inputs"),
             (self.owner_root, retired / "owner-domain"),
             (anchor, retired / "host_identity.ed25519"),
+            (self.target.parent / "host_delivery.json", retired / "host_delivery.json"),
         )
         moved, published = [], []
         try:

@@ -486,8 +486,10 @@ class FakeTransport:
             "commissioning-code": {"status": "issued", "setup_code": "123456"},
             "refresh-host-application": {"status": "refreshed", "changed": []},
             "refresh-release-configuration": {"status": "refreshed", "changed": []},
+            "host-hardware": {"status": "observed", "hardware": {"kind": "device-tree:raspberrypi,5-model-b", "fingerprint": "sha256:" + "a" * 64}},
             "deployment-identity": {
                 "status": "observed",
+                "host_id": derive_host_lan_identity(b"a" * 32).host_id,
                 "authority": {"contract_version": 1, "owner_domain_id": "owner-" + "a" * 20,
                               "owner_domain_generation": 8, "state_id": "authority-state_board"},
                 "descriptor_uri": derive_host_lan_identity(b"a" * 32).hub_origin(8443) + "/api/device-onboarding/v1/descriptor",
@@ -2686,6 +2688,7 @@ def test_deploy_preserves_board_authority_without_reading_workstation_issuer(con
     monkeypatch.setattr(controller_module, "ensure_owner_domain_assets", no_issuer)
     from eidolon_ops.host_application import HostApplicationMaterializer
     monkeypatch.setattr(HostApplicationMaterializer, "owner_assets", no_issuer)
+    controller.config.install_files["host_identity"].unlink()
     result = controller.deploy(release_id="r1", resume=True, activate=activate)
     assert result["status"] == ("activated" if activate else "dry_run")
     assert result["local"]["installed_identity"]["authority"]["owner_domain_generation"] == 8

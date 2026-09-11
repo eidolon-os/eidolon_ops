@@ -8,7 +8,6 @@ refreshed without a reinstall.
 
 from __future__ import annotations
 
-import hashlib
 import os
 import tempfile
 from pathlib import Path
@@ -21,6 +20,9 @@ from eidolon_ops.host_application import (
     HostApplicationError,
     HostApplicationMaterializer,
 )
+from eidolon_ops.host_delivery import bind_delivery
+from eidolon_ops.host_identity import HostIdentityError, host_lan_identity_from_id
+from eidolon_ops.hostagent.hardware import HostHardwareError
 from eidolon_ops.hub_assets import HubAssetError, hub_settings_template
 from eidolon_ops.paths import AppAccess
 from eidolon_ops.private_inputs import INSTALL_DESTINATION_NAMES
@@ -181,7 +183,8 @@ class HostLayer:
             },
         }
         identity_path = self.config.install_files.get("host_identity")
-        if self.app is not None and identity_path is not None and identity_path.is_file():
+        if self.app is not None and (self._deployment_identity is not None or
+                                    (identity_path is not None and identity_path.is_file())):
             try:
                 payload["app"] = self.public_contract()
             except ASSET_ERRORS as exc:
@@ -197,15 +200,15 @@ class HostLayer:
     def prepare_deployment(self) -> dict[str, object]:
         """Use this board's established authority, without consulting the local issuer."""
         context = self.transport.run_agent("deployment-identity", {}, timeout=30)
-        materializer = self.materializer()
-        identity = materializer.identity()
+        try:
+            identity = host_lan_identity_from_id(context.get("host_id"))
+        except HostIdentityError as exc:
+            raise OperationsError("installed Host did not report a valid public identity") from exc
         expected_uri = identity.hub_origin(self.app.hub_https_port) + "/api/device-onboarding/v1/descriptor"
-        identity_hash = hashlib.sha256(self.config.install_files["host_identity"].read_bytes()).hexdigest()
         if (
             context.get("status") != "observed"
             or not isinstance(context.get("authority"), dict)
             or context.get("descriptor_uri") != expected_uri
-            or context.get("preserved_files", {}).get("host_identity.ed25519") != identity_hash
         ):
             raise OperationsError("installed Host identity or endpoint differs; use the explicit Host migration workflow")
         self._deployment_identity = context
@@ -242,7 +245,10 @@ class HostLayer:
             source = ingress.read_bytes()
         except OSError as exc:
             raise OperationsError("deployment-owned LAN ingress source is missing") from exc
-        return HostApplicationMaterializer(self.config, self.app, source)
+        identity = (None if self._deployment_identity is None else
+                    host_lan_identity_from_id(self._deployment_identity["host_id"]))
+        return HostApplicationMaterializer(self.config, self.app, source,
+                                           installed_identity=identity)
 
     def prepare(self):
         materializer = self.materializer()
@@ -262,16 +268,28 @@ class HostLayer:
         *,
         names: tuple[str, ...] = INSTALL_FILE_NAMES,
     ) -> None:
+        # The full name set gates the private inputs, which are written once.
+        # The Host layer is derived rather than kept, so it is staged whenever
+        # this profile has one — a refresh asks for it without the credentials.
+        application = self.prepare() if self.app else None
+        if application is not None:
+            observation = self.transport.run_agent("host-hardware", {}, timeout=30)
+            try:
+                if observation.get("status") != "observed":
+                    raise OperationsError("target hardware could not be observed")
+                bind_delivery(
+                    self.materializer().material_root.parent,
+                    application.identity.host_id, observation["hardware"],
+                    allow_create=application.bootstrap_pending,
+                )
+            except (HostHardwareError, KeyError, TypeError) as exc:
+                raise OperationsError(str(exc)) from exc
         self.transport.run_agent("cleanup-stage", {"release_id": release_id})
         self.transport.run(
             ("/usr/bin/install", "-d", "-m", "0700", stage),
             sudo=False,
             operation="private secret staging directory creation",
         )
-        # The full name set gates the private inputs, which are written once.
-        # The Host layer is derived rather than kept, so it is staged whenever
-        # this profile has one — a refresh asks for it without the credentials.
-        application = self.prepare() if self.app else None
         with tempfile.TemporaryDirectory(prefix="eidolon-host-application-") as temporary_value:
             temporary = Path(temporary_value)
             factory_code = self._factory_setup_code()

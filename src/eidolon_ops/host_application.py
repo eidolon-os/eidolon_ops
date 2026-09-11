@@ -47,15 +47,18 @@ class HostApplicationAssets:
     identity: HostLanIdentity
     owner_domain_id: str
     files: dict[str, bytes]
+    bootstrap_pending: bool
 
 
 class HostApplicationMaterializer:
     """Keep TLS stable across retries while rendering public assets deterministically."""
 
-    def __init__(self, config: OperationsConfig, app: AppAccess, ingress_source: bytes) -> None:
+    def __init__(self, config: OperationsConfig, app: AppAccess, ingress_source: bytes,
+                 *, installed_identity: HostLanIdentity | None = None) -> None:
         self.config = config
         self.app = app
         self.ingress_source = ingress_source
+        self._installed_identity = installed_identity
 
     @property
     def material_root(self) -> Path:
@@ -89,7 +92,8 @@ class HostApplicationMaterializer:
         if set(files) != set(HOST_APPLICATION_STAGE_NAMES):
             raise HostApplicationError("Host application asset set is incomplete")
         return HostApplicationAssets(
-            identity=identity, owner_domain_id=owner.owner_domain_id, files=files
+            identity=identity, owner_domain_id=owner.owner_domain_id, files=files,
+            bootstrap_pending=owner.bootstrap_pending
         )
 
     def owner_assets(
@@ -104,6 +108,8 @@ class HostApplicationMaterializer:
         )
 
     def identity(self) -> HostLanIdentity:
+        if self._installed_identity is not None:
+            return self._installed_identity
         path = self.config.install_files["host_identity"]
         try:
             if (

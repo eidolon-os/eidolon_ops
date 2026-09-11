@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
 from pathlib import Path
+from urllib.parse import urlparse
 
 from . import authority_state, contract, primitives
 from .primitives import TargetError
@@ -44,4 +46,13 @@ def observe(payload: Mapping[str, object], *, root: Path = Path("/")) -> dict[st
     uri = descriptor.get("descriptor_uri")
     if not isinstance(uri, str) or not uri.startswith("https://"):
         raise TargetError("installed Owner descriptor URI is invalid")
-    return {"status": "observed", "authority": lineage, "descriptor_uri": uri, "preserved_files": hashes}
+    # The signed Owner directory already persists the Host-bound public name.
+    # Read it over the authenticated deployment transport. Updating code must
+    # need neither a workstation copy of the private key nor a running API.
+    hostname = urlparse(uri).hostname or ""
+    match = re.fullmatch(r"eidolon-hub-([0-9a-f]{20})\.local", hostname)
+    if match is None:
+        raise TargetError("installed Owner directory has no valid public Host identity")
+    host_id = "ehost-" + match.group(1)
+    return {"status": "observed", "host_id": host_id, "authority": lineage,
+            "descriptor_uri": uri, "preserved_files": hashes}

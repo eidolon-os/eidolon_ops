@@ -28,3 +28,16 @@ def test_host_identity_rejects_invalid_ports() -> None:
     identity = derive_host_lan_identity(b"a" * 32)
     with pytest.raises(HostIdentityError, match="port"):
         identity.hub_origin(0)
+
+
+def test_public_host_id_renders_existing_names_without_private_material():
+    from eidolon_ops.host_identity import host_lan_identity_from_id
+    original = derive_host_lan_identity(b"a" * 32)
+    assert host_lan_identity_from_id(original.host_id) == original
+
+
+@pytest.mark.parametrize("value", [None, "eidolon-pi5", "ehost-123", "ehost-" + "A" * 20])
+def test_public_host_id_rejects_noncanonical_values(value):
+    from eidolon_ops.host_identity import host_lan_identity_from_id
+    with pytest.raises(HostIdentityError):
+        host_lan_identity_from_id(value)

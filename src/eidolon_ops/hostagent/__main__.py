@@ -38,6 +38,7 @@ from .primitives import TargetError, decode_payload
 ACTIONS: dict[str, tuple[ModuleType, str]] = {
     "status": (lifecycle, "status"),
     "host-addresses": (lifecycle, "host_addresses"),
+    "host-hardware": (lifecycle, "host_hardware"),
     "foundation-doctor": (foundation, "foundation_doctor"),
     "foundation-install": (foundation_install, "foundation_install"),
     "app-ready": (probe, "app_ready"),

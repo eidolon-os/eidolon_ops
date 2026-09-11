@@ -10,6 +10,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from . import app_contract, contract, host_application, primitives
+from .hardware import observe_hardware
 from .primitives import TargetError
 
 BOOTSTRAP_CTL = Path("/opt/eidolon/current/eidolon_admin/.venv/bin/eidolon-bootstrapctl")
@@ -443,3 +444,8 @@ def commissioning_code(payload: Mapping[str, object]) -> dict[str, object]:
         "expires_at": expires_at,
         "commissioning_id": commissioning_id,
     }
+
+
+def host_hardware(payload: Mapping[str, object]) -> dict[str, object]:
+    del payload
+    return {"status": "observed", "hardware": observe_hardware()}

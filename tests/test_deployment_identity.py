@@ -56,7 +56,7 @@ def installed(tmp_path):
         connection.execute("INSERT INTO hub_authority_state VALUES (1, ?, 8, ?)", (lineage["owner_domain_id"], lineage["state_id"]))
     (tmp_path / authority_state.AUTHORITY_ANCHOR.relative_to("/")).write_text(json.dumps(lineage))
     (tmp_path / authority_state.OWNER_DESCRIPTOR.relative_to("/")).write_text(json.dumps({
-        **lineage, "descriptor_uri": "https://eidolon-hub-test.local:9443/api/device-onboarding/v1/descriptor"}))
+        **lineage, "descriptor_uri": "https://eidolon-hub-0123456789abcdefabcd.local:9443/api/device-onboarding/v1/descriptor"}))
     return tmp_path
 
 
@@ -112,3 +112,18 @@ def test_release_updates_business_configuration_but_preserves_identity_and_secre
     assert len(result["changed"]) == len(contract.RELEASE_CONFIGURATION_INPUTS)
     assert all((installed / contract.INSTALL_INPUTS[name][0].relative_to("/")).read_bytes() == data
                for name, data in before.items())
+
+
+def test_public_identity_is_observed_without_running_product_api(installed):
+    observed = deployment_identity.observe({}, root=installed)
+    assert observed["host_id"] == "ehost-0123456789abcdefabcd"
+    assert "private_key" not in observed
+
+
+def test_invalid_persisted_public_identity_is_refused(installed):
+    path = installed / authority_state.OWNER_DESCRIPTOR.relative_to("/")
+    descriptor = json.loads(path.read_text())
+    descriptor["descriptor_uri"] = "https://unrelated.local:9443/api/device-onboarding/v1/descriptor"
+    path.write_text(json.dumps(descriptor))
+    with pytest.raises(TargetError, match="public Host identity"):
+        deployment_identity.observe({}, root=installed)

@@ -8,6 +8,7 @@ only by :mod:`eidolon_ops.owner_domain_assets`.
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass
 
 from cryptography.hazmat.primitives import serialization
@@ -45,7 +46,14 @@ def derive_host_lan_identity(raw_private_key: bytes) -> HostLanIdentity:
         serialization.Encoding.Raw,
         serialization.PublicFormat.Raw,
     )
-    suffix = hashlib.sha256(public_key).hexdigest()[:20]
+    return host_lan_identity_from_id("ehost-" + hashlib.sha256(public_key).hexdigest()[:20])
+
+
+def host_lan_identity_from_id(host_id: str) -> HostLanIdentity:
+    """Render routing names from a public product identity, without a private key."""
+    if not isinstance(host_id, str) or re.fullmatch(r"ehost-[0-9a-f]{20}", host_id) is None:
+        raise HostIdentityError("invalid public Host ID")
+    suffix = host_id.removeprefix("ehost-")
     return HostLanIdentity(
         host_id=f"ehost-{suffix}",
         hub_id=f"eidolon-hub-{suffix}",
