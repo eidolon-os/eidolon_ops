@@ -45,11 +45,6 @@ PRODUCT_OVERLAY: tuple[tuple[str, str, str], ...] = (
     ("agent.yaml", "memory.endpoints[0].mcp_url", "http://127.0.0.1:10030/mcp"),
     ("agent.yaml", "memory.discovery_token_env", "EIDOLON_MEMORY_MCP_TOKEN"),
     ("channel.yaml", "avatar.enabled", "false"),
-    # Raw STT audio capture is a developer diagnostic. A production Host neither
-    # needs to retain microphone audio nor grants Channel write access to its
-    # read-only cache root, so enabling it produces a warning on every session
-    # and violates the product's data-minimisation boundary.
-    ("channel.yaml", "bailian_stt.dump_wav", "false"),
 )
 
 # Memory needs no product overlay: its settings resolve paths from the Host path

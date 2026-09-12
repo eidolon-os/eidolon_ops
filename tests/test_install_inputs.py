@@ -86,9 +86,6 @@ voiceprint:
   root: $EIDOLON_STATE_ROOT/voiceprints
 observability:
   timeline_debug_path: "$EIDOLON_LOG_ROOT/channel/turn-timeline.jsonl"
-bailian_stt:
-  dump_wav: true
-  dump_dir: "$EIDOLON_CACHE_ROOT/debug/channel"
 """
     if _source_id == "eidolon_memory":
         return """\
@@ -191,8 +188,9 @@ def test_initializer_creates_one_private_consistent_input_set(config, tmp_path: 
     assert "thinking: disabled" in agent_settings
     channel_settings = (target / "channel.yaml").read_text(encoding="utf-8")
     assert "avatar:\n  enabled: false" in channel_settings
-    assert "  dump_wav: false" in channel_settings
-    assert "dump_wav: true" not in channel_settings
+    # The STT audio dump is gone from the Channel entirely, so there is no
+    # longer a developer diagnostic for this deployer to turn off.
+    assert "dump_wav" not in channel_settings
     # Memory's settings ship unmodified: the Host expresses its encoder through
     # the environment, so improving that file cannot break an install.
     memory_settings = (target / "memory.yaml").read_text(encoding="utf-8")

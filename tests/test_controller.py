@@ -825,7 +825,7 @@ def test_deploy_defaults_to_prepare_and_dry_run(setup_controller) -> None:
     channel_settings = controller.config.install_files["channel_settings"].read_text(
         encoding="utf-8"
     )
-    assert "dump_wav: false" in channel_settings
+    assert "dump_wav" not in channel_settings
     assert [phase["phase"] for phase in result["phases"]] == [
         "bundle",
         "release_reclaim_prepare",
