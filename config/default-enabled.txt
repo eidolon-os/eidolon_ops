@@ -18,7 +18,6 @@
 # since rerunning the seed would overwrite their UI-managed state.
 
 admin
-audit
 agent
 channel
 client-web
