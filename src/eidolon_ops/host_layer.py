@@ -214,7 +214,9 @@ class HostLayer:
         self._deployment_identity = context
         return context
 
-    def refresh_release(self, release_id: str) -> dict[str, object]:
+    def refresh_release(
+        self, release_id: str, *, cutover_mode: str = "reversible"
+    ) -> dict[str, object]:
         if self._deployment_identity is None:
             raise OperationsError("deployment identity preflight is missing")
         template = hub_settings_template(self._source_revisions(), self._read_exact_source_file)
@@ -233,7 +235,12 @@ class HostLayer:
                 self.transport.upload(self.config.install_files[name], f"{stage}/{_STAGED_INSTALL_NAMES[name]}")
         return self.transport.run_agent(
             "refresh-release-configuration",
-            {**self.target_payload(), "release_id": release_id, "deployment_identity": self._deployment_identity},
+            {
+                **self.target_payload(),
+                "release_id": release_id,
+                "cutover_mode": cutover_mode,
+                "deployment_identity": self._deployment_identity,
+            },
             timeout=180,
         )
 

@@ -232,7 +232,9 @@ class ReleaseTransaction:
                 phases.append(
                     {
                         "phase": "host_application",
-                        "result": self.host_layer.refresh_release(release_id),
+                        "result": self.host_layer.refresh_release(
+                            release_id, cutover_mode=cutover_mode
+                        ),
                     }
                 )
             phases.begin("activate")

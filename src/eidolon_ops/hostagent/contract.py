@@ -789,6 +789,26 @@ def optional_source_provenance(
     return records
 
 
+def fixed_cutover_mode(payload: Mapping[str, object]) -> str:
+    """Which promise this activation is making about going back.
+
+    ``reversible`` keeps the previous release restorable, so whatever is
+    staged must also load under the interpreter that would be restored.
+    ``forward-only`` has already given that up — ``release_transaction``
+    crosses a durable barrier and does not restore old interpreters even when
+    the health gate fails — so requiring them to understand the candidate's
+    settings would guard a promise this mode does not make.
+
+    Absent means ``reversible``: the stricter of the two is the safe default
+    for an older workstation that does not send the field.
+    """
+
+    value = payload.get("cutover_mode", "reversible")
+    if value not in {"reversible", "forward-only"}:
+        raise TargetError("cutover mode is invalid")
+    return str(value)
+
+
 def fixed_release_id(payload: Mapping[str, object], *, required: bool = True) -> str | None:
     value = payload.get("release_id")
     if value is None and not required:

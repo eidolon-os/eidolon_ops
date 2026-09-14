@@ -2750,3 +2750,64 @@ def test_isolated_multihomed_host_does_not_guess_the_lowest_address(monkeypatch)
     monkeypatch.setattr(app_contract, "host_addresses", lambda: {"10.0.0.1", "192.168.1.37"})
     with pytest.raises(TargetError, match=r"ambiguous.*app\.lan_ipv4"):
         app_contract.observed_lan_address()
+
+
+# --------------------------------------------------------------------------- #
+# Cutover mode decides whether the previous interpreter gets a vote.
+#
+# `forward-only` exists to cross a barrier the previous release cannot follow:
+# `release_transaction` records starting the candidate as durable and, when the
+# health gate then fails, says old interpreters were not restored rather than
+# restoring them. Holding that mode to rollback safety made an ordinary schema
+# expansion — one field added to a settings file — undeployable in either mode.
+# --------------------------------------------------------------------------- #
+
+
+def _settings_validation_interpreters(monkeypatch, tmp_path, cutover_mode):
+    """Return which interpreters the product settings validation ran against."""
+
+    stage = tmp_path / "stage"
+    stage.mkdir()
+    for name in ("agent.yaml", "channel.yaml", "memory.yaml"):
+        (stage / name).write_text("{}\n", encoding="utf-8")
+
+    seen: list[str] = []
+
+    def record(label, command, **_kwargs):
+        assert "settings validation" in label
+        seen.append(next(part for part in command if part.endswith("/bin/python")))
+        return subprocess.CompletedProcess((), 0, "", "")
+
+    monkeypatch.setattr(primitives, "checked", record)
+    host_application._validate_product_settings_compatibility(stage, "rel-1", cutover_mode)
+    return seen
+
+
+def test_reversible_still_asks_the_release_that_could_be_restored(monkeypatch, tmp_path):
+    seen = _settings_validation_interpreters(monkeypatch, tmp_path, "reversible")
+
+    assert any("/opt/eidolon/current/" in path for path in seen)
+    assert any("/opt/eidolon/releases/rel-1/" in path for path in seen)
+
+
+def test_forward_only_does_not_ask_the_release_it_will_not_restore(monkeypatch, tmp_path):
+    seen = _settings_validation_interpreters(monkeypatch, tmp_path, "forward-only")
+
+    assert not any("/opt/eidolon/current/" in path for path in seen)
+    # Forward safety is not relaxed: the candidate must still load its own
+    # settings, which is the half that protects the release being started.
+    assert [path for path in seen if "/opt/eidolon/releases/rel-1/" in path]
+
+
+def test_an_absent_cutover_mode_keeps_the_stricter_promise(monkeypatch, tmp_path):
+    """An older workstation does not send the field; it must not silently
+    lose rollback safety because of that."""
+
+    seen = _settings_validation_interpreters(monkeypatch, tmp_path, "reversible")
+    assert any("/opt/eidolon/current/" in path for path in seen)
+    assert contract.fixed_cutover_mode({}) == "reversible"
+
+
+def test_an_invalid_cutover_mode_is_refused():
+    with pytest.raises(TargetError):
+        contract.fixed_cutover_mode({"cutover_mode": "whatever"})

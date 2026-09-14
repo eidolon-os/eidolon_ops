@@ -1025,7 +1025,7 @@ def test_deploy_prestages_host_application_before_component_activation(
     monkeypatch.setattr(
         controller.host_layer,
         "refresh_release",
-        lambda release_id: (
+        lambda release_id, *, cutover_mode="reversible": (
             events.append(f"host application {release_id}") or {"status": "refreshed"}
         ),
     )
@@ -1055,7 +1055,9 @@ def test_forward_only_activation_failure_requires_same_schema_fix_without_abort(
     controller, _runner, transport = setup_controller
     controller.host_layer.app = _app()
     monkeypatch.setattr(
-        controller.host_layer, "refresh_release", lambda release_id: {"status": "refreshed"}
+        controller.host_layer,
+        "refresh_release",
+        lambda release_id, *, cutover_mode="reversible": {"status": "refreshed"},
     )
     monkeypatch.setattr(
         controller.releases,
@@ -1095,7 +1097,9 @@ def test_forward_only_health_gate_failure_never_restores_old_interpreters(
 
     transport.run = degraded
     monkeypatch.setattr(
-        controller.host_layer, "refresh_release", lambda release_id: {"status": "refreshed"}
+        controller.host_layer,
+        "refresh_release",
+        lambda release_id, *, cutover_mode="reversible": {"status": "refreshed"},
     )
     monkeypatch.setattr(
         controller.releases,
@@ -1124,7 +1128,9 @@ def test_reversible_activation_failure_restores_host_layer_before_candidate_abor
     controller, _runner, transport = setup_controller
     controller.host_layer.app = _app()
     monkeypatch.setattr(
-        controller.host_layer, "refresh_release", lambda release_id: {"status": "refreshed"}
+        controller.host_layer,
+        "refresh_release",
+        lambda release_id, *, cutover_mode="reversible": {"status": "refreshed"},
     )
 
     def fail_activation(*args, **kwargs):
@@ -1151,7 +1157,9 @@ def test_forward_only_failure_before_barrier_restores_host_layer_and_aborts(
     controller, _runner, transport = setup_controller
     controller.host_layer.app = _app()
     monkeypatch.setattr(
-        controller.host_layer, "refresh_release", lambda release_id: {"status": "refreshed"}
+        controller.host_layer,
+        "refresh_release",
+        lambda release_id, *, cutover_mode="reversible": {"status": "refreshed"},
     )
 
     def fail_before_barrier(*args, **kwargs):
@@ -2434,7 +2442,9 @@ def test_allow_dirty_ships_the_committed_head_and_tells_the_host_it_did(config) 
     controller = _dirty_controller(config, allow_dirty=True)
     controller.host_layer.app = _app()
     config.install_files["host_identity"].write_bytes(b"a" * 32)
-    controller.host_layer.refresh_release = lambda release_id: {"status": "refreshed"}
+    controller.host_layer.refresh_release = (
+        lambda release_id, *, cutover_mode="reversible": {"status": "refreshed"}
+    )
     controller.releases._app_ready = lambda: {"status": "app_ready"}
 
     controller.deploy(release_id="r1", resume=True, activate=True)

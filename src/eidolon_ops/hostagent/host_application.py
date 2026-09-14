@@ -100,15 +100,19 @@ def refresh_host_application(
 
     contract.fixed_units(payload)
     release_id = contract.fixed_release_id(payload)
+    cutover_mode = contract.fixed_cutover_mode(payload)
     stage = contract.VAR_TMP / f"eidolon-secrets-{release_id}"
     if stage.parent != contract.VAR_TMP or contract.STAGING_NAME.fullmatch(stage.name) is None:
         raise TargetError("secret staging path is unsafe")
     if not stage.is_dir() or stage.is_symlink():
         raise TargetError("Host application staging directory is missing")
     _validate_hub_settings_compatibility(
-        stage, release_id, None if preserved_context is None else preserved_context["authority"]
+        stage,
+        release_id,
+        None if preserved_context is None else preserved_context["authority"],
+        cutover_mode,
     )
-    _validate_product_settings_compatibility(stage, release_id)
+    _validate_product_settings_compatibility(stage, release_id, cutover_mode)
     if preserved_context is not None and preserved_context != deployment_identity.observe({}):
         raise TargetError("installed identity changed during configuration validation")
     # A refresh is the deployment path for Host-owned contract changes, not
@@ -244,14 +248,25 @@ def withdraw_hub_hostname(root: Path = Path("/")) -> list[str]:
 
 
 def _validate_hub_settings_compatibility(
-    stage: Path, release_id: str, authority: dict[str, object] | None = None,
+    stage: Path,
+    release_id: str,
+    authority: dict[str, object] | None = None,
+    cutover_mode: str = "reversible",
 ) -> None:
-    """Require one rendered config to load in both sides of the cutover.
+    """Require the rendered config to load on every interpreter that may run it.
 
     The Host layer is installed before component symlinks switch.  A strict
     config understood only by the candidate can therefore strand the previous
-    release during automatic rollback.  Schema expansion must first ship as
-    code defaults; only a later release may require new YAML fields.
+    release during automatic rollback, so under ``reversible`` the schema must
+    expand in two releases: code defaults first, and only a later release may
+    require new YAML fields.
+
+    ``forward-only`` makes no such promise.  ``release_transaction`` treats
+    starting the candidate as a durable barrier and does not restore old
+    interpreters even when the post-activation health gate fails.  Asking the
+    previous release to understand the candidate's settings would then guard a
+    restore that cannot happen — which is what made every ordinary schema
+    expansion undeployable regardless of the mode chosen.
     """
 
     settings = stage / "hub.generated.yaml"
@@ -268,6 +283,9 @@ def _validate_hub_settings_compatibility(
         Path("/opt/eidolon/current/eidolon_hub/.venv/bin/python"),
         Path(f"/opt/eidolon/releases/{release_id}/eidolon_hub/.venv/bin/python"),
     )
+    if cutover_mode == "forward-only":
+        # The restore this would protect is the one the mode gave up.
+        interpreters = interpreters[1:]
     for interpreter in interpreters:
         primitives.checked(
             "cross-release Hub settings validation",
@@ -282,13 +300,24 @@ def _validate_hub_settings_compatibility(
         )
 
 
-def _validate_product_settings_compatibility(stage: Path, release_id: str) -> None:
-    """Require each component config to load before replacing the live copy.
+def _validate_product_settings_compatibility(
+    stage: Path, release_id: str, cutover_mode: str = "reversible"
+) -> None:
+    """Require each component config to load on every interpreter that may run it.
 
-    The settings and component links switch in separate atomic operations. Both
-    the current interpreter (rollback safety) and candidate interpreter (forward
-    safety) must therefore understand the candidate settings before any live
-    Host path is touched.
+    The settings and component links switch in separate atomic operations, so
+    under ``reversible`` both the current interpreter (rollback safety) and the
+    candidate interpreter (forward safety) must understand the candidate
+    settings before any live Host path is touched.
+
+    ``forward-only`` keeps only the second. That mode's whole content is that
+    the previous release will not be restored: ``release_transaction`` records
+    starting the candidate as a durable barrier and, when the post-activation
+    health gate fails, says so rather than restoring old interpreters. Holding
+    it to rollback safety anyway made an ordinary schema expansion — a field
+    added to a settings file — undeployable in either mode, which left the
+    two-release dance as the only way to add a config key and no way at all to
+    ship one that a release needs immediately.
     """
 
     roots = {
@@ -331,6 +360,9 @@ def _validate_product_settings_compatibility(stage: Path, release_id: str) -> No
             Path(f"/opt/eidolon/current/eidolon_{component}/.venv/bin/python"),
             Path(f"/opt/eidolon/releases/{release_id}/eidolon_{component}/.venv/bin/python"),
         )
+        if cutover_mode == "forward-only":
+            # The restore this would protect is the one the mode gave up.
+            interpreters = interpreters[1:]
         for interpreter in interpreters:
             primitives.checked(
                 f"cross-release {component} settings validation",
