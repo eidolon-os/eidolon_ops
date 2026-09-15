@@ -16,6 +16,19 @@ remote_uv = "/usr/local/bin/uv"
 # Fail before sealing or upload if endpoint discovery did not select a wired
 # interface. Read-only and maintenance operations may still use Wi-Fi.
 require_wired_release_upload = true
+# Which of this Host's links belong to this workstation rather than to the
+# product. Delivered to the Host with the rest of the /etc/eidolon facts; the
+# services that publish addresses to devices and phones leave these out, so a
+# bench cable stops being something a device can be handed and cannot reach.
+#
+# Only needed for a link the Host cannot already tell apart: a bench cable that
+# self-assigns into 169.254/16 is filtered as link-local wherever that matters
+# and needs no declaration. A routable subnet nobody but this workstation is on
+# does — it looks exactly like the product LAN from the board.
+#
+# Omit it on a shipped Host, which has no such link. Host bits must be clear:
+# write `10.42.0.0/24` for a subnet, or a bare address for a single peer.
+management_networks = ["10.42.0.0/24"]
 
 [workspace]
 # Not a temporary directory. This holds the sealed bundle a resumed install

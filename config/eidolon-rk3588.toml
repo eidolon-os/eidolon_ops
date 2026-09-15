@@ -31,6 +31,24 @@ remote_uv = "/usr/local/bin/uv"
 # Release payloads must never fall back to Wi-Fi, where this workstation's VPN
 # accounts for the transfer. Status and maintenance commands remain reachable.
 require_wired_release_upload = true
+# The same cable, said once more — this time to the board rather than to this
+# workstation. The two lines above are what Ops does with the wire; this is
+# what the wire *is*, and it is the only statement of that anywhere: to the
+# kernel on either end, 10.42.0.0/24 is an ordinary subnet, indistinguishable
+# from the Wi-Fi the devices are on.
+#
+# Until it was declared, the board published both addresses under one mDNS
+# name and a device took whichever of the two it was handed. On 2026-09-15
+# BOX-3 took this one and spent the evening retrying a connection to an
+# address no device can route to, with every service on the board healthy.
+#
+# It is delivered with the rest of the /etc/eidolon facts, and the Hub, the
+# Channel provider and Admin each narrow what they publish to devices and
+# phones by it. Nothing here changes which link Ops itself uses: Ops can
+# measure a candidate, and it needs this one.
+#
+# A shipped Host has no cable to a workstation and declares nothing.
+management_networks = ["10.42.0.0/24"]
 
 [workspace]
 # 2026-08-25: moved off /private/tmp. macOS purges it on its own schedule.

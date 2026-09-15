@@ -329,6 +329,58 @@ def test_wired_release_policy_must_be_boolean(config_path: Path) -> None:
         load_config(config_path)
 
 
+def test_a_host_declares_which_of_its_links_are_the_operators(config_path: Path) -> None:
+    """The one place in the system that knows a link has a role.
+
+    The two fields beside it say it already, to this workstation: a point-to-
+    point `hostname`, and a release upload that must not leave any other way.
+    The Host was never told, so it published the cable to devices alongside its
+    Wi-Fi and a device that took the wrong one could not route to it at all.
+    """
+
+    assert load_config(config_path).host.management_networks == ()
+
+    _replace(
+        config_path,
+        "connect_timeout_seconds = 7",
+        'connect_timeout_seconds = 7\nmanagement_networks = ["10.42.0.0/24", "10.99.0.7"]',
+    )
+
+    # A bare address is the single peer it names, which is what a point-to-
+    # point cable has; both spellings are canonicalised here rather than on the
+    # Host, which would otherwise read its own profile as drifted.
+    assert load_config(config_path).host.management_networks == (
+        "10.42.0.0/24",
+        "10.99.0.7/32",
+    )
+
+
+@pytest.mark.parametrize(
+    ("value", "message"),
+    [
+        ('"10.42.0.0/24"', "must be an array of networks"),
+        ('["10.42.0.2/24"]', "no host bits set"),
+        ('["eidolon-hub.local"]', "no host bits set"),
+        ('["10.42.0.0/24", "10.42.0.0/24"]', "repeats"),
+    ],
+)
+def test_a_link_declaration_that_could_mean_two_things_is_refused(
+    config_path: Path, value: str, message: str
+) -> None:
+    """`10.42.0.2/24` is a typo for one of two different declarations, and
+    guessing which would either publish the cable or take a whole product
+    subnet away from every device on it."""
+
+    _replace(
+        config_path,
+        "connect_timeout_seconds = 7",
+        f"connect_timeout_seconds = 7\nmanagement_networks = {value}",
+    )
+
+    with pytest.raises(ConfigurationError, match=message):
+        load_config(config_path)
+
+
 def test_a_readiness_deadline_outside_reason_is_refused(config_path: Path) -> None:
     _replace(
         config_path,

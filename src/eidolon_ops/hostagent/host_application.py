@@ -130,6 +130,11 @@ def refresh_host_application(
         # told to install a unit and told it has no such capability would agree
         # with neither, so both come from one value.
         contract.declared_capabilities(payload),
+        # Carried on the same pass, and for the same reason it is rewritten
+        # rather than defended: a Host that gains or loses an operations cable
+        # between releases has to be told, and the services that publish its
+        # addresses read the answer out of this file.
+        contract.declared_management_networks(payload),
     )
     # Derived from the same declaration, and applied on every refresh for the
     # same reason host.env is rewritten rather than defended: a Host's

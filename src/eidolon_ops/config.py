@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import re
 import stat
 import tomllib
@@ -189,6 +190,25 @@ class HostConfig:
     #: operator policy rather than a transport assumption: status and repair
     #: operations may still use any reachable link.
     require_wired_release_upload: bool = False
+    #: The links on this Host that carry operations traffic and nothing else.
+    #:
+    #: This file is the only place in the system that knows a link has a role.
+    #: The two fields above already say it between them — a ``hostname`` that
+    #: is a point-to-point literal, and a release upload that must not leave by
+    #: any other link — but they say it to this workstation, and the Host was
+    #: never told. So it published the cable's address to devices alongside its
+    #: Wi-Fi address, and a device that took the wrong one of the two could not
+    #: route to it at all (2026-09-15, BOX-3).
+    #:
+    #: Declared rather than derived from ``hostname``: that field says where
+    #: Ops reaches this Host today, which on a shipped board is the mDNS name
+    #: and on this bench is the cable. Deriving a role from it would be a sixth
+    #: guess at the thing this field exists to stop guessing.
+    #:
+    #: Empty on a Host with no operations link of its own, which is every
+    #: shipped Host, and the default for the same reason: an address nobody has
+    #: spoken for belongs to the product.
+    management_networks: tuple[str, ...] = ()
     #: How long this Host's own services may take to answer after an
     #: activation. A board is not a laptop — the Channel worker alone spends
     #: its stop timeout shutting down and then loads an ONNX model coming up —
@@ -354,6 +374,7 @@ def load_config(path: Path) -> OperationsConfig:
             "readiness_timeout_seconds",
             "require_wired_release_upload",
             "operator_keys_file",
+            "management_networks",
         },
         label="host",
     )
@@ -379,6 +400,7 @@ def load_config(path: Path) -> OperationsConfig:
         host_wire.get("require_wired_release_upload", False),
         "host.require_wired_release_upload",
     )
+    management_networks = _management_networks(host_wire.get("management_networks"))
 
     workspace_wire = _mapping(document["workspace"], "workspace")
     _require_keys(
@@ -513,6 +535,7 @@ def load_config(path: Path) -> OperationsConfig:
             connect_timeout_seconds=timeout,
             remote_uv=remote_uv,
             require_wired_release_upload=require_wired_release_upload,
+            management_networks=management_networks,
             operator_keys_file=(
                 _local_path(host_wire["operator_keys_file"], base, "host.operator_keys_file")
                 if "operator_keys_file" in host_wire
@@ -528,6 +551,39 @@ def load_config(path: Path) -> OperationsConfig:
         settings_overlay=settings_overlay,
         capabilities=capabilities,
     )
+
+
+def _management_networks(value: object) -> tuple[str, ...]:
+    """Read ``[host] management_networks``, the links Ops keeps for itself.
+
+    Canonicalised here rather than passed through, because this is the value
+    the Host is handed: two operators who write ``10.42.0.0/24`` and
+    ``10.42.0.0/255.255.255.0`` have said the same thing, and a Host that
+    receives two spellings of it would report its own profile as drifted.
+
+    Strict, so ``10.42.0.2/24`` is refused. It is a typo for one of two
+    different declarations — the single cable peer, or its whole subnet — and
+    silently widening it would take a product subnet away from every device on
+    it while looking like it worked.
+    """
+
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        raise ConfigurationError("host.management_networks must be an array of networks")
+    networks: list[str] = []
+    for position, entry in enumerate(value):
+        label = f"host.management_networks[{position}]"
+        try:
+            network = ipaddress.ip_network(_string(entry, label), strict=True)
+        except ValueError as exc:
+            raise ConfigurationError(
+                f"{label} must be an IP network with no host bits set, or a single address"
+            ) from exc
+        if str(network) in networks:
+            raise ConfigurationError(f"{label} repeats {str(network)!r}")
+        networks.append(str(network))
+    return tuple(networks)
 
 
 def _capabilities(value: object) -> frozenset[str]:

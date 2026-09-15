@@ -163,6 +163,15 @@ class HostLayer:
             # take the list on trust. It holds its own copy of what each
             # capability adds; agreeing is the check.
             "capabilities": sorted(self.config.capabilities),
+            # Which of this Host's links are this workstation's and not the
+            # product's. Ops is the only thing that knows — it configured the
+            # cable — and until this was sent, the Host answered devices with
+            # every address it had, the cable's included.
+            #
+            # Sent verbatim rather than derived on the Host: the Host can see
+            # its interfaces perfectly well, and seeing them is exactly what
+            # cannot answer this. A role is not a property of a NIC.
+            "management_networks": list(self.config.host.management_networks),
             "port_registry": port_registry,
             # Where memory's supervisor answers. A backup asks it for a
             # snapshot of each space rather than copying a palace the agent

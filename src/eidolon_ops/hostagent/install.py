@@ -46,10 +46,15 @@ class TargetInstaller:
         #: eidolond and the applier filter their service catalogue by the same
         #: value this install derived its unit topology from.
         capabilities: frozenset[str] = frozenset(),
+        #: Which of this Host's links are the operator's. Written into the same
+        #: profile, so the services this install is about to start publish
+        #: addresses a device can actually route to.
+        management_networks: tuple[str, ...] = (),
         sources: Mapping[str, object] | None = None,
     ) -> None:
         self.port_registry = port_registry
         self.capabilities = capabilities
+        self.management_networks = management_networks
         #: Which commit of each repository this Host was installed from. A first
         #: install writes no cutover document, so this journal is the only place
         #: the founding combination survives the release directory being
@@ -307,7 +312,11 @@ class TargetInstaller:
             self._ensure_capability_service_groups()
             self._validate_service_identity_boundary()
         contract.ensure_host_path_contract(
-            self.root, self._chown, self.port_registry, self.capabilities
+            self.root,
+            self._chown,
+            self.port_registry,
+            self.capabilities,
+            self.management_networks,
         )
 
     def _ensure_capability_service_groups(self) -> tuple[str, ...]:
@@ -527,5 +536,6 @@ def install(payload: Mapping[str, object]) -> dict[str, object]:
         app_check=lambda: probe.app_ready(payload),
         port_registry=contract.fixed_port_registry(payload),
         capabilities=contract.declared_capabilities(payload),
+        management_networks=contract.declared_management_networks(payload),
         sources=contract.optional_source_provenance(payload),
     ).install()

@@ -1923,12 +1923,12 @@ def test_the_derived_host_layer_is_delivered_without_a_reinstall(tmp_path, monke
     monkeypatch.setattr(
         primitives, "checked", lambda *_a, **_k: subprocess.CompletedProcess((), 0, "", "")
     )
-    reconciled: list[tuple[Path, str, frozenset[str]]] = []
+    reconciled: list[tuple[Path, str, frozenset[str], tuple[str, ...]]] = []
     monkeypatch.setattr(
         contract,
         "ensure_host_path_contract",
-        lambda root, _chown, registry, capabilities=frozenset(): reconciled.append(
-            (root, registry, capabilities)
+        lambda root, _chown, registry, capabilities=frozenset(), networks=(): reconciled.append(
+            (root, registry, capabilities, networks)
         ),
     )
     placed: dict[str, Path] = {}
@@ -1952,6 +1952,7 @@ def test_the_derived_host_layer_is_delivered_without_a_reinstall(tmp_path, monke
             "units": list(contract.PRODUCT_UNITS),
             "release_id": "r1",
             "port_registry": "admin:\n  api:\n    port: 9000\n",
+            "management_networks": ["10.42.0.0/24"],
         }
     )
 
@@ -1962,7 +1963,11 @@ def test_the_derived_host_layer_is_delivered_without_a_reinstall(tmp_path, monke
     # The refresh reconciles the path contract with the same capability
     # declaration the payload's unit topology was derived from — the sealed
     # Host profile is where eidolond and the applier read it.
-    assert reconciled == [(Path("/"), "admin:\n  api:\n    port: 9000\n", frozenset())]
+    # Which link is the operator's travels on the same pass, for the same
+    # reason: a Host that gained a bench cable since it was installed would
+    # otherwise go on offering devices an address only this workstation is on.
+    expected = (Path("/"), "admin:\n  api:\n    port: 9000\n", frozenset(), ("10.42.0.0/24",))
+    assert reconciled == [expected]
 
     # Second run has nothing to deliver, so systemd is left alone.
     assert (
@@ -1971,14 +1976,12 @@ def test_the_derived_host_layer_is_delivered_without_a_reinstall(tmp_path, monke
                 "units": list(contract.PRODUCT_UNITS),
                 "release_id": "r1",
                 "port_registry": "admin:\n  api:\n    port: 9000\n",
+                "management_networks": ["10.42.0.0/24"],
             }
         )["changed"]
         == []
     )
-    assert reconciled == [
-        (Path("/"), "admin:\n  api:\n    port: 9000\n", frozenset()),
-        (Path("/"), "admin:\n  api:\n    port: 9000\n", frozenset()),
-    ]
+    assert reconciled == [expected, expected]
 
     placed["owner-domain-root-ca.pem"].chmod(0o666)
     with pytest.raises(TargetError, match="ownership or mode drifted"):
@@ -2811,3 +2814,93 @@ def test_an_absent_cutover_mode_keeps_the_stricter_promise(monkeypatch, tmp_path
 def test_an_invalid_cutover_mode_is_refused():
     with pytest.raises(TargetError):
         contract.fixed_cutover_mode({"cutover_mode": "whatever"})
+
+
+def test_the_link_declaration_travels_from_the_operator_profile_to_the_file_services_read(
+    config, config_path, tmp_path
+) -> None:
+    """The whole point of the change, end to end, in one pass.
+
+    Ops is the only thing that knows the bench cable is a bench cable — it
+    configured it, and to the kernel on either end it is an ordinary subnet.
+    Before this, that knowledge stopped at this workstation, and the board
+    published the cable's address to devices beside its Wi-Fi address under one
+    mDNS name. A device took whichever it was handed.
+
+    Nothing new is plumbed to carry it: `host.env` is the sealed profile every
+    unit already reads through `EnvironmentFile=`, which is how the capability
+    declaration reaches eidolond.
+    """
+
+    import dataclasses
+
+    from eidolon_ops.host_layer import HostLayer
+
+    declared = dataclasses.replace(
+        config,
+        host=dataclasses.replace(config.host, management_networks=("10.42.0.0/24",)),
+    )
+    layer = HostLayer(
+        declared,
+        transport=object(),
+        app=None,
+        read_exact_source_file=lambda *_a: "",
+        source_revisions=lambda: {},
+    )
+
+    payload = layer.target_payload()
+    assert payload["management_networks"] == ["10.42.0.0/24"]
+
+    root = tmp_path / "board"
+    (root / "etc" / "eidolon").mkdir(parents=True)
+    contract.ensure_host_path_contract(
+        root,
+        lambda *_a: None,
+        "ports: {}\n",
+        contract.declared_capabilities(payload),
+        contract.declared_management_networks(payload),
+    )
+
+    host_env = (root / "etc" / "eidolon" / "host.env").read_text(encoding="utf-8")
+    assert f"{contract.MANAGEMENT_NETWORKS_VARIABLE}=10.42.0.0/24\n" in host_env
+
+    # And a Host with no cable of its own — every shipped Host — declares
+    # nothing, which is how every Host behaved before this line existed.
+    contract.ensure_host_path_contract(root, lambda *_a: None, "ports: {}\n")
+    assert f"{contract.MANAGEMENT_NETWORKS_VARIABLE}=\n" in (
+        root / "etc" / "eidolon" / "host.env"
+    ).read_text(encoding="utf-8")
+
+
+def test_the_path_contract_check_reads_this_hosts_own_link_declaration(
+    tmp_path, monkeypatch
+) -> None:
+    """The same false alarm the capability line already taught us about.
+
+    host.env carries a line the agent itself renders, so a check that compares
+    it to anything but this Host's own declaration reports every Host that
+    declares one as broken — and says nothing true while hiding what it would
+    have said.
+    """
+
+    host_env = tmp_path / "host.env"
+    payload = {
+        "units": list(contract.expected_units(frozenset())),
+        "capabilities": [],
+        "management_networks": ["10.42.0.0/24"],
+        "data": {name: str(path) for name, path in contract.FIXED_DATA.items()},
+        "remote_uv": "/usr/local/bin/uv",
+        "ports": "ports: {}\n",
+    }
+    host_env.write_text(
+        contract.host_env_value(frozenset(), ("10.42.0.0/24",)), encoding="utf-8"
+    )
+    monkeypatch.setattr(contract, "HOST_ENV_PATH", host_env)
+
+    assert host_lifecycle.doctor_host(payload)["checks"]["host_path_contract"] is True
+
+    # A Host still carrying the previous release's declaration is drift, and
+    # this is the check that says so: it is the difference between offering a
+    # device the cable and not.
+    host_env.write_text(contract.host_env_value(frozenset()), encoding="utf-8")
+    assert host_lifecycle.doctor_host(payload)["checks"]["host_path_contract"] is False

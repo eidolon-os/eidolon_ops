@@ -7,6 +7,7 @@ against these; nothing is invented on the Host.
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import re
 from collections.abc import Callable, Mapping
@@ -568,12 +569,31 @@ HOST_ENV_VALUE = (
 #: such capability.
 HOST_CAPABILITIES_VARIABLE = "EIDOLON_HOST_CAPABILITIES"
 
+#: Where this Host states which of its links are the operator's rather than the
+#: product's, for everything that publishes an address to a device or a phone.
+#:
+#: The second line here that is not a product constant, and it travels the same
+#: way as the first for the same reason: the Hub, the Channel provider and
+#: Admin all read the sealed Host profile already, so a fact delivered here
+#: needs no plumbing of its own to reach any of them.
+#:
+#: Spelled here as well as in `eidolon_sdk.system.host_links`, which is what
+#: those three read it with — this package is shipped to the Host alone and may
+#: not import upward, and the SDK is not on the path while an install runs.
+MANAGEMENT_NETWORKS_VARIABLE = "EIDOLON_MANAGEMENT_NETWORKS"
 
-def host_env_value(capabilities: frozenset[str]) -> str:
-    """The sealed Host profile, for a Host that can do these things."""
+
+def host_env_value(
+    capabilities: frozenset[str], management_networks: tuple[str, ...] = ()
+) -> str:
+    """The sealed Host profile, for this Host's declarations."""
 
     declared = ",".join(sorted(capabilities))
-    return f"{HOST_ENV_VALUE}{HOST_CAPABILITIES_VARIABLE}={declared}\n"
+    return (
+        f"{HOST_ENV_VALUE}"
+        f"{HOST_CAPABILITIES_VARIABLE}={declared}\n"
+        f"{MANAGEMENT_NETWORKS_VARIABLE}={','.join(management_networks)}\n"
+    )
 
 HOST_DIRECTORIES = (
     (Path("/opt/eidolon"), 0o755, "root", "root"),
@@ -633,6 +653,7 @@ def ensure_host_path_contract(
     chown: Callable[[Path, str, str], None],
     port_registry: str,
     capabilities: frozenset[str] = frozenset(),
+    management_networks: tuple[str, ...] = (),
 ) -> None:
     """Materialize the host-profile roots without adopting mutable contents."""
 
@@ -662,7 +683,9 @@ def ensure_host_path_contract(
     host_env = primitives.host_path(root, HOST_ENV_PATH)
     if host_env.is_symlink() or (host_env.exists() and not host_env.is_file()):
         raise TargetError("existing /etc/eidolon/host.env is not a regular file")
-    primitives.atomic_text(host_env, host_env_value(capabilities), mode=0o644)
+    primitives.atomic_text(
+        host_env, host_env_value(capabilities, management_networks), mode=0o644
+    )
     chown(host_env, "root", "root")
 
 
@@ -688,6 +711,39 @@ def declared_capabilities(payload: Mapping[str, object]) -> frozenset[str]:
         # may be one that should have brought units it will now never install.
         raise TargetError("capability is not one this agent was built for: " + ", ".join(unknown))
     return frozenset(declared)
+
+
+def declared_management_networks(payload: Mapping[str, object]) -> tuple[str, ...]:
+    """Which of this Host's links the operator keeps, validated once for every use.
+
+    Checked rather than believed, like every other payload field here: a value
+    that does not parse, or that parses to a different spelling of itself, is a
+    declaration this Host would write into its own profile and then fail its
+    own path-contract check against. Both are refused before anything is
+    written.
+
+    Order is the operator's and is preserved. Nothing here reads the list as a
+    set, and re-sorting it would only make the file differ from the payload
+    that produced it.
+
+    A payload with no networks is one from before links had roles, and means a
+    Host that reserves nothing — which is how every Host behaved before this,
+    so an older operator keeps working against a newer agent.
+    """
+
+    declared = payload.get("management_networks", [])
+    if not isinstance(declared, list) or not all(isinstance(item, str) for item in declared):
+        raise TargetError("management_networks must be an array of strings")
+    for value in declared:
+        try:
+            network = ipaddress.ip_network(value, strict=True)
+        except ValueError as exc:
+            raise TargetError(f"management network is not a network: {value!r}") from exc
+        if str(network) != value:
+            raise TargetError(f"management network is not in canonical form: {value!r}")
+    if len(set(declared)) != len(declared):
+        raise TargetError("management_networks repeats a network")
+    return tuple(declared)
 
 
 def fixed_units(payload: Mapping[str, object]) -> tuple[str, ...]:

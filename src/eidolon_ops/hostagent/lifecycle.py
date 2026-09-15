@@ -188,7 +188,10 @@ def doctor_host(payload: Mapping[str, object]) -> dict[str, object]:
         # capability and said nothing true about the Host.
         "host_path_contract": host_env.is_file()
         and host_env.read_text(encoding="utf-8")
-        == contract.host_env_value(contract.declared_capabilities(payload)),
+        == contract.host_env_value(
+            contract.declared_capabilities(payload),
+            contract.declared_management_networks(payload),
+        ),
         "port_registry": contract.HOST_PORTS_PATH.is_file()
         and contract.HOST_PORTS_PATH.read_text(encoding="utf-8") == contract.fixed_port_registry(payload),
     }
