@@ -7,13 +7,18 @@ and the adapter answers from what it is composed of.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from ipaddress import ip_address, ip_network
 from pathlib import Path
 
+from eidolon_sdk.system import on_product_link
+
 from eidolon_ops import lan_observation, plans
+from eidolon_ops.config import ConfigurationError, load_config
 from eidolon_ops.errors import OperationsError
 from eidolon_ops.host import HostAdapter, build_adapter
 from eidolon_ops.model import Capability, Evidence, Outcome, Plan, steps_from_phases
-from eidolon_ops.paths import HostProfile, is_product_board
+from eidolon_ops.paths import HostDriver, HostProfile, is_product_board
 from eidolon_ops.process import ProcessError, ProcessRunner
 from eidolon_ops.progress import ProgressSink
 from eidolon_ops.source_assets import status_ports
@@ -69,7 +74,70 @@ class HostController:
         if app is not None and not is_product_board(self.profile.platform):
             context["network"] = self._local_status_network()
         report = {**report, **context}
+        network = report.get("network")
+        if isinstance(network, Mapping):
+            report = {
+                **report,
+                "network": {
+                    **network,
+                    "offered_to_devices": self._offered_to_devices(network.get("addresses")),
+                },
+            }
         return self._observed(plan, report, healthy=report.get("status") != "degraded")
+
+    def _offered_to_devices(self, addresses: object) -> list[str]:
+        """Which of this Host's addresses a device or a phone can be handed.
+
+        `addresses` is everything the machine answers on, and that was the list
+        nobody could act on: on 2026-09-15 a Host published two of them under
+        one name and a device took the one only a workstation could reach. The
+        shorter list is the one that matters — what the Channel provider, Hub's
+        advertiser and Admin will actually offer once the declared operations
+        links are out — and nothing said it anywhere.
+
+        A report, not a verdict. Two product links is not an error, and a Host
+        cannot test reachability from where a device stands, so the honest
+        thing is to show the list rather than judge it. What an operator can do
+        with it is see a bench cable sitting in a list meant for devices, which
+        on the workstation nobody had ever looked at.
+
+        Read where each kind of Host states it: a workstation renders its own
+        environment from its profile, a deployed Host from its operations
+        config. Unreadable means the wider list, because a status that hides
+        addresses when it cannot find a declaration would be worse than one
+        that shows too many.
+        """
+
+        if self.profile.driver is HostDriver.LOCAL_SUPERVISORD:
+            declared = self.profile.management_networks
+        else:
+            declared = self._deployed_management_networks()
+        networks = tuple(ip_network(value) for value in declared)
+        offered: list[str] = []
+        for value in addresses if isinstance(addresses, list) else ():
+            try:
+                address = ip_address(str(value))
+            except ValueError:
+                continue
+            if (
+                address.is_loopback
+                or address.is_link_local
+                or address.is_unspecified
+                or address.is_multicast
+            ):
+                continue
+            if on_product_link(address, networks):
+                offered.append(str(address))
+        return offered
+
+    def _deployed_management_networks(self) -> tuple[str, ...]:
+        path = self.profile.operations_config
+        if path is None:
+            return ()
+        try:
+            return load_config(path).host.management_networks
+        except (OSError, ConfigurationError, OperationsError):
+            return ()
 
     def _local_status_network(self) -> dict[str, object]:
         """Current Mac addresses; status must survive a disconnected machine."""

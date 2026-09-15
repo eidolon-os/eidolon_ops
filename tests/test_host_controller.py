@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -367,3 +368,94 @@ def test_controller_rejects_missing_pi_config_and_unsafe_local_logs(tmp_path: Pa
         local.logs(service="../outside", lines=10, since=None)
     with pytest.raises(OperationsError, match="unsupported local profile"):
         local.local_profile("unknown", "status")
+
+
+def test_status_says_which_addresses_a_device_may_be_handed(tmp_path: Path) -> None:
+    """The list an operator could act on, beside the one they could not.
+
+    `addresses` is every address the machine answers on, and on 2026-09-15 a
+    Host published two of them under one name while a device took the one only
+    a workstation could reach. Nothing anywhere said which of them the Channel
+    provider, Hub's advertiser and Admin would actually offer — so the only way
+    to find out was for a device to spend 77 seconds on the wrong one.
+    """
+
+    controller = HostController(
+        replace(_profile(tmp_path), management_networks=("10.42.0.0/24",)), Runner()
+    )
+
+    assert controller._offered_to_devices(["10.42.0.1", "192.168.100.18"]) == [
+        "192.168.100.18"
+    ]
+
+
+def test_a_host_that_declared_nothing_offers_everything_it_has(tmp_path: Path) -> None:
+    """Which is what every Host did before any of this, and must stay true.
+
+    A Host with two real product links is not wrong. This reports; it does not
+    judge — a Host cannot test reachability from where a device stands, so the
+    honest thing is to show the list and let someone who knows the cabling read
+    it.
+    """
+
+    controller = HostController(_profile(tmp_path), Runner())
+
+    assert controller._offered_to_devices(["10.42.0.1", "192.168.100.18"]) == [
+        "10.42.0.1",
+        "192.168.100.18",
+    ]
+
+
+def test_what_never_crossed_a_network_is_never_offered(tmp_path: Path) -> None:
+    """Loopback and link-local are not somewhere a device can find this Host."""
+
+    controller = HostController(_profile(tmp_path), Runner())
+
+    assert controller._offered_to_devices(
+        ["127.0.0.1", "169.254.7.7", "0.0.0.0", "not-an-address", "192.168.100.18"]
+    ) == ["192.168.100.18"]
+
+
+def test_a_deployed_host_is_read_from_the_file_that_states_it(tmp_path: Path) -> None:
+    """Each kind of Host declares where its own environment comes from.
+
+    A workstation renders its from its profile; a Host Ops deploys to renders
+    its from the operations config. One report, read from whichever of the two
+    this Host actually uses.
+    """
+
+    operations = tmp_path / "operations.toml"
+    operations.write_text(
+        (Path(__file__).parents[1] / "config/eidolon-rk3588.toml").read_text(
+            encoding="utf-8"
+        ),
+        encoding="utf-8",
+    )
+    controller = HostController(
+        replace(_pi_profile(tmp_path), operations_config=operations), Runner()
+    )
+
+    assert controller._offered_to_devices(["10.42.0.2", "192.168.100.19"]) == [
+        "192.168.100.19"
+    ]
+
+
+def test_a_declaration_that_cannot_be_read_shows_more_rather_than_less(
+    tmp_path: Path,
+) -> None:
+    """A status that hid addresses when it lost the file would be worse.
+
+    Status has to survive a machine whose configuration has moved or gone; the
+    safe direction for a report is the wider list, because an operator can see
+    a cable that should not be there and cannot see one that was silently
+    dropped.
+    """
+
+    controller = HostController(
+        replace(_pi_profile(tmp_path), operations_config=tmp_path / "gone.toml"), Runner()
+    )
+
+    assert controller._offered_to_devices(["10.42.0.2", "192.168.100.19"]) == [
+        "10.42.0.2",
+        "192.168.100.19",
+    ]
