@@ -605,3 +605,108 @@ def test_one_rule_for_the_code_whichever_spelling_carried_it(tmp_path: Path) -> 
     assert profile.app is not None
     with pytest.raises(HostProfileError, match="a code the Host would have drawn"):
         profile.app.factory_setup_code()
+
+
+def _declaring(tmp_path: Path, networks: str) -> Path:
+    script = tmp_path / "run.sh"
+    script.write_text("#!/bin/sh\n", encoding="utf-8")
+    path = _write_mac_profile(tmp_path, script=script)
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(
+            'driver = "local-supervisord"',
+            f'driver = "local-supervisord"\nmanagement_networks = {networks}',
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_a_workstation_can_say_which_of_its_own_links_are_the_operator_s(
+    tmp_path: Path,
+) -> None:
+    """Both ends of a cable are on it, and each Host says so about itself.
+
+    The board declares the network in its operations config so it stops
+    publishing its own address on that link. Nobody had ever told the
+    workstation, which runs Hub, Channel and Admin like any Host — so it went
+    on offering phones and devices an address only it could reach, which is
+    the whole of the 2026-09-15 outage happening on the one machine that had
+    not been looked at.
+    """
+
+    profile = load_host_profile(_declaring(tmp_path, '["10.42.0.0/24"]'))
+
+    assert profile.management_networks == ("10.42.0.0/24",)
+    # The same variable a deployed Host reads out of host.env, so the three
+    # consumers that filter by it never learn there are two kinds of Host.
+    assert profile.environment()["EIDOLON_MANAGEMENT_NETWORKS"] == "10.42.0.0/24"
+
+
+def test_a_host_that_declares_none_says_nothing_about_its_links(tmp_path: Path) -> None:
+    """Which is every Host that existed before this could be said."""
+
+    script = tmp_path / "run.sh"
+    script.write_text("#!/bin/sh\n", encoding="utf-8")
+    profile = load_host_profile(_write_mac_profile(tmp_path, script=script))
+
+    assert profile.management_networks == ()
+    assert "EIDOLON_MANAGEMENT_NETWORKS" not in profile.environment()
+
+
+def test_declaring_it_where_nothing_would_read_it_is_refused(tmp_path: Path) -> None:
+    """A declaration nobody reads is the failure this mechanism exists to remove.
+
+    A Host Ops deploys to renders no environment from its profile; its
+    environment comes from the operations config, through host.env. Accepting
+    the line here would leave an operator certain they had said it.
+    """
+
+    script = tmp_path / "run.sh"
+    script.write_text("#!/bin/sh\n", encoding="utf-8")
+    path = _write_mac_profile(tmp_path, script=script)
+    path.write_text(
+        path.read_text(encoding="utf-8")
+        .replace('platform = "macos"', 'platform = "rk3588"')
+        .replace(
+            'driver = "local-supervisord"',
+            'driver = "ssh-systemd"\nmanagement_networks = ["10.42.0.0/24"]',
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(HostProfileError, match="operations config"):
+        load_host_profile(path)
+
+
+@pytest.mark.parametrize(
+    ("networks", "expected"),
+    [
+        # Two spellings of one statement arrive as one value, so a Host cannot
+        # report its own profile as drifted for having been written differently.
+        ('["10.42.0.0/255.255.255.0"]', ("10.42.0.0/24",)),
+        # A bare address is the single peer a point-to-point cable has.
+        ('["10.42.0.2"]', ("10.42.0.2/32",)),
+    ],
+)
+def test_a_declared_network_arrives_as_one_spelling(
+    tmp_path: Path, networks: str, expected: tuple[str, ...]
+) -> None:
+    assert load_host_profile(_declaring(tmp_path, networks)).management_networks == expected
+
+
+@pytest.mark.parametrize(
+    ("networks", "because"),
+    [
+        # A typo for one of two different declarations — the single peer, or
+        # its whole subnet — and widening it silently would take a product
+        # subnet away from every device on it while looking like it worked.
+        ('["10.42.0.2/24"]', "no host bits"),
+        ('["10.42.0.0/24", "10.42.0.0/24"]', "repeats"),
+        ('"10.42.0.0/24"', "array"),
+    ],
+)
+def test_a_declaration_that_could_be_read_two_ways_is_refused(
+    tmp_path: Path, networks: str, because: str
+) -> None:
+    with pytest.raises(HostProfileError, match=because):
+        load_host_profile(_declaring(tmp_path, networks))

@@ -4,6 +4,16 @@ schema_version = 1
 id = "mac-dev"
 platform = "macos"
 driver = "local-supervisord"
+# The workstation's own end of the cable it strings to a board. The board
+# declares this network in its operations config so it stops publishing
+# 10.42.0.2; this says the same thing about 10.42.0.1, which is this machine.
+# Two Hosts each describing their own publishing, not one fact written twice.
+#
+# Nobody had told this one. It runs Hub, Channel and Admin like any Host, and
+# `_both` in the readiness contract says so — so until this line existed it
+# offered phones and devices an address only it can reach, which is the whole
+# of what happened on 2026-09-15 on a board that had been told.
+management_networks = ["10.42.0.0/24"]
 
 [paths]
 install_root = "~/ai/eidolon"

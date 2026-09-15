@@ -14,7 +14,7 @@ import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
-from ipaddress import IPv4Address, ip_address
+from ipaddress import IPv4Address, ip_address, ip_network
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Literal
@@ -209,6 +209,10 @@ class HostProfile:
     paths: HostPaths
     lifecycle_script: Path | None
     operations_config: Path | None
+    #: Which of this Host's own links carry operations traffic rather than the
+    #: product. Empty on every Host that declares none, which is every Host
+    #: that existed before this could be said.
+    management_networks: tuple[str, ...] = ()
 
     @property
     def workspace_root(self) -> Path:
@@ -246,7 +250,63 @@ class HostProfile:
         )
         if self.foundation_mode is not None:
             values["EIDOLON_FOUNDATION_MODE"] = self.foundation_mode
+        if self.management_networks:
+            # The same variable a deployed Host reads out of its own host.env,
+            # so the three consumers that filter by it — Hub's advertiser, the
+            # Channel provider and Admin — do not learn that there are two
+            # kinds of Host.
+            values["EIDOLON_MANAGEMENT_NETWORKS"] = ",".join(self.management_networks)
         return values
+
+
+def _profile_management_networks(
+    value: object, *, driver: HostDriver
+) -> tuple[str, ...]:
+    """Which of this Host's links the operator keeps, when the Host is the workstation.
+
+    A Host states this where its own environment is rendered from. For a Host
+    Ops deploys to that is the operations config, which travels to
+    `/etc/eidolon/host.env`; for a workstation running the sources it is this
+    profile, which is rendered into `product-source.env`. Same variable, same
+    consumers, two renderers — and refusing it on the deployed profile matters
+    more than it looks, because a declaration nobody reads is precisely the
+    failure this whole mechanism exists to remove.
+
+    Both ends of a cable are on it, and each says so about itself: the board
+    declares the link so it stops publishing `10.42.0.2`, and the workstation
+    declares it so it stops publishing `10.42.0.1`. Those are two Hosts each
+    describing their own publishing, not one fact written twice. Nobody had
+    told the workstation, so on 2026-09-15 it was still offering phones and
+    devices a cable only it could reach.
+
+    Canonicalised and strict, matching `config._management_networks` — the same
+    rule on both sides, which is how a value written in one place and checked
+    in another stays the same value.
+    """
+
+    if value is None:
+        return ()
+    if driver is not HostDriver.LOCAL_SUPERVISORD:
+        raise HostProfileError(
+            "host.management_networks belongs in this Host's operations config, which is "
+            "where its environment is rendered from; a profile Ops deploys from renders "
+            "none and nothing would read it here"
+        )
+    if not isinstance(value, list):
+        raise HostProfileError("host.management_networks must be an array of networks")
+    networks: list[str] = []
+    for position, entry in enumerate(value):
+        label = f"host.management_networks[{position}]"
+        try:
+            network = ip_network(_text(entry, label), strict=True)
+        except ValueError as exc:
+            raise HostProfileError(
+                f"{label} must be an IP network with no host bits set, or a single address"
+            ) from exc
+        if str(network) in networks:
+            raise HostProfileError(f"{label} repeats {str(network)!r}")
+        networks.append(str(network))
+    return tuple(networks)
 
 
 def load_host_profile(path: Path) -> HostProfile:
@@ -267,8 +327,12 @@ def load_host_profile(path: Path) -> HostProfile:
         raise HostProfileError("host profile schema_version must be 1")
 
     host = _table(document["host"], "host")
-    if set(host) != {"id", "platform", "driver"}:
-        raise HostProfileError("host must contain exactly id, platform and driver")
+    if not {"id", "platform", "driver"}.issubset(host) or not set(host).issubset(
+        {"id", "platform", "driver", "management_networks"}
+    ):
+        raise HostProfileError(
+            "host must contain id, platform and driver, with only management_networks optional"
+        )
     host_id = _text(host["id"], "host.id")
     if _HOST_ID.fullmatch(host_id) is None:
         raise HostProfileError("host.id is invalid")
@@ -276,6 +340,9 @@ def load_host_profile(path: Path) -> HostProfile:
     driver = _member(HostDriver, host["driver"], "host.driver")
     if _PLATFORM_DRIVERS[platform] is not driver:
         raise HostProfileError("host platform and driver are incompatible")
+    management_networks = _profile_management_networks(
+        host.get("management_networks"), driver=driver
+    )
 
     paths_wire = _table(document["paths"], "paths")
     if set(paths_wire) != set(_PATH_FIELDS):
@@ -336,6 +403,7 @@ def load_host_profile(path: Path) -> HostProfile:
         lifecycle_script=lifecycle_script,
         operations_config=operations_config,
         foundation_mode=foundation_mode,
+        management_networks=management_networks,
         external_livekit_config=external_livekit_config,
         app=app,
         source_overrides=source_overrides,
