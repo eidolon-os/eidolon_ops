@@ -162,14 +162,56 @@ decision (marker==anchor==gen8): keep_established_lineage
 也就是 9 月 10 日那件事。它只在 `--apply` 时触发，`install` 的 dry-run（`apply=False`）
 不会走到。
 
-**所以：修好世代分歧是必要的，但不足以让 `install` 在这块板子上跑完。** 今天那个
-`factory_setup_code` 要不要继续走 install 这条路，是一个独立的决定，得先想清楚
-"给一台已经在跑的 Host 补一个安装期文件"到底应该由哪个动词负责。
+**所以：修好世代分歧是必要的，但不足以让 `install` 在这块板子上跑完。**
+
+### 第二道闸门也补成了一条命令（2026-09-17）
+
+手写 `host_delivery.json` 比手写世代文件更糟：那里面没有任何一处有签名，手写它等于用
+无凭据的方式，去断言这个文件存在的唯一目的所要证明的那件事——写错了没有任何东西会发现。
+所以同样补成操作，`trust-host-delivery`（main `f5db463`）：
+
+```bash
+./eidolon pi5 trust-host-delivery            # 打印证明结果和板子报的硬件标识
+./eidolon pi5 trust-host-delivery --apply
+```
+
+它不接受操作者的断言，而是要板子自证**已经持有这套身份**，三条缺一不可：
+
+| 证明 | 来自 |
+| --- | --- |
+| `serves_this_host_id` | 板子服务的签名 Owner 目录里是这个 profile 的公开 Host id |
+| `holds_this_identity` | 板子手上那份身份密钥就是这个 profile 签发的那一份（哈希比对） |
+| `established_this_authority` | 板子建立的授权世代正是这个 profile 认的那一代 |
+
+只是"在这个地址上应答"三条都证明不了。第二条承重——前两条在换硬件恢复之后依然成立，
+那叫迁移，不叫交付。**只填空，不改写**：已有绑定指向另一块板子时拒绝而非替换，因为挪
+身份是完整恢复或新建 Host，不能是"一个专门用来发现这件事的操作"的副作用。记下之后 ops
+没有任何动词能挪走它，所以 plan 里 apply 标的是 `irreversible`。
+
+### 两条命令的顺序是被守卫强制出来的
+
+pi5 上直接跑 `trust-host-delivery` 必然被拒：板子建立的是第 8 代、材料认第 9 代，
+`established_this_authority` 不成立，报错直接指回第一条。所以顺序固定：
+
+```bash
+./eidolon pi5 trust-host-authority --apply --replace authority-state_LJxSTZE2bamD2OGWCj-2BazBbosGT_AE
+./eidolon pi5 trust-host-delivery --apply
+./eidolon pi5 install --release-id <id>       # 两道闸门才都通
+```
+
+不用记文档，跑错顺序会被挡住并被告知下一步。
+
+opi5max 已经按这条路走完（它本来就没有世代分歧，只缺交付证据）：
+`ehost-f89c0ecca5d0070a7989` ↔ `device-tree:rockchip,rk3588-orangepi-5-max`，
+`sha256:9791c070…`，再跑报 `current`。
+
+至于今天那个 `factory_setup_code` 要不要继续走 install 这条路，是一个独立的决定，得先
+想清楚"给一台已经在跑的 Host 补一个安装期文件"到底应该由哪个动词负责。
 
 ## 5. 需要机主决定的事
 
-1. 是否执行方案 C（只改工作站两个文件，不碰板子）。
-2. 那块 9 月 10 日装过的**新板子**现在在哪、还要不要。方案 C 之后，这个 profile 就
+1. ~~是否执行方案 C~~ 已定：走 `trust-host-authority`，等板子回台架。
+2. 那块 9 月 10 日装过的**新板子**现在在哪、还要不要。收敛之后，这个 profile 就
    不再认它了（它在第 9 代）；它如果还要用，应该有**自己的** profile 和自己的
    `.eidolon-ops/<host>/inputs`，而不是共用 pi5 这一份——它和现在这块板子目前共用同一个
    Host identity 和同一个 Owner 根。
@@ -177,17 +219,21 @@ decision (marker==anchor==gen8): keep_established_lineage
 
 ## 6. 收尾状态（2026-09-17）
 
-代码侧已完成，材料侧未执行：
+两道闸门的代码侧都已完成并合入 main；pi5 的材料侧还没执行，因为板子不在线。
 
-- ✅ `trust-host-authority` 已落地（见 §4），含 12 条新测试：两块板子的分叉在原语层和
-  controller 层各复现一次，并证明采纳之后 install 闸门从 `recovery_required` 变成
-  `keep_established_lineage`。全量回归 1143 passed / 48 skipped，相对基线
-  （1130 passed / 48 skipped）零新增失败；改动范围 Ruff 通过。
-- ✅ 拒绝文案、README「一份 Owner 材料只能认一台 Host」、runbook 已同步。
-- ⏳ **`.eidolon-ops/pi5/owner-domain/` 仍是 generation 9**。pi5 已下台架（台架上换成了
-  opi5max），命令需要读板子才能跑。板子回来后跑一次
-  `trust-host-authority --apply --replace authority-state_LJxSTZE2…` 即收敛，然后用
-  install 干跑复验。
+- ✅ `trust-host-authority`（`beadaa6`）：12 条新测试，两块板子的分叉在原语层和 controller
+  层各复现一次，并证明采纳之后 install 闸门从 `recovery_required` 变成
+  `keep_established_lineage`。
+- ✅ `trust-host-delivery`（`f5db463`）：5 条新测试，含三条证明各自失效的参数化，以及
+  "换了硬件指纹也不许改写"。
+- ✅ 拒绝文案、README（「一份 Owner 材料只能认一台 Host」「身份交付给了哪块板子，也是
+  一份证据」）、runbook 已同步。全量回归 **1179 passed / 47 skipped**，零失败；改动范围
+  Ruff 通过。
+- ✅ **opi5max 已收尾**：世代本来就一致（gen 3，五份副本全同），交付证据已记录，再跑报
+  `current`。
+- ⏳ **pi5 两项都还没做**：`.eidolon-ops/pi5/owner-domain/` 仍是 generation 9，
+  `host_delivery.json` 仍不存在。两条命令都要读板子，而 pi5 已下台架（台架上换成了
+  opi5max）。板子回来后按 §4 的固定顺序跑，然后用 install 干跑复验。
 
 `.eidolon-ops/pi5/diagnosis-20260916-owner-generation/board-owner-directory.json` 是
 板子那份签名目录的离线副本（sha256 与板子自报一致），可用于离线核对，但采纳仍应走命令
