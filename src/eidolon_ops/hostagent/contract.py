@@ -486,6 +486,8 @@ STAGING_NAME = re.compile(
 )
 
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
+#: An environment variable name, the one shape a credential slot can name.
+ENV_KEY = re.compile(r"^[A-Z][A-Z0-9_]*$")
 
 VAR_TMP = Path("/var/tmp")
 
@@ -852,6 +854,46 @@ def declared_credential_relationships(
                 raise TargetError(f"credential relationship names no install input: {entry[field]}")
         relationships.append(tuple(entry[field] for field in fields))  # type: ignore[arg-type]
     return tuple(relationships)
+
+
+def declared_credential_classes(
+    payload: Mapping[str, object],
+) -> tuple[tuple[tuple[str, str], ...], ...]:
+    """Every place one shared credential lives, as the workstation grouped them.
+
+    Pairs are what the product declares; components of the pair graph are what a
+    repair can act on, and working that out is arithmetic over a table this
+    agent does not hold. So the grouping is sent, like the table itself.
+    """
+
+    declared = payload.get("credential_classes", [])
+    if not isinstance(declared, list):
+        raise TargetError("credential_classes must be an array")
+    classes: list[tuple[tuple[str, str], ...]] = []
+    seen: set[tuple[str, str]] = set()
+    for entry in declared:
+        if not isinstance(entry, dict) or set(entry) != {"slots"}:
+            raise TargetError("credential class must name exactly slots")
+        slots = entry["slots"]
+        if not isinstance(slots, list) or len(slots) < 2:
+            raise TargetError("credential class must hold at least two slots")
+        resolved: list[tuple[str, str]] = []
+        for slot in slots:
+            if not isinstance(slot, dict) or set(slot) != {"file", "key"}:
+                raise TargetError("credential slot must name exactly file, key")
+            file, key = slot["file"], slot["key"]
+            if not isinstance(file, str) or file not in SECRET_INPUTS:
+                raise TargetError(f"credential slot names no install input: {file}")
+            if not isinstance(key, str) or ENV_KEY.fullmatch(key) is None:
+                raise TargetError("credential slot key is not an environment name")
+            if (file, key) in seen:
+                # One slot in two classes would make "the value this holds"
+                # ambiguous, and a repair would write it twice with two answers.
+                raise TargetError(f"credential slot is in two classes: {file}:{key}")
+            seen.add((file, key))
+            resolved.append((file, key))
+        classes.append(tuple(resolved))
+    return tuple(classes)
 
 
 def fixed_port_registry(payload: Mapping[str, object]) -> str:

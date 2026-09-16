@@ -33,6 +33,7 @@ class SystemdSupervisor:
                 Capability.COMMISSIONING_CODE,
                 Capability.INIT_INPUTS,
                 Capability.CONVERGE_INPUTS,
+                Capability.REPAIR_CREDENTIALS,
                 Capability.INSTALL,
                 Capability.DEPLOY,
                 Capability.ROLLBACK,
@@ -61,6 +62,9 @@ class SystemdSupervisor:
 
     def converge_inputs(self, *, apply: bool) -> dict[str, object]:
         return self.release.converge_inputs(apply=apply)
+
+    def repair_credentials(self, *, apply: bool) -> dict[str, object]:
+        return self.release.repair_credentials(apply=apply)
 
     def lifecycle(self, action: str, *, dry_run: bool) -> dict[str, object]:
         return self.release.lifecycle(action, dry_run=dry_run)

@@ -149,6 +149,14 @@ def verify_relationships(
         "compared": len(relationships) - len(unchecked),
         "mismatched": mismatched,
         "unchecked": unchecked,
+        # Said here rather than left for the reader to work out. A finding that
+        # names no verb is one people route around, and this one used to name
+        # none because none existed.
+        **(
+            {"repair": "run `repair-credentials` to set these to this machine's value"}
+            if mismatched
+            else {}
+        ),
         "redaction": "credential values are compared on this Host and never returned",
     }
 
@@ -268,6 +276,165 @@ def converge(data: dict, root: Path) -> dict:
         "applied": bool(added),
         "redaction": "credential values are never returned",
     }
+
+
+def repair(data: dict, root: Path) -> dict:
+    """Make every copy of one shared credential on this Host one value again.
+
+    The third verb in this family, and the only one that changes a value a Host
+    already holds. ``install`` compares each staged input byte for byte and
+    refuses on a difference; ``converge`` adds a key a Host lacks and refuses to
+    replace one. Neither can end the state ``verify_relationships`` finds, which
+    is two files on this Host holding different values for one credential — and
+    until this existed nothing could: the remedy was a reinstall, which rotates
+    every secret on the Host to fix one of them.
+
+    **What decides that a repair is warranted is disagreement on this Host**,
+    not disagreement with the workstation. That distinction is the whole safety
+    argument, so it is worth following through:
+
+    - an operator who deliberately changed a credential changed every copy of
+      it, because the product does not work otherwise. Those copies agree, this
+      finds no disagreement, and **nothing is touched** — even though all of
+      them differ from the workstation's value. Reverting that is the one thing
+      this must never do, and it is prevented by construction rather than by a
+      flag;
+    - a Host whose copies disagree is already broken. Every path that could
+      produce that wrote one copy and not the others. There is no state in which
+      this fires and the Host was working.
+
+    The value it aligns to is the staged one — this machine's input set, whose
+    own copies are proven equal before anything is staged. That is the value
+    ``install`` wrote in the first place, so the result is the Host the operator
+    installed, with nothing else rotated.
+
+    By the class and never by the pair. The companion authority token lives in
+    five files joined by four pairs: correcting one of those pairs would move
+    ``data.env`` and leave the three files that agreed with it behind.
+
+    Dry unless asked. A dry run stages nothing and so cannot name the value it
+    would write; it reports which slots hold the same value as which, which is
+    what tells an operator that ``channel.env`` is the odd one out. Applying
+    names what it wrote.
+    """
+
+    classes = contract.declared_credential_classes(data)
+    if not classes:
+        raise TargetError("repair requires the credential classes the product declares")
+    apply = bool(data.get("apply"))
+    stage: Path | None = None
+    files: dict[str, dict[str, str] | None] = {}
+
+    def _read(name: str) -> dict[str, str] | None:
+        if name not in files:
+            destination = primitives.host_path(root, contract.INSTALL_INPUTS[name][0])
+            files[name] = (
+                _parse_env(destination.read_text(encoding="utf-8"))
+                if destination.is_file() and not destination.is_symlink()
+                else None
+            )
+        return files[name]
+
+    divided: list[dict[str, object]] = []
+    repaired: list[dict[str, object]] = []
+    unchecked: list[dict[str, str]] = []
+    pending: dict[str, dict[str, str]] = {}
+
+    for slots in classes:
+        names = [f"{file}:{key}" for file, key in slots]
+        held: dict[str, str] = {}
+        absent: list[str] = []
+        for (file, key), name in zip(slots, names, strict=True):
+            values = _read(file)
+            if values is None or key not in values:
+                absent.append(name)
+            else:
+                held[name] = values[key]
+        if absent:
+            # Neither case is a value to correct: a file that is not there is a
+            # Host that was never installed, and a key that is not there is what
+            # `converge` adds.
+            unchecked.append(
+                {"slots": ", ".join(names), "reason": f"absent: {', '.join(sorted(absent))}"}
+            )
+            continue
+        if len(set(held.values())) == 1:
+            continue
+
+        # Which slots hold the same value as which, named without naming a
+        # value. This is the finding; everything below acts on it.
+        groups = sorted(
+            sorted(name for name, value in held.items() if value == distinct)
+            for distinct in set(held.values())
+        )
+        finding: dict[str, object] = {"slots": names, "groups": groups}
+        divided.append(finding)
+        if not apply:
+            continue
+
+        if stage is None:
+            stage = _staging_directory(data, root)
+        staged: dict[str, str] = {}
+        for (file, key), name in zip(slots, names, strict=True):
+            path = stage / file
+            if not path.is_file():
+                raise TargetError(f"staged input is missing: {file}")
+            offered = _parse_env(path.read_text(encoding="utf-8"))
+            if key not in offered:
+                raise TargetError(f"staged {file} does not carry {key}")
+            staged[name] = offered[key]
+        if len(set(staged.values())) != 1:
+            # The workstation proves its own copies equal before staging them,
+            # so this is that machine's problem and not this Host's. Refused
+            # rather than resolved: a repair that guessed which copy was right
+            # would write the wrong credential everywhere.
+            raise TargetError(
+                "staged inputs disagree about " + ", ".join(names) + "; "
+                "repair the workstation's input set before delivering it"
+            )
+        target = next(iter(staged.values()))
+        written = sorted(name for name, value in held.items() if value != target)
+        for name in written:
+            file, key = name.split(":", 1)
+            pending.setdefault(file, dict(files[file] or {}))[key] = target
+        repaired.append({**finding, "written": written})
+
+    if apply and pending:
+        for file, values in sorted(pending.items()):
+            destination_value, user, group, mode = contract.INSTALL_INPUTS[file]
+            destination = primitives.host_path(root, destination_value)
+            temporary = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.tmp")
+            try:
+                temporary.write_text(
+                    "".join(f"{key}={values[key]}\n" for key in sorted(values)),
+                    encoding="utf-8",
+                )
+                os.chmod(temporary, mode)
+                _chown(temporary, user, group, root)
+                os.replace(temporary, destination)
+            finally:
+                temporary.unlink(missing_ok=True)
+
+    return {
+        "status": "repaired" if repaired else "divided" if divided else "consistent",
+        "classes": len(classes),
+        # The finding, dry or applied: which slots hold the same value as which.
+        "divided": divided,
+        "repaired": repaired,
+        "unchecked": unchecked,
+        # An env file is read at start, so a service still holds the credential
+        # it was started with. Named rather than performed: when a Host restarts
+        # is the operator's call, as it is for `converge`.
+        "restart_required": sorted(pending),
+        "applied": bool(apply and pending),
+        "redaction": "credential values are compared and written here, never returned",
+    }
+
+
+def repair_secret_relationships(payload: dict) -> dict:
+    """The action entry point: this Host, at its real root."""
+
+    return repair(dict(payload), Path("/"))
 
 
 def _staging_directory(data: dict, root: Path) -> Path:

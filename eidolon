@@ -11,7 +11,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROFILES_DIR="${EIDOLON_HOSTS_DIR:-${ROOT}/config/hosts}"
 UV_BIN="${EIDOLON_UV_BIN:-uv}"
 
-ALL_COMMANDS="abandon app-ready pending trust-host-key ssh-config trust-host-authority trust-host-delivery bring-up authority-backup authority-restore backup commissioning-code controller-reset converge-inputs debug deploy diagnose doctor init-inputs install kernel-schema-reset logs provision reset restart restore rollback start status stop update"
+ALL_COMMANDS="abandon app-ready pending trust-host-key ssh-config trust-host-authority trust-host-delivery bring-up authority-backup authority-restore backup commissioning-code controller-reset converge-inputs repair-credentials debug deploy diagnose doctor init-inputs install kernel-schema-reset logs provision reset restart restore rollback start status stop update"
 # Keyed on the Host's driver, not on its platform. What a Host can be asked to
 # do is decided by the adapter its driver selects — adapters/supervisord.py and
 # adapters/systemd.py each declare one capability set — so two boards Ops
@@ -20,7 +20,7 @@ ALL_COMMANDS="abandon app-ready pending trust-host-key ssh-config trust-host-aut
 # boards by name: rk3588 shipped a driver these sets already covered and was
 # still unreachable through this script, because nobody added its name.
 LOCAL_SUPERVISORD_COMMANDS="status doctor app-ready start stop restart logs commissioning-code reset kernel-schema-reset debug"
-SSH_SYSTEMD_COMMANDS="abandon status pending trust-host-key ssh-config trust-host-authority trust-host-delivery bring-up doctor app-ready start stop restart logs commissioning-code provision init-inputs converge-inputs backup restore install controller-reset authority-backup authority-restore reset kernel-schema-reset deploy update rollback diagnose"
+SSH_SYSTEMD_COMMANDS="abandon status pending trust-host-key ssh-config trust-host-authority trust-host-delivery bring-up doctor app-ready start stop restart logs commissioning-code provision init-inputs converge-inputs repair-credentials backup restore install controller-reset authority-backup authority-restore reset kernel-schema-reset deploy update rollback diagnose"
 
 die() {
   printf '错误：%s\n' "$*" >&2
@@ -144,6 +144,7 @@ command_summary() {
     provision) printf '检查或安装 Pi 基础系统依赖' ;;
     init-inputs) printf '首次生成产品私密输入和 Host Identity' ;;
     converge-inputs) printf '补齐新增凭据，不修改已有值' ;;
+    repair-credentials) printf '把板上自相矛盾的共享凭据对齐回本机的值(板上一致则不动)' ;;
     backup) printf '备份声明支持的组件数据（非整机）' ;;
     restore) printf '恢复同一 Host 的组件数据（非整机）' ;;
     install) printf '向新 Pi 安装指定 release' ;;

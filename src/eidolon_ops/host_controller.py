@@ -366,6 +366,20 @@ class HostController:
         report = release.converge_inputs(apply=apply)
         return self._planned_or_applied(plan, report, applied=apply)
 
+    def repair_credentials(self, *, apply: bool = False) -> Evidence:
+        """Make each shared credential on this Host one value again.
+
+        Separate from ``converge_inputs`` for the reason the capability says:
+        convergence is safe on a working Host because it never replaces a value,
+        and this verb exists to replace one. Keeping them apart is what lets
+        both sentences stay true.
+        """
+
+        plan = plans.repair_credentials(self.profile.host_id, apply=apply)
+        release = self.adapter.require_release(Capability.REPAIR_CREDENTIALS)
+        report = release.repair_credentials(apply=apply)
+        return self._planned_or_applied(plan, report, applied=apply)
+
     def install(
         self,
         *,

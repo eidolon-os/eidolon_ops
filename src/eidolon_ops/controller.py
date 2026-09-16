@@ -38,6 +38,7 @@ from eidolon_ops.hostagent.hardware import BINDING_FILE, HostHardwareError, veri
 from eidolon_ops.identity_replacement import replacement_inputs
 from eidolon_ops.install_inputs import (
     add_missing_install_credentials,
+    declared_credential_classes,
     declared_credential_relationships,
     declared_secret_env_keys,
     initialize_install_inputs,
@@ -76,6 +77,9 @@ _LIFECYCLE_ACTIONS = frozenset({"start", "stop", "restart"})
 #: run cleans up after the first rather than accumulating directories of
 #: secrets on the Host.
 _CONVERGENCE_STAGE_ID = "credential-convergence"
+#: Its own staging identity, so a repair never consumes a convergence's files
+#: and a `cleanup-stage` for one cannot remove the other's mid-flight.
+_REPAIR_STAGE_ID = "credential-repair"
 
 
 #: What SQLite leaves beside a database it owns. A component that declared the
@@ -1030,8 +1034,8 @@ class EidolonPiController:
             labels = ", ".join(str(entry.get("label")) for entry in broken)
             return (
                 f"this Host holds two different values for: {labels}. Convergence adds "
-                "keys and cannot repair that; the values it should hold are in this "
-                "machine's input set, and delivering them is a reinstall today"
+                "keys and cannot replace one; run `repair-credentials` to set every copy "
+                "of those to this machine's value"
             )
         if applied:
             return "run `restart` so the services read their new credentials"
@@ -1091,6 +1095,85 @@ class EidolonPiController:
             "restart_required": sorted(host.get("added") or {}),
             "next": self._converged_next_step(applied, host.get("relationships") or {}),
         }
+
+    def repair_credentials(self, *, apply: bool = False) -> dict[str, object]:
+        """Make each shared credential on this Host one value again.
+
+        The third of three verbs, and the only one that changes a value a Host
+        already holds. ``install`` refuses when a staged input differs from the
+        one installed, which is right for resuming an interrupted install;
+        ``converge-inputs`` adds a key the Host lacks and refuses to replace
+        one, which is what makes it safe on a working Host. Between them they
+        could not end the state ``doctor`` now finds — two files on this Host
+        holding different values for one credential — and the only remedy was a
+        reinstall, which rotates every secret on the Host to fix one of them.
+
+        Two things decide what this does, and both are refusals rather than
+        judgement calls:
+
+        1. **this machine's own input set is proven first.** Its copies of every
+           shared credential must already agree, because they are what the Host
+           is about to be aligned to. Delivering from a set that disagrees with
+           itself would write one arbitrary copy of a credential everywhere;
+        2. **the Host must disagree with itself.** A Host whose copies all agree
+           is left alone even when they differ from this machine — that is an
+           operator who rotated a credential here, and reverting them is the one
+           thing this must not do. It is impossible rather than discouraged: the
+           agent never compares a Host value to a staged one except inside a
+           class it has already found divided.
+
+        Dry unless asked, and a dry run stages nothing: there is no reason to
+        put this machine's credentials on a Host in order to report that they
+        are not needed.
+        """
+
+        # Proven before anything is staged, and on the full contract rather than
+        # a narrower check: the value this delivers is only authoritative if the
+        # set it comes from is internally consistent.
+        workstation = self.preflight.validate_input_contract()
+        payload: dict[str, object] = {
+            "credential_classes": declared_credential_classes(),
+            "apply": apply,
+        }
+        if apply:
+            stage = f"/var/tmp/eidolon-secrets-{_REPAIR_STAGE_ID}"
+            self.host_layer.stage_install_files(_REPAIR_STAGE_ID, stage)
+            payload["release_id"] = _REPAIR_STAGE_ID
+        try:
+            host = self.transport.run_agent(
+                "repair-secret-relationships", payload, timeout=120
+            )
+        finally:
+            if apply:
+                # Unlike `converge-inputs`, which leaves its staging directory
+                # for the next run to clear. A repair stages the whole input set
+                # to correct one credential, and leaving that on the Host is a
+                # wider exposure than the operation itself.
+                self.transport.run_agent(
+                    "cleanup-stage", {"release_id": _REPAIR_STAGE_ID}, timeout=120
+                )
+        return {
+            "status": host.get("status"),
+            "workstation": workstation,
+            "host": host,
+            "restart_required": host.get("restart_required") or [],
+            "next": self._repaired_next_step(host),
+        }
+
+    @staticmethod
+    def _repaired_next_step(host: Mapping[str, object]) -> str:
+        divided = host.get("divided") or []
+        if not divided:
+            return "nothing to repair: every shared credential on this Host is one value"
+        if host.get("applied"):
+            return (
+                "run `restart` so the services read their corrected credentials; until "
+                "they do, each still holds the one it was started with"
+            )
+        slots = ", ".join(
+            " vs ".join("/".join(group) for group in entry["groups"]) for entry in divided
+        )
+        return f"rerun with --apply to set these to this machine's value: {slots}"
 
     # -- boundary actions ----------------------------------------------------
 

@@ -57,6 +57,7 @@ ACTIONS: dict[str, tuple[ModuleType, str]] = {
     "install-component-artifact": (staging, "install_component_artifact"),
     "install": (install, "install"),
     "converge-secret-inputs": (secret_inputs, "converge_secret_inputs"),
+    "repair-secret-relationships": (secret_inputs, "repair_secret_relationships"),
     "ensure-service-identities": (identities, "ensure_service_identities"),
     "controller-reset": (lifecycle, "controller_reset"),
     "commissioning-code": (lifecycle, "commissioning_code"),

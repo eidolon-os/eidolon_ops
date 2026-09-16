@@ -34,6 +34,7 @@ from eidolon_ops.provider_inputs import (
 __all__ = [
     "INSTALL_DESTINATION_NAMES",
     "add_missing_install_credentials",
+    "declared_credential_classes",
     "declared_credential_relationships",
     "declared_secret_env_keys",
     "host_rendered_fields",
@@ -437,6 +438,47 @@ PROVIDER_ENV_KEYS: tuple[tuple[str, str], ...] = tuple(
     for source_id, keys in _EXTERNAL_KEYS.items()
     for key in keys
 )
+
+def declared_credential_classes() -> list[dict[str, object]]:
+    """Every place one shared credential lives, grouped by the value they share.
+
+    :data:`SHARED_CREDENTIALS` states pairs, and a repair cannot work in pairs.
+    The companion authority token lives in five files joined by four pairs; a
+    Host holding ``Y`` in four of them and ``X`` in the fifth has exactly one
+    mismatched *pair*, and correcting that pair alone would move ``data.env``
+    and leave the three files that agreed with it behind — the same Host, broken
+    a different way.
+
+    So the unit is the credential: the connected component of the pair graph,
+    every slot that must hold one value. Thirteen of them today, from seventeen
+    pairs.
+
+    Derived here rather than on the Host, like every other declaration in the
+    payload, and ordered so two runs produce the same document.
+    """
+
+    parent: dict[tuple[str, str], tuple[str, str]] = {}
+
+    def find(slot: tuple[str, str]) -> tuple[str, str]:
+        parent.setdefault(slot, slot)
+        while parent[slot] != slot:
+            parent[slot] = parent[parent[slot]]
+            slot = parent[slot]
+        return slot
+
+    for left_file, left_key, right_file, right_key, _label in SHARED_CREDENTIALS:
+        left, right = find((left_file, left_key)), find((right_file, right_key))
+        if left != right:
+            parent[left] = right
+
+    grouped: dict[tuple[str, str], list[tuple[str, str]]] = {}
+    for slot in parent:
+        grouped.setdefault(find(slot), []).append(slot)
+    return [
+        {"slots": [{"file": file, "key": key} for file, key in sorted(slots)]}
+        for _root, slots in sorted(grouped.items())
+    ]
+
 
 def declared_credential_relationships() -> list[dict[str, str]]:
     """Which two credentials a Host must hold as one value, for the agent to prove.

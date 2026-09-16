@@ -58,6 +58,9 @@ OPERATIONS: dict[str, Callable[[HostController, argparse.Namespace], object]] = 
     "converge-inputs": lambda controller, a: controller.converge_inputs(
         apply=a.apply
     ),
+    "repair-credentials": lambda controller, a: controller.repair_credentials(
+        apply=a.apply
+    ),
     "backup": lambda controller, a: controller.backup(output=a.output),
     "restore": lambda controller, a: controller.restore(
         source=a.source, apply=a.apply
@@ -283,6 +286,15 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
     converge_inputs.add_argument("--apply", action="store_true")
+    repair_credentials = operations.add_parser(
+        "repair-credentials",
+        help=(
+            "set every copy of a credential this Host holds two different values for "
+            "to the value in this machine's input set; a Host whose copies agree is "
+            "never touched, even when they differ from this machine"
+        ),
+    )
+    repair_credentials.add_argument("--apply", action="store_true")
     backup = operations.add_parser(
         "backup",
         help="snapshot every authority that can be snapshotted, and fetch it here",

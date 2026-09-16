@@ -90,6 +90,12 @@ class Capability(StrEnum):
     #: staged one — which is right for a resume and is exactly why a
     #: credential added after installation had no way to arrive.
     CONVERGE_INPUTS = "converge-inputs"
+    #: Make each shared credential on a Host one value again. Its own capability
+    #: rather than a mode of CONVERGE_INPUTS, because their safety contracts are
+    #: opposite: convergence is safe on a working Host precisely because it never
+    #: replaces a value, and folding a verb that does into it would make that
+    #: sentence conditional.
+    REPAIR_CREDENTIALS = "repair-credentials"
     INSTALL = "install"
     DEPLOY = "deploy"
     ROLLBACK = "rollback"

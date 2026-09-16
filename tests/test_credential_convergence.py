@@ -26,6 +26,7 @@ from eidolon_ops.hostagent.primitives import TargetError
 from eidolon_ops.install_inputs import (
     DECLARED_ENV_KEYS,
     SHARED_CREDENTIALS,
+    declared_credential_classes,
     declared_credential_relationships,
     declared_secret_env_keys,
 )
@@ -556,3 +557,219 @@ def test_doctor_does_not_fail_a_host_nobody_asked_about(tmp_path) -> None:
 
     assert result["checks"]["credential_relationships"] is True
     assert result["credential_relationships"]["status"] == "not_declared"
+
+
+# -- repair ---------------------------------------------------------------
+#
+# The third verb, and the only one that replaces a value a Host already holds.
+# Every safety rule it relies on is pinned below, because the rules are the
+# reason it is allowed to exist.
+
+
+def _classes(*groups):
+    return [{"slots": [{"file": f, "key": k} for f, k in group]} for group in groups]
+
+
+def _repair_payload(classes, *, apply: bool) -> dict:
+    payload: dict = {"credential_classes": classes, "apply": apply}
+    if apply:
+        payload["release_id"] = "credential-convergence"
+    return payload
+
+
+_COMPANION = (
+    ("data.env", "EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN"),
+    ("kernel.env", "EIDOLON_KERNEL_COMPANION_AUTHORITY_TOKEN"),
+    ("channel.env", "EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN"),
+)
+
+
+def _companion_host(root, data, kernel, channel) -> None:
+    _host(root, "data.env", f"EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN={data}\n")
+    _host(root, "kernel.env", f"EIDOLON_KERNEL_COMPANION_AUTHORITY_TOKEN={kernel}\n")
+    _host(root, "channel.env", f"EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN={channel}\n")
+
+
+def _companion_stage(root, value) -> None:
+    _stage(root, "data.env", f"EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN={value}\n")
+    _stage(root, "kernel.env", f"EIDOLON_KERNEL_COMPANION_AUTHORITY_TOKEN={value}\n")
+    _stage(root, "channel.env", f"EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN={value}\n")
+
+
+def test_a_consistently_changed_host_is_never_touched(tmp_path) -> None:
+    """The one thing this verb must never do, prevented by construction.
+
+    An operator who deliberately changed a credential changed every copy of it,
+    because the product does not work otherwise. Those copies agree, so there is
+    no division to find, and the staged value is never even read — let alone
+    written over theirs. Note that every slot here differs from what is staged.
+    """
+
+    _companion_host(tmp_path, "operators-own", "operators-own", "operators-own")
+    _companion_stage(tmp_path, "this-machines-value")
+
+    report = secret_inputs.repair(_repair_payload(_classes(_COMPANION), apply=True), tmp_path)
+
+    assert report["status"] == "consistent"
+    assert report["applied"] is False and report["divided"] == []
+    for name, key in _COMPANION:
+        body = (tmp_path / "etc/eidolon" / name).read_text(encoding="utf-8")
+        assert f"{key}=operators-own" in body
+
+
+def test_a_divided_credential_is_aligned_by_the_class_not_the_pair(tmp_path) -> None:
+    """Why the unit is the credential and never the relationship.
+
+    Three of these slots agree with each other and disagree with the fourth. Of
+    the pairs that join them, only the ones crossing that line are mismatched —
+    repairing those alone would move `data.env` to the staged value and leave
+    `kernel.env`, which agreed with it, behind. The same Host, broken a
+    different way.
+    """
+
+    _companion_host(tmp_path, "stale", "stale", "this-machines-value")
+    _companion_stage(tmp_path, "this-machines-value")
+
+    report = secret_inputs.repair(_repair_payload(_classes(_COMPANION), apply=True), tmp_path)
+
+    assert report["status"] == "repaired"
+    assert report["repaired"][0]["written"] == [
+        "data.env:EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN",
+        "kernel.env:EIDOLON_KERNEL_COMPANION_AUTHORITY_TOKEN",
+    ]
+    for name, key in _COMPANION:
+        body = (tmp_path / "etc/eidolon" / name).read_text(encoding="utf-8")
+        assert f"{key}=this-machines-value" in body
+    # Named, not performed: each service still holds what it started with.
+    assert report["restart_required"] == ["data.env", "kernel.env"]
+
+
+def test_a_dry_run_names_who_disagrees_with_whom_and_writes_nothing(tmp_path) -> None:
+    """It stages nothing, so it cannot name a value — and does not need to.
+
+    What an operator needs is which file is the odd one out, and that is
+    knowable from the Host alone.
+    """
+
+    _companion_host(tmp_path, "stale", "stale", "this-machines-value")
+
+    report = secret_inputs.repair(_repair_payload(_classes(_COMPANION), apply=False), tmp_path)
+
+    assert report["status"] == "divided" and report["applied"] is False
+    assert report["divided"][0]["groups"] == [
+        ["channel.env:EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN"],
+        [
+            "data.env:EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN",
+            "kernel.env:EIDOLON_KERNEL_COMPANION_AUTHORITY_TOKEN",
+        ],
+    ]
+    assert "stale" not in repr(report) and "this-machines-value" not in repr(report)
+    assert (tmp_path / "etc/eidolon/data.env").read_text(encoding="utf-8") == (
+        "EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN=stale\n"
+    )
+
+
+def test_a_staged_set_that_disagrees_with_itself_is_refused(tmp_path) -> None:
+    """The workstation proves its own copies equal before staging them.
+
+    Reaching this means that proof was skipped. Refused rather than resolved:
+    picking one of two staged copies would write the wrong credential into every
+    file in the class.
+    """
+
+    _companion_host(tmp_path, "one", "two", "two")
+    _stage(tmp_path, "data.env", "EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN=alpha\n")
+    _stage(tmp_path, "kernel.env", "EIDOLON_KERNEL_COMPANION_AUTHORITY_TOKEN=beta\n")
+    _stage(tmp_path, "channel.env", "EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN=alpha\n")
+
+    with pytest.raises(TargetError, match="staged inputs disagree"):
+        secret_inputs.repair(_repair_payload(_classes(_COMPANION), apply=True), tmp_path)
+
+    # And nothing was written on the way to refusing.
+    assert "one" in (tmp_path / "etc/eidolon/data.env").read_text(encoding="utf-8")
+
+
+def test_repair_leaves_other_keys_in_a_file_alone(tmp_path) -> None:
+    """It rewrites one field, not the file it lives in."""
+
+    _host(
+        tmp_path,
+        "data.env",
+        "EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN=stale\n"
+        "EIDOLON_DATA_SQLITE_PATH=/var/lib/eidolon/eidolon-system.sqlite3\n",
+    )
+    _host(tmp_path, "kernel.env", "EIDOLON_KERNEL_COMPANION_AUTHORITY_TOKEN=correct\n")
+    _stage(tmp_path, "data.env", "EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN=correct\n")
+    _stage(tmp_path, "kernel.env", "EIDOLON_KERNEL_COMPANION_AUTHORITY_TOKEN=correct\n")
+
+    secret_inputs.repair(
+        _repair_payload(_classes(_COMPANION[:2]), apply=True), tmp_path
+    )
+
+    body = (tmp_path / "etc/eidolon/data.env").read_text(encoding="utf-8")
+    assert "EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN=correct" in body
+    assert "EIDOLON_DATA_SQLITE_PATH=/var/lib/eidolon/eidolon-system.sqlite3" in body
+
+
+def test_a_missing_key_is_convergence_s_job_not_this_one(tmp_path) -> None:
+    """Crisp contracts: convergence adds a key, repair corrects a value.
+
+    A slot that is not there has no value to correct, and inventing one here
+    would make two verbs able to write the same credential by different rules.
+    """
+
+    _host(tmp_path, "data.env", "EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN=held\n")
+    _host(tmp_path, "kernel.env", "SOMETHING_ELSE=x\n")
+    _stage(tmp_path, "data.env", "EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN=held\n")
+    _stage(tmp_path, "kernel.env", "EIDOLON_KERNEL_COMPANION_AUTHORITY_TOKEN=held\n")
+
+    report = secret_inputs.repair(
+        _repair_payload(_classes(_COMPANION[:2]), apply=True), tmp_path
+    )
+
+    assert report["status"] == "consistent"
+    assert report["unchecked"][0]["reason"] == (
+        "absent: kernel.env:EIDOLON_KERNEL_COMPANION_AUTHORITY_TOKEN"
+    )
+    assert "EIDOLON_KERNEL_COMPANION_AUTHORITY_TOKEN" not in (
+        tmp_path / "etc/eidolon/kernel.env"
+    ).read_text(encoding="utf-8")
+
+
+def test_the_classes_travel_and_the_agent_refuses_a_shape_it_cannot_place() -> None:
+    """Seventeen pairs, thirteen credentials, and one slot in exactly one of them."""
+
+    wire = declared_credential_classes()
+    parsed = contract.declared_credential_classes({"credential_classes": wire})
+    assert len(parsed) == 13
+    assert max(len(slots) for slots in parsed) == 5
+    assert sum(len(slots) for slots in parsed) == len({s for c in parsed for s in c})
+
+    with pytest.raises(TargetError, match="at least two slots"):
+        contract.declared_credential_classes(
+            {"credential_classes": _classes([("data.env", "A")])}
+        )
+    with pytest.raises(TargetError, match="names no install input"):
+        contract.declared_credential_classes(
+            {"credential_classes": _classes([("nope.env", "A"), ("data.env", "B")])}
+        )
+    with pytest.raises(TargetError, match="in two classes"):
+        contract.declared_credential_classes(
+            {
+                "credential_classes": _classes(
+                    [("data.env", "A"), ("hub.env", "B")],
+                    [("data.env", "A"), ("agent.env", "C")],
+                )
+            }
+        )
+
+
+def test_repair_refuses_to_run_with_nothing_declared(tmp_path) -> None:
+    """Unlike the read-only check, which treats silence as nobody asking.
+
+    This one writes. A payload that declares nothing would be a repair with no
+    definition of what it is repairing toward.
+    """
+
+    with pytest.raises(TargetError, match="requires the credential classes"):
+        secret_inputs.repair({"apply": False}, tmp_path)

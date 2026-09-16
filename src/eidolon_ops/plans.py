@@ -125,6 +125,35 @@ def converge_inputs(host_id: str, *, apply: bool = False) -> Plan:
     )
 
 
+def repair_credentials(host_id: str, *, apply: bool = False) -> Plan:
+    """Make each shared credential on this Host one value again.
+
+    ``REVERSIBLE`` rather than ``NONE``, unlike the convergence above, and the
+    difference is the point: this replaces a value the Host already holds. What
+    it replaces it with is this machine's, which is the value ``install`` wrote,
+    so the state it produces can be produced again — and it rotates nothing,
+    touches no authority data and leaves the Host identity alone, which is why
+    it is not ``IRREVERSIBLE`` either.
+
+    What is genuinely gone afterwards is the value it overwrote. That value was
+    one no component could have been using successfully: this only ever fires on
+    a credential whose copies on this Host disagree, which means whatever held
+    it was already failing to authenticate with it.
+    """
+
+    return Plan(
+        operation="repair-credentials",
+        host_id=host_id,
+        steps=_steps(
+            ("workstation", "prove this machine's own copies of each shared credential agree"),
+            ("host", "set every copy of a divided credential to this machine's value"),
+        ),
+        destructive=DestructiveLevel.REVERSIBLE if apply else DestructiveLevel.NONE,
+        requires_flags=frozenset({"--apply"} if apply else set()),
+        touches=frozenset({ActionKind.SECRET, ActionKind.CONFIG}),
+    )
+
+
 def bring_up(host_id: str, *, via: str, apply: bool) -> Plan:
     """Express what Ops requires of a board, for the channel it can be told down.
 
