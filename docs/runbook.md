@@ -16,14 +16,22 @@ Everything that used to be listed here as well — the Host's name, a non-root a
 sudo, the deploy key in it, and a wired link that does not spend its life waiting for a DHCP server that
 cannot answer — is no longer the operator's to remember. `bring-up` renders it from the Host profile, down
 whichever channel the board leaves open: its boot medium if it has never booted, a shell on it if it is
-already running. The host key is recorded by `trust-host-key`, in the profile's own `known_hosts`. Both are
-in the README under "从刷好的盘到可以被操作" and "换板子换的是信任".
+already running. The host key is recorded by `trust-host-key`, in the profile's own `known_hosts`, and
+compared against the fingerprint this repository has reviewed. Both are in the README under
+"从刷好的盘到可以被操作" and "换板子换的是信任"; why trust is keyed by name and which values are tracked
+is in [`host-key-trust.md`](host-key-trust.md).
 
 ```bash
 uv run eidolon-ops --config /absolute/path/hosts/pi5.toml \
   bring-up --via boot-medium --output /Volumes/bootfs --apply
 
+# Read the fingerprint on the board itself first — nothing on this workstation can
+# confirm it: ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
 uv run eidolon-ops --config /absolute/path/hosts/pi5.toml trust-host-key --apply
+
+# Once per workstation: make a hand-typed `ssh eidolon-pi5` use the same options,
+# then Include the fragment from the top of ~/.ssh/config.
+uv run eidolon-ops --config /absolute/path/hosts/pi5.toml ssh-config --apply
 ```
 
 A profile that has commissioned a second board names that board's Authority, and every install to the

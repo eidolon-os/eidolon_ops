@@ -24,8 +24,34 @@ user = "eidolon-opi5max"
 # 出厂的 Host 不接这根线，那时改回 mDNS 名字。
 hostname = "10.42.0.2"
 port = 22
+# This machine's own private key — the only value here that is machine-local.
 identity_file = "~/.ssh/id_ed25519_eidolon_opi5max"
-known_hosts_file = "~/.ssh/known_hosts"
+# And, separately, which operators the board accepts. Tracked; see its header.
+operator_keys_file = "eidolon-rk3588.operators"
+# The profile's own, not the operator's. Trust is granted under the Host's name
+# (`HostKeyAlias`), which above is the cable's address — and every board flashed
+# for this bench answers at that same address. So this name is the one place two
+# different boards are told apart, and in `~/.ssh/known_hosts` that made a board
+# swap an untracked hand edit sitting among a hundred unrelated hosts, where
+# deleting the wrong line fails loudly and pasting an unverified key fails
+# silently and forever. Here it is `trust-host-key`, which shows the fingerprint
+# and makes replacing a different one an acknowledged act. The directory is
+# gitignored, so the file stays machine-local; only its location is reviewed.
+known_hosts_file = "../.eidolon-ops/opi5max/known_hosts"
+# The ed25519 fingerprint this repository declares for this Host, as
+# `ssh-keygen -lf` prints that field. Tracked for the same reason the operator
+# public keys are: it is derived from a public key and the Host prints it to
+# anyone who asks. One value, so it is a field here rather than a file of its
+# own — a scalar in a file needs a parser and a rule that there is only ever
+# one line, for a string this profile can just hold.
+#
+# It closes the one gap the known_hosts above cannot: that file is gitignored,
+# so a second operator and a fresh checkout trust on first use with nothing to
+# compare against. It does not confirm the value — declaring what a scan
+# returned pins the key, it does not verify it. docs/host-key-trust.md says
+# which of the two this is. Empty means nobody has read one off the board yet,
+# which is the honest state and not an error.
+host_fingerprint = ""
 connect_timeout_seconds = 10
 remote_uv = "/usr/local/bin/uv"
 # Release payloads must never fall back to Wi-Fi, where this workstation's VPN

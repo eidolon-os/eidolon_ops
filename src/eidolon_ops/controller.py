@@ -21,6 +21,7 @@ from pathlib import Path
 
 from eidolon_ops import bring_up as bring_up_module
 from eidolon_ops import host_keys
+from eidolon_ops import ssh_config as ssh_config_module
 from eidolon_ops.component_contract import read_component_contracts
 from eidolon_ops.config import OperationsConfig, validate_release_id
 from eidolon_ops.errors import OperationsError
@@ -736,6 +737,7 @@ class EidolonPiController:
 
         alias = self.config.host.hostname
         path = self.config.host.known_hosts_file
+        declared = self.config.host.host_fingerprint
         host_key, endpoint = host_keys.scan(
             self.runner,
             self.transport.candidates(),
@@ -752,8 +754,44 @@ class EidolonPiController:
             "key_type": host_key.key_type,
             "fingerprint": host_key.fingerprint,
             "trusted_fingerprints": list(trusted),
+            "declared_fingerprint": declared or None,
         }
-        if already and len(existing) == 1:
+        # A different question from the one above it. That one asks whether
+        # anything changed on this workstation; this asks whether the board is
+        # the one the profile names, which is the only form of the question a
+        # fresh checkout can ask at all.
+        undeclared = bool(declared) and host_key.fingerprint != declared
+        if undeclared:
+            report["declaration"] = "conflict"
+            report["declaration_detail"] = (
+                f"this profile declares {declared} for this Host, and the board is presenting "
+                f"{host_key.fingerprint}. Those are two different boards, or one board whose "
+                "key was regenerated, or a machine-in-the-middle — nothing here can tell them "
+                "apart, and neither can a second scan. Read the fingerprint on the board over "
+                "something that is not this connection (a serial console, a screen and a "
+                f"keyboard). If it really is {host_key.fingerprint}, set host.host_fingerprint "
+                f"to it in {self.config.path} and run this again; that edit is the "
+                "acknowledgement, and it is the one the next operator gets to see."
+            )
+        elif declared:
+            report["declaration"] = "matches"
+        else:
+            report["declaration"] = "undeclared"
+            # Deliberately not printing the scanned value as a line to paste
+            # into the profile. It came from this connection, so declaring it
+            # would make the comparison check this scan against itself — the
+            # gate would pass forever while claiming to have compared.
+            report["declaration_detail"] = (
+                "this profile declares no host.host_fingerprint, so this is a first-use "
+                "trust: nothing here has anything to compare the board against. Confirming "
+                "it means reading the fingerprint on the board over something that is not "
+                "this connection — a serial console, or a screen and a keyboard. Declaring "
+                "what this scan returned instead pins the key rather than confirming it: it "
+                "catches a later swap and stops every workstation trusting on its own, and "
+                "it cannot catch anything wrong with this scan. docs/host-key-trust.md says "
+                "which of the two you are doing."
+            )
+        if already and len(existing) == 1 and not undeclared:
             report["status"] = "trusted"
             report["detail"] = "this profile already trusts exactly this key; nothing to write"
             return report
@@ -767,10 +805,27 @@ class EidolonPiController:
                 "(`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`), then name it: "
                 f"--replace {host_key.fingerprint} --apply"
             )
+        elif undeclared:
+            report["status"] = "undeclared"
+            report["detail"] = str(report["declaration_detail"])
         else:
             report["status"] = "untrusted" if not existing else "incomplete"
         if not apply:
             return report
+        # Two gates, and deliberately no flag that opens the second one. A
+        # board this profile does not name is answered by changing the profile,
+        # in the commit that reviews the change — which is the only thing the
+        # declaration was ever worth. While `--replace` satisfied both, the way
+        # through was to name the key on the command line and leave the profile
+        # declaring the board before it: the next operator meets a conflict
+        # against a value nobody maintains, and learns that the flag gets past
+        # it. A reviewed value that a flag can overrule is decoration.
+        if undeclared:
+            raise OperationsError(
+                f"{report['declaration_detail']!s} Nothing was written. `--replace` does "
+                "not answer this one: it says this workstation accepts a new key, and what "
+                "is in question is which board this profile names."
+            )
         if replacing:
             if replace is None:
                 raise OperationsError(str(report["detail"]))
@@ -783,6 +838,48 @@ class EidolonPiController:
         host_keys.write(path, alias, host_key)
         report["status"] = "recorded"
         report["detail"] = f"{alias} now trusts {host_key.fingerprint} and nothing else"
+        return report
+
+    def ssh_config(self, *, alias: str, invocation: str, apply: bool = False) -> dict[str, object]:
+        """Write this profile's SSH options where a hand-typed `ssh` will read them.
+
+        Generated rather than documented. Reaching this Host correctly by hand
+        takes four options, one of them (`HostKeyAlias`) load-bearing and not
+        guessable, so the correct way to connect was the long way and the short
+        way was `-o StrictHostKeyChecking=accept-new` into the operator's own
+        known_hosts — the file this profile deliberately stopped using. A
+        control harder to follow than to bypass is only worth discipline.
+        """
+
+        target = ssh_config_module.path_for(self.config.host)
+        # The command as an operator would actually type it, which is not
+        # `./eidolon {alias} ...`: the wrapper selects a Host by its profile
+        # filename, while the alias is the Host's id. Printing a command that
+        # does not run is worse than printing none.
+        text = ssh_config_module.render(self.config.host, alias=alias, generated_by=invocation)
+        report: dict[str, object] = {
+            "alias": alias,
+            "path": str(target),
+            "hostname": self.config.host.hostname,
+            "known_hosts": str(self.config.host.known_hosts_file),
+            "include": f"Include {target}",
+            "fragment": text,
+            "next": (
+                f"Add `Include {target}` to the top of ~/.ssh/config — above any `Host *` "
+                f"block, because ssh keeps the first value it is given — then `ssh {alias}` "
+                "is the same connection Ops makes, strict checking and all."
+            ),
+        }
+        if not apply:
+            report["status"] = "rendered"
+            return report
+        try:
+            ssh_config_module.write(target, text)
+        except OSError as exc:
+            raise OperationsError(
+                f"could not write the ssh config fragment to {target}: {exc}"
+            ) from exc
+        report["status"] = "written"
         return report
 
     def provision(self, *, apply: bool, journal: Journal | None = None) -> dict[str, object]:

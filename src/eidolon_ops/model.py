@@ -120,6 +120,12 @@ class Capability(StrEnum):
     #: outside an install, and because a Host that cannot prove it already holds
     #: the identity must not be offered it.
     TRUST_HOST_DELIVERY = "trust-host-delivery"
+    #: Write this profile's own SSH options where a hand-typed `ssh` will read
+    #: them. Beside TRUST_HOST_KEY rather than folded into it: recording what a
+    #: Host presents and making the safe way to reach it the short way are two
+    #: operations, and only the second is one an operator runs once per
+    #: workstation. Only a Host reached over SSH has either.
+    SSH_CONFIG = "ssh-config"
     #: Express what Ops requires of a board so the board can be told it — down
     #: whichever channel its own state leaves open, its boot medium or a shell
     #: on it. Only a Host reached over SSH needs this, and nothing about it can

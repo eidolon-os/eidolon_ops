@@ -40,7 +40,8 @@ Data V2 初始化、产品服务启动与 release doctor 校验，并记录手�
 “新 Pi”从 Raspberry Pi OS 已刷盘开始。那之后到“可以被 ops 操作”之间的每一件事——Host 的名字、操作
 账号、免密 sudo、部署公钥、以及一条不在等一个不可能存在的 DHCP 服务器的有线链路——都由
 [`bring-up`](#从刷好的盘到可以被操作) 从 Host profile 渲染出来，而不是留给谁去记得。这台 Host 的
-host key 由 [`trust-host-key`](#换板子换的是信任) 记录，记在 profile 自己的 known_hosts 里。
+host key 由 [`trust-host-key`](#换板子换的是信任) 记录，记在 profile 自己的 known_hosts 里；手打的 ssh
+由 [`ssh-config`](#手打-ssh-走同一条路) 走同一套选项。
 
 本工具不写 SD 卡镜像，也不自动制造云端 provider credential。Host identity、service token 和产品
 settings 来自 Mac 上 14 个 mode-0600 输入文件，值不会进入 TOML、argv、bundle、receipt 或诊断元数据。
@@ -262,6 +263,128 @@ host key 是按 Host 的**名字**信任的（`HostKeyAlias`），这正是“�
 名出来。指名一把**不是**正在被出示的 key 会被拒绝——确认必须是关于这台 Host 的，否则就什么都
 没确认。换板子和机器在中间从这里看是同一幅画，而工作站上没有任何东西能分辨它们。
 
+每个 profile 都这样：`config/eidolon-*.toml` 的 `known_hosts_file` 必须指向 profile 自己的目录，
+`config/hosts` 里的每一个 host 都由测试 (`tests/test_profile_host_trust.py`) 按这条规则检查。写成对
+每个 profile 的检查而不是对某一个的检查，是因为这套机制曾经只接到 Pi 上：rk3588 一直指着操作者的
+`~/.ssh/known_hosts`，而且**什么都没坏**——它绕过的那一半机制只在换板子那天才开口。台架上每块烧好
+的 OPi 都在 `10.42.0.2`，也就是说每块不同的板子都在同一个信任名下出示不同的 key，正是这条规则要拦
+的那件事。
+
+### profile 声明它期待哪把 key
+
+`config/<profile>.toml` 里的 `host.host_fingerprint` 是入库的，理由和 `.operators` 一样：指纹是从公钥算
+出来的，板子本机就打印给任何人看。它是一个标量，所以写成 profile 的一个字段，而不是一个单独的文件
+——单值放文件就要配一个解析器和一条“只能有一行”的规则，而 profile 本来就能直接持有一个字符串。
+
+它补的是 profile 自己那份 known_hosts **补不上的那一个**缺口：那份在 gitignore 里，所以第二个操作员
+和新 checkout 各自首次信任，手上没有任何可对照的值。`trust-host-key --apply` 对照它：
+
+- 对得上 → 直接写；
+- 对不上 → 把 profile 声明的和板子出示的并排打出来，要求显式 `--replace`；
+- profile 没声明 → 按首次信任处理，照常记录。
+
+两道闸独立：本机 known_hosts 变没变是一回事，这是不是 profile 指名的那块板子是另一回事，而只有后者
+能在新 checkout 上被问出来。
+
+**它买到什么、买不到什么**，这条要读准，详见 [`docs/host-key-trust.md`](docs/host-key-trust.md)：
+
+| | 声明一个值 |
+|---|---|
+| 此后换板子 | 拦得住 |
+| 别的机器上、以后的中间人 | 拦得住 |
+| 每台工作站各自 TOFU | 消掉了 |
+| **首次扫描那一刻的中间人** | **拦不住** |
+
+所以**把 `trust-host-key` 扫出来的指纹直接填进去，是 pin 不是 verify**：对照值来自被对照的那次扫描，
+这道闸会永远通过。要让它成为 verify，那个值必须从**不是这条连接**的通道读到——串口，或者接屏幕和键
+盘。命令本身不会把扫到的值递给你去粘贴，正是为了不让最省事的那条路是循环的那条。
+
+两个 profile 今天都是空的。台架上 OPi 没接串口也没接 HDMI，现在拿不到非 TOFU 的值；空着是诚实的状
+态，不是待办。
+
+### 手打 ssh 走同一条路
+
+手动 ssh 一次要三个 `-o` 加一个 `-i`，其中 `HostKeyAlias` 没人会自己想到——命令行上没有任何东西提示
+它才是“换链路不是信任决定”的由来。于是正确的路是长的那条，短的那条是 `-o StrictHostKeyChecking=
+accept-new`：一条没人核过的 key 按**地址**记进操作者自己的 `~/.ssh/known_hosts`，也就是这个 profile
+专门不再用的那个文件。2026-09-17 就这么错了一次，方向和设计预测的一模一样。
+
+一条安全机制如果比绕过它更难用，它就只值操作员的自律。所以 ops 自己生成这段 `ssh_config`：
+
+```bash
+./eidolon pi5 ssh-config            # 打印将写入的片段，不落盘
+./eidolon pi5 ssh-config --apply    # 写到 profile 自己的目录里（gitignore）
+```
+
+然后在 `~/.ssh/config` **顶部**——任何 `Host *` 之上，因为 ssh 对每个选项取第一次读到的值——加一行：
+
+```text
+Include /absolute/path/to/eidolon_ops/.eidolon-ops/pi5/ssh_config
+```
+
+之后 `ssh eidolon-pi5` 和 ops 走的是同一套选项：同一个 `HostKeyAlias`、同一份 known_hosts、
+`StrictHostKeyChecking yes`，外加 `IdentitiesOnly yes`（否则 agent 会先把手上每一把 key 都递出去）。
+别名就是 host id，和 `./eidolon eidolon-pi5 status` 用的是同一个词；profile 的 `hostname` 在台架上是
+`10.42.0.2`，不是给人打的。片段是生成的而不是手抄的：手抄会多出一处 alias 和 known_hosts 路径必须
+一致的地方，而且是会无声漂移的那一处。
+
+### 换板子的完整流程
+
+1. 把新板子接上、起机（`bring-up`，见上一节），确认它在 profile 的 `hostname` 上应答。
+2. 在板子上读它自己的指纹：
+
+   ```bash
+   ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+   ```
+
+   **通过什么读到它，决定了它值多少。** 从串口、或者接上屏幕和键盘读到的，是确认；ssh 上去读到的，
+   不是——那条连接的信任正是你要确认的东西，值会从它自己那儿回来，一定对得上。台架上 OPi 现在没接串
+   口也没接 HDMI，所以今天这一步只能走 ssh，也就只能得到一个 pin。这不是可以绕过去的麻烦，是这台台架
+   现在的实际状况。
+
+3. 跑一次 plan，把两边的指纹对上：
+
+   ```bash
+   ./eidolon pi5 trust-host-key
+   ```
+
+   `differs` 是本机已信任另一把（换板子的常态）；`undeclared` 是 profile 声明的值和板子对不上。两种
+   情况报告都把两个指纹并排打出来。
+
+4. **如果 profile 声明了别的指纹**，先把 `config/<profile>.toml` 的 `host.host_fingerprint` 改成你刚读到
+   的那个。`--replace` 不管这道闸——它说的是"这台机器接受一把新 key"，而这里的问题是"这个 profile 指名
+   的是哪块板子"。改完就没有冲突了，下一步也不再需要 `--replace`。
+
+5. 本机 known_hosts 里已经有另一把时，指名你刚刚在板子上读到的那个指纹：
+
+   ```bash
+   ./eidolon pi5 trust-host-key --apply --replace SHA256:...
+   ```
+
+6. 把第 4 步那次编辑和这次换板一起提交。注意它值多少取决于第 2 步：从串口或屏幕读来的是确认，从 ssh
+   读来的只是 pin。
+
+7. `ssh_config` 片段引用的是 profile 的字段，profile 没变就不用重跑；改过 `hostname` 或 `known_hosts_file`
+   就重跑一次 `./eidolon pi5 ssh-config --apply`。
+
+台架上那块 OPi 走的是同样的流程，把 `pi5` 换成 `rk3588`：包装脚本按 `[host] driver` 分发，两块板子拿到
+同一套命令。
+
+```bash
+./eidolon rk3588 trust-host-key
+./eidolon rk3588 ssh-config --apply
+```
+
+注意 `./eidolon` 认的是 **profile 文件名**（`pi5`、`rk3588`），而 ssh 别名是 **host id**
+（`eidolon-pi5`、`eidolon-opi5max`）。两者故意不同：文件名唯一，而 id 不唯一
+（`pi5.toml` 和 `pi5-device-management-hil.toml` 都声明 `eidolon-pi5`）；反过来，ssh 片段进的是操作者
+的全局 `~/.ssh/config`，在那儿 `Host pi5` 这种裸名字太容易和别人自己的主机撞上。
+
+profile 刚从 `~/.ssh/known_hosts` 搬过来时是第 3 步的一个特例：新文件还不存在，`release_preflight`
+会在 seal 之前拒绝并直接给出上面这条命令。`~/.ssh/known_hosts` 里那条既有条目**不会**被搬过来——它
+当初是按地址首次信任的，而这个文件是按 Host 的名字记的，把一个没人重新核过的值搬进来正好是这套机
+制存在的理由。重新跑一次 `trust-host-key` 并核指纹就是全部代价。
+
 ### 一份 Owner 材料只能认一台 Host
 
 换板子还有第二面，比 host key 深一层。Owner 材料里的 generation 不是一个可以随手推的计数
@@ -480,6 +603,7 @@ session：只能用一次，并把之前的窗口作废。它**不会自己过�
 # Pi release/install capabilities
 ./eidolon pi5 bring-up --via boot-medium|shell --output DIR [--apply]
 ./eidolon pi5 trust-host-key [--apply] [--replace SHA256:...]
+./eidolon pi5 ssh-config [--apply]            # 让手打的 ssh 走同一套选项
 ./eidolon pi5 trust-host-authority [--apply] [--replace authority-state_...]
 ./eidolon pi5 trust-host-delivery [--apply]
 ./eidolon pi5 provision [--apply]

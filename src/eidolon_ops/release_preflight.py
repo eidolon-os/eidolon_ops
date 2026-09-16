@@ -77,11 +77,23 @@ class ReleasePreflight:
             # profile's own and gitignored, so a fresh checkout has none until
             # a host key is trusted. Without this sentence that is a dead end
             # on the one machine most likely to hit it.
+            #
+            # A profile moved off ~/.ssh/known_hosts reaches this the same way,
+            # on a workstation that has been deploying happily for months, so
+            # the sentence has to be a command rather than a description: the
+            # key in the operator's own file is not carried over, because a
+            # value nobody re-checked is exactly the one this stopped trusting.
             raise ConfigurationError(
                 f"host.known_hosts_file must be a non-empty regular file: {known_hosts}. "
-                "A fresh checkout has no key trusted for this Host yet — "
-                "`trust-host-key` reads the key the Host is presenting, shows you its "
-                "fingerprint to check against the Host itself, and records it"
+                "No key is trusted for this Host yet — that is a fresh checkout, or a "
+                "profile that has just moved off ~/.ssh/known_hosts. Run "
+                "`eidolon-ops --config <host profile> trust-host-key`: it reads the key the "
+                "Host is presenting and shows you its fingerprint to check against the Host "
+                "itself "
+                "(`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`), and `--apply` records "
+                "it. An entry that was already in ~/.ssh/known_hosts is not copied here: it "
+                "was trusted on first use under an address, and this file is keyed by the "
+                "Host's name"
             )
         if stat.S_IMODE(known_hosts.stat().st_mode) & 0o022:
             raise ConfigurationError("host.known_hosts_file must not be group/world writable")

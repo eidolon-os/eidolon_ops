@@ -313,6 +313,28 @@ class HostController:
             plan, report, applied=apply and report.get("status") == "recorded"
         )
 
+    def ssh_config(self, *, apply: bool = False) -> Evidence:
+        plan = plans.ssh_config(self.profile.host_id, apply=apply)
+        release = self.adapter.require_release(Capability.SSH_CONFIG)
+        report = release.ssh_config(
+            # The Host's id, which is what every plan, report and ledger entry
+            # already calls this Host — and, unlike the profile filename below,
+            # carries the product's own prefix. This block lands in the
+            # operator's global ~/.ssh/config, beside their other hosts, and
+            # `Host pi5` is a far grabbier name to claim there than
+            # `Host eidolon-pi5`.
+            alias=self.profile.host_id,
+            # The command that regenerates it, which names this Host the other
+            # way: the wrapper selects a profile by filename, not by id, and
+            # ids are not unique — `pi5.toml` and `pi5-device-management-hil`
+            # both declare `eidolon-pi5`. So the two differ on purpose, and a
+            # fragment that named a command nobody can run would be worse than
+            # one that named none.
+            invocation=f"./eidolon {self.profile.path.stem} ssh-config --apply",
+            apply=apply,
+        )
+        return self._planned_or_applied(plan, report, applied=apply)
+
     def provision(self, *, apply: bool) -> Evidence:
         plan = plans.provision(self.profile.host_id, apply=apply)
         release = self.adapter.require_release(Capability.PROVISION)

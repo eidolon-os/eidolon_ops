@@ -7,6 +7,7 @@ allowed to look at a key the strict transport is right to refuse.
 
 from __future__ import annotations
 
+import dataclasses
 import subprocess
 
 import pytest
@@ -146,8 +147,15 @@ def test_broad_or_marked_trust_is_never_treated_as_a_new_host(tmp_path, host_pat
 # --- the operation: what it takes to change what is trusted -----------------
 
 
-def _controller(tmp_path, config, answers: dict[str, str], recorded: str | None):
-    """A release controller whose known_hosts and Host answers are both ours."""
+def _controller(
+    tmp_path, config, answers: dict[str, str], recorded: str | None, *, declared: str = ""
+):
+    """A release controller whose known_hosts and Host answers are both ours.
+
+    ``recorded`` is what this workstation already trusts; ``declared`` is what
+    the profile says. They are separate arguments because they are separate
+    facts — a fresh checkout has the second and not the first.
+    """
 
     import dataclasses
 
@@ -169,7 +177,12 @@ def _controller(tmp_path, config, answers: dict[str, str], recorded: str | None)
     path = tmp_path / "profile-known-hosts"
     if recorded is not None:
         path.write_text(f"{ALIAS} ssh-ed25519 {recorded}\n", encoding="utf-8")
-    host = dataclasses.replace(config.host, hostname=ALIAS, known_hosts_file=path)
+    host = dataclasses.replace(
+        config.host,
+        hostname=ALIAS,
+        known_hosts_file=path,
+        host_fingerprint=declared,
+    )
     scoped = dataclasses.replace(config, host=host)
     controller = EidolonPiController.__new__(EidolonPiController)
     controller.config = scoped
@@ -243,3 +256,138 @@ def test_hashed_trust_requires_confirmation_and_revokes_only_the_old_key(tmp_pat
     controller.trust_host_key(apply=True, replace=NEW_PRINT)
     assert host_keys.recorded(path, ALIAS) == (f"ssh-ed25519 {NEW_KEY}",)
     assert "|1|" not in path.read_text()
+
+
+def test_a_board_the_profile_does_not_name_is_refused_on_a_fresh_checkout(
+    tmp_path, config
+) -> None:
+    """The case a second operator could not previously ask about at all.
+
+    Nothing is trusted locally, so every check that looks at this workstation's
+    own state says "first use, go ahead" — which is exactly what it said on
+    every machine, independently, which is why the declared value belongs to
+    the profile rather than to this workstation.
+    """
+
+    controller, path = _controller(
+        tmp_path, config, {WIRED.address: NEW_KEY}, recorded=None, declared=OLD_PRINT
+    )
+
+    planned = controller.trust_host_key()
+    assert planned["status"] == "undeclared"
+    assert planned["declaration"] == "conflict"
+    assert planned["declared_fingerprint"] == OLD_PRINT
+    assert planned["fingerprint"] == NEW_PRINT
+    # Both values, side by side: the operator is the one who can tell a swapped
+    # board from a regenerated key from a machine-in-the-middle. The way out is
+    # named as the edit, not as a flag.
+    detail = str(planned["detail"])
+    assert OLD_PRINT in detail and NEW_PRINT in detail
+    assert "host.host_fingerprint" in detail
+    assert "--replace" not in detail
+
+    with pytest.raises(OperationsError, match="declares"):
+        controller.trust_host_key(apply=True)
+    assert host_keys.recorded(path, ALIAS) == (), "a refused apply must write nothing"
+
+    # And no flag opens it. While `--replace` satisfied both gates, this wrote
+    # the new key and left the profile naming the board before it — a reviewed
+    # value the next operator meets as a conflict nobody maintains, and learns
+    # to flag past.
+    with pytest.raises(OperationsError, match="does not answer this one"):
+        controller.trust_host_key(apply=True, replace=NEW_PRINT)
+    assert host_keys.recorded(path, ALIAS) == ()
+
+    # Changing the declaration is the acknowledgement, and then there is no
+    # conflict left to acknowledge.
+    controller.config = dataclasses.replace(
+        controller.config,
+        host=dataclasses.replace(controller.config.host, host_fingerprint=NEW_PRINT),
+    )
+    report = controller.trust_host_key(apply=True)
+    assert report["status"] == "recorded"
+    assert host_keys.recorded(path, ALIAS) == (f"ssh-ed25519 {NEW_KEY}",)
+
+
+def test_the_declared_board_is_recorded_without_ceremony(tmp_path, config) -> None:
+    """A declaration that agrees is what removes a step, not what adds one."""
+
+    controller, path = _controller(
+        tmp_path, config, {WIRED.address: NEW_KEY}, recorded=None, declared=NEW_PRINT
+    )
+
+    planned = controller.trust_host_key()
+    assert planned["declaration"] == "matches"
+    assert planned["status"] == "untrusted"
+    assert "declaration_detail" not in planned
+
+    assert controller.trust_host_key(apply=True)["status"] == "recorded"
+    assert host_keys.recorded(path, ALIAS) == (f"ssh-ed25519 {NEW_KEY}",)
+
+
+def test_the_local_gate_is_still_a_flag_and_only_the_local_gate(tmp_path, config) -> None:
+    """`--replace` keeps doing its own job, which the change above does not touch.
+
+    The board is the one the profile names; what changed is only what this
+    workstation had recorded. That is a decision the operator can make at the
+    command line, because the thing being acknowledged is local.
+    """
+
+    controller, path = _controller(
+        tmp_path, config, {WIRED.address: NEW_KEY}, recorded=OLD_KEY, declared=NEW_PRINT
+    )
+
+    assert controller.trust_host_key()["status"] == "differs"
+    with pytest.raises(OperationsError, match="already trusts a different key"):
+        controller.trust_host_key(apply=True)
+
+    report = controller.trust_host_key(apply=True, replace=NEW_PRINT)
+    assert report["status"] == "recorded"
+    assert host_keys.recorded(path, ALIAS) == (f"ssh-ed25519 {NEW_KEY}",)
+
+
+def test_a_locally_trusted_key_the_repository_disowns_is_still_stopped(tmp_path, config) -> None:
+    """The two gates are independent, and the weaker one cannot answer for both.
+
+    This workstation trusts exactly this key, so the local check is satisfied
+    and would report "nothing to write". It is the wrong board anyway — which
+    is the whole reason the declared value does not live on this machine.
+    """
+
+    controller, path = _controller(
+        tmp_path, config, {WIRED.address: NEW_KEY}, recorded=NEW_KEY, declared=OLD_PRINT
+    )
+
+    planned = controller.trust_host_key()
+    assert planned["status"] == "undeclared"
+    assert planned["trusted_fingerprints"] == [NEW_PRINT]
+    assert planned["declared_fingerprint"] == OLD_PRINT
+
+    with pytest.raises(OperationsError, match="declares"):
+        controller.trust_host_key(apply=True)
+    # Refusing has to leave the file alone: rewriting the same key would put a
+    # write in the run ledger for a decision nobody made.
+    assert host_keys.recorded(path, ALIAS) == (f"ssh-ed25519 {NEW_KEY}",)
+
+
+def test_no_declaration_still_records_and_never_offers_the_scan_to_paste(tmp_path, config) -> None:
+    """First use stays possible, because this cannot invent a value nobody read."""
+
+    controller, _ = _controller(
+        tmp_path, config, {WIRED.address: NEW_KEY}, recorded=None, declared=""
+    )
+
+    planned = controller.trust_host_key()
+    assert planned["declaration"] == "undeclared"
+    assert planned["status"] == "untrusted", "an undeclared first use is not an error"
+    assert planned["declared_fingerprint"] is None
+
+    # The defect this replaces: the report used to hand over the scanned value
+    # as a line to paste into the profile. Pasting it makes the comparison
+    # check this scan against itself, so the gate passes forever while claiming
+    # to have compared — a green light manufactured out of the thing it grades.
+    detail = str(planned["declaration_detail"])
+    assert NEW_PRINT not in detail
+    assert "not this connection" in detail
+
+    assert controller.trust_host_key(apply=True)["status"] == "recorded"

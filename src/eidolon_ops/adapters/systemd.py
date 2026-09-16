@@ -45,6 +45,7 @@ class SystemdSupervisor:
                 Capability.TRUST_HOST_KEY,
                 Capability.TRUST_HOST_AUTHORITY,
                 Capability.TRUST_HOST_DELIVERY,
+                Capability.SSH_CONFIG,
                 Capability.BRING_UP,
             }
         )

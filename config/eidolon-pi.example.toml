@@ -15,6 +15,19 @@ identity_file = "/absolute/path/to/id_ed25519_eidolon_pi"
 # fingerprint first; the directory is gitignored, so only the location is a
 # reviewed decision, never the key.
 known_hosts_file = "../.eidolon-ops/<host>/known_hosts"
+# The ed25519 fingerprint this repository declares for this Host, as
+# `ssh-keygen -lf` prints that field — the token alone, not the whole line.
+# Tracked because it is derived from a public key; one value, so a field rather
+# than a file. It closes the one gap the gitignored file above cannot: a second
+# operator and a fresh checkout would otherwise trust on first use with nothing
+# to compare against. It does not confirm the value — see docs/host-key-trust.md.
+host_fingerprint = ""
+# Which operators this board accepts, as a tracked authorized_keys-format file:
+# one line per person's public key. Separate from identity_file, which is only
+# this machine's own private key — while they were one field, a second operator
+# had to be handed somebody's private key. `bring-up` makes the board's own
+# authorized_keys equal this file.
+operator_keys_file = "<profile>.operators"
 connect_timeout_seconds = 10
 remote_uv = "/usr/local/bin/uv"
 # Fail before sealing or upload if endpoint discovery did not select a wired

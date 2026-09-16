@@ -77,6 +77,7 @@ OPERATIONS: dict[str, Callable[[HostController, argparse.Namespace], object]] = 
         replace=a.replace,
     ),
     "trust-host-delivery": lambda controller, a: controller.trust_host_delivery(apply=a.apply),
+    "ssh-config": lambda controller, a: controller.ssh_config(apply=a.apply),
     "install": lambda controller, a: controller.install(
         release_id=a.release_id,
         resume=a.resume,
@@ -368,6 +369,11 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
     trust_host_delivery.add_argument("--apply", action="store_true")
+    ssh_config = operations.add_parser(
+        "ssh-config",
+        help="write this profile's SSH options where a hand-typed `ssh` will read them",
+    )
+    ssh_config.add_argument("--apply", action="store_true")
     install = operations.add_parser("install")
     install.add_argument("--release-id", required=True)
     install.add_argument("--resume", action="store_true")

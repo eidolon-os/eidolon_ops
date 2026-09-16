@@ -203,6 +203,28 @@ def trust_host_authority(host_id: str, *, apply: bool, adopting: bool) -> Plan:
     )
 
 
+def ssh_config(host_id: str, *, apply: bool) -> Plan:
+    """Write this profile's SSH options where a hand-typed `ssh` reads them.
+
+    Not destructive in either mode. The fragment is derived entirely from the
+    profile, so rewriting it withdraws nothing an operator could want back —
+    what it replaces is the version derived from an older profile, which is the
+    one that could disagree with the transport.
+    """
+
+    return Plan(
+        operation="ssh-config",
+        host_id=host_id,
+        steps=_steps(
+            ("render", "state this profile's transport options as an ssh_config block"),
+            ("write", "place it beside this profile's own known_hosts"),
+        ),
+        destructive=DestructiveLevel.NONE,
+        requires_flags=frozenset({"--apply"} if apply else set()),
+        touches=frozenset({ActionKind.CONFIG}) if apply else frozenset(),
+    )
+
+
 def trust_host_key(host_id: str, *, apply: bool, replacing: bool) -> Plan:
     """Record which host key this profile trusts.
 
