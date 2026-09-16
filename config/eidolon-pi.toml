@@ -36,6 +36,11 @@ remote_uv = "/usr/local/bin/uv"
 # requiring a USB adapter. Operators with a mandatory wired policy can opt in.
 # The selected link is reported before upload; speed is measured per deployment.
 require_wired_release_upload = false
+# 2026-09-16。开发台架：claim 窗口常开，Setup code 单独即可添加 Host Admin。
+# 理由是这台机器没有别的办法证明"人持有它"——commissioning-code 和
+# controller-reset 都要走这台工作站，所以管理手机一丢，台架就把自己锁在外面。
+# 出厂的 Host 不写这一行，那时产品规则（ADR-0007）就是对的那条。
+claim_window = "always_open"
 
 [workspace]
 # 2026-08-25: moved off /private/tmp. macOS purges it on its own schedule.
