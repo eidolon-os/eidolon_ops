@@ -422,6 +422,15 @@ class FakeTransport:
                 "removed": ["/opt/eidolon"],
             },
             "install": {"status": "installed"},
+            # A Host whose processes all run the release its links name. The
+            # deploy asks after every activation, because a Host that has not
+            # got there reports exactly the same health as one that has.
+            "converge-running-release": {
+                "status": "converged",
+                "release_id": "release-1",
+                "restarted": [],
+                "running_releases": {},
+            },
             # An unowned Host: no Hub database, so no Authority lineage. Tests
             # that need a Host which has already established one override it.
             "authority-lineage": {
@@ -988,6 +997,7 @@ def test_deploy_resume_activate_skips_transfer(setup_controller) -> None:
         "dry_run",
         "service_identities",
         "activate",
+        "converge_running_release",
         "doctor",
         "app_ready",
         "release_reclaim_commit",
@@ -1041,6 +1051,7 @@ def test_deploy_prestages_host_application_before_component_activation(
         "host_cutover_snapshot",
         "host_application",
         "activate",
+        "converge_running_release",
         "doctor",
         "app_ready",
         "cutover_receipt",

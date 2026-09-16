@@ -3,6 +3,14 @@
 Only direct children of the reviewed release and staging roots are eligible.
 The active graph is derived from every link in ``/opt/eidolon/current``; no
 component table can make a live release invisible to this collector.
+
+A link answers what the next start will load, which is not the same question
+as what is loaded now.  So a second reading stands beside it: no release a
+live process is executing from is ever removed, whatever the links say.  That
+is the exact deletion this collector performed on 2026-09-16 — the directory
+of a Channel Provider that had re-executed just before the symlink flip — and
+it is the one failure this collector can cause that nothing downstream can
+see, because the process kept answering and every health signal stayed green.
 """
 
 from __future__ import annotations
@@ -17,7 +25,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Protocol
 
-from . import contract, primitives
+from . import contract, primitives, runtime_release
 from .primitives import TargetError
 
 _PHASES = {"prepare", "retain", "commit", "abort"}
@@ -76,8 +84,15 @@ def reclaim(
         if phase == "commit" and not candidate_prepared:
             raise TargetError("release commit requires a sealed candidate release")
 
+        # Read before the first removal and inside the lock, so nothing can
+        # start out of a release between proving it unused and deleting it.
+        running = runtime_release.observe(root=host_root)
+        live_ids = set(runtime_release.holders(running))
+
         before = disk_usage(paths.capacity_root)
-        removed_releases, release_bytes = _clean_releases(paths, protected_releases)
+        removed_releases, release_bytes, retained_ids = _clean_releases(
+            paths, protected_releases, live_ids
+        )
         removed_uploads, upload_bytes = _clean_staging(
             paths, "eidolon-release-", protected_staging
         )
@@ -101,6 +116,12 @@ def reclaim(
             "active_release_ids": sorted(active_ids),
             "active_targets": active_targets,
             "protected_release_ids": sorted(protected_releases),
+            # Which releases have a process executing out of them, and which of
+            # those this sweep would otherwise have deleted. Reported for every
+            # phase, because the question "is this Host running what it says it
+            # runs" has no other answer anywhere on the Host.
+            "running_releases": runtime_release.holders(running),
+            "retained_running_release_ids": sorted(retained_ids),
             "removed": {
                 "releases": removed_releases,
                 "uploads": removed_uploads,
@@ -232,16 +253,32 @@ def _active_targets(paths: _Paths) -> dict[str, dict[str, str]]:
     return result
 
 
-def _clean_releases(paths: _Paths, protected: set[str]) -> tuple[list[str], int]:
+def _clean_releases(
+    paths: _Paths, protected: set[str], live: set[str]
+) -> tuple[list[str], int, set[str]]:
+    """Remove every unprotected release, except one something is running from.
+
+    Retained rather than refused. A Host that is already in this state got
+    there without the sweep, and refusing here would block the very deploy
+    that restarts the stale unit — turning one silent Host into one that
+    cannot be fixed by the tool that fixes it. Keeping the directory keeps the
+    stale process consistent with itself and keeps its code readable, and the
+    id travels out in the evidence so the caller can say so out loud.
+    """
+
     if not paths.releases.exists() and not paths.releases.is_symlink():
-        return [], 0
+        return [], 0, set()
     _require_real_directory(paths.releases, "release root")
     removed: list[str] = []
+    retained: set[str] = set()
     reclaimed = 0
     for path in sorted(paths.releases.iterdir(), key=lambda item: item.name):
         if contract.RELEASE_ID.fullmatch(path.name) is None:
             raise TargetError(f"release root contains a non-conventional path: {path.name}")
         if path.name in protected:
+            continue
+        if path.name in live:
+            retained.add(path.name)
             continue
         if path.is_symlink() or not path.is_dir():
             raise TargetError(f"release deletion target is not a real directory: {path}")
@@ -256,7 +293,7 @@ def _clean_releases(paths: _Paths, protected: set[str]) -> tuple[list[str], int]
             raise TargetError(f"release directory could not be removed safely: {path}") from exc
         removed.append(str(contract.RELEASES / path.name))
         reclaimed += size
-    return removed, reclaimed
+    return removed, reclaimed, retained
 
 
 def _clean_staging(

@@ -84,15 +84,62 @@ _SQLITE_SIDECARS = ("-shm", "-wal", ".lock", "-journal")
 _PENDING_SUBJECTS = 5
 
 
+#: What a Host says when it is not serving the release it publishes, and what
+#: it says when that question could not be answered at all. Kept apart on
+#: purpose: an unasked question is not a negative answer, and reporting it as
+#: one is how this state stayed invisible for a day.
+_SERVING_UNKNOWN = "this Host did not report which release its processes are running"
+
+
+def _running_release_detail(report: Mapping[str, object], active: str) -> str | None:
+    """One sentence when the Host is not serving what it publishes, else None.
+
+    The links, the receipts and the source comparison all describe what the
+    Host would load if it started now. None of them can see a process that
+    started before the last symlink flip and never re-execed — which on
+    eidolon-pi5 served a release that had been deleted from the disk, behind
+    an `is-active`, a `/health` and a `pending` that all read converged.
+    """
+
+    running = report.get("running_releases")
+    if not isinstance(running, Mapping) or running.get("status") != "observed":
+        return _SERVING_UNKNOWN
+    releases = running.get("releases")
+    if not isinstance(releases, Mapping):
+        return _SERVING_UNKNOWN
+    holders: list[str] = []
+    for release_id, processes in sorted(releases.items()):
+        if release_id == active or not isinstance(processes, list):
+            continue
+        for process in processes:
+            if not isinstance(process, Mapping):
+                continue
+            unit = process.get("unit") or "no systemd unit"
+            holders.append(f"{unit} (pid {process.get('pid')}) runs {release_id}")
+    if not holders:
+        return None
+    return (
+        f"this Host publishes {active} but is not serving it: "
+        + "; ".join(holders)
+        + " — restart those units"
+    )
+
+
 def _pending_detail(
     active: str,
     total: int,
     behind: Mapping[str, object],
     uncommitted: Mapping[str, object],
+    serving: str | None,
 ) -> str:
-    """One sentence, naming both ways work fails to be on a Host."""
+    """One sentence, naming every way work fails to be on a Host."""
 
     parts = []
+    # First, because it outranks the others: being behind means the Host does
+    # not have the work yet, and this means it has the work and is not running
+    # it — which no amount of deploying will fix by itself.
+    if serving is not None:
+        parts.append(serving)
     if behind:
         parts.append(f"{total} commit(s) in {len(behind)} source(s) are not on this Host")
     if uncommitted:
@@ -286,7 +333,13 @@ class EidolonPiController:
             return {}
         return {
             key: answer[key]
-            for key in ("active_release", "pending_commits", "uncommitted", "detail")
+            for key in (
+                "active_release",
+                "pending_commits",
+                "uncommitted",
+                "serving",
+                "detail",
+            )
             if key in answer
         } | {"sources": sorted(answer.get("pending") or {})}
 
@@ -326,6 +379,7 @@ class EidolonPiController:
                 "active_release": None,
                 "detail": "the Host publishes no component links, so nothing says what it runs",
             }
+        serving = _running_release_detail(report, active)
         shipped = self._shipped_sources(report, active)
         if shipped is None:
             return {
@@ -334,6 +388,7 @@ class EidolonPiController:
                     f"the Host runs {active} but has no recorded provenance for it, so what "
                     "it shipped cannot be compared with what is here"
                 ),
+                "serving": serving,
             }
         behind: dict[str, object] = {}
         uncommitted: dict[str, object] = {}
@@ -362,7 +417,11 @@ class EidolonPiController:
             # sealed with `git archive` from a commit. Adding them together
             # would give one number that means neither thing.
             "uncommitted": uncommitted,
-            "detail": _pending_detail(active, total, behind, uncommitted),
+            # A third way, and the only one whose absence used to read as
+            # health: the Host has the work, publishes it, and is not running
+            # it. `None` here is the Host confirming that it is.
+            "serving": serving,
+            "detail": _pending_detail(active, total, behind, uncommitted, serving),
         }
 
     @staticmethod

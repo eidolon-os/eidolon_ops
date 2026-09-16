@@ -27,6 +27,7 @@ from . import (
     probe,
     reclamation,
     reset,
+    runtime_release,
     secret_inputs,
     staging,
 )
@@ -51,6 +52,7 @@ ACTIONS: dict[str, tuple[ModuleType, str]] = {
     "finalize-release-artifacts": (staging, "finalize_release_artifacts"),
     "cleanup-stage": (staging, "cleanup_stage"),
     "reclaim-releases": (reclamation, "reclaim"),
+    "converge-running-release": (runtime_release, "converge"),
     "component-artifact-state": (staging, "component_artifact_state"),
     "install-component-artifact": (staging, "install_component_artifact"),
     "install": (install, "install"),

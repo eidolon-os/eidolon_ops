@@ -119,11 +119,15 @@ def _render_pi(document: Mapping[str, object], units: Mapping[str, object]) -> s
             failures.append(str(name))
 
     releases = _release_ids(_mapping(document.get("current_links")))
+    serving, serving_agrees = _serving_summary(document, releases)
     latest_receipt = _latest_receipt(document.get("recent_receipts"))
     healthy_count = len(rows) - len(failures)
     lines = _header(
         document,
-        overall=not failures,
+        # A Host serving a release it has already replaced has no unhealthy
+        # unit to show — that was the whole problem. So it counts against the
+        # verdict here, or this report goes on being the one that said 正常.
+        overall=not failures and serving_agrees,
         host_detail=" · ".join(
             value
             for value in (
@@ -140,6 +144,7 @@ def _render_pi(document: Mapping[str, object], units: Mapping[str, object]) -> s
             f"连接        {document.get('endpoint', '-')}",
             *_network_lines(document),
             f"当前版本    {', '.join(releases) if releases else '未发现 active release'}",
+            f"实际运行    {serving}",
             f"最近发布    {latest_receipt}",
             f"服务        {healthy_count}/{len(rows)} 正常",
             f"代码差距    {_behind_summary(document)}",
@@ -156,6 +161,36 @@ def _render_pi(document: Mapping[str, object], units: Mapping[str, object]) -> s
             )
         )
     return "\n".join(lines)
+
+
+def _serving_summary(
+    document: Mapping[str, object], published: list[str]
+) -> tuple[str, bool]:
+    """Which release the live processes are on, against the one the links name.
+
+    The line above this one reads the `current` symlinks, which say what the
+    next start will load. A process that started before the last flip is still
+    running what it loaded then, and nothing else on this report can see it:
+    its unit is active, its port answers, and its release is whatever the links
+    say. On 2026-09-16 that gap was a Host serving a release whose directory
+    had already been swept off the disk.
+    """
+
+    running = _mapping(document.get("running_releases"))
+    if running.get("status") != "observed":
+        return ("未能读取进程实际版本", False)
+    releases = _mapping(running.get("releases"))
+    holders: list[str] = []
+    for release_id, processes in sorted(releases.items()):
+        if release_id in published or not isinstance(processes, list):
+            continue
+        for process in processes:
+            entry = _mapping(process)
+            unit = entry.get("unit") or f"pid {entry.get('pid')}"
+            holders.append(f"{unit} → {release_id}")
+    if not holders:
+        return ("与 current 链接一致", True)
+    return ("、".join(holders) + " —— 重启这些 unit", False)
 
 
 def _behind_summary(document: Mapping[str, object]) -> str:

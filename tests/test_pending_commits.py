@@ -69,13 +69,26 @@ def _controller(config, git: _Git) -> EidolonPiController:
     return controller
 
 
-def _report(config, *, release_id: str, shipped: dict[str, str], links: str | None = None):
+def _report(
+    config,
+    *,
+    release_id: str,
+    shipped: dict[str, str],
+    links: str | None = None,
+    running: dict[str, object] | None = None,
+):
     linked = links or release_id
     return {
         "current_links": {
             source_id: f"/opt/eidolon/releases/{linked}/{source_id}"
             for source_id in config.sources
         },
+        # What the Host's processes are actually executing. Defaults to the
+        # release the links name, because a Host that has not got there is the
+        # exception these tests have to be able to express — and, before it was
+        # reported at all, could not be.
+        "running_releases": running
+        or {"status": "observed", "releases": {linked: [{"pid": 1, "unit": "eidolon-hub.service"}]}},
         "release_sources": [
             {
                 "release_id": release_id,
@@ -131,6 +144,66 @@ def test_a_source_committed_to_since_the_release_is_named_with_its_distance(
     }
     assert answer["pending_commits"] == 2
     assert answer["detail"] == "2 commit(s) in 1 source(s) are not on this Host"
+
+
+def test_a_host_not_serving_what_it_publishes_is_not_reported_as_matching(
+    config,
+) -> None:
+    """The eidolon-pi5 report of 2026-09-16, which said the opposite.
+
+    Every input this command had was correct and agreed: the links named the
+    new release, the provenance matched every checkout, and it concluded "the
+    Host runs pi5-standing-window-20260916b and every source matches it" while
+    Channel Provider served the release before it from a directory that no
+    longer existed. Being behind and not running what you have are different
+    failures, and only one of them is fixed by deploying again.
+    """
+
+    shipped = {source_id: _SHIPPED for source_id in config.sources}
+    git = _Git({Path(source.path).name: _SHIPPED for source in config.sources.values()})
+
+    answer = _controller(config, git)._pending_commits(
+        _report(
+            config,
+            release_id="pi5-standing-window-20260916b",
+            shipped=shipped,
+            running={
+                "status": "observed",
+                "releases": {
+                    "20260911-pi5-authority-simplification-1": [
+                        {"pid": 4711, "unit": "eidolon-channel-provider.service"}
+                    ]
+                },
+            },
+        )
+    )
+
+    assert answer["pending"] == {}
+    assert "every source matches" not in answer["detail"]
+    assert answer["serving"] == (
+        "this Host publishes pi5-standing-window-20260916b but is not serving it: "
+        "eidolon-channel-provider.service (pid 4711) runs "
+        "20260911-pi5-authority-simplification-1 — restart those units"
+    )
+    assert answer["serving"] in answer["detail"]
+
+
+def test_a_host_that_did_not_report_its_processes_is_not_taken_for_a_matching_one(
+    config,
+) -> None:
+    """Unasked is not answered. Treating it as agreement is the original bug."""
+
+    shipped = {source_id: _SHIPPED for source_id in config.sources}
+    git = _Git({Path(source.path).name: _SHIPPED for source in config.sources.values()})
+
+    answer = _controller(config, git)._pending_commits(
+        _report(config, release_id="r1", shipped=shipped, running={"status": "unreadable"})
+    )
+
+    assert "every source matches" not in answer["detail"]
+    assert answer["serving"] == (
+        "this Host did not report which release its processes are running"
+    )
 
 
 def test_links_that_do_not_agree_are_reported_rather_than_guessed(config) -> None:

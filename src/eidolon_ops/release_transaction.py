@@ -539,6 +539,7 @@ class ReleaseTransaction:
 
     def _run_health_gate(self, cli: str, descriptor: str, phases: Journal) -> Exception | None:
         try:
+            self._converge_running_release(phases)
             phases.begin("doctor")
             doctor = self._remote_json(
                 "release doctor",
@@ -552,6 +553,36 @@ class ReleaseTransaction:
             return exc
         self._observe_app_readiness(phases)
         return None
+
+    def _converge_running_release(self, phases: Journal) -> None:
+        """Put every process on the release the links now name, before judging it.
+
+        Inside the gate rather than beside it, and first within the gate, for
+        two reasons. A doctor that passes against a process left over from the
+        previous release has examined the previous release — which is how
+        eidolon-pi5 reported a healthy activation of a release whose routes it
+        was not serving. And a Host that cannot be brought onto one release is
+        a failed activation, so it belongs on the path that already knows how
+        to put a release back, rather than on a new one that would have to
+        learn.
+
+        Restarting here also puts the restart before the doctor and the app
+        readiness observation below, so nothing this does goes unchecked.
+        """
+
+        phases.begin("converge_running_release")
+        converged = self.transport.run_agent(
+            "converge-running-release",
+            self.host_layer.target_payload(),
+            # The same rule as the activation timeout above: a Host that is
+            # legitimately spending its readiness window on each unit it has to
+            # restart must not be abandoned by this side, which would leave the
+            # restarts running with nobody reading their result.
+            timeout=_REMOTE_ACTIVATION_TIMEOUT_SECONDS,
+        )
+        if converged.get("status") not in {"converged", "reconverged"}:
+            raise OperationsError("running release convergence returned invalid evidence")
+        phases.append({"phase": "converge_running_release", "result": converged})
 
     def _observe_app_readiness(self, phases: Journal) -> None:
         """Observed after the gate, so it can never be one.

@@ -9,7 +9,7 @@ import shutil
 from collections.abc import Mapping
 from pathlib import Path
 
-from . import app_contract, contract, host_application, primitives
+from . import app_contract, contract, host_application, primitives, runtime_release
 from .hardware import observe_hardware
 from .primitives import TargetError
 
@@ -71,6 +71,12 @@ def status(payload: Mapping[str, object]) -> dict[str, object]:
             ),
         },
         "current_links": links,
+        # Which release each live process is executing from, which the links
+        # above cannot answer: they say what the next start will load. Until
+        # this was reported, a Host serving a release it had already replaced
+        # was indistinguishable here from one that had not — every field on
+        # this report, and every command derived from it, read converged.
+        "running_releases": runtime_release.report(),
         "recent_receipts": receipts,
         "installations": installations,
         # Which commits each recent release was built from. A record no command

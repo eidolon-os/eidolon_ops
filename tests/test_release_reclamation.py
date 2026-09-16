@@ -12,6 +12,57 @@ from eidolon_ops.hostagent.primitives import TargetError
 pytestmark = pytest.mark.component
 
 
+@pytest.fixture(autouse=True)
+def procfs(tmp_path: Path) -> Path:
+    """Every fake Host has a readable process table, and by default it is empty.
+
+    Not optional, and not defaulted to "nothing is running": the collector
+    refuses to prove a release unused when it cannot see the processes, so a
+    test root without this would be exercising the refusal rather than the
+    sweep.
+    """
+
+    path = tmp_path / "proc"
+    path.mkdir(exist_ok=True)
+    return path
+
+
+def _process(
+    root: Path,
+    pid: int,
+    *,
+    unit: str | None = None,
+    exe: str | None = None,
+    argv: tuple[str, ...] = (),
+) -> Path:
+    """One live process, as /proc presents it."""
+
+    entry = root / "proc" / str(pid)
+    entry.mkdir(parents=True)
+    if exe is not None:
+        (entry / "exe").symlink_to(exe)
+    (entry / "cmdline").write_bytes(b"".join(value.encode() + b"\0" for value in argv))
+    if unit is not None:
+        (entry / "cgroup").write_text(f"0::/system.slice/{unit}\n", encoding="utf-8")
+    return entry
+
+
+def _venv_python(root: Path, release_id: str, component: str = "kernel") -> str:
+    """The interpreter path a component's console script carries in its shebang.
+
+    Absolute, and baked at the moment that release's virtualenv was built, so
+    it keeps naming its own release no matter where `current` points later.
+    """
+
+    return str(
+        root
+        / contract.RELEASES.relative_to("/")
+        / release_id
+        / component
+        / ".venv/bin/python"
+    )
+
+
 def _host(root: Path, release_ids: tuple[str, ...]) -> None:
     for release_id in release_ids:
         component = root / contract.RELEASES.relative_to("/") / release_id / "kernel"
@@ -419,3 +470,118 @@ def test_a_marker_that_is_not_a_candidate_marker_says_so(tmp_path: Path) -> None
 
     with pytest.raises(TargetError, match="not a candidate marker"):
         reclamation.reclaim(_payload("old"), root=tmp_path)
+
+
+def test_commit_never_sweeps_the_release_a_live_process_is_executing(
+    tmp_path: Path,
+) -> None:
+    """The eidolon-pi5 failure of 2026-09-16, from the collector's side.
+
+    Channel Provider re-executed just before the symlink flip, so it went on
+    running the previous release while every link, every health signal and
+    every source comparison named the new one. The sweep then deleted the
+    directory out from under it, and the Host served code that no longer
+    existed on disk until somebody restarted the unit by hand.
+
+    Note which reading catches it. `/proc/<pid>/exe` names no release at all:
+    the venv's python is itself a symlink and resolves to the system
+    interpreter. argv[0] is the whole evidence.
+    """
+
+    _host(tmp_path, ("20260911-pi5-authority-simplification-1", "pi5-standing-window-20260916b"))
+    for name in contract.CURRENT_LINKS:
+        _link(tmp_path, name, "pi5-standing-window-20260916b")
+    _seal(tmp_path, "pi5-standing-window-20260916b")
+    _process(
+        tmp_path,
+        4711,
+        unit="eidolon-channel-provider.service",
+        exe="/usr/bin/python3.13",
+        argv=(
+            _venv_python(tmp_path, "20260911-pi5-authority-simplification-1", "eidolon_channel"),
+            "-m",
+            "eidolon_channel.provider",
+        ),
+    )
+
+    result = reclamation.reclaim(
+        _payload("pi5-standing-window-20260916b", "commit"), root=tmp_path
+    )
+
+    stale = tmp_path / "opt/eidolon/releases/20260911-pi5-authority-simplification-1"
+    assert stale.is_dir(), "the directory a live process is executing from was deleted"
+    assert result["removed"]["releases"] == []
+    assert result["retained_running_release_ids"] == [
+        "20260911-pi5-authority-simplification-1"
+    ]
+    assert result["running_releases"] == {
+        "20260911-pi5-authority-simplification-1": [
+            {"pid": 4711, "unit": "eidolon-channel-provider.service"}
+        ]
+    }
+
+
+def test_a_release_only_a_native_binary_holds_open_is_kept_too(tmp_path: Path) -> None:
+    """The same protection where argv says nothing and exe says everything.
+
+    A component that ships a real binary is executed through
+    /opt/eidolon/current/<component>, so argv[0] names no release; the kernel
+    recorded what that symlink resolved to, and `exe` is the only witness. The
+    two readings cover each other, which is why both are taken.
+    """
+
+    _host(tmp_path, ("old", "candidate"))
+    _link(tmp_path, "eidolon_kernel", "candidate")
+    _process(
+        tmp_path,
+        822,
+        unit="eidolon-nats.service",
+        exe=str(tmp_path / "opt/eidolon/releases/old/kernel/bin/nats-server"),
+        argv=("/opt/eidolon/current/eidolon_kernel/bin/nats-server", "-c", "/etc/nats.conf"),
+    )
+
+    result = reclamation.reclaim(_payload("candidate"), root=tmp_path)
+
+    assert (tmp_path / "opt/eidolon/releases/old").is_dir()
+    assert result["retained_running_release_ids"] == ["old"]
+
+
+def test_a_release_nothing_is_running_is_still_swept(tmp_path: Path) -> None:
+    """The guard protects live releases, and only those.
+
+    Without this, "keep what is running" and "keep everything" pass the same
+    tests, and a collector that reclaims nothing fills the disk instead.
+    """
+
+    _host(tmp_path, ("old", "candidate"))
+    _link(tmp_path, "eidolon_kernel", "candidate")
+    _process(
+        tmp_path,
+        822,
+        unit="eidolon-kernel.service",
+        exe="/usr/bin/python3.13",
+        argv=(_venv_python(tmp_path, "candidate", "kernel"), "-m", "eidolon_kernel"),
+    )
+
+    result = reclamation.reclaim(_payload("candidate"), root=tmp_path)
+
+    assert not (tmp_path / "opt/eidolon/releases/old").exists()
+    assert result["removed"]["releases"] == ["/opt/eidolon/releases/old"]
+    assert result["retained_running_release_ids"] == []
+
+
+def test_a_process_table_that_cannot_be_read_stops_the_sweep(tmp_path: Path) -> None:
+    """Unreadable is not the same answer as nothing, and must not become it.
+
+    A collector that treats "I could not look" as "nothing is running" deletes
+    exactly as much as one with no guard at all, and reports that it was safe.
+    """
+
+    _host(tmp_path, ("old", "candidate"))
+    _link(tmp_path, "eidolon_kernel", "candidate")
+    (tmp_path / "proc").rmdir()
+
+    with pytest.raises(TargetError, match="no release can be proven unused"):
+        reclamation.reclaim(_payload("candidate"), root=tmp_path)
+
+    assert (tmp_path / "opt/eidolon/releases/old").is_dir()

@@ -80,10 +80,15 @@ def test_pi_status_shows_units_release_and_receipt() -> None:
                 "agent": "/opt/eidolon/releases/r42/eidolon_agent",
             },
             "recent_receipts": [{"release_id": "r42", "status": "activated"}],
+            "running_releases": {
+                "status": "observed",
+                "releases": {"r42": [{"pid": 11, "unit": "eidolon-admin.service"}]},
+            },
         }
     )
 
     assert "当前版本    r42" in output
+    assert "实际运行    与 current 链接一致" in output
     assert "最近发布    r42 · activated" in output
     assert "1/2 正常" in output
     assert "eidolon-agent.service" in output
@@ -98,3 +103,63 @@ def test_status_error_is_actionable() -> None:
     assert "mac.toml" in output
     assert "connection refused" in output
     assert "网络连接" in output
+
+
+def _serving_report(running: dict[str, object]) -> dict[str, object]:
+    """A Host with nothing else wrong with it: every unit loaded and active."""
+
+    return {
+        "plan": {"host_id": "eidolon-pi5"},
+        "host": "eidolon-box",
+        "system": "linux",
+        "machine": "aarch64",
+        "units": {
+            "eidolon-channel-provider.service": {
+                "LoadState": "loaded",
+                "ActiveState": "active",
+                "SubState": "running",
+                "NRestarts": 0,
+            }
+        },
+        "current_links": {
+            "channel": "/opt/eidolon/releases/pi5-standing-window-20260916b/eidolon_channel"
+        },
+        "running_releases": running,
+    }
+
+
+def test_pi_status_refuses_to_call_a_host_healthy_that_is_serving_an_old_release() -> None:
+    """The 2026-09-16 report, which had no unhealthy unit to show — and said 正常.
+
+    Channel Provider was active, its port answered, and the link named the new
+    release; the process was serving the previous one out of a directory that
+    had already been deleted. Nothing on this report could say so, so the
+    verdict at the top was the wrong one with entirely correct inputs.
+    """
+
+    output = render_status(
+        _serving_report(
+            {
+                "status": "observed",
+                "releases": {
+                    "20260911-pi5-authority-simplification-1": [
+                        {"pid": 4711, "unit": "eidolon-channel-provider.service"}
+                    ]
+                },
+            }
+        )
+    )
+
+    assert "eidolon-channel-provider.service → 20260911-pi5-authority-simplification-1" in output
+    assert "重启这些 unit" in output
+    assert "1/1 正常" in output, "the unit really is active; that was never the problem"
+    assert "总体状态    异常" in output, "the verdict must not read healthy"
+
+
+def test_pi_status_says_so_when_it_could_not_read_the_processes() -> None:
+    """A reading that did not happen is not a reading that came back clean."""
+
+    output = render_status(_serving_report({"status": "unreadable", "releases": {}}))
+
+    assert "实际运行    未能读取进程实际版本" in output
+    assert "总体状态    异常" in output
