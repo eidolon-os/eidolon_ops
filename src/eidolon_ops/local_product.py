@@ -45,7 +45,7 @@ from eidolon_ops.hub_assets import (
     render_hub_settings,
 )
 from eidolon_ops.identity_replacement import replacement_inputs
-from eidolon_ops.install_inputs import validate_install_input_contract
+from eidolon_ops.install_inputs import host_rendered_fields, validate_install_input_contract
 from eidolon_ops.owner_domain_assets import (
     AuthorityDecision,
     OwnerDomainAssetError,
@@ -433,7 +433,7 @@ class LocalProductSource:
             if name == "local-api.env":
                 value = environment.merge(
                     value,
-                    {
+                    host_rendered_fields(name, {
                         "EIDOLON_LOCAL_API_OWNER_DOMAIN_ID": owner_domain_id,
                         "EIDOLON_LOCAL_API_OWNER_DOMAIN_DESCRIPTOR_URI": self._descriptor_uri(),
                         "EIDOLON_LOCAL_API_OWNER_DOMAIN_DESCRIPTOR": str(
@@ -445,18 +445,18 @@ class LocalProductSource:
                         "EIDOLON_LOCAL_API_AUTHORITY_SIGNING_CERTIFICATE": str(
                             self._authority_signing_certificate_path()
                         ),
-                    },
+                    }),
                     label="generated environment",
                 )
             if name == "channel.env":
                 value = environment.merge(
                     value,
-                    {
+                    host_rendered_fields(name, {
                         "EIDOLON_LIVEKIT_CLIENT_URL": self._livekit_client_url(app),
                         "EIDOLON_CHANNEL_PROVIDER_ALLOW_INSECURE_LAN_CLIENT_URL": (
                             "1" if app.allow_insecure_livekit else "0"
                         ),
-                    },
+                    }),
                     label="generated environment",
                 )
             rendered[root / "env" / name] = value.encode("utf-8")

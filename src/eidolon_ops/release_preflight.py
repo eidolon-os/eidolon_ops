@@ -413,9 +413,16 @@ class ReleasePreflight:
         """Materialize settings from this operation's exact source revisions.
 
         Deploy does not need the workstation's provider credential sources: the
-        installed Host already owns and separately proves those credentials. It
-        does need the three non-secret settings inputs because they travel with
-        every code cutover. Keeping this narrower than the install contract
+        Host owns its credentials, and a deploy is a code cutover. What it does
+        check about them is narrow and worth stating exactly, because a wider
+        claim used to sit here: the gate beside this one asks the Host whether
+        it *holds* every declared credential, by name. Nothing compares a value
+        on the Host to anything, and no Host-side check re-proves that two files
+        there still agree — the relationships in ``SHARED_CREDENTIALS`` are
+        proven on the workstation, by the install contract, and only there.
+
+        It does need the three non-secret settings inputs because they travel
+        with every code cutover. Keeping this narrower than the install contract
         prevents an unrelated key-source file from blocking a normal update.
         """
 

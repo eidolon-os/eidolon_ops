@@ -15,6 +15,7 @@ from eidolon_ops.host_identity import (
     livekit_client_url,
 )
 from eidolon_ops.hub_assets import render_hub_settings
+from eidolon_ops.install_inputs import host_rendered_fields
 from eidolon_ops.owner_domain_assets import (
     OwnerDomainAssetError,
     OwnerDomainAssets,
@@ -140,7 +141,7 @@ class HostApplicationMaterializer:
                 )
             except OwnerDomainAssetError as exc:
                 raise HostApplicationError(str(exc)) from exc
-            replacements = {
+            replacements = host_rendered_fields(name, {
                 "EIDOLON_LOCAL_API_OWNER_DOMAIN_ID": owner.owner_domain_id,
                 "EIDOLON_LOCAL_API_OWNER_DOMAIN_DESCRIPTOR_URI": (
                     identity.hub_origin(self.app.hub_https_port)
@@ -155,14 +156,14 @@ class HostApplicationMaterializer:
                 "EIDOLON_LOCAL_API_AUTHORITY_SIGNING_CERTIFICATE": (
                     "/etc/eidolon/owner-domain/authority_signing_certificate.pem"
                 ),
-            }
+            })
         elif name == "channel.env":
-            replacements = {
+            replacements = host_rendered_fields(name, {
                 "EIDOLON_LIVEKIT_CLIENT_URL": self._livekit_client_url(identity),
                 "EIDOLON_CHANNEL_PROVIDER_ALLOW_INSECURE_LAN_CLIENT_URL": (
                     "1" if self.app.allow_insecure_livekit else "0"
                 ),
-            }
+            })
         else:
             return value
         return environment.merge(value, replacements, label="Host application environment")

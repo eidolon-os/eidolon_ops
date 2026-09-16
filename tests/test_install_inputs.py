@@ -10,11 +10,14 @@ import pytest
 
 from eidolon_ops.config import OperationsConfig
 from eidolon_ops.install_inputs import (
-    add_missing_install_credentials,
+    DECLARED_ENV_KEYS,
+    HOST_RENDERED_ENV_KEYS,
     INSTALL_DESTINATION_NAMES,
     InstallInputError,
+    add_missing_install_credentials,
     initialize_install_inputs,
     validate_install_input_contract,
+    withdraw_rendered_fields,
 )
 
 pytestmark = pytest.mark.component
@@ -740,3 +743,122 @@ def test_a_provider_key_that_is_gone_is_still_a_refusal(config, tmp_path: Path) 
 
     with pytest.raises(InstallInputError, match="missing or a placeholder"):
         validate_install_input_contract(configured, _settings_reader, refresh_derived=True)
+
+
+def test_the_input_set_holds_no_field_the_host_layer_renders(config, tmp_path) -> None:
+    """A generated input set answers only questions it can answer.
+
+    ``channel.env`` used to ship ``EIDOLON_LIVEKIT_CLIENT_URL=ws://127.0.0.1:7880``
+    — an address no device can use, replaced on every path out of this machine,
+    and pinned there by a contract check. It was harmless only because every
+    delivery path happened to render over it. A Host profile with no ``[app]``
+    renders nothing and the target accepts that staged set, and the Channel
+    provider hands a configured host straight to the device while its "plain
+    ws:// only on loopback" rule lets exactly this value through. Every device
+    would have been told to reach LiveKit at its own address.
+    """
+
+    configured = _config_for_init(config, tmp_path)
+    initialize_install_inputs(configured, _settings_reader)
+    target = next(iter(configured.install_files.values())).parent
+
+    assert HOST_RENDERED_ENV_KEYS, "the guarantee is empty if nothing declares a rendered field"
+    for name, rendered in HOST_RENDERED_ENV_KEYS.items():
+        assert not set(_env(target / name)) & rendered
+
+
+def test_a_rendered_field_left_in_an_input_set_is_withdrawn(config, tmp_path) -> None:
+    """Withdrawn on the refresh pass, not refused.
+
+    An input set written before Ops learned it did not own this field has no way
+    to say so, exactly like a settings copy that predates a component's new
+    default. Both follow their source here rather than stopping every operation
+    until somebody hand-edits a mode-0600 file.
+    """
+
+    configured = _config_for_init(config, tmp_path)
+    initialize_install_inputs(configured, _settings_reader)
+    target = next(iter(configured.install_files.values())).parent
+    channel = _env(target / "channel.env")
+    channel["EIDOLON_LIVEKIT_CLIENT_URL"] = "ws://127.0.0.1:7880"
+    _write_env(target / "channel.env", channel)
+
+    assert withdraw_rendered_fields(target) == ["channel.env:EIDOLON_LIVEKIT_CLIENT_URL"]
+    assert "EIDOLON_LIVEKIT_CLIENT_URL" not in _env(target / "channel.env")
+    # Only that field. Every credential beside it is untouched.
+    assert set(_env(target / "channel.env")) == set(channel) - {"EIDOLON_LIVEKIT_CLIENT_URL"}
+    assert withdraw_rendered_fields(target) == []
+
+
+def test_the_contract_names_a_rendered_field_it_finds(config, tmp_path) -> None:
+    """Named as what it is, not as a key set that "drifted".
+
+    Different mistake, different fix: nothing about this file is missing or
+    extra by the operator's doing — it holds a copy of something the Host layer
+    owns, and the answer is to drop it rather than to go looking for what moved.
+    """
+
+    configured = _config_for_init(config, tmp_path)
+    initialize_install_inputs(configured, _settings_reader)
+    target = next(iter(configured.install_files.values())).parent
+    channel = _env(target / "channel.env")
+    channel["EIDOLON_CHANNEL_PROVIDER_ALLOW_INSECURE_LAN_CLIENT_URL"] = "1"
+    _write_env(target / "channel.env", channel)
+
+    with pytest.raises(InstallInputError, match="holds fields the Host layer renders"):
+        validate_install_input_contract(configured, _settings_reader)
+    # And the refresh pass ends it, which is the path every caller takes.
+    validated = validate_install_input_contract(configured, _settings_reader, refresh_derived=True)
+    assert validated["refreshed"]["withdrawn"] == [
+        "channel.env:EIDOLON_CHANNEL_PROVIDER_ALLOW_INSECURE_LAN_CLIENT_URL"
+    ]
+
+
+def test_the_repair_covers_channel_env_like_every_other_file(config, tmp_path) -> None:
+    """No file sits outside the accounting any more.
+
+    ``channel.env`` was reported as ``not_repairable`` — a hardcoded name, and
+    the opposite of the truth: it is the one file the Host layer can replace
+    whole. What actually kept it out was that the table could not say "optional".
+    """
+
+    configured = _config_for_init(config, tmp_path)
+    initialize_install_inputs(configured, _settings_reader)
+    target = next(iter(configured.install_files.values())).parent
+    channel = _env(target / "channel.env")
+    livekit_key = channel.pop("LIVEKIT_API_KEY")
+    _write_env(target / "channel.env", channel)
+
+    planned = add_missing_install_credentials(configured, apply=False)
+    assert "not_repairable" not in planned
+    assert planned["added"] == {"channel.env": ["LIVEKIT_API_KEY"]}
+
+    applied = add_missing_install_credentials(configured, apply=True)
+    assert applied["applied"] is True
+    # Copied from the file holding the other side of the pair, never re-minted:
+    # minting one side of a shared secret is how the pair breaks.
+    assert _env(target / "channel.env")["LIVEKIT_API_KEY"] == livekit_key
+    validate_install_input_contract(configured, _settings_reader)
+
+
+def test_an_optional_channel_credential_is_neither_required_nor_repaired(
+    config, tmp_path
+) -> None:
+    """The one thing a plain set could not express, now stated.
+
+    The operator has this vendor or does not. A Host without it is not a Host
+    missing something, so nothing asks for it and nothing mints it.
+    """
+
+    configured = _config_for_init(config, tmp_path)
+    initialize_install_inputs(configured, _settings_reader)
+    target = next(iter(configured.install_files.values())).parent
+    assert "SENSETIME_STT_API_KEY" in _env(target / "channel.env")
+    assert "SENSETIME_TTS_API_KEY" not in _env(target / "channel.env")
+
+    assert DECLARED_ENV_KEYS["channel.env"].optional == frozenset(
+        {"SENSETIME_STT_API_KEY", "SENSETIME_TTS_API_KEY"}
+    )
+    # Absent and present are both legal, and neither is a repair.
+    assert add_missing_install_credentials(configured, apply=False)["added"] == {}
+    validate_install_input_contract(configured, _settings_reader)

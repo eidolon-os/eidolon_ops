@@ -65,13 +65,23 @@ def test_the_declaration_is_derived_rather_than_restated() -> None:
 
     declared = declared_secret_env_keys()
     for name, keys in declared.items():
-        assert set(keys) == DECLARED_ENV_KEYS[name]
-    # channel.env is excluded because its key set is deliberately open: optional
-    # provider credentials are legitimately absent, so "missing" is not a
-    # decidable question there.
-    assert "channel.env" not in declared
-    assert "bootstrap.env" not in declared, "nothing declared is nothing to converge to"
+        assert set(keys) == DECLARED_ENV_KEYS[name].required
+    assert "bootstrap.env" not in declared, "nothing required is nothing to converge to"
     assert "admin.env" in declared
+
+    # channel.env is in this accounting now. It used to be the one file outside
+    # it, on the stated grounds that its key set was "deliberately open" so
+    # "missing" could not be decided there. Neither half held: the required set
+    # was written out by hand inside the contract check, 340 lines from the
+    # table, and only the optional tail was ever open.
+    channel = DECLARED_ENV_KEYS["channel.env"]
+    assert set(declared["channel.env"]) == channel.required
+    # And only `required` travels. An optional credential is legitimately
+    # absent, so asking a Host for one could only ever report a Host that is
+    # fine; a rendered field is not in the input set this converges from, so
+    # there would be nothing to deliver.
+    assert channel.optional and not set(declared["channel.env"]) & channel.optional
+    assert channel.rendered and not set(declared["channel.env"]) & channel.rendered
 
 
 def test_the_missing_credential_is_reported_before_it_is_written(tmp_path) -> None:
@@ -260,3 +270,55 @@ def test_both_sides_of_a_shared_credential_are_declared(tmp_path) -> None:
             assert left_key in declared[left_file], f"{left_file}:{left_key}"
         if right_file in declared:
             assert right_key in declared[right_file], f"{right_file}:{right_key}"
+
+
+def test_convergence_reads_rotation_off_the_declared_keys_only(tmp_path) -> None:
+    """A Host-bound field that differs is not a rotation.
+
+    A staged Host-bound file carries fields the controller renders for this Host
+    — where devices reach LiveKit, whether plain ``ws://`` is allowed — and those
+    change whenever the Host binding changes. Comparing them here would refuse a
+    convergence with "rotate through a reinstall", which is both wrong and
+    unactionable: those fields have their own delivery path and were never
+    rotated. The credential beside them is still compared, because that refusal
+    is the one an operator needs.
+    """
+
+    declared = {"channel.env": ["EIDOLON_CHANNEL_PROVIDER_TOKEN", "PAIRING_JWT_SECRET"]}
+    _host(
+        tmp_path,
+        "channel.env",
+        "EIDOLON_CHANNEL_PROVIDER_TOKEN=kept\n"
+        "EIDOLON_LIVEKIT_CLIENT_URL=ws://192.168.1.9:7880\n",
+    )
+    _stage(
+        tmp_path,
+        "channel.env",
+        "EIDOLON_CHANNEL_PROVIDER_TOKEN=kept\n"
+        "PAIRING_JWT_SECRET=arrives\n"
+        # The Host moved networks since it was installed. Not a rotation.
+        "EIDOLON_LIVEKIT_CLIENT_URL=ws://10.0.0.4:7880\n",
+    )
+
+    report = secret_inputs.converge(_payload(declared, apply=True), tmp_path)
+
+    assert report["added"] == {"channel.env": ["PAIRING_JWT_SECRET"]}
+    body = (tmp_path / "etc/eidolon/channel.env").read_text(encoding="utf-8")
+    assert "PAIRING_JWT_SECRET=arrives" in body
+    # Untouched: convergence adds keys, and this one is the Host's.
+    assert "EIDOLON_LIVEKIT_CLIENT_URL=ws://192.168.1.9:7880" in body
+
+
+def test_a_rotated_declared_credential_is_still_refused(tmp_path) -> None:
+    """Narrowing the comparison must not lose the refusal it exists for."""
+
+    declared = {"channel.env": ["EIDOLON_CHANNEL_PROVIDER_TOKEN", "PAIRING_JWT_SECRET"]}
+    _host(tmp_path, "channel.env", "EIDOLON_CHANNEL_PROVIDER_TOKEN=installed\n")
+    _stage(
+        tmp_path,
+        "channel.env",
+        "EIDOLON_CHANNEL_PROVIDER_TOKEN=rotated\nPAIRING_JWT_SECRET=arrives\n",
+    )
+
+    with pytest.raises(TargetError, match="EIDOLON_CHANNEL_PROVIDER_TOKEN"):
+        secret_inputs.converge(_payload(declared, apply=True), tmp_path)

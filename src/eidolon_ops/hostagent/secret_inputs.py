@@ -120,10 +120,17 @@ def converge(data: dict, root: Path) -> dict:
         # Rotation is a different operation. Refusing here rather than silently
         # keeping the Host's value, because an operator who staged a changed
         # secret and saw "converged" would believe it had been delivered.
+        #
+        # Over the *declared* keys, not every key the staged file happens to
+        # carry. A staged Host-bound file also holds fields the controller
+        # renders for this Host — where devices reach LiveKit, where its Owner
+        # domain is — and those differ whenever the Host binding changes, which
+        # is not a rotation and has its own delivery path. Comparing them here
+        # would refuse a convergence for a reason that is not true.
         rotated = [
             key
-            for key, value in offered.items()
-            if key in present and present[key] != value
+            for key in keys
+            if key in offered and key in present and present[key] != offered[key]
         ]
         if rotated:
             raise TargetError(

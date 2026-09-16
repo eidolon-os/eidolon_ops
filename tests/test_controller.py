@@ -1604,7 +1604,7 @@ def test_unified_pi_stage_renders_host_bound_application_assets(config) -> None:
         encoding="utf-8",
     )
     config.install_files["channel_env"].write_text(
-        "EIDOLON_LIVEKIT_CLIENT_URL=ws://127.0.0.1:7880\nPAIRING_JWT_SECRET=test-token\n",
+        "PAIRING_JWT_SECRET=test-token\n",
         encoding="utf-8",
     )
 
@@ -2591,7 +2591,7 @@ def _authority_controller(config, transport=None) -> EidolonPiController:
         "EIDOLON_LOCAL_API_ADMIN_BASE_URL=http://127.0.0.1:9000\n", encoding="utf-8"
     )
     config.install_files["channel_env"].write_text(
-        "EIDOLON_LIVEKIT_CLIENT_URL=ws://127.0.0.1:7880\n", encoding="utf-8"
+        "PAIRING_JWT_SECRET=test-token\n", encoding="utf-8"
     )
     controller = EidolonPiController(
         config,

@@ -334,6 +334,17 @@ REFRESHABLE_HOST_APPLICATION_INPUTS = (
 #: Install inputs whose non-secret fields are derived from the Host binding.
 #: The controller re-renders the whole authoritative environment file so the
 #: target never edits or infers credentials while updating those fields.
+#:
+#: Carried by a full Host-layer refresh (``refresh-host-application``) and
+#: deliberately **not** by a release cutover: ``RELEASE_CONFIGURATION_INPUTS``
+#: below is what a deploy sends, and it leaves these two alone. A deploy
+#: replaces code and the settings derived from that code; credentials belong to
+#: the Host, and shipping them on every release would mean every upgrade
+#: quietly rewrote them.
+#:
+#: Worth knowing before reading "refreshable" as "refreshed often": today the
+#: full refresh is reached only by ``authority-restore``, so in practice these
+#: two files are written on a Host by ``install`` and by that one operation.
 REFRESHABLE_HOST_BOUND_INPUTS = ("local-api.env", "channel.env")
 REFRESHABLE_PRODUCT_SETTINGS = ("agent.yaml", "channel.yaml", "memory.yaml")
 RELEASE_CONFIGURATION_INPUTS = (

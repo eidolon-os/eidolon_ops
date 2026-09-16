@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import secrets
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
 from eidolon_ops.config import INSTALL_FILE_NAMES, OperationsConfig
 from eidolon_ops.errors import InstallInputError
 from eidolon_ops.private_inputs import (
     INSTALL_DESTINATION_NAMES,
+    PROVIDER_DESTINATIONS,
     refresh_derived_settings,
     refresh_provider_credentials,
     require_safe_input_directory,
@@ -33,8 +35,10 @@ __all__ = [
     "INSTALL_DESTINATION_NAMES",
     "add_missing_install_credentials",
     "declared_secret_env_keys",
+    "host_rendered_fields",
     "initialize_install_inputs",
     "validate_install_input_contract",
+    "withdraw_rendered_fields",
 ]
 
 
@@ -158,7 +162,6 @@ def initialize_install_inputs(
             "LIVEKIT_API_KEY": livekit_key,
             "LIVEKIT_API_SECRET": livekit_secret,
             "EIDOLON_CHANNEL_PROVIDER_TOKEN": hub_provider_token,
-            "EIDOLON_LIVEKIT_CLIENT_URL": "ws://127.0.0.1:7880",
             "PAIRING_JWT_SECRET": pairing_token,
             "EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN": data_token,
         },
@@ -223,62 +226,169 @@ SHARED_CREDENTIALS: tuple[tuple[str, str, str, str, str], ...] = (
     ("channel.env", "LIVEKIT_API_SECRET", "livekit.env", "LIVEKIT_API_SECRET", "Channel/LiveKit secret"),
 )
 
-#: Exactly which keys each generated env file holds.
+@dataclass(frozen=True, slots=True)
+class EnvFileKeys:
+    """What one generated environment file holds, and who writes each key.
+
+    Three categories rather than one set, because ``channel.env`` has all three
+    and a set could only state one. So that file was pushed out of the
+    accounting entirely, and four separate places grew their own way of saying
+    "except channel.env" -- ``declared_secret_env_keys``, the repair below, the
+    ``not_repairable`` field it reported, and a second required-key set written
+    out by hand inside the contract check. None of them agreed on why, and the
+    reason they all gave -- that "missing" is undecidable there -- was not true:
+    the required set was fully written down, 340 lines from this table.
+
+    ``required``
+        Every Host must hold it. The generator mints it or copies it from the
+        file holding the other side of a shared secret, the contract check
+        refuses a set without it, and the convergence payload asks a Host for
+        exactly these.
+
+    ``optional``
+        The operator has this credential or does not, and the input set says
+        the same either way. This is the one thing a plain set could not
+        express, and the whole reason one file sat outside the table.
+
+    ``rendered``
+        Written onto this file by the Host layer on the way to a Host, from
+        facts only a Host binding knows. **Never present in the input set
+        itself.** ``local-api.env`` has always been this shape -- its five
+        Owner-domain fields are rendered and none of them is in its seed --
+        and stating it here is what makes the shape checkable rather than
+        coincidental. ``channel.env`` was the one file that broke it: it
+        carried ``EIDOLON_LIVEKIT_CLIENT_URL=ws://127.0.0.1:7880``, a value
+        the render replaced on every path out of here, and which would have
+        pointed every device at itself had it ever survived one.
+    """
+
+    required: frozenset[str] = frozenset()
+    optional: frozenset[str] = frozenset()
+    rendered: frozenset[str] = frozenset()
+
+    def __post_init__(self) -> None:
+        if self.required & self.optional or (self.required | self.optional) & self.rendered:
+            raise InstallInputError("one key cannot be in two categories of one env file")
+
+
+#: Exactly which keys each generated env file holds, and who writes each.
 #:
-#: Module level, and read by two callers for the same reason ``SHARED_CREDENTIALS``
-#: is: the contract check proves a set has not drifted, and the repair below
-#: works out what an older Host is missing. A second copy would let a credential
-#: be required by one and unknown to the other.
-DECLARED_ENV_KEYS: dict[str, set[str]] = {
-    "data.env": {
-        "EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN",
-        "EIDOLON_DATA_MEMORY_RUNTIME_ROSTER_TOKEN",
-        "EIDOLON_DATA_WORKSPACE_AUTHORITY_TOKEN",
-        "EIDOLON_DATA_SQLITE_PATH",
-        "EIDOLON_DATA_DATABASE_URL",
-        "EIDOLON_DATA_OBJECT_STORE_PATH",
-        "EIDOLON_DATA_AUDIT_NATS_URL",
-    },
-    "hub.env": {
-        "EIDOLON_HUB_MANAGEMENT_JWT_SECRET",
-        "EIDOLON_HUB_DEVICE_REGISTRY_READER_TOKEN",
-        "EIDOLON_HUB_CHANNEL_PROVIDER_TOKEN",
-    },
-    "kernel.env": {
-        "EIDOLON_KERNEL_HUB_MANAGEMENT_TOKEN",
-        "EIDOLON_KERNEL_COMPANION_AUTHORITY_TOKEN",
-    },
-    "admin.env": {
-        "EIDOLON_ADMIN_DATA_AUTHORITY_TOKEN",
-        "EIDOLON_ADMIN_DATA_WORKSPACE_AUTHORITY_TOKEN",
-        "EIDOLON_ADMIN_HUB_MANAGEMENT_JWT_SECRET",
-        "EIDOLON_ADMIN_LOCAL_API_SERVICE_TOKEN",
-        "EIDOLON_ADMIN_MEMORY_API_SERVICE_TOKEN",
-        "EIDOLON_AGENT_ADMIN_API_TOKEN",
-        "EIDOLON_CHANNEL_PROVIDER_TOKEN",
-        "EIDOLON_ADMIN_SYSTEM_DIRECTORY_UDS",
-        "EIDOLON_ADMIN_AUDIT_NATS_URL",
-    },
-    "local-api.env": {
-        "EIDOLON_LOCAL_API_ADMIN_BASE_URL",
-        "EIDOLON_LOCAL_API_ADMIN_SERVICE_TOKEN",
-        "EIDOLON_LOCAL_API_LIFECYCLE_WORKFLOW_SOCKET",
-    },
-    "bootstrap.env": set(),
-    "agent.env": {
-        "EIDOLON_AGENT_LLM_API_KEY",
-        "EIDOLON_AGENT_ADMIN_API_TOKEN",
-        "EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN",
-        "EIDOLON_MEMORY_MCP_TOKEN",
-        "PAIRING_JWT_SECRET",
-    },
-    "memory.env": {
-        "EIDOLON_DATA_MEMORY_RUNTIME_ROSTER_TOKEN",
-        "EIDOLON_MEMORY_LLM_API_KEY",
-        "EIDOLON_MEMORY_MCP_TOKEN",
-        "EIDOLON_MEMORY_API_TOKEN",
-    },
-    "livekit.env": {"LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"},
+#: Module level, and read by four callers for the same reason
+#: ``SHARED_CREDENTIALS`` is: the contract check proves a set has not drifted,
+#: the repair below works out what an older Host is missing, the convergence
+#: payload tells a Host what the product requires, and the Host layer proves
+#: it renders exactly the fields declared here. A second copy would let a
+#: credential be required by one and unknown to the other.
+DECLARED_ENV_KEYS: dict[str, EnvFileKeys] = {
+    "data.env": EnvFileKeys(
+        required=frozenset({
+            "EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN",
+            "EIDOLON_DATA_MEMORY_RUNTIME_ROSTER_TOKEN",
+            "EIDOLON_DATA_WORKSPACE_AUTHORITY_TOKEN",
+            "EIDOLON_DATA_SQLITE_PATH",
+            "EIDOLON_DATA_DATABASE_URL",
+            "EIDOLON_DATA_OBJECT_STORE_PATH",
+            "EIDOLON_DATA_AUDIT_NATS_URL",
+        }),
+    ),
+    "hub.env": EnvFileKeys(
+        required=frozenset({
+            "EIDOLON_HUB_MANAGEMENT_JWT_SECRET",
+            "EIDOLON_HUB_DEVICE_REGISTRY_READER_TOKEN",
+            "EIDOLON_HUB_CHANNEL_PROVIDER_TOKEN",
+        }),
+    ),
+    "kernel.env": EnvFileKeys(
+        required=frozenset({
+            "EIDOLON_KERNEL_HUB_MANAGEMENT_TOKEN",
+            "EIDOLON_KERNEL_COMPANION_AUTHORITY_TOKEN",
+        }),
+    ),
+    "admin.env": EnvFileKeys(
+        required=frozenset({
+            "EIDOLON_ADMIN_DATA_AUTHORITY_TOKEN",
+            "EIDOLON_ADMIN_DATA_WORKSPACE_AUTHORITY_TOKEN",
+            "EIDOLON_ADMIN_HUB_MANAGEMENT_JWT_SECRET",
+            "EIDOLON_ADMIN_LOCAL_API_SERVICE_TOKEN",
+            "EIDOLON_ADMIN_MEMORY_API_SERVICE_TOKEN",
+            "EIDOLON_AGENT_ADMIN_API_TOKEN",
+            "EIDOLON_CHANNEL_PROVIDER_TOKEN",
+            "EIDOLON_ADMIN_SYSTEM_DIRECTORY_UDS",
+            "EIDOLON_ADMIN_AUDIT_NATS_URL",
+        }),
+    ),
+    "local-api.env": EnvFileKeys(
+        required=frozenset({
+            "EIDOLON_LOCAL_API_ADMIN_BASE_URL",
+            "EIDOLON_LOCAL_API_ADMIN_SERVICE_TOKEN",
+            "EIDOLON_LOCAL_API_LIFECYCLE_WORKFLOW_SOCKET",
+        }),
+        # Where this Host's Owner domain is, which is a fact about this Host
+        # and not a credential. Rendered on the way out, never held here.
+        rendered=frozenset({
+            "EIDOLON_LOCAL_API_OWNER_DOMAIN_ID",
+            "EIDOLON_LOCAL_API_OWNER_DOMAIN_DESCRIPTOR_URI",
+            "EIDOLON_LOCAL_API_OWNER_DOMAIN_DESCRIPTOR",
+            "EIDOLON_LOCAL_API_OWNER_ROOT_CERTIFICATE",
+            "EIDOLON_LOCAL_API_AUTHORITY_SIGNING_CERTIFICATE",
+        }),
+    ),
+    "bootstrap.env": EnvFileKeys(),
+    "agent.env": EnvFileKeys(
+        required=frozenset({
+            "EIDOLON_AGENT_LLM_API_KEY",
+            "EIDOLON_AGENT_ADMIN_API_TOKEN",
+            "EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN",
+            "EIDOLON_MEMORY_MCP_TOKEN",
+            "PAIRING_JWT_SECRET",
+        }),
+    ),
+    "channel.env": EnvFileKeys(
+        required=frozenset({
+            "OPENAI_LLM_API_KEY",
+            "BAILIAN_STT_API_KEY",
+            "BAILIAN_TTS_API_KEY",
+            "LIVEKIT_API_KEY",
+            "LIVEKIT_API_SECRET",
+            "EIDOLON_CHANNEL_PROVIDER_TOKEN",
+            "PAIRING_JWT_SECRET",
+            "EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN",
+        }),
+        # A second synthesis vendor the operator may or may not have bought.
+        # This pair is why the whole file used to sit outside this table.
+        optional=frozenset(_OPTIONAL_CHANNEL_KEYS),
+        # Where devices are told to reach LiveKit, and whether plain `ws://`
+        # is allowed on this Host's LAN. Neither is answerable from here: the
+        # first is answered per binding by the Channel provider, against the
+        # address that binding is actually reachable on, and the second is one
+        # profile's decision about one Host.
+        rendered=frozenset({
+            "EIDOLON_LIVEKIT_CLIENT_URL",
+            "EIDOLON_CHANNEL_PROVIDER_ALLOW_INSECURE_LAN_CLIENT_URL",
+        }),
+    ),
+    "memory.env": EnvFileKeys(
+        required=frozenset({
+            "EIDOLON_DATA_MEMORY_RUNTIME_ROSTER_TOKEN",
+            "EIDOLON_MEMORY_LLM_API_KEY",
+            "EIDOLON_MEMORY_MCP_TOKEN",
+            "EIDOLON_MEMORY_API_TOKEN",
+        }),
+    ),
+    "livekit.env": EnvFileKeys(
+        required=frozenset({"LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"}),
+    ),
+}
+
+#: Which fields the Host layer writes onto an input file on the way to a Host.
+#:
+#: Derived from the table above rather than restated, and read by both
+#: renderers -- the Pi's and the Mac's -- so a field added to one of them and
+#: not to this table fails rather than arriving undeclared. That is exactly how
+#: ``EIDOLON_CHANNEL_PROVIDER_ALLOW_INSECURE_LAN_CLIENT_URL`` came to exist on
+#: every Host while appearing in no declaration anywhere in Ops.
+HOST_RENDERED_ENV_KEYS: dict[str, frozenset[str]] = {
+    name: keys.rendered for name, keys in DECLARED_ENV_KEYS.items() if keys.rendered
 }
 
 #: Entries that are product topology rather than secrets: the same on every
@@ -306,7 +416,6 @@ FIXED_ENV_VALUES: dict[str, str] = {
     "EIDOLON_ADMIN_SYSTEM_DIRECTORY_UDS": "/run/eidolon/system.sock",
     "EIDOLON_LOCAL_API_ADMIN_BASE_URL": "http://127.0.0.1:9000",
     "EIDOLON_LOCAL_API_LIFECYCLE_WORKFLOW_SOCKET": "/run/eidolon-lifecycle/workflow.sock",
-    "EIDOLON_LIVEKIT_CLIENT_URL": "ws://127.0.0.1:7880",
 }
 
 _DATA_PATH_KEYS = (
@@ -317,12 +426,15 @@ _DATA_PATH_KEYS = (
 
 #: Credentials only an operator can supply. A repair refuses when one is missing
 #: rather than inventing a value that would authenticate to nothing.
-PROVIDER_ENV_KEYS: tuple[tuple[str, str], ...] = (
-    ("agent.env", "EIDOLON_AGENT_LLM_API_KEY"),
-    ("channel.env", "OPENAI_LLM_API_KEY"),
-    ("channel.env", "BAILIAN_STT_API_KEY"),
-    ("channel.env", "BAILIAN_TTS_API_KEY"),
-    ("memory.env", "EIDOLON_MEMORY_LLM_API_KEY"),
+#:
+#: Derived from the two tables that already state this, rather than written out
+#: a third time. The hand-written copy this replaces was byte-identical to a
+#: fourth copy inside the contract check below, which is the arrangement every
+#: comment in this file warns against.
+PROVIDER_ENV_KEYS: tuple[tuple[str, str], ...] = tuple(
+    (PROVIDER_DESTINATIONS[source_id], key)
+    for source_id, keys in _EXTERNAL_KEYS.items()
+    for key in keys
 )
 
 def declared_secret_env_keys() -> dict[str, list[str]]:
@@ -334,16 +446,21 @@ def declared_secret_env_keys() -> dict[str, list[str]]:
     carrying its own copy of the requirement would be a second opinion that
     drifts — which is the whole shape of the failure this exists to close.
 
-    ``channel.env`` is excluded, as it is from the repair: its key set is
-    deliberately open, so "missing" is not a decidable question there. Files with
-    nothing declared are excluded too, because a declaration of nothing is not a
-    thing to converge to.
+    ``required`` only. An optional credential is legitimately absent, so asking
+    a Host for one could only ever report a Host that is fine; and a rendered
+    field is not in the input set this converges from, so there would be nothing
+    to deliver. Files with nothing required are left out, because a declaration
+    of nothing is not a thing to converge to — which today is ``bootstrap.env``
+    and nothing else. ``channel.env`` used to be left out too, on the stated
+    grounds that "missing" was undecidable there; it was decidable, and it is in
+    now, so a Host short a Channel credential is caught by the same gate as
+    every other file.
     """
 
     return {
-        name: sorted(keys)
+        name: sorted(keys.required)
         for name, keys in sorted(DECLARED_ENV_KEYS.items())
-        if keys and name != "channel.env"
+        if keys.required
     }
 
 
@@ -370,8 +487,7 @@ def add_missing_install_credentials(
     What it will not do: touch a value that is already there, rotate anything,
     re-anchor the Host identity, or invent a provider credential — an LLM key
     this process made up would authenticate to nothing, so a missing one is
-    reported and the repair refuses. It also does not repair ``channel.env``,
-    whose key set is deliberately open; see below.
+    reported and the repair refuses.
 
     Dry by default. ``apply=False`` reports what it would add and writes nothing,
     because the operator running this is holding a Host that currently works.
@@ -379,14 +495,7 @@ def add_missing_install_credentials(
 
     target = target_directory(config)
     require_safe_input_directory(target)
-    # ``channel.env`` is read but never repaired: its key set is open — optional
-    # provider credentials are legitimately absent — so "missing" is not a
-    # decidable question there. A credential added to that file needs the
-    # generator, and this says so rather than half-handling it.
-    envs = {
-        name: parse_provider_env(target / name)
-        for name in (*DECLARED_ENV_KEYS, "channel.env")
-    }
+    envs = {name: parse_provider_env(target / name) for name in DECLARED_ENV_KEYS}
 
     missing_provider = [
         f"{name}:{key}"
@@ -408,7 +517,7 @@ def add_missing_install_credentials(
     added: dict[str, list[str]] = {}
     minted: dict[tuple[str, str], str] = {}
     for name, declared in DECLARED_ENV_KEYS.items():
-        for key in sorted(declared - set(envs[name])):
+        for key in sorted(declared.required - set(envs[name])):
             value = FIXED_ENV_VALUES.get(key)
             if value is None:
                 partner = partners.get((name, key))
@@ -432,9 +541,11 @@ def add_missing_install_credentials(
     return {
         "status": "credentials_added" if apply and added else "planned",
         "directory": str(target),
-        # Named rather than silently skipped: a reader should not have to work
-        # out why one file is not in the accounting.
-        "not_repairable": ["channel.env"],
+        # No ``not_repairable`` any more. It named ``channel.env``, and it said
+        # the opposite of the truth: that file is the one the Host layer can
+        # replace whole, and it is now repaired like every other. A field
+        # naming an exception outlives the exception; the accounting below
+        # covers every file the table declares, so there is nothing to name.
         # Names only. A report that carried the values would put every new
         # secret in a terminal's scrollback.
         "added": {name: sorted(keys) for name, keys in sorted(added.items())},
@@ -442,6 +553,60 @@ def add_missing_install_credentials(
         "applied": bool(apply and added),
         "redaction": "credential values are never returned",
     }
+
+
+def host_rendered_fields(name: str, values: Mapping[str, str]) -> dict[str, str]:
+    """The fields a Host layer renderer writes onto one input file, proved.
+
+    Both renderers — the Pi's and the Mac's — build their replacements and hand
+    them here, so a field one of them writes is a field
+    :data:`DECLARED_ENV_KEYS` names. Without this the table is a comment:
+    ``EIDOLON_CHANNEL_PROVIDER_ALLOW_INSECURE_LAN_CLIENT_URL`` reached every
+    Host this product has ever had while appearing in no declaration anywhere
+    in Ops, and the only way to find out a Host had it was to read the file on
+    the Host.
+    """
+
+    declared = HOST_RENDERED_ENV_KEYS.get(name, frozenset())
+    if set(values) != declared:
+        raise InstallInputError(
+            f"Host layer renders fields {name} does not declare: "
+            f"{', '.join(sorted(set(values) ^ declared))}"
+        )
+    return dict(values)
+
+
+def withdraw_rendered_fields(target: Path) -> list[str]:
+    """Drop fields the Host layer renders from the input set it renders onto.
+
+    A copy of a fact is not a second opinion about it, and these are not even
+    copies: the value an input set holds here was written before anything knew
+    the answer. ``EIDOLON_LIVEKIT_CLIENT_URL`` is the one this was written for.
+    It sat in ``channel.env`` as ``ws://127.0.0.1:7880``, replaced on every path
+    out of this machine, pinned there by a contract check, and catastrophic on
+    the one path that skips the render — a Host profile with no ``[app]``, which
+    the target accepts — because the Channel provider hands a configured host
+    straight to the device and loopback is the one host its "plain ws:// only on
+    loopback" rule lets through. Every device would have been told to reach
+    LiveKit at its own address.
+
+    Withdrawn rather than refused, and on the same pass that makes the derived
+    settings and the provider credentials follow their sources, because this is
+    the same kind of thing: an input set that was written when Ops still thought
+    it owned this field, and has no way to say so.
+    """
+
+    withdrawn: list[str] = []
+    for name, rendered in HOST_RENDERED_ENV_KEYS.items():
+        values = parse_provider_env(target / name)
+        stale = sorted(set(values) & rendered)
+        if not stale:
+            continue
+        for key in stale:
+            del values[key]
+        write_private_file(target / name, serialize_env(values))
+        withdrawn.extend(f"{name}:{key}" for key in stale)
+    return withdrawn
 
 
 def validate_install_input_contract(
@@ -479,6 +644,13 @@ def validate_install_input_contract(
         settings = refresh_derived_settings(target, config, read_exact_file)
         if settings:
             refreshed["settings"] = settings
+        # Before the key-set check below, which refuses what this removes. Not
+        # gated on ``verify_provider_sources``: a rendered field has nothing to
+        # do with a component's own credentials, and the Mac path — which skips
+        # that verification — holds the same input set.
+        withdrawn = withdraw_rendered_fields(target)
+        if withdrawn:
+            refreshed["withdrawn"] = withdrawn
         if verify_provider_sources:
             credentials = refresh_provider_credentials(target, config)
             if credentials:
@@ -498,39 +670,33 @@ def validate_install_input_contract(
             "livekit.env",
         )
     }
-    exact_keys = DECLARED_ENV_KEYS
-    channel_required = {
-        "OPENAI_LLM_API_KEY",
-        "BAILIAN_STT_API_KEY",
-        "BAILIAN_TTS_API_KEY",
-        "LIVEKIT_API_KEY",
-        "LIVEKIT_API_SECRET",
-        "EIDOLON_CHANNEL_PROVIDER_TOKEN",
-        "EIDOLON_LIVEKIT_CLIENT_URL",
-        "PAIRING_JWT_SECRET",
-        "EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN",
-    }
-    for name, keys in exact_keys.items():
-        if set(envs[name]) != keys:
+    # One rule for all ten files. ``channel.env`` used to need its own, written
+    # out by hand right here, because the table above could not say "optional";
+    # with a file that declares none, the bounds below collapse to the exact
+    # equality the other nine always had.
+    for name, keys in DECLARED_ENV_KEYS.items():
+        present = set(envs[name])
+        rendered = present & keys.rendered
+        if rendered:
+            # Named separately from "drifted", because it is a different
+            # mistake with a different fix: the Host layer owns these fields,
+            # and an input set holding one is a copy that can only go stale.
+            # ``refresh_derived`` above withdraws them, so reaching this means
+            # the caller asked not to.
+            raise InstallInputError(
+                "install input holds fields the Host layer renders: "
+                f"{name}:{', '.join(sorted(rendered))}"
+            )
+        if not keys.required <= present or not present <= (keys.required | keys.optional):
             raise InstallInputError(f"install input env key set drifted: {name}")
-    channel_keys = set(envs["channel.env"])
-    if not channel_required <= channel_keys or not channel_keys <= (
-        channel_required | set(_OPTIONAL_CHANNEL_KEYS)
-    ):
-        raise InstallInputError("install input env key set drifted: channel.env")
 
     if verify_provider_sources:
-        provider_destinations = {
-            "eidolon_agent": "agent.env",
-            "eidolon_channel": "channel.env",
-            "eidolon_memory": "memory.env",
-        }
         current_providers = {
             source_id: parse_provider_env(config.sources[source_id].path / "config/.env")
             for source_id in _EXTERNAL_KEYS
         }
         for source_id, keys in _EXTERNAL_KEYS.items():
-            destination = envs[provider_destinations[source_id]]
+            destination = envs[PROVIDER_DESTINATIONS[source_id]]
             for key in keys:
                 current = current_providers[source_id].get(key)
                 if not usable_secret(current, key=key):
@@ -557,7 +723,6 @@ def validate_install_input_contract(
 
     data = envs["data.env"]
     admin = envs["admin.env"]
-    channel = envs["channel.env"]
     for left_file, left_key, right_file, right_key, label in SHARED_CREDENTIALS:
         left = envs[left_file][left_key]
         right = envs[right_file][right_key]
@@ -568,16 +733,8 @@ def validate_install_input_contract(
         raise InstallInputError("Data authority paths drifted from the product contract")
     if admin["EIDOLON_ADMIN_SYSTEM_DIRECTORY_UDS"] != "/run/eidolon/system.sock":
         raise InstallInputError("Admin system directory path drifted from the product contract")
-    if channel["EIDOLON_LIVEKIT_CLIENT_URL"] != "ws://127.0.0.1:7880":
-        raise InstallInputError("LiveKit client origin drifted from the backend-only contract")
 
-    for name, key in (
-        ("agent.env", "EIDOLON_AGENT_LLM_API_KEY"),
-        ("channel.env", "OPENAI_LLM_API_KEY"),
-        ("channel.env", "BAILIAN_STT_API_KEY"),
-        ("channel.env", "BAILIAN_TTS_API_KEY"),
-        ("memory.env", "EIDOLON_MEMORY_LLM_API_KEY"),
-    ):
+    for name, key in PROVIDER_ENV_KEYS:
         if not usable_secret(envs[name].get(key), key=key):
             raise InstallInputError(
                 f"provider credential is missing or a placeholder: {name}:{key}"

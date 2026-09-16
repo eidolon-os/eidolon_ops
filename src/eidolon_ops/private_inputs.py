@@ -147,12 +147,20 @@ def refresh_provider_credentials(target: Path, config: OperationsConfig) -> list
     the derived settings beside it follow the pinned commits. What stays refused
     is a value that is *missing* or a placeholder: nothing here can invent an LLM
     key, and a key that authenticates to nothing is worth stopping for.
+
+    This brings the *workstation's* input set up to date and nothing else. What
+    carries a rotated key to a Host is a separate question with a narrow answer
+    today: a deploy does not ship these files, ``converge-inputs`` only adds
+    keys a Host lacks, and ``install`` refuses a file that differs from the one
+    already there. So rotating a provider key here and expecting a running Host
+    to pick it up does not work yet, and nothing in this function pretends it
+    does.
     """
 
     refreshed: list[str] = []
     for source_id, keys in EXTERNAL_KEYS.items():
         current = parse_provider_env(config.sources[source_id].path / "config/.env")
-        name = _PROVIDER_DESTINATIONS[source_id]
+        name = PROVIDER_DESTINATIONS[source_id]
         installed = parse_provider_env(target / name)
         wanted = dict(installed)
         for key in keys:
@@ -179,7 +187,10 @@ def refresh_provider_credentials(target: Path, config: OperationsConfig) -> list
 
 
 #: Which input file holds each component's provider keys.
-_PROVIDER_DESTINATIONS = {
+#:
+#: Public because ``install_inputs`` derives ``PROVIDER_ENV_KEYS`` from it
+#: rather than restating the pairing, and used to restate it twice more.
+PROVIDER_DESTINATIONS = {
     "eidolon_agent": "agent.env",
     "eidolon_channel": "channel.env",
     "eidolon_memory": "memory.env",

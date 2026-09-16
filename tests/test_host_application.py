@@ -11,6 +11,11 @@ from eidolon_ops.host_application import (
     HostApplicationMaterializer,
 )
 from eidolon_ops.hub_assets import HubAssetError
+from eidolon_ops.install_inputs import (
+    HOST_RENDERED_ENV_KEYS,
+    InstallInputError,
+    host_rendered_fields,
+)
 from eidolon_ops.paths import AppAccess
 
 HUB_TEMPLATE = """\
@@ -96,9 +101,13 @@ def test_pi_environment_targets_the_same_host_bound_hub(config) -> None:
         "EIDOLON_LOCAL_API_ADMIN_BASE_URL=http://127.0.0.1:9000\n"
         "EIDOLON_LOCAL_API_ADMIN_SERVICE_TOKEN=test-token\n",
     )
+    # The seed carries credentials and nothing else. Both Host-bound fields
+    # below are added by the render, not overwritten in it: an input set that
+    # stated where devices reach LiveKit would be answering a question only a
+    # binding can answer.
     channel = materializer.render_environment(
         "channel.env",
-        "EIDOLON_LIVEKIT_CLIENT_URL=ws://127.0.0.1:7880\nPAIRING_JWT_SECRET=test\n",
+        "PAIRING_JWT_SECRET=test\n",
     )
 
     assert f"EIDOLON_LOCAL_API_OWNER_DOMAIN_ID={owner.owner_domain_id}" in local_api
@@ -181,3 +190,31 @@ def test_starting_the_hub_opens_the_lan_with_it(config) -> None:
     # Wants= carries no ordering, and the ingress orders itself after the Hub,
     # so the pair cannot deadlock systemd.
     assert "After=network-online.target eidolon-hub.service" in ingress
+
+
+def test_a_renderer_cannot_write_a_field_the_table_does_not_declare() -> None:
+    """The declaration is checked, not merely written down.
+
+    ``EIDOLON_CHANNEL_PROVIDER_ALLOW_INSECURE_LAN_CLIENT_URL`` reached every
+    Host this product has ever had while appearing in no declaration anywhere in
+    Ops; the only way to learn a Host had it was to read the file on the Host.
+    Both renderers pass their replacements through here, so the next such field
+    fails where it is added rather than arriving unannounced.
+    """
+
+    declared = HOST_RENDERED_ENV_KEYS["channel.env"]
+    assert host_rendered_fields("channel.env", dict.fromkeys(declared, "x")) == dict.fromkeys(
+        declared, "x"
+    )
+    with pytest.raises(InstallInputError, match="EIDOLON_CHANNEL_PROVIDER_NEW_FIELD"):
+        host_rendered_fields(
+            "channel.env",
+            {**dict.fromkeys(declared, "x"), "EIDOLON_CHANNEL_PROVIDER_NEW_FIELD": "1"},
+        )
+    # And a field dropped from a renderer is caught the same way: a Host would
+    # otherwise keep whatever the last release wrote.
+    with pytest.raises(InstallInputError, match="EIDOLON_LIVEKIT_CLIENT_URL"):
+        host_rendered_fields(
+            "channel.env",
+            {"EIDOLON_CHANNEL_PROVIDER_ALLOW_INSECURE_LAN_CLIENT_URL": "1"},
+        )
