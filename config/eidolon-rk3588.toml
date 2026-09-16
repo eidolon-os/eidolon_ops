@@ -49,6 +49,11 @@ require_wired_release_upload = true
 #
 # A shipped Host has no cable to a workstation and declares nothing.
 management_networks = ["10.42.0.0/24"]
+# 2026-09-16。开发台架：claim 窗口常开，Setup code 单独即可添加 Host Admin。
+# 这台机器证明"人持有它"的每条路——commissioning-code、controller-reset——都要走
+# 这台工作站，所以管理手机一丢，台架就把自己锁在外面；而这块板子正是 mobile 和
+# BOX-3 接着的那台。出厂的 Host 不写这一行，那时产品规则（ADR-0007）就是对的那条。
+claim_window = "always_open"
 
 [workspace]
 # 2026-08-25: moved off /private/tmp. macOS purges it on its own schedule.
