@@ -61,6 +61,98 @@ def _parse_env(text: str) -> dict[str, str]:
     return values
 
 
+def verify_relationships(
+    relationships: tuple[tuple[str, str, str, str, str], ...], root: Path
+) -> dict:
+    """Prove the credentials two files on this Host share are still one value.
+
+    Nothing on a Host has ever asked this. The relationships are proven when the
+    input set is written, on the workstation, by the install contract — and that
+    runs on ``install --apply`` and nowhere else. After that the two copies live
+    on the Host and drift independently, and four of the six pairs fail in ways
+    no gate here can see:
+
+    - a Channel provider token that stopped matching Hub's or Admin's answers
+      401 to a reconciliation nobody is watching;
+    - a pairing JWT secret that stopped matching the Agent's fails signature
+      verification inside ``chat()``, so the first symptom is a person talking
+      to a device;
+    - a companion authority token that stopped matching Data's 401s a runtime
+      call.
+
+    Only the LiveKit pair shows up anywhere, and then only as the side effect of
+    a worker that cannot register. So this reads both sides and compares them.
+
+    Values are compared here and never leave: the report names the pair and the
+    two places it lives, and nothing else. A digest would be no more useful to
+    the operator and one more thing to be careless with.
+
+    Fail-closed on a file this Host does not have. Every one of these files is
+    part of a full install, so a missing one is not a profile that declined it —
+    it is a Host that cannot hold the relationship at all, and reporting that as
+    agreement would be the same lie this check exists to stop telling.
+    """
+
+    mismatched: list[dict[str, str]] = []
+    unchecked: list[dict[str, str]] = []
+    values: dict[str, dict[str, str] | None] = {}
+
+    def _read(name: str) -> dict[str, str] | None:
+        if name not in values:
+            destination = primitives.host_path(root, contract.INSTALL_INPUTS[name][0])
+            values[name] = (
+                _parse_env(destination.read_text(encoding="utf-8"))
+                if destination.is_file() and not destination.is_symlink()
+                else None
+            )
+        return values[name]
+
+    for left_file, left_key, right_file, right_key, label in relationships:
+        where = {
+            "label": label,
+            "left": f"{left_file}:{left_key}",
+            "right": f"{right_file}:{right_key}",
+        }
+        left, right = _read(left_file), _read(right_file)
+        absent = [name for name, side in ((left_file, left), (right_file, right)) if side is None]
+        if absent:
+            unchecked.append({**where, "reason": f"not installed: {', '.join(sorted(set(absent)))}"})
+            continue
+        missing = [
+            f"{name}:{key}"
+            for name, side, key in (
+                (left_file, left, left_key),
+                (right_file, right, right_key),
+            )
+            if key not in side
+        ]
+        if missing:
+            # Distinct from a mismatch, and already the subject of ``converge``:
+            # a Host short a declared credential is repairable, a Host holding
+            # two different ones is not.
+            unchecked.append({**where, "reason": f"absent: {', '.join(missing)}"})
+            continue
+        if left[left_key] != right[right_key]:
+            mismatched.append(where)
+
+    return {
+        "status": (
+            "not_declared"
+            if not relationships
+            else "mismatched"
+            if mismatched
+            else "unverified"
+            if unchecked
+            else "agreed"
+        ),
+        "declared": len(relationships),
+        "compared": len(relationships) - len(unchecked),
+        "mismatched": mismatched,
+        "unchecked": unchecked,
+        "redaction": "credential values are compared on this Host and never returned",
+    }
+
+
 def converge(data: dict, root: Path) -> dict:
     """Add every declared key this Host is missing, from the staged files.
 
@@ -72,6 +164,14 @@ def converge(data: dict, root: Path) -> dict:
     if not isinstance(declared, dict) or not declared:
         raise TargetError("convergence requires a declared key set")
     apply = bool(data.get("apply"))
+    # Answered on the way past, because this action already opens every one of
+    # these files and the operator running it is asking about credentials. It
+    # does not change what convergence does: adding a key a Host lacks is not
+    # the fix for two files that disagree, and pretending otherwise would make
+    # the report say a repair had happened.
+    relationships = verify_relationships(
+        contract.declared_credential_relationships(data), root
+    )
     # Resolved on first use, not up front: a Host that already holds every
     # declared key needs nothing staged, and demanding a staging directory to
     # tell somebody "already current" would make the safe case the awkward one.
@@ -161,6 +261,10 @@ def converge(data: dict, root: Path) -> dict:
         # Reported rather than raised: a profile may legitimately not install
         # every input, and the caller can tell which case it is looking at.
         "absent": sorted(absent),
+        # Likewise reported, and for a sharper reason: nothing here can repair a
+        # pair that disagrees, so raising would stop a convergence that is
+        # otherwise correct and leave the Host worse off than before.
+        "relationships": relationships,
         "applied": bool(added),
         "redaction": "credential values are never returned",
     }

@@ -822,6 +822,38 @@ def fixed_data(payload: Mapping[str, object]) -> dict[str, Path]:
     return result
 
 
+def declared_credential_relationships(
+    payload: Mapping[str, object],
+) -> tuple[tuple[str, str, str, str, str], ...]:
+    """Which two credentials on this Host have to be the same value.
+
+    Sent rather than known here, for the reason every declaration in this
+    payload is: the workstation owns ``SHARED_CREDENTIALS``, and an agent
+    holding its own copy would be a second opinion that drifts — which is the
+    shape of the defect this check exists to find in the first place.
+
+    A payload with no relationships is one from an older workstation, and
+    declares nothing to compare. That is not a Host that failed the check; it
+    is a Host nobody asked about.
+    """
+
+    declared = payload.get("credential_relationships", [])
+    if not isinstance(declared, list):
+        raise TargetError("credential_relationships must be an array")
+    fields = ("left_file", "left_key", "right_file", "right_key", "label")
+    relationships: list[tuple[str, str, str, str, str]] = []
+    for entry in declared:
+        if not isinstance(entry, dict) or set(entry) != set(fields):
+            raise TargetError(f"credential relationship must name exactly {', '.join(fields)}")
+        if not all(isinstance(entry[field], str) and entry[field] for field in fields):
+            raise TargetError("credential relationship fields must be non-empty strings")
+        for field in ("left_file", "right_file"):
+            if entry[field] not in SECRET_INPUTS:
+                raise TargetError(f"credential relationship names no install input: {entry[field]}")
+        relationships.append(tuple(entry[field] for field in fields))  # type: ignore[arg-type]
+    return tuple(relationships)
+
+
 def fixed_port_registry(payload: Mapping[str, object]) -> str:
     """The port registry the operator sent, refused rather than invented.
 

@@ -21,11 +21,12 @@ from pathlib import Path
 
 import pytest
 
-from eidolon_ops.hostagent import secret_inputs
+from eidolon_ops.hostagent import contract, lifecycle, secret_inputs
 from eidolon_ops.hostagent.primitives import TargetError
 from eidolon_ops.install_inputs import (
     DECLARED_ENV_KEYS,
     SHARED_CREDENTIALS,
+    declared_credential_relationships,
     declared_secret_env_keys,
 )
 
@@ -322,3 +323,236 @@ def test_a_rotated_declared_credential_is_still_refused(tmp_path) -> None:
 
     with pytest.raises(TargetError, match="EIDOLON_CHANNEL_PROVIDER_TOKEN"):
         secret_inputs.converge(_payload(declared, apply=True), tmp_path)
+
+
+def _relationship(left_file, left_key, right_file, right_key, label="Test pair"):
+    return {
+        "left_file": left_file,
+        "left_key": left_key,
+        "right_file": right_file,
+        "right_key": right_key,
+        "label": label,
+    }
+
+
+def test_the_relationships_travel_rather_than_being_known_on_the_host() -> None:
+    """One author, same as the key declaration beside it.
+
+    An agent holding its own copy of which credentials must match would be a
+    second opinion that drifts — which is exactly the defect this check looks
+    for, so building it out of a second copy would be absurd.
+    """
+
+    wire = declared_credential_relationships()
+    assert len(wire) == len(SHARED_CREDENTIALS)
+    assert [
+        (e["left_file"], e["left_key"], e["right_file"], e["right_key"], e["label"])
+        for e in wire
+    ] == [tuple(pair) for pair in SHARED_CREDENTIALS]
+    # And it survives the wire: the agent refuses a shape it did not expect.
+    assert contract.declared_credential_relationships({"credential_relationships": wire})
+    # Every relationship the product declares, not only the ones that prompted
+    # this: six of them involve channel.env and four of those fail silently,
+    # but a Host can hold any of the seventeen wrongly and none was checked.
+    channel = [e for e in wire if "channel.env" in {e["left_file"], e["right_file"]}]
+    assert len(channel) == 6 and len(wire) == 17
+
+
+def test_a_host_holding_two_different_values_is_named(tmp_path) -> None:
+    """The failure that had nowhere to be seen.
+
+    Hub presents this token to the Channel provider. When the two stopped
+    matching, the provider answered 401 to a reconciliation nobody watches, and
+    every gate on this Host stayed green.
+    """
+
+    _host(tmp_path, "hub.env", "EIDOLON_HUB_CHANNEL_PROVIDER_TOKEN=installed\n")
+    _host(tmp_path, "channel.env", "EIDOLON_CHANNEL_PROVIDER_TOKEN=drifted\n")
+
+    report = secret_inputs.verify_relationships(
+        (
+            (
+                "hub.env",
+                "EIDOLON_HUB_CHANNEL_PROVIDER_TOKEN",
+                "channel.env",
+                "EIDOLON_CHANNEL_PROVIDER_TOKEN",
+                "Hub/Channel Provider token",
+            ),
+        ),
+        tmp_path,
+    )
+
+    assert report["status"] == "mismatched"
+    assert report["mismatched"] == [
+        {
+            "label": "Hub/Channel Provider token",
+            "left": "hub.env:EIDOLON_HUB_CHANNEL_PROVIDER_TOKEN",
+            "right": "channel.env:EIDOLON_CHANNEL_PROVIDER_TOKEN",
+        }
+    ]
+    # Names and places only. Neither value appears anywhere in the answer.
+    assert "installed" not in repr(report) and "drifted" not in repr(report)
+
+
+def test_agreement_is_reported_as_agreement(tmp_path) -> None:
+    _host(tmp_path, "agent.env", "PAIRING_JWT_SECRET=one-value\n")
+    _host(tmp_path, "channel.env", "PAIRING_JWT_SECRET=one-value\n")
+
+    report = secret_inputs.verify_relationships(
+        (("agent.env", "PAIRING_JWT_SECRET", "channel.env", "PAIRING_JWT_SECRET", "Agent/Channel JWT"),),
+        tmp_path,
+    )
+
+    assert report["status"] == "agreed"
+    assert report["compared"] == 1
+    assert report["mismatched"] == [] and report["unchecked"] == []
+
+
+def test_a_pair_that_could_not_be_compared_is_not_agreement(tmp_path) -> None:
+    """Fail closed, and say which half was missing.
+
+    Every one of these files belongs to a full install, so a missing one is not
+    a profile that declined it. Reporting "agreed" because there was nothing to
+    compare would be the same kind of lie this check exists to stop telling.
+    """
+
+    _host(tmp_path, "hub.env", "EIDOLON_HUB_CHANNEL_PROVIDER_TOKEN=installed\n")
+    pair = (
+        "hub.env",
+        "EIDOLON_HUB_CHANNEL_PROVIDER_TOKEN",
+        "channel.env",
+        "EIDOLON_CHANNEL_PROVIDER_TOKEN",
+        "Hub/Channel Provider token",
+    )
+
+    absent_file = secret_inputs.verify_relationships((pair,), tmp_path)
+    assert absent_file["status"] == "unverified"
+    assert absent_file["compared"] == 0
+    assert "not installed: channel.env" in absent_file["unchecked"][0]["reason"]
+
+    # A file that exists without the key is a different report, because it is a
+    # different fix: that one convergence repairs.
+    _host(tmp_path, "channel.env", "LIVEKIT_API_KEY=unrelated\n")
+    absent_key = secret_inputs.verify_relationships((pair,), tmp_path)
+    assert absent_key["status"] == "unverified"
+    assert "absent: channel.env:EIDOLON_CHANNEL_PROVIDER_TOKEN" in (
+        absent_key["unchecked"][0]["reason"]
+    )
+
+
+def test_an_older_workstation_declares_nothing_and_that_is_not_a_failure(tmp_path) -> None:
+    """Nobody asked, which is not the same as this Host answering badly."""
+
+    report = secret_inputs.verify_relationships((), tmp_path)
+    assert report["status"] == "not_declared"
+    assert contract.declared_credential_relationships({}) == ()
+
+
+def test_the_agent_refuses_a_relationship_it_cannot_place(tmp_path) -> None:
+    """Checked rather than believed, like every other field in this payload."""
+
+    with pytest.raises(TargetError, match="names no install input"):
+        contract.declared_credential_relationships(
+            {"credential_relationships": [_relationship("nope.env", "A", "hub.env", "B")]}
+        )
+    with pytest.raises(TargetError, match="must name exactly"):
+        contract.declared_credential_relationships(
+            {"credential_relationships": [{"left_file": "hub.env"}]}
+        )
+    with pytest.raises(TargetError, match="must be an array"):
+        contract.declared_credential_relationships({"credential_relationships": "hub.env"})
+
+
+def test_convergence_reports_a_pair_it_cannot_repair(tmp_path) -> None:
+    """Adding a key is not the fix for two files holding different values.
+
+    So it is reported beside the repair rather than folded into it: a report
+    that said `converged` while Hub still could not authenticate to the Channel
+    provider is the green-over-broken shape this whole area keeps producing.
+    """
+
+    _host(tmp_path, "hub.env", "EIDOLON_HUB_CHANNEL_PROVIDER_TOKEN=installed\n")
+    _host(
+        tmp_path,
+        "channel.env",
+        "EIDOLON_CHANNEL_PROVIDER_TOKEN=drifted\nLIVEKIT_API_KEY=kept\n",
+    )
+    payload = {
+        **_payload({"channel.env": ["LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"]}, apply=False),
+        "credential_relationships": [
+            _relationship(
+                "hub.env",
+                "EIDOLON_HUB_CHANNEL_PROVIDER_TOKEN",
+                "channel.env",
+                "EIDOLON_CHANNEL_PROVIDER_TOKEN",
+                "Hub/Channel Provider token",
+            )
+        ],
+    }
+
+    report = secret_inputs.converge(payload, tmp_path)
+
+    # The repair it can do is unaffected...
+    assert report["missing"] == {"channel.env": ["LIVEKIT_API_SECRET"]}
+    # ...and the one it cannot is named rather than swallowed.
+    assert report["relationships"]["status"] == "mismatched"
+    assert report["relationships"]["mismatched"][0]["label"] == "Hub/Channel Provider token"
+
+
+def test_doctor_is_where_a_drifted_pair_turns_red(tmp_path) -> None:
+    """The point of the whole check: somewhere an operator actually reads.
+
+    Not a readiness fact — that gates releases and would roll one back over
+    something a release cannot cause or fix. Not a deploy refusal either: a pair
+    that disagrees is real, but no verb repairs it today, and a gate that
+    refuses without naming what to run is one people learn to work around.
+    `doctor` is the verb for "what is wrong with this Host", and it blocks
+    nothing.
+    """
+
+    payload = {
+        "units": list(contract.PRODUCT_UNITS),
+        "data": {name: str(path) for name, path in contract.FIXED_DATA.items()},
+        "remote_uv": "/definitely/missing/uv",
+        "credential_relationships": [
+            _relationship(
+                "agent.env",
+                "PAIRING_JWT_SECRET",
+                "channel.env",
+                "PAIRING_JWT_SECRET",
+                "Agent/Channel JWT",
+            )
+        ],
+    }
+
+    _host(tmp_path, "agent.env", "PAIRING_JWT_SECRET=one-value\n")
+    _host(tmp_path, "channel.env", "PAIRING_JWT_SECRET=one-value\n")
+    agreed = lifecycle.doctor_host(payload, root=tmp_path)
+    assert agreed["checks"]["credential_relationships"] is True
+    assert agreed["credential_relationships"]["status"] == "agreed"
+
+    # Now the two stop agreeing. Every other surface on this Host is unchanged:
+    # both services start, both answer their health checks, and the failure only
+    # appears when somebody speaks to a device.
+    _host(tmp_path, "channel.env", "PAIRING_JWT_SECRET=drifted\n")
+    drifted = lifecycle.doctor_host(payload, root=tmp_path)
+    assert drifted["checks"]["credential_relationships"] is False
+    assert drifted["status"] == "degraded"
+    # And it says which pair, because a bare false sends an operator reading ten
+    # mode-0600 files with `sudo cat`.
+    assert drifted["credential_relationships"]["mismatched"][0]["label"] == "Agent/Channel JWT"
+
+
+def test_doctor_does_not_fail_a_host_nobody_asked_about(tmp_path) -> None:
+    """An older workstation sends no relationships; that is not a finding."""
+
+    payload = {
+        "units": list(contract.PRODUCT_UNITS),
+        "data": {name: str(path) for name, path in contract.FIXED_DATA.items()},
+        "remote_uv": "/definitely/missing/uv",
+    }
+
+    result = lifecycle.doctor_host(payload, root=tmp_path)
+
+    assert result["checks"]["credential_relationships"] is True
+    assert result["credential_relationships"]["status"] == "not_declared"

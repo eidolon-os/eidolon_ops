@@ -671,15 +671,10 @@ authority-restore 触发"；`refresh_provider_credentials` 的 docstring 补了�
 
 ## 7.4 明确没做的
 
-**板端凭证关系检查**（第六部分建议 5）。它是缺能力，不是不优雅：要新的 payload 字段、
-新的 agent 代码、以及"doctor 是否因此 degraded"这个有产品后果的判断。属于单独的决定。
-
-结构收敛之后这个缺口小了一点但没消失：**存在性**现在由 deploy 闸门覆盖到 `channel.env` 了，
-**值是否相等**仍然只在工作站证明，而工作站那条路只有 `install --apply` 会走。
-所以第四部分那张表里的四对静默漂移**依然静默**。
-
-**供应商凭证轮换的死路**（建议 6）也照原判断没修：它要一个新动词，是独立的设计决定。
+**供应商凭证轮换的死路**（建议 6）照原判断没修：它要一个新动词，是独立的设计决定。
 只把那两处会让下一个人不去查的注释改掉了。
+
+（板端凭证关系检查原本也在这一节，机主随后要求做掉，记在第八部分。）
 
 ## 7.5 验证
 
@@ -706,3 +701,93 @@ ruff check src tests  仅剩 1 个先前就存在的 B905，在本次未触碰�
 落到合法状态（撤掉 `EIDOLON_LIVEKIT_CLIENT_URL`，其余 8 键不动）。
 **没有改动机主的真实输入集，也没有在板子上写任何文件**——`deploy` 不经过契约检查，
 所以现状继续可用；那个字段会在下一次 `install --apply` 或 Mac 侧运行时自动撤回。
+
+
+---
+
+# 第八部分：板端凭证关系检查（2026-09-17，机主追加）
+
+第七部分把它列为"明确没做"，机主指定要做。
+
+## 8.1 三个判断
+
+**范围比原计划大。** 原本说的是"那四对静默的"。实际做出来覆盖 `SHARED_CREDENTIALS`
+**全部 17 对**——写测试时才发现我第四部分那句"六对"说的是"涉及 `channel.env` 的六对"，
+而整张表是 17 对，**板上一对都没被检查过**。既然机制一样，没有理由只查六对。
+
+**挂在 `doctor`，不挂 readiness。** readiness 事实会让发布回滚；一对凭证不一致既不是
+某次发布造成的，也不是它能修的，拿它回滚发布是错配。`doctor` 是"这台 Host 哪里不对"的
+动词，而且它不拦任何东西。
+
+**不拦 deploy。** 这是唯一需要反复权衡的一条。一对不一致永远是真缺陷——按构造它们在
+install 时相等，没有任何合法路径让它们不同。但**今天没有动词能修它**：`converge` 只加
+不改，`install` 见到不同直接拒，剩下的只有重装。仓里这一带自己的注释写过
+「A gate that refuses without saying what to run is a gate people learn to work around」，
+以及 app 检查当年为什么撤掉拒绝、保留测量。所以：**报告，不拒绝**，并且把这个取舍写进
+代码，因为下一个人一定会问。
+
+报告也不是塞进一个没人读的字段：`converge-inputs` 的 `next` 那句话会直接变成
+「this Host holds two different values for: <标签>。Convergence adds keys and cannot
+repair that…」。
+
+## 8.2 形状
+
+和 `declared_secret_env_keys()` 完全同构——**声明在工作站，比较在板上**：
+
+```
+install_inputs.declared_credential_relationships()      ← 由 SHARED_CREDENTIALS 推出
+        │  随 payload 下发（target_payload 和 converge 两条）
+contract.declared_credential_relationships(payload)     ← 板上校验形状，不认的直接拒
+secret_inputs.verify_relationships(pairs, root)         ← 读两边、比较、只回名字
+        ├── doctor-host          → checks["credential_relationships"]，假则 degraded
+        └── converge-secret-inputs → report["relationships"]
+```
+
+理由和它旁边那条声明一样，而且在这里更尖锐：**一个自带副本的 agent 就是会漂移的第二意见
+——而漂移正是这条检查要找的东西**，用第二副本去造它是荒谬的。
+
+几条刻意的取舍：
+
+- **值不出板子。** 在板上比较，报告只回标签和 `file:key` 两个端点。摘要也不回：对操作者
+  没有更有用，却多一样需要小心对待的东西。
+- **比不了不算通过。** 缺文件、或文件在而键不在，都记进 `unchecked` 并让 `doctor` 变红。
+  这些文件每一个都属于完整安装，"没得比所以算一致"正是这条检查要终结的那种谎。
+  文件缺和键缺分开报，因为修法不同——后者 `converge` 能修。
+- **老工作站不发声明 = 没人问过。** `status: not_declared`，`doctor` 不红。
+  与 `declared_capabilities` / `declared_management_networks` 的既有约定一致。
+- `doctor_host` 增加了 `root` 参数（默认 `/`），和 `converge(data, root)`、
+  `withdraw_hub_hostname(root=...)` 同一个形状。没有它这条检查无法测。
+
+## 8.3 仍然没做：修
+
+**检查能告诉你哪一对坏了，没有任何东西能把它修好。** 这是有意的，理由值得写下来：
+
+工作站的输入集被 `validate_install_input_contract` 证明是自洽的，所以板上两边不一致时
+至少有一边和工作站不同，"把板上那份改成工作站那份"是良定义的。但它会在一台正在运行的
+Host 上改写凭证——正是 `converge` 的「What it will not do」明令禁止的——而且如果操作者
+是**故意**在板上改过某个值、工作站那份才是旧的，这个"修复"就是在回退他们。
+
+那是一个独立的设计决定（谁是权威、什么时候允许 ops 覆盖 Host 上的凭证），不该塞进一次
+检查里。检查的形状已经为它留好位置：`mismatched` 里每一项都带着两个端点。
+
+## 8.4 验证
+
+```
+基线（第七部分收尾）  1075 passed, 48 skipped
+第八部分之后          1084 passed, 48 skipped      （+9 个新测试）
+ruff                  仍只剩那 1 个先前就有的 B905
+```
+
+新增测试钉住的性质：声明由 `SHARED_CREDENTIALS` 推出且经得起过线、不一致被点名且
+**值不出现在报告里**、一致报一致、比不了不算通过（文件缺与键缺分开）、老工作站不算失败、
+agent 拒绝放不下的关系、`converge` 报告它修不了的那一对、以及 **`doctor` 是变红的地方**。
+
+真机端到端（opi5max，用真正会下发的 `injected_script()`，`apply=False` 只读）：
+
+```json
+"relationships": { "declared": 17, "compared": 17,
+                   "mismatched": [], "unchecked": [], "status": "agreed" }
+"applied": false
+```
+
+17 对全部比对、全部一致，板上没有写入任何东西，临时文件已清理。

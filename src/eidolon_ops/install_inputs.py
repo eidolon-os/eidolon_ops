@@ -34,6 +34,7 @@ from eidolon_ops.provider_inputs import (
 __all__ = [
     "INSTALL_DESTINATION_NAMES",
     "add_missing_install_credentials",
+    "declared_credential_relationships",
     "declared_secret_env_keys",
     "host_rendered_fields",
     "initialize_install_inputs",
@@ -436,6 +437,33 @@ PROVIDER_ENV_KEYS: tuple[tuple[str, str], ...] = tuple(
     for source_id, keys in _EXTERNAL_KEYS.items()
     for key in keys
 )
+
+def declared_credential_relationships() -> list[dict[str, str]]:
+    """Which two credentials a Host must hold as one value, for the agent to prove.
+
+    Derived from :data:`SHARED_CREDENTIALS` for the same reason
+    :func:`declared_secret_env_keys` is derived from the table beside it: the
+    workstation owns what the product requires, and this travels to the Host
+    rather than being known there.
+
+    It is the same table the install contract proves on this machine. The
+    difference is where it is proven — and until this existed, nowhere was the
+    Host. The contract check runs on ``install --apply`` and on no other path,
+    so after the day a Host is installed its two copies of a shared secret were
+    never compared again by anything.
+    """
+
+    return [
+        {
+            "left_file": left_file,
+            "left_key": left_key,
+            "right_file": right_file,
+            "right_key": right_key,
+            "label": label,
+        }
+        for left_file, left_key, right_file, right_key, label in SHARED_CREDENTIALS
+    ]
+
 
 def declared_secret_env_keys() -> dict[str, list[str]]:
     """What every environment file on a Host must hold, for the agent to apply.

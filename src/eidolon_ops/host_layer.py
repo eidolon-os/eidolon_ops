@@ -24,6 +24,7 @@ from eidolon_ops.host_delivery import bind_delivery
 from eidolon_ops.host_identity import HostIdentityError, host_lan_identity_from_id
 from eidolon_ops.hostagent.hardware import HostHardwareError
 from eidolon_ops.hub_assets import HubAssetError, hub_settings_template
+from eidolon_ops.install_inputs import declared_credential_relationships
 from eidolon_ops.paths import AppAccess
 from eidolon_ops.private_inputs import INSTALL_DESTINATION_NAMES
 from eidolon_ops.readiness import product_payload
@@ -184,6 +185,11 @@ class HostLayer:
             # parser to read the registry above — so the assignment is sent
             # from the one place that owns it.
             "memory_admin_url": f"http://127.0.0.1:{PORTS['memory_admin']}",
+            # Which of this Host's credentials have to be the same value as
+            # another of its credentials. Sent for the same reason as the
+            # readiness set below: the workstation owns the table, and a Host
+            # is the only place that can compare what it actually holds.
+            "credential_relationships": declared_credential_relationships(),
             # What this Host is asked to attest, and what it needs to attest
             # it. The check set has one author; a copy compiled into the
             # injected agent would be the one nobody thinks to update.

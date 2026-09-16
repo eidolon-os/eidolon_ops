@@ -38,6 +38,7 @@ from eidolon_ops.hostagent.hardware import BINDING_FILE, HostHardwareError, veri
 from eidolon_ops.identity_replacement import replacement_inputs
 from eidolon_ops.install_inputs import (
     add_missing_install_credentials,
+    declared_credential_relationships,
     declared_secret_env_keys,
     initialize_install_inputs,
 )
@@ -1013,6 +1014,29 @@ class EidolonPiController:
         except ASSET_ERRORS as exc:
             raise OperationsError(str(exc)) from exc
 
+    @staticmethod
+    def _converged_next_step(applied: bool, relationships: Mapping[str, object]) -> str:
+        """What to do next, including the part this verb cannot do.
+
+        A pair that disagrees is named here rather than left in a nested report
+        field, because it is the one finding this operation cannot act on: it
+        adds keys, and both sides already have one. Saying so is the whole
+        point — the alternative is a green `converged` over a Host whose Hub
+        cannot authenticate to its Channel provider.
+        """
+
+        broken = relationships.get("mismatched") or []
+        if broken:
+            labels = ", ".join(str(entry.get("label")) for entry in broken)
+            return (
+                f"this Host holds two different values for: {labels}. Convergence adds "
+                "keys and cannot repair that; the values it should hold are in this "
+                "machine's input set, and delivering them is a reinstall today"
+            )
+        if applied:
+            return "run `restart` so the services read their new credentials"
+        return "rerun with --apply to write what is listed"
+
     def converge_inputs(self, *, apply: bool = False) -> dict[str, object]:
         """Make this Host hold the credential set the product declares.
 
@@ -1041,6 +1065,12 @@ class EidolonPiController:
         local = self.add_missing_input_credentials(apply=apply)
         payload: dict[str, object] = {
             "declared": declared_secret_env_keys(),
+            # Answered on the same pass and repaired by neither half of this
+            # verb: adding a key a Host lacks is not the fix for two files that
+            # hold different values. Reported because somebody running this is
+            # already asking about credentials, and because until it was asked
+            # here and in `doctor`, nothing on a Host had ever compared them.
+            "credential_relationships": declared_credential_relationships(),
             "apply": apply,
         }
         if apply:
@@ -1059,11 +1089,7 @@ class EidolonPiController:
             # units that read a changed file have to be restarted — and deciding
             # *when* a Host restarts is the operator's call, not this verb's.
             "restart_required": sorted(host.get("added") or {}),
-            "next": (
-                "run `restart` so the services read their new credentials"
-                if applied
-                else "rerun with --apply to write what is listed"
-            ),
+            "next": self._converged_next_step(applied, host.get("relationships") or {}),
         }
 
     # -- boundary actions ----------------------------------------------------

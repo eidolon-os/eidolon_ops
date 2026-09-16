@@ -9,7 +9,14 @@ import shutil
 from collections.abc import Mapping
 from pathlib import Path
 
-from . import app_contract, contract, host_application, primitives, runtime_release
+from . import (
+    app_contract,
+    contract,
+    host_application,
+    primitives,
+    runtime_release,
+    secret_inputs,
+)
 from .hardware import observe_hardware
 from .primitives import TargetError
 
@@ -172,13 +179,28 @@ def release_sources(payload: Mapping[str, object]) -> dict[str, object]:
     ]
     return {"status": "observed", "releases": list(reversed(activated))}
 
-def doctor_host(payload: Mapping[str, object]) -> dict[str, object]:
+def doctor_host(payload: Mapping[str, object], root: Path = Path("/")) -> dict[str, object]:
+    """What is wrong with this Host, measured rather than inferred.
+
+    ``root`` is ``/`` in the only place this runs and a temporary tree under
+    test, the same shape ``converge`` and ``withdraw_hub_hostname`` already use.
+    """
+
     contract.fixed_units(payload)
     contract.fixed_data(payload)
     remote_uv = payload.get("remote_uv")
     if not isinstance(remote_uv, str) or not Path(remote_uv).is_absolute():
         raise TargetError("remote uv path is invalid")
     host_env = contract.HOST_ENV_PATH
+    # The one question about this Host's credentials that nothing has ever
+    # asked here. The install contract proves these pairs on the workstation and
+    # only on ``install --apply``; afterwards the two copies live on the Host
+    # and drift independently, and four of the six fail silently when they do.
+    # This is the verb an operator runs to find out what is wrong, so it is
+    # where the answer belongs.
+    relationships = secret_inputs.verify_relationships(
+        contract.declared_credential_relationships(payload), root
+    )
     checks = {
         "system": platform.system().lower() == "linux",
         "machine": platform.machine().lower() == "aarch64",
@@ -201,6 +223,11 @@ def doctor_host(payload: Mapping[str, object]) -> dict[str, object]:
         ),
         "port_registry": contract.HOST_PORTS_PATH.is_file()
         and contract.HOST_PORTS_PATH.read_text(encoding="utf-8") == contract.fixed_port_registry(payload),
+        # False when a pair disagrees and when one could not be compared, both
+        # of which are this Host failing to hold a relationship it is supposed
+        # to. An older workstation declares none, which is nobody asking rather
+        # than this Host answering badly.
+        "credential_relationships": relationships["status"] in {"agreed", "not_declared"},
     }
     release_id = contract.fixed_release_id(payload, required=False)
     release_doctor: object = None
@@ -224,6 +251,10 @@ def doctor_host(payload: Mapping[str, object]) -> dict[str, object]:
         and not (isinstance(release_doctor, dict) and not release_doctor.get("healthy"))
         else "degraded",
         "checks": checks,
+        # Beside the boolean, because "which pair, and where its two halves
+        # live" is the whole of what an operator can act on, and a bare false
+        # would send them reading ten files with `sudo cat`.
+        "credential_relationships": relationships,
         "release": release_doctor,
     }
 
