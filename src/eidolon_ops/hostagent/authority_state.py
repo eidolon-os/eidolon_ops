@@ -95,3 +95,25 @@ def authority_lineage(
 
     contract.fixed_units(payload)
     return {"status": "observed", **established_lineage(root=root)}
+
+
+def installed_owner_directory(
+    payload: Mapping[str, object], *, root: Path = Path("/")
+) -> dict[str, object]:
+    """The signed Owner directory this Host serves, beside the lineage it names.
+
+    The document itself, not a digest of it: a controller adopting this Host's
+    Authority verifies the signature against the Owner root it already holds,
+    and a digest cannot be checked against a key. Read-only in both directions —
+    this says what the Host has and changes nothing about it.
+    """
+
+    contract.fixed_units(payload)
+    path = primitives.host_path(root.resolve(), OWNER_DESCRIPTOR)
+    if path.is_symlink() or not path.is_file():
+        raise TargetError("installed Owner directory is missing or unsafe")
+    try:
+        directory = path.read_text(encoding="utf-8")
+    except (OSError, ValueError) as exc:
+        raise TargetError("installed Owner directory is unreadable") from exc
+    return {"status": "observed", "directory": directory, **established_lineage(root=root)}

@@ -108,6 +108,12 @@ class Capability(StrEnum):
     #: to change it — which is what a replaced board needs and what a text
     #: editor should not be the interface for.
     TRUST_HOST_KEY = "trust-host-key"
+    #: Record which Authority lineage this profile's Owner material speaks for,
+    #: adopting the signed directory the Host already serves. Its own capability
+    #: rather than a flag on an install: it changes only what this side claims,
+    #: takes nothing from the Host, and exists precisely for the Hosts an
+    #: install is refusing to touch.
+    TRUST_HOST_AUTHORITY = "trust-host-authority"
     #: Express what Ops requires of a board so the board can be told it — down
     #: whichever channel its own state leaves open, its boot medium or a shell
     #: on it. Only a Host reached over SSH needs this, and nothing about it can

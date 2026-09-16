@@ -262,6 +262,32 @@ host key 是按 Host 的**名字**信任的（`HostKeyAlias`），这正是“�
 名出来。指名一把**不是**正在被出示的 key 会被拒绝——确认必须是关于这台 Host 的，否则就什么都
 没确认。换板子和机器在中间从这里看是同一幅画，而工作站上没有任何东西能分辨它们。
 
+### 一份 Owner 材料只能认一台 Host
+
+换板子还有第二面，比 host key 深一层。Owner 材料里的 generation 不是一个可以随手推的计数
+器，它说的是这份材料**为哪一次安装代言**。拿同一个 profile 去给第二块空白板子做首次安装，材
+料就改成认那块板子了——而台架上那块完好无损、握着它发过的每一个 Claim，此后每个 `install`
+都被正确地拒绝，理由是两边说的不是同一代。
+
+在这种形状里，错的是工作站，不是板子。`trust-host-authority` 就是说出这句话的那条命令：
+
+```bash
+./eidolon pi5 trust-host-authority                                      # 打印两边各认哪一代
+./eidolon pi5 trust-host-authority --apply --replace authority-state_...  # 采纳板子已建立的那一代
+```
+
+它**采纳**而不是重签：板子正在服务的那份签名目录被原样收下，所以每台已经缓存过它的设备手里
+那份继续成立，revision 线也不重开。它只在那份目录确实由这份材料自己的 Owner 根签过时才接受
+——这挡住的是一台板子报出这个 Owner 从没签发过的世代。state id 没有任何签名覆盖，所以那一半
+要操作者在板子上核对后用 `--replace` 指名，和 `trust-host-key` 同一个理由。
+
+它不写板子、不动任何 key、不作废任何 Claim。采纳错了也不会放行什么：install 的闸门会再问一
+次板子，然后照样拒绝。同代目录只退不进——如果这边已经签发了更新的 revision 还没送出去，采纳
+一份更旧的会被拒绝，因为那会静默地撤掉操作者刚做的改动。
+
+板子两份授权记录（Hub 库标记和 `authority-lineage.json`）互相不一致时，它也拒绝：那种情况下
+板子确实丢了东西，该走恢复，没有"已建立的那一代"可以采纳。
+
 ## 基础环境 profile
 
 ### 部署链路
@@ -431,6 +457,7 @@ session：只能用一次，并把之前的窗口作废。它**不会自己过�
 # Pi release/install capabilities
 ./eidolon pi5 bring-up --via boot-medium|shell --output DIR [--apply]
 ./eidolon pi5 trust-host-key [--apply] [--replace SHA256:...]
+./eidolon pi5 trust-host-authority [--apply] [--replace authority-state_...]
 ./eidolon pi5 provision [--apply]
 ./eidolon pi5 init-inputs
 ./eidolon pi5 install --release-id ID [--resume] [--apply]

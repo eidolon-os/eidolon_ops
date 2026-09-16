@@ -12,7 +12,9 @@ from eidolon_sdk.device_foundation.v1.directory_tool import issue_descriptor
 from eidolon_ops.host_identity import derive_host_lan_identity
 from eidolon_ops.owner_domain_assets import (
     OwnerDomainAssetError,
+    adopt_host_authority,
     ensure_owner_domain_assets,
+    mark_authority_bootstrapped,
 )
 
 NOW = datetime(2026, 8, 18, 12, 0, tzinfo=UTC)
@@ -232,6 +234,132 @@ def test_partial_owner_identity_is_not_reissued(tmp_path: Path, missing) -> None
     with pytest.raises(OwnerDomainAssetError, match="AUTHORITY_RECOVERY_REQUIRED"):
         ensure_owner_domain_assets(material, identity, 8443, now=NOW)
     assert {p.name: p.read_bytes() for p in material.iterdir()} == before
+
+
+def _lineage(assets) -> dict[str, object]:
+    return {
+        "contract_version": 1,
+        "owner_domain_id": assets.owner_domain_id,
+        "owner_domain_generation": assets.owner_domain_generation,
+        "state_id": assets.authority_state_id,
+    }
+
+
+def test_adoption_refuses_a_directory_this_owner_root_did_not_sign(tmp_path: Path) -> None:
+    identity = derive_host_lan_identity(b"a" * 32)
+    mine = ensure_owner_domain_assets(tmp_path / "mine", identity, 8443, now=NOW)
+    stranger = ensure_owner_domain_assets(tmp_path / "stranger", identity, 8443, now=NOW)
+    before = {p.name: p.read_bytes() for p in (tmp_path / "mine").iterdir()}
+
+    with pytest.raises(OwnerDomainAssetError, match="another Owner Domain"):
+        adopt_host_authority(
+            tmp_path / "mine",
+            directory=stranger.descriptor,
+            lineage=_lineage(stranger),
+            now=NOW,
+        )
+
+    assert mine.owner_domain_id != stranger.owner_domain_id
+    assert {p.name: p.read_bytes() for p in (tmp_path / "mine").iterdir()} == before
+
+
+def test_adoption_refuses_a_lineage_the_directory_does_not_name(tmp_path: Path) -> None:
+    identity = derive_host_lan_identity(b"a" * 32)
+    assets = ensure_owner_domain_assets(tmp_path / "owner-domain", identity, 8443, now=NOW)
+    claimed = {**_lineage(assets), "owner_domain_generation": assets.owner_domain_generation + 1}
+
+    with pytest.raises(OwnerDomainAssetError, match="does not match the directory"):
+        adopt_host_authority(
+            tmp_path / "owner-domain",
+            directory=assets.descriptor,
+            lineage=claimed,
+            now=NOW,
+        )
+
+
+def test_adoption_refuses_to_walk_a_live_revision_line_backwards(tmp_path: Path) -> None:
+    material = tmp_path / "owner-domain"
+    identity = derive_host_lan_identity(b"a" * 32)
+    served = ensure_owner_domain_assets(material, identity, 8443, now=NOW)
+    # The endpoint moved, so this side issued the next revision of the same
+    # lineage and has not delivered it yet. The Host still serves the one above.
+    issued = ensure_owner_domain_assets(material, identity, 9443, now=NOW)
+    assert issued.owner_domain_generation == served.owner_domain_generation
+
+    with pytest.raises(OwnerDomainAssetError, match="newer directory"):
+        adopt_host_authority(
+            material, directory=served.descriptor, lineage=_lineage(served), now=NOW
+        )
+
+    assert (material / "owner-domain-descriptor.json").read_bytes() == issued.descriptor
+
+
+def test_adopting_what_this_material_already_holds_writes_nothing(tmp_path: Path) -> None:
+    material = tmp_path / "owner-domain"
+    identity = derive_host_lan_identity(b"a" * 32)
+    assets = ensure_owner_domain_assets(material, identity, 8443, now=NOW)
+    mark_authority_bootstrapped(
+        material,
+        owner_domain_id=assets.owner_domain_id,
+        owner_domain_generation=assets.owner_domain_generation,
+        authority_state_id=assets.authority_state_id,
+    )
+    before = {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in material.iterdir()}
+
+    adopted = adopt_host_authority(
+        material, directory=assets.descriptor, lineage=_lineage(assets), now=NOW
+    )
+
+    assert adopted["owner_domain_generation"] == assets.owner_domain_generation
+    assert {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in material.iterdir()} == before
+
+
+def test_adoption_keeps_every_key_and_only_moves_the_lineage(tmp_path: Path) -> None:
+    material = tmp_path / "owner-domain"
+    identity = derive_host_lan_identity(b"a" * 32)
+    served = ensure_owner_domain_assets(material, identity, 8443, now=NOW)
+    kept = _lineage(served)
+    # What a second board's install left behind: a generation this Owner did
+    # issue, and a directory naming it.
+    state = json.loads((material / "owner-domain-state.json").read_text(encoding="utf-8"))
+    (material / "owner-domain-state.json").write_text(
+        json.dumps(
+            {
+                **state,
+                "owner_domain_generation": state["owner_domain_generation"] + 1,
+                "authority_state_id": "authority-state_the-other-board",
+                "bootstrap_pending": False,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    moved = ensure_owner_domain_assets(material, identity, 8443, now=NOW)
+    assert moved.owner_domain_generation == served.owner_domain_generation + 1
+    keys = {
+        name: (material / name).read_bytes()
+        for name in ("owner-domain-root.key.pem", "authority-signing.key.pem", "hub.key", "hub.crt")
+    }
+
+    adopted = adopt_host_authority(
+        material, directory=served.descriptor, lineage=kept, now=NOW
+    )
+
+    assert adopted == {
+        "contract_version": 1,
+        "owner_domain_id": served.owner_domain_id,
+        "owner_domain_generation": served.owner_domain_generation,
+        "authority_state_id": served.authority_state_id,
+        "bootstrap_pending": False,
+    }
+    assert (material / "owner-domain-descriptor.json").read_bytes() == served.descriptor
+    assert {name: (material / name).read_bytes() for name in keys} == keys
+    # And the result is a material the ordinary issuer now leaves alone.
+    settled = ensure_owner_domain_assets(material, identity, 8443, now=NOW)
+    assert settled.descriptor == served.descriptor
+    assert _lineage(settled) == kept
 
 
 def test_invalid_owner_state_does_not_renew_signers(tmp_path: Path) -> None:

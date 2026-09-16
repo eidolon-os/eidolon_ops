@@ -42,6 +42,7 @@ from eidolon_ops.owner_domain_assets import (
     OWNER_DOMAIN_MATERIAL_NAMES,
     AuthorityDecision,
     OwnerDomainAssetError,
+    adopt_host_authority,
     authority_lineage,
     authority_recovery_required,
     decide_owner_authority,
@@ -156,9 +157,12 @@ def _authority_recovery_required(marker: object, lineage: dict[str, object]) -> 
         marker,
         lineage,
         remedy=(
-            "An install must not ship past that. Restore the matching Authority "
-            "backup, or create a new Host (all data is lost; Mobile must pair again) with "
-            "install --reset-existing --wipe-authority-data --apply."
+            "An install must not ship past that. If both name the same Owner Domain and this "
+            "Host is intact, the stale side is this controller — one Owner's material used to "
+            "commission a second board names that board — and trust-host-authority adopts what "
+            "this Host established without touching it. Otherwise restore the matching "
+            "Authority backup, or create a new Host (all data is lost; Mobile must pair again) "
+            "with install --reset-existing --wipe-authority-data --apply."
         ),
     )
 
@@ -1271,6 +1275,112 @@ class EidolonPiController:
         except OwnerDomainAssetError as exc:
             raise OperationsError(str(exc)) from exc
         return {"status": "authority_bootstrap_consumed", "authority": expected}
+
+    def trust_host_authority(
+        self, *, apply: bool = False, replace: str | None = None
+    ) -> dict[str, object]:
+        """Record which Authority lineage this profile's Owner material speaks for.
+
+        The counterpart of the refusal in :meth:`authority_capability`, and the
+        answer that refusal could not give. Disagreement is always worth
+        refusing, but the vocabulary named only two ways out — a backup, and a
+        factory reset — and both assume the *Host* is the side that lost
+        something. On a bench the common case is the other one: one Owner's
+        material was used to commission a second board, so the material now
+        names that board, while the board in front of you is intact and holds
+        every Claim it ever issued. Nothing is wrong with the Host, and until
+        this existed there was no way to say so that did not destroy it.
+
+        Like ``trust-host-key``, this reports what it found and makes the
+        operator name what they confirmed, because the part that matters cannot
+        be proved from here: the directory is accepted only if this Owner root
+        signed it, but a state id is a value in the Host's database and carries
+        no signature. Unlike ``trust-host-key``, what gets recorded is checked
+        again by every later operation — the install gate asks the Host itself,
+        so adopting the wrong lineage blocks an install rather than permitting
+        one. That is also why this writes nothing to the Host and asks it to
+        change nothing.
+        """
+
+        self.preflight.validate_ssh_material()
+        if self.app is None:
+            raise OperationsError("Owner Authority adoption requires the Pi Host app contract")
+        materializer = self.host_layer.materializer()
+        try:
+            current = materializer.owner_assets()
+        except OwnerDomainAssetError as exc:
+            raise OperationsError(str(exc)) from exc
+        observed = self.transport.run_agent(
+            "owner-directory", self.host_layer.target_payload(), timeout=120
+        )
+        directory = observed.get("directory")
+        established = observed.get("established")
+        if observed.get("status") != "observed" or not isinstance(directory, str):
+            raise OperationsError("Host Owner directory observation is invalid")
+        if not isinstance(established, dict):
+            # Exactly the case adoption must not paper over: the two copies of
+            # the Host's own lineage disagree, so there is no established one to
+            # adopt and the Host is the side that lost something after all.
+            raise OperationsError(
+                "AUTHORITY_RECOVERY_REQUIRED: this Host's database and saved authorization "
+                "state do not agree, so it has no established lineage to adopt; restore its "
+                "complete backup"
+            )
+        profile = authority_lineage(current)
+        report: dict[str, object] = {
+            "host": self.config.host.target,
+            "material_root": str(materializer.material_root),
+            "profile_lineage": profile,
+            "host_lineage": established,
+            "directory_matches": current.descriptor.decode("utf-8") == directory,
+        }
+        if profile == established and report["directory_matches"]:
+            report["status"] = "current"
+            report["detail"] = (
+                "this profile's Owner material already speaks for the lineage this Host "
+                "established; nothing to write"
+            )
+            return report
+        report["status"] = "differs"
+        report["detail"] = (
+            f"this profile's Owner material names {profile}, and this Host has established "
+            f"{established}. Adopting takes nothing from the Host and reissues nothing — the "
+            "signed directory it serves is adopted as it stands. Confirm the state id against "
+            "the Host itself (`/var/lib/eidolon/hub/authority-lineage.json`), then name it: "
+            f"--replace {established['state_id']} --apply"
+        )
+        if not apply:
+            return report
+        if replace is None:
+            raise OperationsError(str(report["detail"]))
+        if replace != established["state_id"]:
+            raise OperationsError(
+                f"--replace names {replace!r}, but this Host has established "
+                f"{established['state_id']!r}. Nothing was written. Either the Host's lineage "
+                "changed since the plan ran, or the state id being confirmed is not this Host's."
+            )
+        try:
+            adopted = adopt_host_authority(
+                materializer.material_root,
+                directory=directory.encode("utf-8"),
+                lineage=established,
+            )
+        except OwnerDomainAssetError as exc:
+            raise OperationsError(str(exc)) from exc
+        report["status"] = "recorded"
+        report["adopted"] = {
+            "contract_version": adopted["contract_version"],
+            "owner_domain_id": adopted["owner_domain_id"],
+            "owner_domain_generation": adopted["owner_domain_generation"],
+            "state_id": adopted["authority_state_id"],
+        }
+        report["directory_matches"] = True
+        report["detail"] = (
+            "this profile's Owner material now speaks for the lineage this Host established, "
+            "and holds the directory this Host serves. No key, no device Claim and nothing on "
+            "the Host was changed."
+        )
+        return report
 
     def controller_reset(self, *, apply: bool) -> dict[str, object]:
         """Return a claimed Host to unclaimed so a new phone can manage it.

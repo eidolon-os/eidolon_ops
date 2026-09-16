@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import secrets
 import stat
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -216,6 +217,124 @@ def mark_authority_bootstrapped(
         material_root / _STATE,
         (json.dumps(state, sort_keys=True, separators=(",", ":")) + "\n").encode(),
     )
+
+
+def adopt_host_authority(
+    material_root: Path,
+    *,
+    directory: bytes,
+    lineage: Mapping[str, object],
+    now: datetime | None = None,
+) -> _AuthorityState:
+    """Bind this material to the Authority lineage a Host has already established.
+
+    A generation is not a counter this side may move at will: it names *which
+    installation* of this Owner Domain the material speaks for.  One Owner's
+    material used to commission a second board therefore ends up naming the
+    board it commissioned last, and every operation that reaches the first board
+    refuses — correctly, and including the install that would have told it
+    anything.  Until this existed the vocabulary had no way to say the true
+    thing, which is that the Host is right and this side holds the stale answer,
+    so the only ways out were a backup nobody had taken and a factory reset that
+    destroys the Host being argued about.
+
+    This adopts rather than reissues.  The signed directory comes from the Host
+    and is accepted only if this material's own Owner root signed it, which is
+    what stops a Host from naming a generation this Owner never issued; because
+    it is adopted byte for byte, every device already holding that directory
+    keeps holding exactly it and no revision line restarts.  The state id comes
+    from the Host's database and anchor, which is the one part no signature can
+    prove — which is why the operation is explicit and why the caller, not this
+    function, is where the operator confirms it.
+
+    Nothing about the Host is written, asked for, or invalidated.  Adopting the
+    wrong lineage authorizes nothing by itself: the install gate still requires
+    the Host to independently present the same one.
+    """
+
+    _require_private_material_root(material_root)
+    root_certificate = _certificate(material_root / _ROOT_CERTIFICATE)
+    signer_certificate = _certificate(material_root / _SIGNER_CERTIFICATE)
+    owner_domain_id = _owner_domain_id(root_certificate)
+    instant = (now or datetime.now(UTC)).astimezone(UTC)
+    try:
+        descriptor = OwnerDomainDescriptor.model_validate_json(directory.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise OwnerDomainAssetError("installed Owner directory is not a readable document") from exc
+    if descriptor.owner_domain_id != owner_domain_id:
+        raise OwnerDomainAssetError(
+            "installed Owner directory names another Owner Domain; this material cannot adopt it"
+        )
+    # The signature check is the whole reason a Host may be believed here: this
+    # document is only acceptable because the Owner root in this directory
+    # signed it, so the generation being adopted is one this Owner did issue.
+    _validate_directory(descriptor, root_certificate, signer_certificate, instant)
+    if (
+        not isinstance(lineage, Mapping)
+        or lineage.get("contract_version") != 1
+        or lineage.get("owner_domain_id") != owner_domain_id
+        or type(lineage.get("owner_domain_generation")) is not int
+        or lineage["owner_domain_generation"] != descriptor.owner_domain_generation
+        or not isinstance(lineage.get("state_id"), str)
+        or not str(lineage["state_id"]).startswith("authority-state_")
+    ):
+        raise OwnerDomainAssetError(
+            "Host Authority lineage does not match the directory this Host serves"
+        )
+    _require_not_older_directory(material_root, descriptor)
+    state = _authority_state(material_root, owner_domain_id)
+    adopted: _AuthorityState = {
+        "contract_version": 1,
+        "owner_domain_id": owner_domain_id,
+        "owner_domain_generation": descriptor.owner_domain_generation,
+        "authority_state_id": str(lineage["state_id"]),
+        # A lineage the Host established is a spent capability by definition.
+        "bootstrap_pending": False,
+    }
+    if state == adopted and (material_root / _DESCRIPTOR).read_bytes() == directory:
+        return state
+    # Directory first, state last. Each write is atomic on its own, and until
+    # the state names this lineage nothing claims it: a failure in between
+    # leaves the install gate refusing exactly as it does now, which is the
+    # recoverable side to land on.
+    write_private_file(material_root / _DESCRIPTOR, directory)
+    write_private_file(
+        material_root / _STATE,
+        (json.dumps(adopted, sort_keys=True, separators=(",", ":")) + "\n").encode(),
+    )
+    return adopted
+
+
+def _require_not_older_directory(
+    material_root: Path, adopted: OwnerDomainDescriptor
+) -> None:
+    """Never let adoption walk a live revision line backwards.
+
+    Two directories at the same generation are the same line, and this side
+    advances it whenever the Host's endpoint changes — so between issuing a
+    revision and delivering it, the Host still serves the older one. Adopting
+    then would silently undo the change the operator had just made. Different
+    generations are different lines and have no revision to compare.
+    """
+
+    path = material_root / _DESCRIPTOR
+    if not path.is_file():
+        return
+    try:
+        current = OwnerDomainDescriptor.model_validate_json(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        # Older than the contract, or unreadable. Either way it states no
+        # revision this can be sure it would be walking back.
+        return
+    if (
+        current.owner_domain_id == adopted.owner_domain_id
+        and current.owner_domain_generation == adopted.owner_domain_generation
+        and current.directory_revision > adopted.directory_revision
+    ):
+        raise OwnerDomainAssetError(
+            "this material holds a newer directory for the Host's own lineage; "
+            "deliver it instead of adopting an older revision"
+        )
 
 
 class AuthorityDecision(StrEnum):

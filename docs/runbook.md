@@ -26,6 +26,15 @@ uv run eidolon-ops --config /absolute/path/hosts/pi5.toml \
 uv run eidolon-ops --config /absolute/path/hosts/pi5.toml trust-host-key --apply
 ```
 
+A profile that has commissioned a second board names that board's Authority, and every install to the
+first one is then refused for naming a different generation. `trust-host-authority` reports what each
+side names and adopts the signed directory the Host already serves, after you confirm its state id
+against the Host. It writes nothing to the Host. README, "一份 Owner 材料只能认一台 Host".
+
+```bash
+uv run eidolon-ops --config /absolute/path/hosts/pi5.toml trust-host-authority
+```
+
 Create the private inputs once before the first plan. This is local-only and never contacts the Pi:
 
 ```bash

@@ -2725,6 +2725,34 @@ def test_authority_lineage_reports_what_a_started_hub_established(tmp_path: Path
     }
 
 
+def test_installed_owner_directory_is_served_with_the_lineage_it_names(tmp_path: Path) -> None:
+    lineage = _establish_lineage(tmp_path)
+    descriptor = tmp_path / authority_state.OWNER_DESCRIPTOR.relative_to("/")
+    descriptor.parent.mkdir(parents=True, exist_ok=True)
+    descriptor.write_text(json.dumps({"owner_domain_id": "owner-x"}), encoding="utf-8")
+
+    observed = authority_state.installed_owner_directory(
+        {"units": list(contract.PRODUCT_UNITS)}, root=tmp_path
+    )
+
+    assert observed == {
+        "status": "observed",
+        "directory": json.dumps({"owner_domain_id": "owner-x"}),
+        "marker": lineage,
+        "anchor": lineage,
+        "established": lineage,
+    }
+
+
+def test_installed_owner_directory_refuses_a_host_that_serves_none(tmp_path: Path) -> None:
+    _establish_lineage(tmp_path)
+
+    with pytest.raises(TargetError, match="Owner directory is missing"):
+        authority_state.installed_owner_directory(
+            {"units": list(contract.PRODUCT_UNITS)}, root=tmp_path
+        )
+
+
 def test_a_database_without_its_anchor_is_reported_but_not_called_established(
     tmp_path: Path,
 ) -> None:

@@ -11,7 +11,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROFILES_DIR="${EIDOLON_HOSTS_DIR:-${ROOT}/config/hosts}"
 UV_BIN="${EIDOLON_UV_BIN:-uv}"
 
-ALL_COMMANDS="abandon app-ready pending trust-host-key bring-up authority-backup authority-restore backup commissioning-code controller-reset converge-inputs debug deploy diagnose doctor init-inputs install kernel-schema-reset logs provision reset restart restore rollback start status stop update"
+ALL_COMMANDS="abandon app-ready pending trust-host-key trust-host-authority bring-up authority-backup authority-restore backup commissioning-code controller-reset converge-inputs debug deploy diagnose doctor init-inputs install kernel-schema-reset logs provision reset restart restore rollback start status stop update"
 # Keyed on the Host's driver, not on its platform. What a Host can be asked to
 # do is decided by the adapter its driver selects — adapters/supervisord.py and
 # adapters/systemd.py each declare one capability set — so two boards Ops
@@ -20,7 +20,7 @@ ALL_COMMANDS="abandon app-ready pending trust-host-key bring-up authority-backup
 # boards by name: rk3588 shipped a driver these sets already covered and was
 # still unreachable through this script, because nobody added its name.
 LOCAL_SUPERVISORD_COMMANDS="status doctor app-ready start stop restart logs commissioning-code reset kernel-schema-reset debug"
-SSH_SYSTEMD_COMMANDS="abandon status pending trust-host-key bring-up doctor app-ready start stop restart logs commissioning-code provision init-inputs converge-inputs backup restore install controller-reset authority-backup authority-restore reset kernel-schema-reset deploy update rollback diagnose"
+SSH_SYSTEMD_COMMANDS="abandon status pending trust-host-key trust-host-authority bring-up doctor app-ready start stop restart logs commissioning-code provision init-inputs converge-inputs backup restore install controller-reset authority-backup authority-restore reset kernel-schema-reset deploy update rollback diagnose"
 
 die() {
   printf '错误：%s\n' "$*" >&2
@@ -154,6 +154,7 @@ command_summary() {
     reset) printf '查看或执行产品运行态重置' ;;
     bring-up) printf '把 ops 对板子的要求渲染出来(首启载荷或就地执行的脚本)' ;;
     trust-host-key) printf '记录这个 profile 信任哪把 host key(换板子时用)' ;;
+    trust-host-authority) printf '记录这个 profile 的 Owner 材料认哪一代授权(采纳板子已建立的那一代)' ;;
     kernel-schema-reset) printf '把 Kernel 自己打不开的那份权威改名挪开(会先说清丢什么)' ;;
     controller-reset) printf '撤销全部手机管理者并重新开放认领' ;;
     authority-backup) printf '备份 Hub 授权与离线 Owner 材料（非整机）' ;;

@@ -66,6 +66,7 @@ ACTIONS: dict[str, tuple[ModuleType, str]] = {
     "backup": (authorities, "backup"),
     "restore": (authorities, "restore"),
     "authority-lineage": (authority_state, "authority_lineage"),
+    "owner-directory": (authority_state, "installed_owner_directory"),
     "authority-backup": (authority_restore, "backup"),
     "authority-restore-plan": (authority_restore, "restore_plan"),
     "authority-restore": (authority_restore, "restore"),

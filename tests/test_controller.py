@@ -2698,6 +2698,149 @@ def test_a_host_whose_hub_names_another_authority_is_refused_not_overwritten(
         controller.authority_capability(will_wipe=False, apply=True)
 
 
+def _commissioned_a_second_board(controller) -> tuple[dict[str, object], bytes]:
+    """Move this material on the way a second board's first install moved it.
+
+    That install found a Host with no Hub database, read it as an Authority
+    whose state was gone, and advanced the generation — leaving the material
+    naming the board it had just commissioned rather than the one still on the
+    bench. Returns what the first board keeps: its lineage, and the signed
+    directory it goes on serving.
+    """
+
+    root = controller.host_layer.materializer().material_root
+    kept = _lineage_of(controller)
+    kept_directory = (root / "owner-domain-descriptor.json").read_bytes()
+    moved = {
+        "contract_version": 1,
+        "owner_domain_id": kept["owner_domain_id"],
+        "owner_domain_generation": int(kept["owner_domain_generation"]) + 1,
+        "authority_state_id": "authority-state_the-other-board",
+        "bootstrap_pending": False,
+    }
+    (root / "owner-domain-state.json").write_text(
+        json.dumps(moved, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8"
+    )
+    # The second board's install reissued the directory at its generation, which
+    # is the other half of what this side is left holding.
+    controller.host_layer.materializer().owner_assets()
+    return kept, kept_directory
+
+
+def _host_serves(controller, transport, lineage, directory: bytes) -> None:
+    observation = {
+        "status": "observed",
+        "marker": lineage,
+        "anchor": lineage,
+        "established": lineage,
+    }
+    transport.overrides["authority-lineage"] = observation
+    transport.overrides["owner-directory"] = {
+        **observation,
+        "directory": directory.decode("utf-8"),
+    }
+
+
+def test_a_second_boards_install_leaves_this_material_naming_the_other_host(config) -> None:
+    transport = FakeTransport()
+    controller = _authority_controller(config, transport)
+    kept, kept_directory = _commissioned_a_second_board(controller)
+    _host_serves(controller, transport, kept, kept_directory)
+
+    with pytest.raises(OperationsError, match="AuthorityRecoveryRequired") as refused:
+        controller.authority_capability(will_wipe=False, apply=True)
+
+    # The refusal is right, and now says the thing that is true about this
+    # shape instead of offering only a backup and a factory reset.
+    assert "trust-host-authority" in str(refused.value)
+
+
+def test_adopting_this_hosts_lineage_unblocks_install_without_reissuing_anything(config) -> None:
+    transport = FakeTransport()
+    controller = _authority_controller(config, transport)
+    kept, kept_directory = _commissioned_a_second_board(controller)
+    _host_serves(controller, transport, kept, kept_directory)
+    root = controller.host_layer.materializer().material_root
+    keys = {
+        name: (root / name).read_bytes()
+        for name in ("owner-domain-root.key.pem", "authority-signing.key.pem", "hub.key", "hub.crt")
+    }
+
+    planned = controller.trust_host_authority()
+    assert planned["status"] == "differs"
+    assert planned["host_lineage"] == kept
+    assert str(kept["state_id"]) in str(planned["detail"])
+
+    applied = controller.trust_host_authority(apply=True, replace=str(kept["state_id"]))
+
+    assert applied["status"] == "recorded"
+    assert applied["adopted"] == kept
+    # Adopted, not reissued: the directory every device already holds is the
+    # directory this side now holds, byte for byte.
+    assert (root / "owner-domain-descriptor.json").read_bytes() == kept_directory
+    assert _lineage_of(controller) == kept
+    assert {name: (root / name).read_bytes() for name in keys} == keys
+    assert not transport.uploads
+
+    capability = controller.authority_capability(will_wipe=False, apply=True)
+    assert capability is not None
+    assert capability["decision"] == "keep_established_lineage"
+    assert capability["lineage"] == kept
+
+
+def test_adoption_refuses_until_the_state_id_is_confirmed_on_the_host(config) -> None:
+    transport = FakeTransport()
+    controller = _authority_controller(config, transport)
+    kept, kept_directory = _commissioned_a_second_board(controller)
+    _host_serves(controller, transport, kept, kept_directory)
+    root = controller.host_layer.materializer().material_root
+    before = {path.name: path.read_bytes() for path in root.iterdir()}
+
+    with pytest.raises(OperationsError, match="--replace"):
+        controller.trust_host_authority(apply=True)
+    with pytest.raises(OperationsError, match="Nothing was written"):
+        controller.trust_host_authority(apply=True, replace="authority-state_not-this-host")
+
+    assert {path.name: path.read_bytes() for path in root.iterdir()} == before
+
+
+def test_adoption_refuses_a_host_whose_two_copies_of_its_lineage_disagree(config) -> None:
+    transport = FakeTransport()
+    controller = _authority_controller(config, transport)
+    kept, kept_directory = _commissioned_a_second_board(controller)
+    _host_serves(controller, transport, kept, kept_directory)
+    # A Host that lost its database, or its anchor, has no established lineage
+    # to adopt — which is the one case that really is the Host's loss.
+    transport.overrides["owner-directory"] = {
+        **transport.overrides["owner-directory"],
+        "anchor": None,
+        "established": None,
+    }
+    root = controller.host_layer.materializer().material_root
+    before = {path.name: path.read_bytes() for path in root.iterdir()}
+
+    with pytest.raises(OperationsError, match="AUTHORITY_RECOVERY_REQUIRED"):
+        controller.trust_host_authority(apply=True, replace=str(kept["state_id"]))
+
+    assert {path.name: path.read_bytes() for path in root.iterdir()} == before
+
+
+def test_adoption_is_a_read_when_this_material_already_speaks_for_the_host(config) -> None:
+    transport = FakeTransport()
+    controller = _authority_controller(config, transport)
+    spent = _consume(controller)
+    root = controller.host_layer.materializer().material_root
+    _host_serves(
+        controller, transport, spent, (root / "owner-domain-descriptor.json").read_bytes()
+    )
+    before = {path.name: path.read_bytes() for path in root.iterdir()}
+
+    report = controller.trust_host_authority(apply=True, replace=str(spent["state_id"]))
+
+    assert report["status"] == "current"
+    assert {path.name: path.read_bytes() for path in root.iterdir()} == before
+
+
 @pytest.mark.parametrize("activate", [False, True])
 def test_deploy_preserves_board_authority_without_reading_workstation_issuer(config, activate, monkeypatch):
     transport = FakeTransport()
