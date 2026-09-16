@@ -2841,6 +2841,98 @@ def test_adoption_is_a_read_when_this_material_already_speaks_for_the_host(confi
     assert {path.name: path.read_bytes() for path in root.iterdir()} == before
 
 
+def _host_holds_this_identity(controller, transport) -> None:
+    """Say the Host reports the identity and Authority this profile issued it."""
+
+    identity = derive_host_lan_identity(b"a" * 32)
+    transport.overrides["deployment-identity"] = {
+        "status": "observed",
+        "host_id": identity.host_id,
+        "authority": _lineage_of(controller),
+        "descriptor_uri": identity.hub_origin(8443) + "/api/device-onboarding/v1/descriptor",
+        "preserved_files": {"host_identity.ed25519": hashlib.sha256(b"a" * 32).hexdigest()},
+    }
+
+
+def _binding_path(controller) -> Path:
+    return controller.host_layer.materializer().material_root.parent / "host_delivery.json"
+
+
+def test_delivery_evidence_is_recorded_for_a_host_that_proves_it_holds_the_identity(
+    config,
+) -> None:
+    transport = FakeTransport()
+    controller = _authority_controller(config, transport)
+    _consume(controller)
+    _host_holds_this_identity(controller, transport)
+
+    planned = controller.trust_host_delivery()
+    assert planned["status"] == "absent"
+    assert planned["proof"] == {
+        "serves_this_host_id": True,
+        "holds_this_identity": True,
+        "established_this_authority": True,
+    }
+    # A plan is a read even here, where the thing missing is a local file.
+    assert not _binding_path(controller).exists()
+
+    applied = controller.trust_host_delivery(apply=True)
+
+    assert applied["status"] == "recorded"
+    assert json.loads(_binding_path(controller).read_bytes()) == {
+        "contract_version": 1,
+        "host_id": applied["host_id"],
+        "hardware": applied["hardware"],
+    }
+    assert not transport.uploads
+    assert controller.trust_host_delivery(apply=True)["status"] == "current"
+
+
+@pytest.mark.parametrize(
+    "broken",
+    [
+        {"host_id": "ehost-" + "b" * 20},
+        {"preserved_files": {"host_identity.ed25519": "0" * 64}},
+        {"authority": {"contract_version": 1, "owner_domain_id": "owner-" + "c" * 20,
+                       "owner_domain_generation": 1, "state_id": "authority-state_elsewhere"}},
+    ],
+)
+def test_delivery_refuses_a_host_that_cannot_prove_it_holds_the_identity(config, broken) -> None:
+    transport = FakeTransport()
+    controller = _authority_controller(config, transport)
+    _consume(controller)
+    _host_holds_this_identity(controller, transport)
+    transport.overrides["deployment-identity"] = {
+        **transport.overrides["deployment-identity"], **broken
+    }
+
+    with pytest.raises(OperationsError, match="does not prove it already holds"):
+        controller.trust_host_delivery(apply=True)
+
+    assert not _binding_path(controller).exists()
+
+
+def test_delivery_refuses_to_move_an_identity_to_another_board(config) -> None:
+    transport = FakeTransport()
+    controller = _authority_controller(config, transport)
+    _consume(controller)
+    _host_holds_this_identity(controller, transport)
+    controller.trust_host_delivery(apply=True)
+    recorded = _binding_path(controller).read_bytes()
+    # The same identity, proving itself just as well, on different hardware:
+    # a second board that was restored onto, or one that was handed these
+    # credentials. Recording is not how that becomes allowed.
+    transport.overrides["host-hardware"] = {
+        "status": "observed",
+        "hardware": {"kind": "device-tree:rockchip,rk3588", "fingerprint": "sha256:" + "d" * 64},
+    }
+
+    with pytest.raises(OperationsError, match="provisioned for another board"):
+        controller.trust_host_delivery(apply=True)
+
+    assert _binding_path(controller).read_bytes() == recorded
+
+
 @pytest.mark.parametrize("activate", [False, True])
 def test_deploy_preserves_board_authority_without_reading_workstation_issuer(config, activate, monkeypatch):
     transport = FakeTransport()

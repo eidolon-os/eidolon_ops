@@ -148,6 +148,30 @@ def bring_up(host_id: str, *, via: str, apply: bool) -> Plan:
     )
 
 
+def trust_host_delivery(host_id: str, *, apply: bool) -> Plan:
+    """Record which board this profile's Host identity was delivered to.
+
+    Irreversible in the only sense that matters to an operator: no operation
+    rewrites a binding once it exists, because noticing that an identity moved
+    boards is the entire job of the thing being written. Undoing it is a
+    complete restore or a new Host, so the plan says so rather than implying
+    this can be tried and taken back.
+    """
+
+    return Plan(
+        operation="trust-host-delivery",
+        host_id=host_id,
+        steps=_steps(
+            ("prove", "require this Host to prove it already holds this profile's identity"),
+            ("read", "read the permanent hardware identifier it reports"),
+            ("record", "write the profile's delivery binding, only if it has none"),
+        ),
+        destructive=DestructiveLevel.IRREVERSIBLE if apply else DestructiveLevel.NONE,
+        requires_flags=frozenset({"--apply"} if apply else set()),
+        touches=frozenset({ActionKind.SECRET}) if apply else frozenset(),
+    )
+
+
 def trust_host_authority(host_id: str, *, apply: bool, adopting: bool) -> Plan:
     """Record which Authority lineage this profile's Owner material speaks for.
 

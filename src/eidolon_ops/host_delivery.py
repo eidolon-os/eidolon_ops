@@ -11,6 +11,23 @@ from eidolon_ops.hostagent.primitives import exclusive
 from eidolon_ops.private_inputs import ensure_private_parent, write_private_file
 
 
+def recorded_delivery(root: Path) -> bytes | None:
+    """The binding this profile already holds, or None. Reads, never writes.
+
+    Separate from :func:`bind_delivery` so an operation can report what is
+    recorded without deciding anything: the write path refuses an absent
+    binding it is not allowed to create, and a plan needs to describe that
+    state rather than raise it.
+    """
+
+    path = root / BINDING_FILE
+    if not path.exists() and not path.is_symlink():
+        return None
+    if path.is_symlink() or not path.is_file() or stat.S_IMODE(path.stat().st_mode) != 0o600:
+        raise OperationsError("Host delivery binding is unsafe")
+    return path.read_bytes()
+
+
 def bind_delivery(root: Path, host_id: str, hardware: dict[str, str],
                   *, allow_create: bool = True) -> bytes:
     ensure_private_parent(root)

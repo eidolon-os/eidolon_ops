@@ -44,6 +44,7 @@ class SystemdSupervisor:
                 Capability.DIAGNOSE,
                 Capability.TRUST_HOST_KEY,
                 Capability.TRUST_HOST_AUTHORITY,
+                Capability.TRUST_HOST_DELIVERY,
                 Capability.BRING_UP,
             }
         )

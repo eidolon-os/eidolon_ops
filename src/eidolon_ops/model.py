@@ -114,6 +114,12 @@ class Capability(StrEnum):
     #: takes nothing from the Host, and exists precisely for the Hosts an
     #: install is refusing to touch.
     TRUST_HOST_AUTHORITY = "trust-host-authority"
+    #: Record which board this profile's Host identity was delivered to, for a
+    #: Host that was delivered before the binding existed to be written. Its own
+    #: capability because it is the one operation allowed to fill that evidence
+    #: outside an install, and because a Host that cannot prove it already holds
+    #: the identity must not be offered it.
+    TRUST_HOST_DELIVERY = "trust-host-delivery"
     #: Express what Ops requires of a board so the board can be told it — down
     #: whichever channel its own state leaves open, its boot medium or a shell
     #: on it. Only a Host reached over SSH needs this, and nothing about it can

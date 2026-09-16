@@ -288,6 +288,29 @@ host key 是按 Host 的**名字**信任的（`HostKeyAlias`），这正是“�
 板子两份授权记录（Hub 库标记和 `authority-lineage.json`）互相不一致时，它也拒绝：那种情况下
 板子确实丢了东西，该走恢复，没有"已建立的那一代"可以采纳。
 
+### 身份交付给了哪块板子，也是一份证据
+
+`install` 把身份交给一台新 Host 的同时，会写下 `host_delivery.json`：这个 profile 的身份
+交付给了哪一块**物理**板子（用永久硬件标识，不是地址、不是 machine-id）。此后每次 install
+只校验它，不重写——这是"同名的第二块板子不能悄悄拿走这套凭据"的落点。
+
+代价是：在这份绑定存在之前装好的 Host，没有这份证据可校验，于是 install 永远拒绝它们，
+而它们本身完全正常。`trust-host-delivery` 补的就是这个：
+
+```bash
+./eidolon pi5 trust-host-delivery            # 打印证明结果和板子报的硬件标识
+./eidolon pi5 trust-host-delivery --apply
+```
+
+它不靠操作者的记忆，而是要板子自己证明**它已经持有这套身份**，三条缺一不可：它服务的
+Owner 目录里是这个 profile 的公开 Host id；它手上那份身份密钥就是这个 profile 签发的那
+一份；它建立的授权世代正是这个 profile 认的那一代。只是"在这个地址上应答"证明不了任何
+一条。第二条是关键——前两条在换硬件恢复之后依然成立，那叫迁移，不叫交付。
+
+**只填空，不改写。** 已有绑定指向另一块板子时它拒绝，不替换：把身份挪到另一块板子是完整
+恢复或新建 Host，绝不能是"一个专门用来发现这件事的操作"的副作用。记下之后也不能再用 ops
+挪走，所以 plan 里它标的是 `irreversible`。
+
 ## 基础环境 profile
 
 ### 部署链路
@@ -458,6 +481,7 @@ session：只能用一次，并把之前的窗口作废。它**不会自己过�
 ./eidolon pi5 bring-up --via boot-medium|shell --output DIR [--apply]
 ./eidolon pi5 trust-host-key [--apply] [--replace SHA256:...]
 ./eidolon pi5 trust-host-authority [--apply] [--replace authority-state_...]
+./eidolon pi5 trust-host-delivery [--apply]
 ./eidolon pi5 provision [--apply]
 ./eidolon pi5 init-inputs
 ./eidolon pi5 install --release-id ID [--resume] [--apply]

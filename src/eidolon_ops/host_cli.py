@@ -76,6 +76,7 @@ OPERATIONS: dict[str, Callable[[HostController, argparse.Namespace], object]] = 
         apply=a.apply,
         replace=a.replace,
     ),
+    "trust-host-delivery": lambda controller, a: controller.trust_host_delivery(apply=a.apply),
     "install": lambda controller, a: controller.install(
         release_id=a.release_id,
         resume=a.resume,
@@ -359,6 +360,14 @@ def _parser() -> argparse.ArgumentParser:
             "this Owner issued, but no signature covers a state id, so the confirmation is yours"
         ),
     )
+    trust_host_delivery = operations.add_parser(
+        "trust-host-delivery",
+        help=(
+            "record which board this profile's Host identity was delivered to, for a Host "
+            "installed before that evidence was written"
+        ),
+    )
+    trust_host_delivery.add_argument("--apply", action="store_true")
     install = operations.add_parser("install")
     install.add_argument("--release-id", required=True)
     install.add_argument("--resume", action="store_true")

@@ -35,6 +35,15 @@ against the Host. It writes nothing to the Host. README, "一份 Owner 材料只
 uv run eidolon-ops --config /absolute/path/hosts/pi5.toml trust-host-authority
 ```
 
+A Host installed before `host_delivery.json` existed has no delivery evidence for install to verify, so
+install refuses it although nothing is wrong with it. `trust-host-delivery` records that evidence, but
+only for a Host that proves it already holds this profile's identity, and only into an absent binding.
+README, "身份交付给了哪块板子，也是一份证据".
+
+```bash
+uv run eidolon-ops --config /absolute/path/hosts/pi5.toml trust-host-delivery
+```
+
 Create the private inputs once before the first plan. This is local-only and never contacts the Pi:
 
 ```bash

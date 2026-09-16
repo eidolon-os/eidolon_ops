@@ -276,6 +276,16 @@ class HostController:
         report = release.bring_up(via=via, output=output, apply=apply)
         return self._planned_or_applied(plan, report, applied=apply)
 
+    def trust_host_delivery(self, *, apply: bool = False) -> Evidence:
+        plan = plans.trust_host_delivery(self.profile.host_id, apply=apply)
+        release = self.adapter.require_release(Capability.TRUST_HOST_DELIVERY)
+        report = release.trust_host_delivery(apply=apply)
+        # A binding this profile already held is a read, like the authority
+        # adoption beside it: only "recorded" put anything on disk.
+        return self._planned_or_applied(
+            plan, report, applied=apply and report.get("status") == "recorded"
+        )
+
     def trust_host_authority(
         self, *, apply: bool = False, replace: str | None = None
     ) -> Evidence:

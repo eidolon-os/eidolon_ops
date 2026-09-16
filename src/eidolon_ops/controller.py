@@ -30,8 +30,10 @@ from eidolon_ops.foundation import (
     python_bootstrap_script,
     python_probe_script,
 )
+from eidolon_ops.host_delivery import bind_delivery, recorded_delivery
 from eidolon_ops.host_layer import ASSET_ERRORS, HostLayer
 from eidolon_ops.hostagent.contract import RESET_AUTHORITY_ROOTS
+from eidolon_ops.hostagent.hardware import BINDING_FILE, HostHardwareError, verify_binding
 from eidolon_ops.identity_replacement import replacement_inputs
 from eidolon_ops.install_inputs import (
     add_missing_install_credentials,
@@ -1379,6 +1381,98 @@ class EidolonPiController:
             "this profile's Owner material now speaks for the lineage this Host established, "
             "and holds the directory this Host serves. No key, no device Claim and nothing on "
             "the Host was changed."
+        )
+        return report
+
+    def trust_host_delivery(self, *, apply: bool = False) -> dict[str, object]:
+        """Record which board this profile's Host identity was delivered to.
+
+        An install writes this binding as it hands a new Host its identity, and
+        every install after that only verifies it — which is what stops one
+        profile's credentials from being handed to a second board that happens
+        to answer at the same name. Hosts installed before the binding existed
+        have no such evidence, so that verification has nothing to check and
+        refuses instead, permanently, on Hosts that are perfectly fine.
+
+        The evidence is recoverable without trusting the operator's memory,
+        because a Host that already holds this identity can prove it: it serves
+        an Owner directory naming this profile's public Host id, it holds the
+        very identity secret this profile issued, and it has established the
+        Authority this profile speaks for. A board that merely answers at this
+        address proves none of those. All three are required here, and the
+        second is the one that matters — the first two survive a restore onto
+        different hardware, which is a migration, not a delivery.
+
+        Recording only ever fills an absent binding. One that names another
+        board is refused, not replaced: moving an identity between boards is a
+        complete restore or a new Host, and never a side effect of an operation
+        whose whole job is to notice that it happened.
+        """
+
+        self.preflight.validate_ssh_material()
+        if self.app is None:
+            raise OperationsError("Host delivery evidence requires the Pi Host app contract")
+        materializer = self.host_layer.materializer()
+        try:
+            identity = materializer.identity()
+            owner = authority_lineage(materializer.owner_assets(identity=identity))
+        except ASSET_ERRORS as exc:
+            raise OperationsError(str(exc)) from exc
+        installed = self.transport.run_agent("deployment-identity", {}, timeout=30)
+        hardware = self.transport.run_agent("host-hardware", {}, timeout=30).get("hardware")
+        if installed.get("status") != "observed" or not isinstance(hardware, dict):
+            raise OperationsError("installed Host identity or hardware could not be observed")
+        preserved = installed.get("preserved_files")
+        recorded_secret = preserved.get("host_identity.ed25519") if isinstance(preserved, dict) else None
+        proof = {
+            "serves_this_host_id": installed.get("host_id") == identity.host_id,
+            "holds_this_identity": recorded_secret
+            == file_sha256(self.config.install_files["host_identity"]),
+            "established_this_authority": installed.get("authority") == owner,
+        }
+        report: dict[str, object] = {
+            "host": self.config.host.target,
+            "host_id": identity.host_id,
+            "hardware": hardware,
+            "proof": proof,
+            "binding_file": str(materializer.material_root.parent / BINDING_FILE),
+        }
+        if not all(proof.values()):
+            raise OperationsError(
+                "this Host does not prove it already holds this profile's identity "
+                f"{proof}. A Host that cannot is either a different board or one this "
+                "profile has never installed; deliver it with install, or reconcile the "
+                "Authority first with trust-host-authority. Nothing was written."
+            )
+        root = materializer.material_root.parent
+        existing = recorded_delivery(root)
+        if existing is not None:
+            # Mismatch raises out of here, carrying hardware.py's own sentence
+            # about what reusing another board's credentials would mean.
+            try:
+                verify_binding(existing, identity.host_id, hardware)
+            except HostHardwareError as exc:
+                raise OperationsError(str(exc)) from exc
+            report["status"] = "current"
+            report["detail"] = "this profile already records this board as holding its identity"
+            return report
+        report["status"] = "absent"
+        report["detail"] = (
+            "this profile has no delivery evidence, which is why install refuses it. This "
+            "Host proves it already holds the identity, so recording what it reports adds "
+            "the evidence rather than the fact. Afterwards this identity cannot be moved to "
+            "another board except by a complete restore: --apply"
+        )
+        if not apply:
+            return report
+        try:
+            bind_delivery(root, identity.host_id, hardware, allow_create=True)
+        except (HostHardwareError, OperationsError) as exc:
+            raise OperationsError(str(exc)) from exc
+        report["status"] = "recorded"
+        report["detail"] = (
+            "this profile now records the board it had already delivered this identity to; "
+            "nothing on the Host was read for it but its own report, and nothing was written there"
         )
         return report
 
