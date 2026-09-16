@@ -135,6 +135,12 @@ def refresh_host_application(
         # between releases has to be told, and the services that publish its
         # addresses read the answer out of this file.
         contract.declared_management_networks(payload),
+        # And on the same pass, for the third time for the same reason: a Host
+        # that becomes a bench rig, or stops being one, is told here. Missing
+        # from this call once already, which wrote an undeclared window over a
+        # declared one on every deployment -- the install path had it and this
+        # one did not, so it looked like the declaration never arrived.
+        contract.declared_claim_window(payload),
     )
     # Derived from the same declaration, and applied on every refresh for the
     # same reason host.env is rewritten rather than defended: a Host's

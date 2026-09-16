@@ -1927,8 +1927,8 @@ def test_the_derived_host_layer_is_delivered_without_a_reinstall(tmp_path, monke
     monkeypatch.setattr(
         contract,
         "ensure_host_path_contract",
-        lambda root, _chown, registry, capabilities=frozenset(), networks=(): reconciled.append(
-            (root, registry, capabilities, networks)
+        lambda root, _chown, registry, capabilities=frozenset(), networks=(), claim_window="": (
+            reconciled.append((root, registry, capabilities, networks, claim_window))
         ),
     )
     placed: dict[str, Path] = {}
@@ -1966,7 +1966,16 @@ def test_the_derived_host_layer_is_delivered_without_a_reinstall(tmp_path, monke
     # Which link is the operator's travels on the same pass, for the same
     # reason: a Host that gained a bench cable since it was installed would
     # otherwise go on offering devices an address only this workstation is on.
-    expected = (Path("/"), "admin:\n  api:\n    port: 9000\n", frozenset(), ("10.42.0.0/24",))
+    # What this Host does about claiming rides the same pass, and for the third
+    # time for the same reason: it is a fact about the Host that changes
+    # between releases, and the refresh is where a Host is told.
+    expected = (
+        Path("/"),
+        "admin:\n  api:\n    port: 9000\n",
+        frozenset(),
+        ("10.42.0.0/24",),
+        "",
+    )
     assert reconciled == [expected]
 
     # Second run has nothing to deliver, so systemd is left alone.
@@ -2970,3 +2979,33 @@ def test_a_claim_window_the_agent_does_not_implement_is_refused(tmp_path) -> Non
         contract.declared_claim_window({"claim_window": "always"})
     with pytest.raises(contract.TargetError, match="must be a string"):
         contract.declared_claim_window({"claim_window": True})
+
+
+def test_every_site_that_renders_the_host_profile_carries_every_declaration() -> None:
+    """Two call sites write host.env, and only one of them was updated.
+
+    `install` had the claim window and `host_application` -- the refresh path
+    every deployment takes -- did not, so each deploy rewrote a declared window
+    as an undeclared one. The Host started, worked, and quietly kept the
+    product rule; it looked exactly like the declaration never arriving.
+
+    Checked by signature rather than by behaviour on purpose: the next
+    declaration added here will be added to one site first too.
+    """
+
+    import inspect
+
+    from eidolon_ops.hostagent import host_application, install
+
+    rendered = set(
+        inspect.signature(contract.ensure_host_path_contract).parameters
+    ) - {"root", "chown", "port_registry"}
+
+    for module, name in ((install, "install.py"), (host_application, "host_application.py")):
+        source = inspect.getsource(module)
+        call = source[source.index("ensure_host_path_contract(") :]
+        call = call[: call.index("\n    )")]
+        for parameter in rendered:
+            assert f"declared_{parameter}" in call or f"self.{parameter}" in call, (
+                f"{name} renders host.env without {parameter}"
+            )
