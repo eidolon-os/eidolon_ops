@@ -191,6 +191,7 @@ def doctor_host(payload: Mapping[str, object]) -> dict[str, object]:
         == contract.host_env_value(
             contract.declared_capabilities(payload),
             contract.declared_management_networks(payload),
+            contract.declared_claim_window(payload),
         ),
         "port_registry": contract.HOST_PORTS_PATH.is_file()
         and contract.HOST_PORTS_PATH.read_text(encoding="utf-8") == contract.fixed_port_registry(payload),

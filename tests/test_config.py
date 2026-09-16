@@ -597,3 +597,47 @@ def test_a_repeated_capability_is_refused(config_path: Path) -> None:
         load_config(
             _with_settings(config_path, '\n[capabilities]\nprovides = ["rknpu2", "rknpu2"]\n')
         )
+
+
+def test_a_host_may_declare_what_it_does_about_claiming(config_path: Path) -> None:
+    """Ops is the only side that knows a Host is a bench Host.
+
+    Every path to a new claim window reaches the Host's control socket, which
+    means this workstation. A rig whose managing phone is lost is therefore
+    locked out of itself by the rule that protects a shipped Host, and the
+    board cannot tell the two apart -- so the profile says which it is.
+    """
+
+    assert load_config(config_path).host.claim_window == ""
+
+    _replace(
+        config_path,
+        "connect_timeout_seconds = 7",
+        'connect_timeout_seconds = 7\nclaim_window = "always_open"',
+    )
+
+    assert load_config(config_path).host.claim_window == "always_open"
+
+
+@pytest.mark.parametrize(
+    "value",
+    ['"always"', '"open"', '"development"', '"true"'],
+)
+def test_a_claim_window_nobody_implements_is_refused_at_the_desk(
+    config_path: Path, value: str
+) -> None:
+    """Refused here, because the Host's own default is what a typo would leave.
+
+    A misspelling that reached the board would render an empty declaration and
+    the Host would quietly keep the product rule -- which looks exactly like
+    the lockout this field exists to prevent, discovered at the worst moment.
+    """
+
+    _replace(
+        config_path,
+        "connect_timeout_seconds = 7",
+        f"connect_timeout_seconds = 7\nclaim_window = {value}",
+    )
+
+    with pytest.raises(ConfigurationError, match="on_demand or always_open"):
+        load_config(config_path)

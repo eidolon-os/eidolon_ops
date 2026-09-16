@@ -582,17 +582,31 @@ HOST_CAPABILITIES_VARIABLE = "EIDOLON_HOST_CAPABILITIES"
 #: not import upward, and the SDK is not on the path while an install runs.
 MANAGEMENT_NETWORKS_VARIABLE = "EIDOLON_MANAGEMENT_NETWORKS"
 
+#: What this Host does about claiming, read by bootstrapd. Spelled here as well
+#: as in `eidolon_admin_server.bootstrap.config` for the same reason as the
+#: line above: this package ships to the Host alone and may not import upward.
+CLAIM_WINDOW_VARIABLE = "EIDOLON_BOOTSTRAP_CLAIM_WINDOW"
+
 
 def host_env_value(
-    capabilities: frozenset[str], management_networks: tuple[str, ...] = ()
+    capabilities: frozenset[str],
+    management_networks: tuple[str, ...] = (),
+    claim_window: str = "",
 ) -> str:
-    """The sealed Host profile, for this Host's declarations."""
+    """The sealed Host profile, for this Host's declarations.
+
+    An undeclared claim window is written as the empty string rather than
+    omitted: the file is this Host's whole profile, and a reader that has to
+    tell "not declared" from "line lost" has been given two questions where the
+    other declarations give it one.
+    """
 
     declared = ",".join(sorted(capabilities))
     return (
         f"{HOST_ENV_VALUE}"
         f"{HOST_CAPABILITIES_VARIABLE}={declared}\n"
         f"{MANAGEMENT_NETWORKS_VARIABLE}={','.join(management_networks)}\n"
+        f"{CLAIM_WINDOW_VARIABLE}={claim_window}\n"
     )
 
 HOST_DIRECTORIES = (
@@ -654,6 +668,7 @@ def ensure_host_path_contract(
     port_registry: str,
     capabilities: frozenset[str] = frozenset(),
     management_networks: tuple[str, ...] = (),
+    claim_window: str = "",
 ) -> None:
     """Materialize the host-profile roots without adopting mutable contents."""
 
@@ -684,7 +699,9 @@ def ensure_host_path_contract(
     if host_env.is_symlink() or (host_env.exists() and not host_env.is_file()):
         raise TargetError("existing /etc/eidolon/host.env is not a regular file")
     primitives.atomic_text(
-        host_env, host_env_value(capabilities, management_networks), mode=0o644
+        host_env,
+        host_env_value(capabilities, management_networks, claim_window),
+        mode=0o644,
     )
     chown(host_env, "root", "root")
 
@@ -744,6 +761,30 @@ def declared_management_networks(payload: Mapping[str, object]) -> tuple[str, ..
     if len(set(declared)) != len(declared):
         raise TargetError("management_networks repeats a network")
     return tuple(declared)
+
+
+#: The spellings bootstrapd accepts. Refused here as well as at the desk: a
+#: payload is not always one this workstation wrote, and a value that reaches
+#: the file unchecked would leave bootstrapd refusing to start on a board that
+#: no longer has an operator in front of it.
+CLAIM_WINDOWS = ("on_demand", "always_open")
+
+
+def declared_claim_window(payload: Mapping[str, object]) -> str:
+    """What this Host was told to do about claiming, checked rather than believed.
+
+    A payload with no claim window is one from before Hosts could say, and
+    means a Host on the product default -- so an older workstation keeps
+    working against a newer agent, the same way it does for every other
+    declaration here.
+    """
+
+    declared = payload.get("claim_window", "")
+    if not isinstance(declared, str):
+        raise TargetError("claim_window must be a string")
+    if declared and declared not in CLAIM_WINDOWS:
+        raise TargetError(f"claim_window is not one this Host accepts: {declared!r}")
+    return declared
 
 
 def fixed_units(payload: Mapping[str, object]) -> tuple[str, ...]:

@@ -172,6 +172,11 @@ class HostLayer:
             # its interfaces perfectly well, and seeing them is exactly what
             # cannot answer this. A role is not a property of a NIC.
             "management_networks": list(self.config.host.management_networks),
+            # What this Host does about claiming, when it is not the product
+            # default. Sent for the same reason as the line above: a bench Host
+            # and a shipped one are indistinguishable from the board, and Ops is
+            # the side that knows which one it configured.
+            "claim_window": self.config.host.claim_window,
             "port_registry": port_registry,
             # Where memory's supervisor answers. A backup asks it for a
             # snapshot of each space rather than copying a palace the agent

@@ -2904,3 +2904,69 @@ def test_the_path_contract_check_reads_this_hosts_own_link_declaration(
     # device the cable and not.
     host_env.write_text(contract.host_env_value(frozenset()), encoding="utf-8")
     assert host_lifecycle.doctor_host(payload)["checks"]["host_path_contract"] is False
+
+
+def test_a_claim_window_declaration_reaches_the_sealed_profile(
+    config, config_path, tmp_path
+) -> None:
+    """Desk to board in one pass, because five hand-offs is five places to drop it.
+
+    The value is read by bootstrapd out of `host.env`, and every step between
+    here and there — config, payload, contract accessor, installer, renderer —
+    defaults to "say nothing". So each one of them can be wrong on its own and
+    still leave a Host that starts, works, and quietly keeps the product rule.
+    That failure looks exactly like the lockout the declaration prevents, which
+    is why it is checked end to end rather than per hop.
+    """
+
+    import dataclasses
+
+    from eidolon_ops.host_layer import HostLayer
+
+    declared = dataclasses.replace(
+        config,
+        host=dataclasses.replace(config.host, claim_window="always_open"),
+    )
+    layer = HostLayer(
+        declared,
+        transport=object(),
+        app=None,
+        read_exact_source_file=lambda *_a: "",
+        source_revisions=lambda: {},
+    )
+
+    payload = layer.target_payload()
+    assert payload["claim_window"] == "always_open"
+
+    root = tmp_path / "board"
+    (root / "etc" / "eidolon").mkdir(parents=True)
+    contract.ensure_host_path_contract(
+        root,
+        lambda *_a: None,
+        "ports: {}\n",
+        contract.declared_capabilities(payload),
+        contract.declared_management_networks(payload),
+        contract.declared_claim_window(payload),
+    )
+
+    host_env = (root / "etc" / "eidolon" / "host.env").read_text(encoding="utf-8")
+    assert f"{contract.CLAIM_WINDOW_VARIABLE}=always_open\n" in host_env
+
+    # A Host that says nothing gets the product rule, which is how every Host
+    # behaved before this line existed.
+    contract.ensure_host_path_contract(root, lambda *_a: None, "ports: {}\n")
+    assert f"{contract.CLAIM_WINDOW_VARIABLE}=\n" in (
+        root / "etc" / "eidolon" / "host.env"
+    ).read_text(encoding="utf-8")
+
+
+def test_a_claim_window_the_agent_does_not_implement_is_refused(tmp_path) -> None:
+    """Checked on the board too: a payload is not always one this desk wrote."""
+
+    assert contract.declared_claim_window({}) == ""
+    assert contract.declared_claim_window({"claim_window": "always_open"}) == "always_open"
+
+    with pytest.raises(contract.TargetError, match="not one this Host accepts"):
+        contract.declared_claim_window({"claim_window": "always"})
+    with pytest.raises(contract.TargetError, match="must be a string"):
+        contract.declared_claim_window({"claim_window": True})

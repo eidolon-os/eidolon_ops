@@ -50,11 +50,16 @@ class TargetInstaller:
         #: profile, so the services this install is about to start publish
         #: addresses a device can actually route to.
         management_networks: tuple[str, ...] = (),
+        #: What this Host does about claiming, when it is not the product
+        #: default. Written into the same profile, because bootstrapd reads it
+        #: from there and Ops is the only side that knows a bench Host.
+        claim_window: str = "",
         sources: Mapping[str, object] | None = None,
     ) -> None:
         self.port_registry = port_registry
         self.capabilities = capabilities
         self.management_networks = management_networks
+        self.claim_window = claim_window
         #: Which commit of each repository this Host was installed from. A first
         #: install writes no cutover document, so this journal is the only place
         #: the founding combination survives the release directory being
@@ -317,6 +322,7 @@ class TargetInstaller:
             self.port_registry,
             self.capabilities,
             self.management_networks,
+            self.claim_window,
         )
 
     def _ensure_capability_service_groups(self) -> tuple[str, ...]:
@@ -537,5 +543,6 @@ def install(payload: Mapping[str, object]) -> dict[str, object]:
         port_registry=contract.fixed_port_registry(payload),
         capabilities=contract.declared_capabilities(payload),
         management_networks=contract.declared_management_networks(payload),
+        claim_window=contract.declared_claim_window(payload),
         sources=contract.optional_source_provenance(payload),
     ).install()

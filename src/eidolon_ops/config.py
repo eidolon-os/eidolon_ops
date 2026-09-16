@@ -209,6 +209,15 @@ class HostConfig:
     #: shipped Host, and the default for the same reason: an address nobody has
     #: spoken for belongs to the product.
     management_networks: tuple[str, ...] = ()
+    #: Whether this Host keeps a claim window standing, so a Setup code alone
+    #: can add a Host Admin. ``""`` leaves the Host on its own default, which
+    #: is the product rule: the factory window opens once while unclaimed and
+    #: after that a window is minted by whoever can reach the control socket.
+    #:
+    #: A bench Host has no way to satisfy that. Every path to a new window runs
+    #: through this workstation, so a lost phone locks the rig out of itself,
+    #: and Ops is the only thing that knows a Host is a bench Host.
+    claim_window: str = ""
     #: How long this Host's own services may take to answer after an
     #: activation. A board is not a laptop — the Channel worker alone spends
     #: its stop timeout shutting down and then loads an ONNX model coming up —
@@ -375,6 +384,7 @@ def load_config(path: Path) -> OperationsConfig:
             "require_wired_release_upload",
             "operator_keys_file",
             "management_networks",
+            "claim_window",
         },
         label="host",
     )
@@ -401,6 +411,7 @@ def load_config(path: Path) -> OperationsConfig:
         "host.require_wired_release_upload",
     )
     management_networks = _management_networks(host_wire.get("management_networks"))
+    claim_window = _claim_window(host_wire.get("claim_window"))
 
     workspace_wire = _mapping(document["workspace"], "workspace")
     _require_keys(
@@ -536,6 +547,7 @@ def load_config(path: Path) -> OperationsConfig:
             remote_uv=remote_uv,
             require_wired_release_upload=require_wired_release_upload,
             management_networks=management_networks,
+            claim_window=claim_window,
             operator_keys_file=(
                 _local_path(host_wire["operator_keys_file"], base, "host.operator_keys_file")
                 if "operator_keys_file" in host_wire
@@ -551,6 +563,27 @@ def load_config(path: Path) -> OperationsConfig:
         settings_overlay=settings_overlay,
         capabilities=capabilities,
     )
+
+
+#: What a Host may be told about its claim window. Spelled here as well as in
+#: `eidolon_admin_server.bootstrap.config`, which is what reads it: Ops writes
+#: this value and must refuse a misspelling at the desk rather than on a board
+#: that then quietly keeps the product default -- the failure that would look
+#: exactly like the lockout the declaration exists to prevent.
+_CLAIM_WINDOWS = ("on_demand", "always_open")
+
+
+def _claim_window(value: object) -> str:
+    """Read ``[host] claim_window``, what this Host does about claiming."""
+
+    if value is None:
+        return ""
+    declared = _string(value, "host.claim_window").strip().lower()
+    if declared not in _CLAIM_WINDOWS:
+        raise ConfigurationError(
+            "host.claim_window must be " + " or ".join(_CLAIM_WINDOWS)
+        )
+    return declared
 
 
 def _management_networks(value: object) -> tuple[str, ...]:
