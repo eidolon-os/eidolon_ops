@@ -364,6 +364,17 @@ class HostLayer:
 
 
     def refresh(self, release_id: str) -> dict[str, object]:
+        """Deliver the Host layer, and take the staged copy back off the Host.
+
+        What this stages is the widest set any operation puts under /var/tmp:
+        the Host identity's Ed25519 private key, the Hub's TLS private key, and
+        the two Host-bound environment files with every credential in them. The
+        agent has read them by the time it answers, and nothing afterwards
+        wants them — the authority restore that reaches this verb stages its
+        own material under `eidolon-authority-*`. Left behind, they sat there
+        until something happened to stage the same release id again.
+        """
+
         stage = f"/var/tmp/eidolon-secrets-{release_id}"
         self.stage_install_files(
             release_id,
@@ -374,8 +385,13 @@ class HostLayer:
                 *PRODUCT_SETTINGS_INPUTS,
             ),
         )
-        return self.transport.run_agent(
-            "refresh-host-application",
-            {**self.target_payload(), "release_id": release_id},
-            timeout=180,
-        )
+        try:
+            return self.transport.run_agent(
+                "refresh-host-application",
+                {**self.target_payload(), "release_id": release_id},
+                timeout=180,
+            )
+        finally:
+            self.transport.run_agent(
+                "cleanup-stage", {"release_id": release_id}, timeout=120
+            )

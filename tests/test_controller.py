@@ -3116,3 +3116,116 @@ def test_consumed_authority_requires_both_copies_of_state(config, missing):
     with pytest.raises(OperationsError, match=r"AuthorityRecoveryRequired|AUTHORITY_RECOVERY_REQUIRED"):
         controller.authority_capability(will_wipe=False, apply=True)
     assert _material_state(controller) == before
+
+
+def _stub_workstation_half(controller: EidolonPiController) -> None:
+    """Both credential verbs prove this machine's input set before staging.
+
+    That half has its own suite. Stubbed here so each test below is about the
+    one thing it names: whether what was staged on the Host is taken back off.
+    """
+
+    controller.add_missing_input_credentials = lambda *, apply=False: {  # type: ignore[method-assign]
+        "status": "planned", "added": {}, "applied": False,
+    }
+    controller.preflight.validate_input_contract = lambda: {  # type: ignore[method-assign]
+        "status": "compatible"
+    }
+
+
+def _staged_then_cleaned(transport: FakeTransport, release_id: str) -> bool:
+    """Was the directory this operation staged credentials into cleared again?
+
+    `stage_install_files` clears the directory on its way in, so a cleanup that
+    only happens there leaves the copy behind until something stages the same
+    release id again. What this asserts is a cleanup *after* the work.
+    """
+
+    actions = [action for action, payload, *_ in transport.agent_calls
+               if action == "cleanup-stage" and payload.get("release_id") == release_id]
+    return len(actions) >= 2
+
+
+def test_converge_takes_its_staged_credentials_back_off_the_host(config):
+    """The whole input set is staged to deliver one key; it does not stay.
+
+    This directory holds every credential the Host has plus its identity key.
+    It used to be cleared only by whoever staged next — which on a Host that
+    needs no further convergence is never.
+    """
+
+    transport = FakeTransport()
+    controller = _authority_controller(config, transport)
+    _stub_workstation_half(controller)
+    transport.overrides["converge-secret-inputs"] = {
+        "status": "already_current", "added": {}, "missing": {}, "absent": [],
+        "applied": False, "relationships": {"status": "agreed", "mismatched": []},
+    }
+
+    controller.converge_inputs(apply=True)
+
+    assert _staged_then_cleaned(transport, "credential-convergence")
+
+
+def test_converge_clears_its_stage_even_when_the_host_refuses(config):
+    """A failed run is the one most likely to be walked away from."""
+
+    transport = FakeTransport()
+    controller = _authority_controller(config, transport)
+    _stub_workstation_half(controller)
+    transport.fail_actions["converge-secret-inputs"] = OperationsError("refused")
+
+    with pytest.raises(OperationsError):
+        controller.converge_inputs(apply=True)
+
+    assert _staged_then_cleaned(transport, "credential-convergence")
+
+
+def test_a_dry_convergence_stages_nothing_to_clean(config):
+    """Nothing is put on the Host to report that nothing is needed."""
+
+    transport = FakeTransport()
+    controller = _authority_controller(config, transport)
+    _stub_workstation_half(controller)
+    transport.overrides["converge-secret-inputs"] = {
+        "status": "already_current", "added": {}, "missing": {}, "absent": [],
+        "applied": False, "relationships": {"status": "agreed", "mismatched": []},
+    }
+
+    controller.converge_inputs(apply=False)
+
+    assert not any(action == "cleanup-stage" for action, *_ in transport.agent_calls)
+
+
+def test_repair_takes_its_staged_credentials_back_off_the_host(config):
+    transport = FakeTransport()
+    controller = _authority_controller(config, transport)
+    _stub_workstation_half(controller)
+    transport.overrides["repair-secret-relationships"] = {
+        "status": "consistent", "classes": 13, "divided": [], "repaired": [],
+        "unchecked": [], "restart_required": [], "applied": False,
+    }
+
+    controller.repair_credentials(apply=True)
+
+    assert _staged_then_cleaned(transport, "credential-repair")
+
+
+def test_the_host_layer_refresh_takes_its_staged_private_keys_back(config):
+    """The widest set any operation puts under /var/tmp.
+
+    The Host identity's Ed25519 private key, the Hub's TLS private key, and both
+    Host-bound environment files. The agent has read them by the time it
+    answers, and the authority restore that reaches this verb stages its own
+    material elsewhere.
+    """
+
+    transport = FakeTransport()
+    controller = _authority_controller(config, transport)
+    transport.overrides["refresh-host-application"] = {
+        "status": "refreshed", "changed": [], "removed": [],
+    }
+
+    controller.host_layer.refresh("20260917-release-1")
+
+    assert _staged_then_cleaned(transport, "20260917-release-1")

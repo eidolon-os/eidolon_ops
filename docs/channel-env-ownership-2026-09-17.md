@@ -887,3 +887,66 @@ ruff          仍只剩那 1 个先前就有的 B905
 
 13 个类全部一致。事后核对 `/etc/eidolon/*.env` 时间戳，与本次会话开始时完全相同
 （Sep 8 install，Sep 14 那次完整 refresh），**板上没有任何写入**，临时文件已清理。
+
+---
+
+# 第十部分：暂存目录用完即清（2026-09-17，收尾）
+
+第九部分记下"`converge-inputs` 的暂存目录不清"当作遗留项，机主指定一并改掉。
+
+## 10.1 查下来是三处，不是一处
+
+把"谁暂存、谁清理"全部列出来之后：
+
+| 动词 | 暂存内容 | 原本清理吗 |
+|---|---|---|
+| `install` | 全套输入集 | **会**（显式 `cleanup-stage`） |
+| `repair-credentials` | 全套输入集 | **会**（第九部分加的） |
+| `converge-inputs` | 全套输入集 | 不会 ← 机主点名的 |
+| `HostLayer.refresh` | Host identity 私钥、Hub TLS 私钥、两个 Host 绑定文件 | 不会 ← **比点名那个更糟** |
+| `HostLayer.refresh_release` | hub 设置、ingress 程序、unit 文件、3 个 yaml | 不会（**全是非密材料**） |
+
+`stage_install_files` 只在**进门时**清一次同 id 的目录，所以没有出门清理的动词，会把一份副本留在
+`/var/tmp` 直到下一次用同一个 release id 暂存——对一台不再需要收敛的 Host 来说就是永远。
+
+## 10.2 改了两处，留了一处
+
+**改 `converge-inputs`**：机主点名的。它为了送一两个键而暂存整套输入集。
+
+**也改 `HostLayer.refresh`**：它泄露的是这几个动词里最宽的一组——`host_identity.ed25519`
+（Ed25519 私钥）、`hub.key`（TLS 私钥）、`channel.env` 和 `local-api.env`。
+动它之前先查证了后续步骤不读这个目录：唯一到达它的 `authority-restore` 用的是自己的
+`eidolon-authority-*`（`hostagent/authority_restore.py:141`）。
+
+**没改 `refresh_release`**：它暂存的全是非密材料（hub 设置、ingress 程序、unit 文件、3 个
+非密 yaml），而它在 deploy 的关键路径上，后面还有 activate。收益是"整洁"，代价是要在收尾
+阶段验证一条发布路径——不值当。记在这里。
+
+三处都用 `try/finally`，因为**失败的那一次恰恰是最可能被撂下不管的那一次**。
+
+## 10.3 变异验证
+
+这三条断言如果对"有没有清理"不敏感，就等于什么都没钉住。所以拆掉 `converge` 和 `refresh`
+的清理各跑了一遍：
+
+```
+注入变异后：
+  test_converge_takes_its_staged_credentials_back_off_the_host        FAILED ✓
+  test_converge_clears_its_stage_even_when_the_host_refuses           FAILED ✓
+  test_the_host_layer_refresh_takes_its_staged_private_keys_back      FAILED ✓
+  test_repair_takes_its_staged_credentials_back_off_the_host          passed ✓（没动它的清理）
+  test_a_dry_convergence_stages_nothing_to_clean                      passed ✓（它断言的是"不该有清理"）
+```
+
+红的正好是该红的那三条。随后还原并确认工作区无变异残留。
+
+断言写成"同一个 release id 的 `cleanup-stage` 至少出现两次"，而不是"出现过"——因为
+`stage_install_files` 进门时就会清一次，只断言"出现过"在删掉出门清理之后仍然会绿。
+
+## 10.4 验证
+
+```
+第九部分收尾  1169 passed, 48 skipped
+第十部分之后  1174 passed, 48 skipped      （+5）
+ruff          仍只剩那 1 个先前就有的 B905
+```

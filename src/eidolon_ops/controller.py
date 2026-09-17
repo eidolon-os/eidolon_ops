@@ -1083,7 +1083,21 @@ class EidolonPiController:
             stage = f"/var/tmp/eidolon-secrets-{_CONVERGENCE_STAGE_ID}"
             self.host_layer.stage_install_files(_CONVERGENCE_STAGE_ID, stage)
             payload["release_id"] = _CONVERGENCE_STAGE_ID
-        host = self.transport.run_agent("converge-secret-inputs", payload, timeout=120)
+        try:
+            host = self.transport.run_agent("converge-secret-inputs", payload, timeout=120)
+        finally:
+            if apply:
+                # Cleared here rather than by whoever stages next. This directory
+                # holds the whole input set — every credential on the Host, plus
+                # its identity key — and it was staged to deliver one or two of
+                # them. `stage_install_files` clears it on its way in, so the
+                # copy left behind used to sit under /var/tmp until the next
+                # convergence, which on a Host that needs no more of them is
+                # forever. In a `finally` because a failed convergence is the
+                # run most likely to be left alone afterwards.
+                self.transport.run_agent(
+                    "cleanup-stage", {"release_id": _CONVERGENCE_STAGE_ID}, timeout=120
+                )
         applied = bool(local.get("applied")) or bool(host.get("applied"))
         return {
             "status": "converged" if applied else "planned",
@@ -1145,10 +1159,10 @@ class EidolonPiController:
             )
         finally:
             if apply:
-                # Unlike `converge-inputs`, which leaves its staging directory
-                # for the next run to clear. A repair stages the whole input set
-                # to correct one credential, and leaving that on the Host is a
-                # wider exposure than the operation itself.
+                # A repair stages the whole input set to correct one credential,
+                # and leaving that on the Host is a wider exposure than the
+                # operation itself. The same is true of `converge-inputs` above
+                # and of the Host-layer refresh, and all three clear it now.
                 self.transport.run_agent(
                     "cleanup-stage", {"release_id": _REPAIR_STAGE_ID}, timeout=120
                 )
