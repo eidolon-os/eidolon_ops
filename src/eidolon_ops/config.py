@@ -230,24 +230,6 @@ class HostConfig:
     #: connects with, and which keys the board trusts. While they were one, a
     #: second operator had to be handed somebody's private key.
     operator_keys_file: Path | None = None
-    #: The ed25519 host key fingerprint this repository declares for this Host,
-    #: as ``ssh-keygen -lf`` prints that field. Tracked for the same reason the
-    #: operator public keys are: a fingerprint is derived from a public key and
-    #: the Host prints it to anyone who asks, while which board answers to this
-    #: name is a decision worth reviewing.
-    #:
-    #: Stated here rather than in a file of its own, because it is one value.
-    #: ``operator_keys_file`` needs a file: it is a line per person. A scalar in
-    #: a file needs a parser, a rule that there is only ever one line, and a
-    #: path to resolve — machinery for a string this profile can simply hold.
-    #:
-    #: What it buys is the one gap the profile's own known_hosts cannot cover:
-    #: that file is gitignored, so a second operator and a fresh checkout trust
-    #: on first use with nothing to compare against. What it does not buy is
-    #: confirmation that the value is right — see ``docs/host-key-trust.md``.
-    #: Empty means this Host declares none, which is a first-use trust rather
-    #: than an error: nothing here can invent a fingerprint nobody has read.
-    host_fingerprint: str = ""
 
     @property
     def target(self) -> str:
@@ -401,7 +383,6 @@ def load_config(path: Path) -> OperationsConfig:
             "readiness_timeout_seconds",
             "require_wired_release_upload",
             "operator_keys_file",
-            "host_fingerprint",
             "management_networks",
             "claim_window",
         },
@@ -431,7 +412,6 @@ def load_config(path: Path) -> OperationsConfig:
     )
     management_networks = _management_networks(host_wire.get("management_networks"))
     claim_window = _claim_window(host_wire.get("claim_window"))
-    host_fingerprint = _host_fingerprint(host_wire.get("host_fingerprint"))
 
     workspace_wire = _mapping(document["workspace"], "workspace")
     _require_keys(
@@ -573,7 +553,6 @@ def load_config(path: Path) -> OperationsConfig:
                 if "operator_keys_file" in host_wire
                 else None
             ),
-            host_fingerprint=host_fingerprint,
             readiness_timeout_seconds=readiness,
         ),
         workspace=workspace,
@@ -592,38 +571,6 @@ def load_config(path: Path) -> OperationsConfig:
 #: that then quietly keeps the product default -- the failure that would look
 #: exactly like the lockout the declaration exists to prevent.
 _CLAIM_WINDOWS = ("on_demand", "always_open")
-
-
-#: A SHA256 host key fingerprint as OpenSSH prints it: the token alone, which
-#: is 256 bits of base64 and never padded.
-_FINGERPRINT = re.compile(r"^SHA256:[A-Za-z0-9+/]{43}$")
-
-
-def _host_fingerprint(value: object) -> str:
-    """Read ``[host] host_fingerprint``, the key this repository declares.
-
-    Checked for shape, because the failure of a malformed one is silent: it
-    would match no Host ever, and the comparison would report first use on a
-    Host somebody had declared. Pasting the whole `ssh-keygen -lf` line instead
-    of its second field is the way to get that wrong, so it is named.
-    """
-
-    if value is None:
-        return ""
-    if not isinstance(value, str):
-        raise ConfigurationError("host.host_fingerprint must be a string")
-    declared = value.strip()
-    if not declared:
-        # The state a profile adopting this starts in, and stays in until
-        # somebody reads a fingerprint off the board. Not an error: see the
-        # field's own comment for why this cannot be filled in from here.
-        return ""
-    if _FINGERPRINT.fullmatch(declared) is None:
-        raise ConfigurationError(
-            f"host.host_fingerprint must be one `SHA256:...` token as `ssh-keygen -lf` "
-            f"prints it — that field alone, not the whole line: {declared!r}"
-        )
-    return declared
 
 
 def _claim_window(value: object) -> str:

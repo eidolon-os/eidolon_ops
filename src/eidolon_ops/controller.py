@@ -742,7 +742,6 @@ class EidolonPiController:
 
         alias = self.config.host.hostname
         path = self.config.host.known_hosts_file
-        declared = self.config.host.host_fingerprint
         host_key, endpoint = host_keys.scan(
             self.runner,
             self.transport.candidates(),
@@ -759,44 +758,8 @@ class EidolonPiController:
             "key_type": host_key.key_type,
             "fingerprint": host_key.fingerprint,
             "trusted_fingerprints": list(trusted),
-            "declared_fingerprint": declared or None,
         }
-        # A different question from the one above it. That one asks whether
-        # anything changed on this workstation; this asks whether the board is
-        # the one the profile names, which is the only form of the question a
-        # fresh checkout can ask at all.
-        undeclared = bool(declared) and host_key.fingerprint != declared
-        if undeclared:
-            report["declaration"] = "conflict"
-            report["declaration_detail"] = (
-                f"this profile declares {declared} for this Host, and the board is presenting "
-                f"{host_key.fingerprint}. Those are two different boards, or one board whose "
-                "key was regenerated, or a machine-in-the-middle — nothing here can tell them "
-                "apart, and neither can a second scan. Read the fingerprint on the board over "
-                "something that is not this connection (a serial console, a screen and a "
-                f"keyboard). If it really is {host_key.fingerprint}, set host.host_fingerprint "
-                f"to it in {self.config.path} and run this again; that edit is the "
-                "acknowledgement, and it is the one the next operator gets to see."
-            )
-        elif declared:
-            report["declaration"] = "matches"
-        else:
-            report["declaration"] = "undeclared"
-            # Deliberately not printing the scanned value as a line to paste
-            # into the profile. It came from this connection, so declaring it
-            # would make the comparison check this scan against itself — the
-            # gate would pass forever while claiming to have compared.
-            report["declaration_detail"] = (
-                "this profile declares no host.host_fingerprint, so this is a first-use "
-                "trust: nothing here has anything to compare the board against. Confirming "
-                "it means reading the fingerprint on the board over something that is not "
-                "this connection — a serial console, or a screen and a keyboard. Declaring "
-                "what this scan returned instead pins the key rather than confirming it: it "
-                "catches a later swap and stops every workstation trusting on its own, and "
-                "it cannot catch anything wrong with this scan. docs/host-key-trust.md says "
-                "which of the two you are doing."
-            )
-        if already and len(existing) == 1 and not undeclared:
+        if already and len(existing) == 1:
             report["status"] = "trusted"
             report["detail"] = "this profile already trusts exactly this key; nothing to write"
             return report
@@ -810,27 +773,10 @@ class EidolonPiController:
                 "(`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`), then name it: "
                 f"--replace {host_key.fingerprint} --apply"
             )
-        elif undeclared:
-            report["status"] = "undeclared"
-            report["detail"] = str(report["declaration_detail"])
         else:
             report["status"] = "untrusted" if not existing else "incomplete"
         if not apply:
             return report
-        # Two gates, and deliberately no flag that opens the second one. A
-        # board this profile does not name is answered by changing the profile,
-        # in the commit that reviews the change — which is the only thing the
-        # declaration was ever worth. While `--replace` satisfied both, the way
-        # through was to name the key on the command line and leave the profile
-        # declaring the board before it: the next operator meets a conflict
-        # against a value nobody maintains, and learns that the flag gets past
-        # it. A reviewed value that a flag can overrule is decoration.
-        if undeclared:
-            raise OperationsError(
-                f"{report['declaration_detail']!s} Nothing was written. `--replace` does "
-                "not answer this one: it says this workstation accepts a new key, and what "
-                "is in question is which board this profile names."
-            )
         if replacing:
             if replace is None:
                 raise OperationsError(str(report["detail"]))

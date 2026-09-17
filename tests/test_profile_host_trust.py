@@ -1,7 +1,7 @@
 """Where each shipped profile keeps its SSH trust, held to one rule.
 
-The mechanism — a profile-owned known_hosts, a tracked operator set, a tracked
-fingerprint — was built for one profile and then only wired into that one. The
+The mechanism — a profile-owned known_hosts and a tracked operator set — was
+built for one profile and then only wired into that one. The
 second board kept pointing at the operator's `~/.ssh/known_hosts` for a year,
 which is where the design says trust must not live, and nothing failed: every
 operation worked, because the mechanism this bypasses is the one that only
@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from eidolon_ops.config import ConfigurationError, load_config
+from eidolon_ops.config import load_config
 
 pytestmark = pytest.mark.unit
 
@@ -124,48 +124,6 @@ def test_every_profile_states_its_operators_rather_than_implying_them(profile: P
         f"{operators.name} is not tracked. A public key is public, and who may operate a "
         "board is a reviewed decision rather than whatever sits in one laptop's ~/.ssh."
     )
-
-
-@pytest.mark.parametrize("profile", PROFILES, ids=_identifier)
-def test_every_profile_can_state_the_key_it_expects(profile: Path) -> None:
-    """The asymmetry this closes: operator keys tracked, host fingerprint not.
-
-    Both are public — a fingerprint is derived from a public key, and the Host
-    prints it to anyone who asks — but only one of them travelled. The other
-    lived solely in the gitignored profile directory, so a second operator and
-    a fresh checkout trusted on first use with nothing to compare against.
-
-    The declaration may be empty. Nothing here can manufacture a value that is
-    read off a board, and declaring what a scan returned would pin the key
-    rather than confirm it — so an empty one is the honest state, and the field
-    still has to parse as one.
-    """
-
-    declared = load_config(profile).host.host_fingerprint
-
-    assert declared == "" or declared.startswith("SHA256:")
-
-
-def test_a_malformed_declaration_is_refused_rather_than_never_matching(tmp_path: Path) -> None:
-    """A value that cannot match must not read as "nobody declared one".
-
-    Pasting the whole `ssh-keygen -lf` line rather than its second field is the
-    way to get this wrong, and its failure is silent: the comparison would
-    match no Host ever and report first use on a Host somebody had declared.
-    """
-
-    source = (CONFIG / "eidolon-pi.toml").read_text(encoding="utf-8")
-    broken = tmp_path / "eidolon-pi.toml"
-    broken.write_text(
-        source.replace(
-            'host_fingerprint = ""',
-            'host_fingerprint = "256 SHA256:rGKurdR2TIc8J2A5A5XXstiwfyIK2SnElnSpUtHn7wo (ED25519)"',
-        ),
-        encoding="utf-8",
-    )
-
-    with pytest.raises(ConfigurationError, match="that field alone"):
-        load_config(broken)
 
 
 @pytest.mark.parametrize("profile", PROFILES, ids=_identifier)

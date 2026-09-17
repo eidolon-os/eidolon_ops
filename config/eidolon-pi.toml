@@ -30,20 +30,6 @@ operator_keys_file = "eidolon-pi.operators"
 # different one an acknowledged act. The directory is gitignored, so the file
 # stays machine-local; only its location is now a reviewed decision.
 known_hosts_file = "../.eidolon-ops/pi5/known_hosts"
-# The ed25519 fingerprint this repository declares for this Host, as
-# `ssh-keygen -lf` prints that field. Tracked for the same reason the operator
-# public keys are: it is derived from a public key and the Host prints it to
-# anyone who asks. One value, so it is a field here rather than a file of its
-# own — a scalar in a file needs a parser and a rule that there is only ever
-# one line, for a string this profile can just hold.
-#
-# It closes the one gap the known_hosts above cannot: that file is gitignored,
-# so a second operator and a fresh checkout trust on first use with nothing to
-# compare against. It does not confirm the value — declaring what a scan
-# returned pins the key, it does not verify it. docs/host-key-trust.md says
-# which of the two this is. Empty means nobody has read one off the board yet,
-# which is the honest state and not an error.
-host_fingerprint = ""
 connect_timeout_seconds = 10
 remote_uv = "/usr/local/bin/uv"
 # Prefer a reachable wire, but allow deployment on the ordinary LAN without

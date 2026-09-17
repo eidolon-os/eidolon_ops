@@ -270,38 +270,6 @@ host key 是按 Host 的**名字**信任的（`HostKeyAlias`），这正是“�
 的 OPi 都在 `10.42.0.2`，也就是说每块不同的板子都在同一个信任名下出示不同的 key，正是这条规则要拦
 的那件事。
 
-### profile 声明它期待哪把 key
-
-`config/<profile>.toml` 里的 `host.host_fingerprint` 是入库的，理由和 `.operators` 一样：指纹是从公钥算
-出来的，板子本机就打印给任何人看。它是一个标量，所以写成 profile 的一个字段，而不是一个单独的文件
-——单值放文件就要配一个解析器和一条“只能有一行”的规则，而 profile 本来就能直接持有一个字符串。
-
-它补的是 profile 自己那份 known_hosts **补不上的那一个**缺口：那份在 gitignore 里，所以第二个操作员
-和新 checkout 各自首次信任，手上没有任何可对照的值。`trust-host-key --apply` 对照它：
-
-- 对得上 → 直接写；
-- 对不上 → 把 profile 声明的和板子出示的并排打出来，要求显式 `--replace`；
-- profile 没声明 → 按首次信任处理，照常记录。
-
-两道闸独立：本机 known_hosts 变没变是一回事，这是不是 profile 指名的那块板子是另一回事，而只有后者
-能在新 checkout 上被问出来。
-
-**它买到什么、买不到什么**，这条要读准，详见 [`docs/host-key-trust.md`](docs/host-key-trust.md)：
-
-| | 声明一个值 |
-|---|---|
-| 此后换板子 | 拦得住 |
-| 别的机器上、以后的中间人 | 拦得住 |
-| 每台工作站各自 TOFU | 消掉了 |
-| **首次扫描那一刻的中间人** | **拦不住** |
-
-所以**把 `trust-host-key` 扫出来的指纹直接填进去，是 pin 不是 verify**：对照值来自被对照的那次扫描，
-这道闸会永远通过。要让它成为 verify，那个值必须从**不是这条连接**的通道读到——串口，或者接屏幕和键
-盘。命令本身不会把扫到的值递给你去粘贴，正是为了不让最省事的那条路是循环的那条。
-
-两个 profile 今天都是空的。台架上 OPi 没接串口也没接 HDMI，现在拿不到非 TOFU 的值；空着是诚实的状
-态，不是待办。
-
 ### 手打 ssh 走同一条路
 
 手动 ssh 一次要三个 `-o` 加一个 `-i`，其中 `HostKeyAlias` 没人会自己想到——命令行上没有任何东西提示
@@ -331,41 +299,29 @@ Include /absolute/path/to/eidolon_ops/.eidolon-ops/pi5/ssh_config
 ### 换板子的完整流程
 
 1. 把新板子接上、起机（`bring-up`，见上一节），确认它在 profile 的 `hostname` 上应答。
-2. 在板子上读它自己的指纹：
-
-   ```bash
-   ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
-   ```
-
-   **通过什么读到它，决定了它值多少。** 从串口、或者接上屏幕和键盘读到的，是确认；ssh 上去读到的，
-   不是——那条连接的信任正是你要确认的东西，值会从它自己那儿回来，一定对得上。台架上 OPi 现在没接串
-   口也没接 HDMI，所以今天这一步只能走 ssh，也就只能得到一个 pin。这不是可以绕过去的麻烦，是这台台架
-   现在的实际状况。
-
-3. 跑一次 plan，把两边的指纹对上：
+2. 跑一次 plan，看板子出示的是什么：
 
    ```bash
    ./eidolon pi5 trust-host-key
    ```
 
-   `differs` 是本机已信任另一把（换板子的常态）；`undeclared` 是 profile 声明的值和板子对不上。两种
-   情况报告都把两个指纹并排打出来。
+   `untrusted` 是此前没信过任何 key（首次）；`differs` 是本机已信任另一把，也就是换板子的常态，报告
+   会把两个指纹并排打出来，并给出在板子上读指纹的命令。
 
-4. **如果 profile 声明了别的指纹**，先把 `config/<profile>.toml` 的 `host.host_fingerprint` 改成你刚读到
-   的那个。`--replace` 不管这道闸——它说的是"这台机器接受一把新 key"，而这里的问题是"这个 profile 指名
-   的是哪块板子"。改完就没有冲突了，下一步也不再需要 `--replace`。
-
-5. 本机 known_hosts 里已经有另一把时，指名你刚刚在板子上读到的那个指纹：
+3. 在板子上核对，然后指名你核对的那个指纹：
 
    ```bash
    ./eidolon pi5 trust-host-key --apply --replace SHA256:...
    ```
 
-6. 把第 4 步那次编辑和这次换板一起提交。注意它值多少取决于第 2 步：从串口或屏幕读来的是确认，从 ssh
-   读来的只是 pin。
+   指名一把**不是**正在被出示的 key 会被拒绝——确认必须是关于这台 Host 的，否则就什么都没确认。
 
-7. `ssh_config` 片段引用的是 profile 的字段，profile 没变就不用重跑；改过 `hostname` 或 `known_hosts_file`
-   就重跑一次 `./eidolon pi5 ssh-config --apply`。
+4. `ssh_config` 片段引用的是 profile 的字段，profile 没变就不用重跑；改过 `hostname` 或
+   `known_hosts_file` 就重跑一次 `./eidolon pi5 ssh-config --apply`。
+
+profile 刚从 `~/.ssh/known_hosts` 搬过来时是第 2 步的一个特例：新文件还不存在，`release_preflight`
+会在 seal 之前拒绝并直接给出上面这条命令。`~/.ssh/known_hosts` 里那条既有条目**不会**被搬过来——它
+当初是按地址首次信任的，而这个文件是按 Host 的名字记的。重新跑一次 `trust-host-key` 就是全部代价。
 
 台架上那块 OPi 走的是同样的流程，把 `pi5` 换成 `rk3588`：包装脚本按 `[host] driver` 分发，两块板子拿到
 同一套命令。
