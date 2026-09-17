@@ -239,7 +239,7 @@ write-once）。挡住 install 的两道闸门 2026-09-17 都已清掉。
 
 ## 5. 需要机主决定的事
 
-1. ~~是否执行方案 C~~ 已定：走 `trust-host-authority`，等板子回台架。
+1. ~~是否执行方案 C~~ 已定并已执行（2026-09-17，走 `trust-host-authority`，见 §6）。
 2. 那块 9 月 10 日装过的**新板子**现在在哪、还要不要。收敛之后，这个 profile 就
    不再认它了（它在第 9 代）；它如果还要用，应该有**自己的** profile 和自己的
    `.eidolon-ops/<host>/inputs`，而不是共用 pi5 这一份——它和现在这块板子目前共用同一个
@@ -248,7 +248,7 @@ write-once）。挡住 install 的两道闸门 2026-09-17 都已清掉。
 
 ## 6. 收尾状态（2026-09-17）
 
-两道闸门的代码侧都已完成并合入 main；pi5 的材料侧还没执行，因为板子不在线。
+两道闸门的代码侧都已完成并合入 main，**pi5 的材料侧也已在真机上执行完毕**。
 
 - ✅ `trust-host-authority`（`beadaa6`）：12 条新测试，两块板子的分叉在原语层和 controller
   层各复现一次，并证明采纳之后 install 闸门从 `recovery_required` 变成
@@ -260,9 +260,38 @@ write-once）。挡住 install 的两道闸门 2026-09-17 都已清掉。
   Ruff 通过。
 - ✅ **opi5max 已收尾**：世代本来就一致（gen 3，五份副本全同），交付证据已记录，再跑报
   `current`。
-- ⏳ **pi5 两项都还没做**：`.eidolon-ops/pi5/owner-domain/` 仍是 generation 9，
-  `host_delivery.json` 仍不存在。两条命令都要读板子，而 pi5 已下台架（台架上换成了
-  opi5max）。板子回来后按 §4 的固定顺序跑，然后用 install 干跑复验。
+- ✅ **pi5 已收尾**（2026-09-17，板子回到台架后执行）。基线：release
+  `pi5-claim-window-20260916c`，20/20 服务正常。动手前把整个 `owner-domain/` 留了一份
+  副本（含 Owner 根私钥，逐文件校验一致）：
+  `.eidolon-ops/pi5/retired-owner-domain-20260917-150202/`。
+
+  只读诊断复现出的分歧与本文 §2 逐字一致：板子 gen 8 / `authority-state_LJxSTZE2…`，
+  材料 gen 9 / `authority-state_Ebiff…`。`trust-host-authority --apply --replace` 之后：
+
+  | 检查 | 结果 |
+  | --- | --- |
+  | 工作站 lineage | generation 8 + 板子那个 state_id |
+  | descriptor | 板子 2026-08-27 签发的原件（`rev 1`，`issued 2026-08-27T01:00:45Z`） |
+  | 六份密钥/证书 | root key/CA、signer key/cert、hub.crt/key **逐字节未动** |
+  | 再跑普通签发器 | **一个字节都不改写**；命令复跑报 `current` / `directory_matches: true` |
+  | 板子 | 全程未写入，doctor 仍 healthy |
+
+  最后两行是 §4 那句"采纳而非重签、revision 线不重开"的真机复验——在此之前只有单元
+  测试证明过它。
+
+  接着 `trust-host-delivery --apply`，绑定记为 `ehost-980046b6704894461dfb` ↔
+  `device-tree:raspberrypi,5-model-b`。跑之前三项证明全部通过，其中
+  `established_this_authority` **只有在上一步采纳之后才为真**——"顺序是被守卫强制出来
+  的"这一点在真机上是可观察的，不是约定。
+
+  两条命令 apply 时的 plan 分别自报 `reversible` 和 `irreversible`，`touches: [secret]`。
+
+- ⏳ **install 没有跑。** 它的 dry-run 会真的准备候选（上传加构建，上一轮记录 104 秒），
+  为验一道闸门去对一块正在服务的板子跑它不成比例。两道闸门的收敛可以直接判定：授权闸门
+  的判据就是 `marker == established == profile lineage`，复跑得到的 `current` /
+  `directory_matches: true` 正是它；交付绑定刚从板子自报的硬件写出，`verify_binding`
+  必然通过。真要跑 install 时它同时是 `factory_setup_code` 的投递（见 §4），那一步应该
+  带着自己的目的跑，而不是当作闸门的验证。
 
 `.eidolon-ops/pi5/diagnosis-20260916-owner-generation/board-owner-directory.json` 是
 板子那份签名目录的离线副本（sha256 与板子自报一致），可用于离线核对，但采纳仍应走命令
