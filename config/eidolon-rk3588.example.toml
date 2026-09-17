@@ -5,7 +5,15 @@ profile = "ubuntu-2604-rk3588-arm64-v1"
 
 [host]
 user = "eidolon-opi5max"
-hostname = "192.168.100.15"
+# The Host's name, not one of its addresses. The board self-assigns a
+# link-local address on whatever link is up and publishes this name over mDNS;
+# Ops resolves it per run and ranks the wire first. Naming it is what lets a
+# board be swapped without configuring anything to match it — an address here
+# has to be held by the board and matched by this workstation, and then two
+# boards cannot share one cable. `bring-up` refuses a Host that is addressed
+# rather than named, because it would set the address as the board's own
+# hostname and publish that.
+hostname = "<host>.local"
 port = 22
 identity_file = "/absolute/path/to/id_ed25519_eidolon_pi"
 # The profile's own file, not the operator's ~/.ssh/known_hosts. Populate it
@@ -34,7 +42,12 @@ require_wired_release_upload = true
 #
 # Omit it on a shipped Host, which has no such link. Host bits must be clear:
 # write `10.42.0.0/24` for a subnet, or a bare address for a single peer.
-management_networks = ["10.42.0.0/24"]
+# Commented out because it is the exception, not the shape: a Host found by
+# name self-assigns into 169.254/16, which every service that publishes an
+# address already filters without being told. Uncomment it only for a bench
+# link that is a routable subnet, and expect to be asked why that link is not
+# link-local instead.
+# management_networks = ["10.42.0.0/24"]
 
 [workspace]
 # Not a temporary directory. This holds the sealed bundle a resumed install

@@ -5,7 +5,15 @@ profile = "raspberry-pi-os-debian-arm64-v2"
 
 [host]
 user = "eidolon-pi5"
-hostname = "192.168.100.15"
+# The Host's name, not one of its addresses. The board self-assigns a
+# link-local address on whatever link is up and publishes this name over mDNS;
+# Ops resolves it per run and ranks the wire first. Naming it is what lets a
+# board be swapped without configuring anything to match it — an address here
+# has to be held by the board and matched by this workstation, and then two
+# boards cannot share one cable. `bring-up` refuses a Host that is addressed
+# rather than named, because it would set the address as the board's own
+# hostname and publish that.
+hostname = "<host>.local"
 port = 22
 identity_file = "/absolute/path/to/id_ed25519_eidolon_pi"
 # The profile's own file, not the operator's ~/.ssh/known_hosts. Trust is
