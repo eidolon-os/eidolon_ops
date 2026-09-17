@@ -467,3 +467,46 @@ def test_a_declaration_that_cannot_be_read_shows_more_rather_than_less(
         "10.42.0.2",
         "192.168.100.19",
     ]
+
+
+def test_doctor_lifts_the_readiness_verdict_where_an_operator_will_see_it(
+    tmp_path: Path,
+) -> None:
+    """A verdict four levels down is one nobody finds.
+
+    `doctor` began attesting the readiness contract because the two commands
+    answered different questions and nothing said so — a Host was breaking a
+    promise it had made while `doctor` reported `healthy`. Burying the answer
+    inside the adapter's own section would have relocated that failure rather
+    than fixed it.
+    """
+
+    controller = HostController(_profile(tmp_path), Runner())
+    readiness = {
+        "status": "degraded",
+        "checks": {"claim_window_honored": False},
+        "failures": [{"fact": "claim_window_honored", "remedy": "run `converge-inputs --apply`"}],
+    }
+    controller.adapter.supervisor.doctor = lambda *, release_id=None: {
+        "status": "degraded",
+        "readiness": readiness,
+    }
+
+    report = controller.doctor().report
+
+    assert report["readiness"] is readiness
+    assert report["status"] == "degraded"
+    # Still where it came from, too. Lifting is for the reader; nothing that
+    # already reads the adapter's section should have it moved out from under.
+    assert report["host"]["readiness"] is readiness
+
+
+def test_doctor_invents_no_readiness_section_for_an_adapter_without_one(
+    tmp_path: Path,
+) -> None:
+    """Absence must stay absence. An empty section reads as "checked, fine"."""
+
+    controller = HostController(_profile(tmp_path), Runner())
+    controller.adapter.supervisor.doctor = lambda *, release_id=None: {"status": "healthy"}
+
+    assert "readiness" not in controller.doctor().report

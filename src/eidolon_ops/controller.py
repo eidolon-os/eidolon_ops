@@ -57,7 +57,11 @@ from eidolon_ops.owner_domain_assets import (
 from eidolon_ops.paths import AppAccess
 from eidolon_ops.process import ProcessRunner
 from eidolon_ops.progress import Journal, ProgressSink
-from eidolon_ops.readiness import READINESS_TRANSPORT_TIMEOUT_SECONDS, describe_failures
+from eidolon_ops.readiness import (
+    READINESS_TRANSPORT_TIMEOUT_SECONDS,
+    describe_failures,
+    failed_facts,
+)
 from eidolon_ops.release_bundle import BundleTransfer, file_sha256, parse_json
 from eidolon_ops.release_preflight import ReleasePreflight
 from eidolon_ops.release_transaction import ReleaseTransaction
@@ -548,11 +552,32 @@ class EidolonPiController:
 
     def app_ready(self) -> dict[str, object]:
         self.preflight.validate_ssh_material()
-        return self.transport.run_agent(
+        report = self.transport.run_agent(
             "app-ready",
             self.host_layer.target_payload(),
             timeout=READINESS_TRANSPORT_TIMEOUT_SECONDS,
         )
+        return self._with_readiness_failures(report)
+
+    @staticmethod
+    def _with_readiness_failures(report: dict[str, object]) -> dict[str, object]:
+        """Say what failed and what to run, beside the booleans that say it failed.
+
+        The agent answers the contract and nothing else, which is right — it is
+        a mechanism, and the descriptions and remedies are the workstation's to
+        own. But that left the operator holding twenty-five booleans with one
+        false in the middle, naming a failure and explaining nothing.
+
+        Added here rather than on the Host for that reason, and only when
+        something is actually false: a green report gaining an empty `failures`
+        key would invite reading its absence as "not checked".
+        """
+
+        checks = report.get("checks")
+        if not isinstance(checks, Mapping):
+            return report
+        failures = failed_facts(checks)
+        return {**report, "failures": failures} if failures else report
 
     def _require_authority_restore_readiness(self) -> dict[str, object]:
         report = self.transport.run_agent("readiness-compatibility", {}, timeout=30)
@@ -585,12 +610,68 @@ class EidolonPiController:
         if release_id is not None:
             payload["release_id"] = validate_release_id(release_id)
         remote = self.transport.run_agent("doctor-host", payload, timeout=240)
-        healthy = remote.get("status") == "healthy" and foundation.get("status") == "healthy"
+        readiness = self._doctor_readiness()
+        # `ready`, not "anything but degraded". A readiness probe that could not
+        # answer leaves this command unable to say the Host is healthy, and
+        # saying it anyway would rebuild the exact gap this closes — a green
+        # headline over a question nobody asked. The reason sits in the report.
+        healthy = (
+            remote.get("status") == "healthy"
+            and foundation.get("status") == "healthy"
+            and readiness.get("status") == "ready"
+        )
         return {
             "status": "healthy" if healthy else "degraded",
             "local": local,
             "foundation": foundation,
             "remote": remote,
+            "readiness": readiness,
+        }
+
+    def _doctor_readiness(self) -> dict[str, object]:
+        """The readiness contract, asked by the command people actually run.
+
+        These two verbs answer different questions and nothing said so. `doctor`
+        asks the Host agent whether the installation is sound — units, files,
+        paths — and the twenty-five readiness facts were only ever attested by
+        `app-ready`. On 2026-09-17 the Pi was breaking a claim-window promise it
+        had made, `claim_window_honored` was false, and `doctor` answered
+        `healthy` in the same minute. Neither was wrong. Between them they told
+        an operator their Host was fine.
+
+        The reason this is safe to fold in is that `doctor` is nobody's gate: it
+        is read by the CLI and the console and nothing rolls back on its verdict.
+        The scar tissue on `_observe_app_readiness` — a degraded App gate rolling
+        a Host back to a release that would not start — is about using this
+        answer to *decide* something, which this does not do.
+
+        Two deliberate choices:
+
+        * **no settling.** A snapshot, at ``settle_seconds=0``. Waiting four
+          minutes for a Channel worker is what a release cutover should do; a
+          diagnosis should say what is true when it is asked.
+        * **never raises.** This is the command run when something is already
+          wrong, so a probe that cannot answer is a finding to report, not a
+          reason to have no report at all. Same rule as the dirty-workspace
+          tolerance above.
+        """
+
+        try:
+            report = self.transport.run_agent(
+                "app-ready",
+                self.host_layer.target_payload(settle_seconds=0),
+                timeout=READINESS_TRANSPORT_TIMEOUT_SECONDS,
+            )
+        except Exception as exc:  # pragma: no cover - reported, never fatal
+            return {"status": "unobserved", "error": str(exc)}
+        checks = report.get("checks")
+        if not isinstance(checks, Mapping):
+            return {"status": "unobserved", "error": "the Host returned no readiness facts"}
+        failures = failed_facts(checks)
+        return {
+            "status": "degraded" if failures else "ready",
+            "checks": checks,
+            **({"failures": failures} if failures else {}),
         }
 
     def logs(self, *, unit: str | None, lines: int, since: str | None) -> dict[str, object]:

@@ -154,8 +154,17 @@ class HostLayer:
             if role not in without
         }
 
-    def target_payload(self) -> dict[str, object]:
-        """Everything a Host is told about itself, in one reviewed shape."""
+    def target_payload(self, *, settle_seconds: int | None = None) -> dict[str, object]:
+        """Everything a Host is told about itself, in one reviewed shape.
+
+        ``settle_seconds`` overrides how long the Host may wait for its Channel
+        worker to come good before answering. The default is this Host's own
+        release readiness budget, which is right when something has just been
+        deployed and a worker is expected to be mid-registration. A caller that
+        wants a snapshot rather than an outcome — ``doctor`` — passes 0, so the
+        answer describes the Host as it is now instead of as it may be in four
+        minutes. Nothing else about the payload changes with it.
+        """
 
         port_registry = self._port_registry()
         payload: dict[str, object] = {
@@ -193,7 +202,13 @@ class HostLayer:
             # What this Host is asked to attest, and what it needs to attest
             # it. The check set has one author; a copy compiled into the
             # injected agent would be the one nobody thinks to update.
-            "readiness": product_payload(settle_seconds=self.config.host.readiness_timeout_seconds),
+            "readiness": product_payload(
+                settle_seconds=(
+                    self.config.host.readiness_timeout_seconds
+                    if settle_seconds is None
+                    else settle_seconds
+                )
+            ),
             "readiness_timeout_seconds": self.config.host.readiness_timeout_seconds,
             "data": {
                 "system_database": str(self.config.data.system_database),

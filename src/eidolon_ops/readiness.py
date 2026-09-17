@@ -114,14 +114,35 @@ class ReadinessCheck:
     fact: ReadinessFact
     description: str
     attested_by: frozenset[HostKind]
+    #: The verb that repairs this, when one verb repairs it.
+    #:
+    #: Optional on purpose, and most entries here have none. A gate that
+    #: refuses without saying what to run is a gate people learn to work
+    #: around — that is why this field exists — but inventing a remedy for a
+    #: fact that has no single one is the same failure wearing a helpful face.
+    #: "Your Channel worker cannot reach LiveKit" is answered by looking, not
+    #: by a command, and an operator who runs a suggested verb that was never
+    #: going to help learns to distrust the next suggestion too.
+    #:
+    #: So: fill this in only where the repair really is one named operation,
+    #: and leave it empty everywhere else rather than reaching.
+    remedy: str | None = None
 
 
-def _both(fact: ReadinessFact, description: str) -> ReadinessCheck:
-    return ReadinessCheck(fact, description, frozenset(HostKind))
+def _both(
+    fact: ReadinessFact, description: str, *, remedy: str | None = None
+) -> ReadinessCheck:
+    return ReadinessCheck(fact, description, frozenset(HostKind), remedy)
 
 
-def _only(kind: HostKind, fact: ReadinessFact, description: str) -> ReadinessCheck:
-    return ReadinessCheck(fact, description, frozenset({kind}))
+def _only(
+    fact_kind: HostKind,
+    fact: ReadinessFact,
+    description: str,
+    *,
+    remedy: str | None = None,
+) -> ReadinessCheck:
+    return ReadinessCheck(fact, description, frozenset({fact_kind}), remedy)
 
 
 #: Ports and endpoints answer whether a process is listening. These are the
@@ -243,14 +264,25 @@ READINESS_CONTRACT: tuple[ReadinessCheck, ...] = (
     ),
     # The only fact here about a promise rather than a surface. A Host
     # declaring a standing claim window needs the factory Setup code to stand
-    # one up, and only an install delivers that — so the declaration can sit on
-    # a Host for weeks, inert, while every fact above is green and no window
-    # ever opens. That is exactly what the Pi did between 2026-09-10 and
-    # 2026-09-17, and nothing reported it.
+    # one up — so the declaration can sit on a Host for weeks, inert, while
+    # every fact above is green and no window ever opens. That is exactly what
+    # the Pi did between 2026-09-10 and 2026-09-17, and nothing reported it.
+    #
+    # It is also the reason this contract grew a `remedy` at all. When this
+    # fact was added, the only verb that could deliver the code was a full
+    # `install`: rebuild the release, stop the product, run the data baseline,
+    # switch every component. A red light whose only remedy is a reinstall is
+    # one people route around. `converge-inputs` delivers it now, which is what
+    # makes naming a verb here worth doing.
     _both(
         ReadinessFact.CLAIM_WINDOW_HONORED,
         "this Host holds what its claim-window declaration needs: one standing "
         "a window has the factory Setup code that opens it",
+        remedy=(
+            "run `converge-inputs --apply` to deliver the factory Setup code, then "
+            "restart `eidolon-bootstrapd` — the code is read while that unit "
+            "initialises, so the Host stands no window until it does"
+        ),
     ),
 )
 
@@ -359,6 +391,43 @@ def describe(kind: HostKind) -> dict[str, str]:
     }
 
 
+#: Every fact that names a repair, by fact name. Built once from the contract
+#: rather than kept beside it, so a remedy added above needs no second edit.
+REMEDIES: dict[str, str] = {
+    str(check.fact): check.remedy for check in READINESS_CONTRACT if check.remedy
+}
+
+
+def failed_facts(checks: Mapping[str, object]) -> list[dict[str, str]]:
+    """The facts a report says are false, each with what it means and what to run.
+
+    The gap this closes is small and was expensive: a readiness report is
+    twenty-five booleans, and an operator reading `"claim_window_honored": false`
+    was told the name of a failure and nothing else — not what the Host had
+    promised, not which command makes it true. Both were already written down,
+    in the contract, and nothing joined them to the report.
+
+    Contract order, not report order, so two Hosts failing the same way read the
+    same. Facts this contract does not name are still listed: a report carrying
+    something unknown is exactly when an operator needs to see it, and silently
+    dropping it would be the report deciding what is worth mentioning.
+    """
+
+    known = [str(check.fact) for check in READINESS_CONTRACT]
+    failed = {name for name, value in checks.items() if not value}
+    ordered = [name for name in known if name in failed]
+    ordered += sorted(failed - set(known))
+    descriptions = {str(check.fact): check.description for check in READINESS_CONTRACT}
+    return [
+        {
+            "fact": name,
+            **({"means": descriptions[name]} if name in descriptions else {}),
+            **({"remedy": REMEDIES[name]} if name in REMEDIES else {}),
+        }
+        for name in ordered
+    ]
+
+
 def require_complete(kind: HostKind, checks: Mapping[str, object]) -> None:
     """Refuse a readiness report that is not the declared check set."""
 
@@ -397,9 +466,24 @@ def describe_failures(report: object, path: str = "") -> str:
 
     reasons = _failures(report, path)
     if reasons:
-        return "; ".join(reasons)
+        # A remedy rides along on the reason that has one. This string is what
+        # an operator gets when an authority restore refuses, which is the
+        # moment they are least able to go and look one up.
+        return "; ".join(_with_remedy(reason) for reason in reasons)
     status = report.get("status") if isinstance(report, dict) else None
     return f"status={status!r}"
+
+
+def _with_remedy(reason: str) -> str:
+    """Append the verb, when the failing leaf is a fact that names one.
+
+    Matched on the last path segment because ``_failures`` reports where a
+    false value was found, not what it was — ``remote.checks.claim_window_honored``
+    and a bare ``claim_window_honored`` are the same finding reached two ways.
+    """
+
+    remedy = REMEDIES.get(reason.rsplit(".", 1)[-1])
+    return f"{reason} ({remedy})" if remedy else reason
 
 
 def _failures(report: object, path: str) -> list[str]:

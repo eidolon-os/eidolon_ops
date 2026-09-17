@@ -198,6 +198,13 @@ class HostController:
             "adapter": adapter.describe(),
             "paths": paths,
             "foundation": foundation,
+            # Lifted out of `host` rather than left where the adapter put it.
+            # This is the report an operator reads when they suspect something,
+            # and a readiness verdict four levels down is one nobody finds —
+            # which is the failure this whole section exists to answer, only
+            # relocated. Adapters that do not attest readiness simply have none
+            # to lift, and say nothing here.
+            **({"readiness": host["readiness"]} if isinstance(host, dict) and "readiness" in host else {}),
             "host": host,
         }
         return self._observed(plan, report, healthy=healthy)

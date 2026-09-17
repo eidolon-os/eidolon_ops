@@ -487,12 +487,85 @@ stat 前后完全一致：mtime 1789655871 / 600 / eidolon-bootstrap:eidolon-boo
 
 ### 8.6 留下的、没做的
 
-- **红了之后没有任何地方说该跑哪个动词。** `app-ready` 只输出
-  `"claim_window_honored": false`。仓里自己的原则是「A gate that refuses without saying what
-  to run is a gate people learn to work around」。给 25 条事实都配上 remedy 是一次模型扩展，
-  本轮没做——**单独立题**。
-- **`doctor` 不带 readiness 事实**（§2.1）。机主今天的直觉正是跑 `doctor`，扑空了。同上，
-  单独立题。
+- ~~红了之后没有任何地方说该跑哪个动词~~ **已做，见 §9。**
+- ~~`doctor` 不带 readiness 事实~~ **已做，见 §9。**
 - **`reopen_standing_claim_window`（被认领消耗后自动重开）这条路没有在真机验过**，因为它
   要真的完成一次 claim，需要手机。开机自动开窗这半已验。
 - **opi5max 对照组仍未复验**（共用网线）。
+
+---
+
+## 9. 两个后续，当天做完（2026-09-17 23:xx）
+
+机主要求这两件也在 main 上落地，不另开会话。
+
+### 9.1 报红时说出该跑的动词
+
+`ReadinessCheck` 增加可选字段 `remedy`。**大多数事实不填，这是刻意的**：
+「Channel worker 够不到 LiveKit」的答案是去看，不是一条命令；给一个本来就帮不上忙的事实
+编一个动词，和不说动词是同一种失败换张友善的脸——而且运维试过一次没用之后，下一条真的
+建议也不会再被信。
+
+只有 `claim_window_honored` 填了：`converge-inputs --apply` + 重启 `eidolon-bootstrapd`。
+它也是这个字段存在的原因——这条事实刚加上时，唯一能修它的动词是整机重装。
+
+投递到运维眼前的两条路（`describe()` 没有任何调用者，往那里写等于写进死代码，所以没动它）：
+
+- `failed_facts(checks)` 把报告里为 false 的事实、它的含义、它的动词接起来，
+  `app-ready` 和 `doctor` 都在报告里带 `failures`。**绿的时候不带这个键**——一个空的
+  `failures` 会被读成"查过了，没事"，而缺席才是缺席。
+- `describe_failures` 给认得的事实附上动词。这条字符串正是 authority-restore 拒绝时运维
+  拿到的东西，也是他们最没工夫去查文档的时刻。
+
+### 9.2 `doctor` 现在也问 readiness
+
+`doctor` 现在跑 `app-ready` 动作并把结论并进自己的判定。两个刻意的选择：
+
+- **不等待**（`settle_seconds=0`）。等四分钟让 Channel worker 注册，是发布切换该做的事；
+  诊断该说"问它的那一刻是什么样"。为此 `target_payload` 增加了 `settle_seconds` 覆盖。
+- **永不抛**。这是已经觉得不对劲才会跑的命令，探针答不上来是一条发现，不是"干脆没有报告"
+  的理由——和它早就有的"容忍脏工作区"是同一条规矩。
+
+但 **`unobserved` 不算健康**。`healthy` 要求 `readiness == "ready"`，不是"只要不是
+degraded"。没问到就说健康，等于把这次要修的绿标题重新盖回去。
+
+并且结论从 `host` 里**提到了 `HostController` 报告的顶层**。埋在四层下面的判定等于没有——
+那只是把同一个失败换了个地方。不提供 readiness 的 adapter（本地 supervisord）什么都不加。
+
+**为什么这样改是安全的**：`doctor` 不是任何人的门禁，只有 CLI 和 console 读它，没有任何
+东西因它的判定而回滚。`_observe_app_readiness` 上那段伤疤——「a degraded App gate rolled a
+Host back to a release that could not start at all」——针对的是**拿这个答案去做决定**，而
+`doctor` 不做决定。另外 `HOST_SETUP_COMPLETABLE_STATES` 含 `absent`，所以"还没人认领"的
+Host 本来就是绿的，不会因此误报。
+
+### 9.3 验证
+
+全量 **1306 passed**，改动范围 Ruff 通过。**6 次变异探针全部被咬住**：
+
+| 变异 | 变红的测试 |
+|---|---|
+| `unobserved` 重新算作健康 | `..._will_not_call_a_host_healthy_it_could_not_ask` |
+| `settle_seconds` 覆盖被忽略 | `..._takes_a_snapshot_rather_than_waiting_for_one` |
+| `failures` 里不带 remedy | 两条（doctor + app-ready） |
+| remedy 文案改错 | 同上两条 |
+| 顶层提升被删 | `..._lifts_the_readiness_verdict_where_an_operator_will_see_it` |
+| 提升改成无条件 | `..._invents_no_readiness_section_for_an_adapter_without_one` |
+
+真机（pi5）：
+
+```
+./eidolon pi5 doctor
+  status            : healthy
+  readiness (顶层)  : ready / 25 facts        ← 以前这里什么都没有
+  耗时              : 7.3s
+```
+
+**没有实地复现红色路径。**那要把板上的 `factory_setup_code` 挪开，而本仓反复记录的教训就是
+不要手改板子上的文件。红路径由单元测试覆盖（含上表 4 条相关变异），且这块板子今天早些时候
+本来就用同一个探针报过 `claim_window_honored: false`；**只有 remedy 文案是仅经测试验证的，
+没有在真机上被人眼看过。**
+
+### 9.4 顺带修正的一处散文
+
+`READINESS_CONTRACT` 里 `claim_window_honored` 那段注释原写着「only an install delivers
+that」。`25b0ad2` 之后这句话为假，已改。

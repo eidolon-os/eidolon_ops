@@ -34,9 +34,15 @@ from eidolon_ops.host_identity import derive_host_lan_identity
 from eidolon_ops.hub_assets import HUB_SETTINGS_TEMPLATE as HUB_SETTINGS_TEMPLATE_CONTRACT
 from eidolon_ops.paths import AppAccess
 from eidolon_ops.process import ProcessResult
+from eidolon_ops.readiness import HostKind, expected_facts
 from eidolon_ops.release_matrix import SYSTEMD_ASSET_CONTRACTS
 
 pytestmark = pytest.mark.component
+
+#: A Host answering every fact in the contract. Derived rather than written out
+#: so a fact added to the contract cannot leave this fake silently attesting an
+#: older, shorter check set.
+ALL_FACTS_TRUE = {fact: True for fact in expected_facts(HostKind.PRODUCT)}
 
 
 DEPLOY_TREE_LISTING = (
@@ -396,7 +402,7 @@ class FakeTransport:
             "status": {"status": "observed"},
             "foundation-doctor": {"status": "healthy"},
             "foundation-install": {"status": "installed"},
-            "app-ready": {"status": "app_ready"},
+            "app-ready": {"status": "app_ready", "checks": dict(ALL_FACTS_TRUE)},
             "expansion-plan": {
                 "status": "eligible",
                 "source_release": "core-release",
@@ -698,11 +704,123 @@ def test_doctor_combines_local_and_remote(setup_controller) -> None:
     result = controller.doctor(release_id="r1")
 
     assert result["status"] == "healthy"
-    assert transport.agent_calls[-1][1]["release_id"] == "r1"
-    assert [call[0] for call in transport.agent_calls[:2]] == [
+    by_action = {call[0]: call[1] for call in transport.agent_calls}
+    assert by_action["doctor-host"]["release_id"] == "r1"
+    assert [call[0] for call in transport.agent_calls] == [
         "foundation-doctor",
         "doctor-host",
+        "app-ready",
     ]
+
+
+def test_doctor_asks_the_readiness_contract_too(setup_controller) -> None:
+    """The two verbs answered different questions and nothing said so.
+
+    On 2026-09-17 the Pi was breaking a claim-window promise it had made,
+    `claim_window_honored` was false, and `doctor` answered `healthy` in the
+    same minute. Neither was wrong on its own; between them they told an
+    operator their Host was fine.
+    """
+
+    controller, _runner, _transport = setup_controller
+
+    result = controller.doctor()
+
+    assert result["readiness"]["status"] == "ready"
+    assert result["readiness"]["checks"] == ALL_FACTS_TRUE
+    assert "failures" not in result["readiness"], "a green report invents no empty list"
+
+
+def test_doctor_takes_a_snapshot_rather_than_waiting_for_one(setup_controller) -> None:
+    """Zero settle. A diagnosis says what is true when it is asked.
+
+    Waiting four minutes for a Channel worker to register is what a release
+    cutover should do. Here it would mean the command run *because* something
+    looks wrong is the slowest one to answer.
+    """
+
+    controller, _runner, transport = setup_controller
+
+    controller.doctor()
+
+    readiness = {call[0]: call[1] for call in transport.agent_calls}["app-ready"]
+    assert readiness["readiness"]["channel_worker"]["settle_seconds"] == 0
+    # And the verb that is allowed to wait still does.
+    controller.app_ready()
+    waiting = [call for call in transport.agent_calls if call[0] == "app-ready"][-1][1]
+    assert waiting["readiness"]["channel_worker"]["settle_seconds"] > 0
+
+
+def test_doctor_is_degraded_by_a_broken_promise_and_names_the_verb(
+    setup_controller,
+) -> None:
+    """The whole point: red, and with the command that makes it green."""
+
+    controller, _runner, transport = setup_controller
+    transport.overrides["app-ready"] = {
+        "status": "degraded",
+        "checks": {**ALL_FACTS_TRUE, "claim_window_honored": False},
+    }
+
+    result = controller.doctor()
+
+    assert result["status"] == "degraded"
+    assert result["readiness"]["status"] == "degraded"
+    assert result["readiness"]["failures"] == [
+        {
+            "fact": "claim_window_honored",
+            "means": (
+                "this Host holds what its claim-window declaration needs: one "
+                "standing a window has the factory Setup code that opens it"
+            ),
+            "remedy": (
+                "run `converge-inputs --apply` to deliver the factory Setup code, "
+                "then restart `eidolon-bootstrapd` — the code is read while that "
+                "unit initialises, so the Host stands no window until it does"
+            ),
+        }
+    ]
+
+
+def test_doctor_will_not_call_a_host_healthy_it_could_not_ask(setup_controller) -> None:
+    """An unanswerable probe is a finding, not a silence.
+
+    Reported rather than raised, because this is the command someone runs when
+    they already suspect something — but it must not come back `healthy`
+    either, which would rebuild the green headline this change exists to end.
+    """
+
+    controller, _runner, transport = setup_controller
+    transport.fail_actions["app-ready"] = RuntimeError("no route to host")
+
+    result = controller.doctor()
+
+    assert result["status"] == "degraded"
+    assert result["readiness"]["status"] == "unobserved"
+    assert "no route to host" in result["readiness"]["error"]
+
+
+def test_app_ready_names_what_failed_and_what_to_run(setup_controller) -> None:
+    """The same joining, on the verb that always owned the question."""
+
+    controller, _runner, transport = setup_controller
+    transport.overrides["app-ready"] = {
+        "status": "degraded",
+        "checks": {**ALL_FACTS_TRUE, "claim_window_honored": False},
+    }
+
+    report = controller.app_ready()
+
+    assert [entry["fact"] for entry in report["failures"]] == ["claim_window_honored"]
+    assert "converge-inputs --apply" in report["failures"][0]["remedy"]
+
+
+def test_a_green_app_ready_carries_no_failures_key(setup_controller) -> None:
+    """Absence would otherwise be readable as "not checked"."""
+
+    controller, _runner, _transport = setup_controller
+
+    assert "failures" not in controller.app_ready()
 
 
 def test_provision_is_read_only_by_default(setup_controller) -> None:
