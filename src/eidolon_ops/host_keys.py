@@ -27,15 +27,11 @@ the first answer wins. `ssh-keyscan` cannot bind to an interface the way the
 transport does, and does not need to — a link-local address that leaves by the
 wrong interface simply gets no answer, and the next candidate is tried.
 
-What that file cannot do is travel. It is gitignored, because it sits beside
-the private inputs, so a second operator and a fresh checkout arrive at it on
-their own by trusting the first key they are shown. A fingerprint is public —
-derived from a public key, and printed by the Host to anyone who asks — so the
-profile states one, in `host.host_fingerprint`, and this compares against it.
-That closes the travelling gap and nothing else: it cannot confirm the value is
-right, and an empty declaration is first use rather than an error, because a
-fingerprint nobody has read off a board cannot be invented here. See
-`docs/host-key-trust.md` for what that comparison is and is not worth.
+What this file cannot do is travel: it is gitignored, so a second operator and
+a fresh checkout trust on first use with nothing to compare against. A declared
+fingerprint in the profile would have crossed that gap, and was tried and taken
+back out — the only fingerprint reachable from here comes over the connection
+it would be checking. `docs/host-key-trust.md` keeps the reasoning.
 """
 
 from __future__ import annotations
