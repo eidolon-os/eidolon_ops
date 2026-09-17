@@ -205,8 +205,37 @@ opi5max 已经按这条路走完（它本来就没有世代分歧，只缺交付
 `ehost-f89c0ecca5d0070a7989` ↔ `device-tree:rockchip,rk3588-orangepi-5-max`，
 `sha256:9791c070…`，再跑报 `current`。
 
-至于今天那个 `factory_setup_code` 要不要继续走 install 这条路，是一个独立的决定，得先
-想清楚"给一台已经在跑的 Host 补一个安装期文件"到底应该由哪个动词负责。
+### `factory_setup_code` 归哪个动词：install，不新增（2026-09-17 结论）
+
+这个问题的答案是"已经有了"。查清楚的三件事：
+
+- `issue_setup_code`（`eidolon_admin/.../bootstrap/service.py:647`）**没有 claim 状态门禁**
+  ——够到控制套接字就是授权。pi5 有 6 个 Claim，`commissioning-code` 照样开窗。
+- ops 的 `commissioning_code`（`controller.py`）在不传 `--code` 时自动取
+  `app.factory_setup_code()`，读的就是 `.eidolon-ops/pi5/inputs/factory_setup_code`。
+  **"每次输一样的数字、不用查码"这个收益不需要板子上有那个文件。**
+- `_open_factory_window` 自己写着：`ALWAYS_OPEN` 存在是因为在开发台架上
+  "every other way to mint a window runs through a workstation"。台架正是有工作站的场合。
+
+所以板上那个文件只多买两件事：开机自动开窗、被认领消耗后自动重开。都是"少敲一条命令"，
+不是能力缺口；而它设计要服务的开箱即用场景（没人够得到控制套接字）在台架上不成立。
+
+契约把它和 `host_identity.ed25519` 归为一类（"same write-once delivery"），这是对的，
+不改。曾考虑把 `converge-inputs` 的单位从"env 文件里的 key"扩到"声明过的输入"——撤回了：
+那是一次模型扩展，而收益已被既有动词覆盖。
+
+**pi5 的选择是 B：保留 `claim_window = always_open` 声明，由下次 install 交付码。** 不需要
+改代码：`stage_install_files` 在 profile 指了码时本来就会上传它，而
+`install._install_prerequisites` 只在目标文件不存在时写入（存在且哈希不同则拒绝——这正是
+write-once）。挡住 install 的两道闸门 2026-09-17 都已清掉。
+
+### 让这个静默状态变响
+
+真正的缺陷是：一个声明可以承诺它无法兑现的事，且没有任何地方会说。pi5 从 09-10 到
+09-17 就是这样——声明了常开窗口、没有码、窗口从不打开、所有服务 active、`deploy` 每次
+报成功。新增 readiness 事实 `claim_window_honored`：**声明了 `always_open` 的 Host 必须
+持有那份码**，否则 `app-ready` 直接判失败。`on_demand`（产品默认）和未声明都不受影响——
+它们没有承诺任何东西。板子侧和 Mac source run 两条路都出这条事实。
 
 ## 5. 需要机主决定的事
 

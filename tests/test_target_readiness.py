@@ -822,3 +822,52 @@ def test_livekit_network_must_be_attested_even_when_signalling_is_healthy(
     assert [name for name, ok in result["checks"].items() if not ok] == [
         "livekit_network_current"
     ]
+
+
+def _declare(root: Path, claim_window: str | None, *, code: bool) -> None:
+    """A Host profile on disk, as `ensure_host_path_contract` would leave it."""
+
+    if claim_window is not None:
+        host_env = root / contract.HOST_ENV_PATH.relative_to("/")
+        host_env.parent.mkdir(parents=True, exist_ok=True)
+        host_env.write_text(
+            contract.host_env_value(frozenset(), (), claim_window), encoding="utf-8"
+        )
+    if code:
+        path = root / contract.INSTALL_INPUTS["factory_setup_code"][0].relative_to("/")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("99999990\n", encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    ("claim_window", "code", "honored"),
+    [
+        # The state the Pi sat in for a week: a promise it had nothing to keep.
+        ("always_open", False, False),
+        ("always_open", True, True),
+        # The product default opens no window until an operator mints one,
+        # which is not a failure and has never needed the code.
+        ("on_demand", False, True),
+        ("", False, True),
+        # A Host told nothing has promised nothing.
+        (None, False, True),
+    ],
+)
+def test_a_standing_claim_window_needs_the_code_that_opens_it(
+    tmp_path: Path, claim_window, code, honored
+) -> None:
+    _declare(tmp_path, claim_window, code=code)
+
+    assert probe.claim_window_honored(tmp_path) is honored
+
+
+def test_an_unreadable_host_profile_is_not_reported_as_a_broken_promise(
+    tmp_path: Path,
+) -> None:
+    """Nothing was declared that could be broken; the failure is elsewhere."""
+
+    host_env = tmp_path / contract.HOST_ENV_PATH.relative_to("/")
+    host_env.parent.mkdir(parents=True, exist_ok=True)
+    host_env.mkdir()
+
+    assert probe.claim_window_honored(tmp_path) is True

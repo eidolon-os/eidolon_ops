@@ -106,6 +106,7 @@ class ReadinessFact(StrEnum):
     CHANNEL_WORKER_HEALTHY = "channel_worker_healthy"
     CHANNEL_WORKER_DISPATCH_IDENTITY = "channel_worker_dispatch_identity"
     CHANNEL_WORKER_LIVEKIT_LINK = "channel_worker_livekit_link"
+    CLAIM_WINDOW_HONORED = "claim_window_honored"
 
 
 @dataclass(frozen=True, slots=True)
@@ -239,6 +240,17 @@ READINESS_CONTRACT: tuple[ReadinessCheck, ...] = (
     _both(
         ReadinessFact.LIVEKIT_NETWORK_CURRENT,
         "eidolond reports LiveKit running on the network it is configured for",
+    ),
+    # The only fact here about a promise rather than a surface. A Host
+    # declaring a standing claim window needs the factory Setup code to stand
+    # one up, and only an install delivers that — so the declaration can sit on
+    # a Host for weeks, inert, while every fact above is green and no window
+    # ever opens. That is exactly what the Pi did between 2026-09-10 and
+    # 2026-09-17, and nothing reported it.
+    _both(
+        ReadinessFact.CLAIM_WINDOW_HONORED,
+        "this Host holds what its claim-window declaration needs: one standing "
+        "a window has the factory Setup code that opens it",
     ),
 )
 

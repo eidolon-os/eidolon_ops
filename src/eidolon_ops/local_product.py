@@ -16,6 +16,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 
 from eidolon_ops import environment, lan_observation, probes, source_assets
 from eidolon_ops.config import OperationsConfig
+from eidolon_ops.environment import EnvironmentFileError
 from eidolon_ops.errors import InstallInputError, OperationsError
 from eidolon_ops.host_delivery import bind_delivery
 from eidolon_ops.host_identity import (
@@ -25,6 +26,7 @@ from eidolon_ops.host_identity import (
     livekit_client_url,
     livekit_client_url_at,
 )
+from eidolon_ops.hostagent import contract
 from eidolon_ops.hostagent.authority_state import lineage_evidence
 from eidolon_ops.hostagent.hardware import observe_hardware
 from eidolon_ops.hostagent.kernel_schema import (
@@ -568,6 +570,34 @@ class LocalProductSource:
             "checks": report,
         }
 
+    def _claim_window_honored(self) -> bool:
+        """Whether this source run can do what its claim-window declaration says.
+
+        Asked of the same two things a board is asked about — the value
+        bootstrapd will read, and whether the factory Setup code it names is
+        there — rather than answered ``True`` because a source run happens not
+        to render the variable today. Written that way so that the day it does,
+        this fact is already telling the truth instead of still being a
+        placeholder nobody remembers to fill in.
+        """
+
+        paths = self.profile.paths
+        declared = ""
+        bootstrap_env = paths.config_root / "env/bootstrap.env"
+        try:
+            if bootstrap_env.is_file() and not bootstrap_env.is_symlink():
+                declared = environment.parse(
+                    bootstrap_env.read_text(encoding="utf-8"),
+                    label="generated service env file",
+                    key=environment.SERVICE_KEY,
+                ).get(contract.CLAIM_WINDOW_VARIABLE, "")
+        except (OSError, EnvironmentFileError):
+            return True
+        if declared.strip() != "always_open":
+            return True
+        code = paths.bootstrap_state_root / "factory_setup_code"
+        return code.is_file() and not code.is_symlink()
+
     def app_ready(self) -> dict[str, object]:
         """Attest every fact the readiness contract expects of a source run."""
 
@@ -680,6 +710,7 @@ class LocalProductSource:
             str(ReadinessFact.CHANNEL_WORKER_DISPATCH_IDENTITY): bool(
                 channel["dispatch_identity"]
             ),
+            str(ReadinessFact.CLAIM_WINDOW_HONORED): self._claim_window_honored(),
         }
         healthy = is_ready(HostKind.SOURCE, checks)
         return {

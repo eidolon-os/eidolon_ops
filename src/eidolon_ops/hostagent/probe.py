@@ -46,7 +46,44 @@ READINESS_FACTS = (
     "hub_mdns_service",
     "local_api_mdns_service",
     "livekit_network_current",
+    "claim_window_honored",
 )
+
+
+def claim_window_honored(root: Path = Path("/")) -> bool:
+    """Whether this Host can do what its claim-window declaration says.
+
+    A Host declaring ``always_open`` is promising a window that stands up at
+    every bootstrap start and returns after a claim spends it. That promise is
+    made in `/etc/eidolon/host.env` and kept out of the factory Setup code —
+    and the code is delivered only by an install, so a Host can carry the
+    declaration for weeks without ever having been given what it needs. Nothing
+    reported that: the declaration is inert, every service is active, and no
+    window ever opens.
+
+    Not a check that a window is open. `on_demand` is the product default and
+    opens none until an operator mints one, which is not a failure; this asks
+    only whether what the Host was told is something it is equipped to do. A
+    Host told nothing has promised nothing, so an unreadable or absent profile
+    is honored rather than failed — the same reading `declared_claim_window`
+    gives a payload from before Hosts could say.
+    """
+
+    host_env = primitives.host_path(root, contract.HOST_ENV_PATH)
+    try:
+        if host_env.is_symlink() or not host_env.is_file():
+            return True
+        declared = ""
+        for line in host_env.read_text(encoding="utf-8").splitlines():
+            name, separator, value = line.partition("=")
+            if separator and name.strip() == contract.CLAIM_WINDOW_VARIABLE:
+                declared = value.strip()
+    except OSError:
+        return True
+    if declared != "always_open":
+        return True
+    code = primitives.host_path(root, contract.INSTALL_INPUTS["factory_setup_code"][0])
+    return code.is_file() and not code.is_symlink()
 
 
 def readiness_compatibility(payload: Mapping[str, object]) -> dict[str, object]:
@@ -555,6 +592,11 @@ def app_ready(payload: Mapping[str, object]) -> dict[str, object]:
         and media_service.get("runtime_state") == "ready"
         and media_service.get("network_current") is True
     )
+    # Two files and no surface, so it goes last: nothing about it has to
+    # settle, and standing it beside the probes that wait would suggest a retry
+    # could change it. It cannot — a Host either holds the code its own
+    # declaration needs, or it has been promising something it cannot do.
+    checks["claim_window_honored"] = claim_window_honored()
     if tuple(checks) != READINESS_FACTS:
         raise TargetError("readiness report does not match the declared check set")
     return {
