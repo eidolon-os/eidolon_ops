@@ -425,6 +425,19 @@ def admin_services_yaml() -> str:
 
 
 def _service_header(service_id: str, name: str) -> list[str]:
+    # Management session traces read the Provider through this authenticated
+    # bridge on source runs exactly as they do on a product Host. Without the
+    # proxy entry the route refuses with "service 'channel-provider' is not
+    # proxied", which reads as a missing Host rather than a missing address.
+    if service_id == "channel-provider":
+        return [
+            f"  - id: {service_id}",
+            f"    name: {name}",
+            "    integration: proxy",
+            f"    base_url: http://127.0.0.1:{PORTS['channel_provider']}",
+            "    upstream_prefix: ''",
+            "    auth: {type: bearer, token_env: EIDOLON_CHANNEL_PROVIDER_TOKEN}",
+        ]
     return [
         f"  - id: {service_id}",
         f"    name: {name}",
