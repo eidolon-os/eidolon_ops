@@ -262,8 +262,8 @@ write-once）。挡住 install 的两道闸门 2026-09-17 都已清掉。
   `current`。
 - ✅ **pi5 已收尾**（2026-09-17，板子回到台架后执行）。基线：release
   `pi5-claim-window-20260916c`，20/20 服务正常。动手前把整个 `owner-domain/` 留了一份
-  副本（含 Owner 根私钥，逐文件校验一致）：
-  `.eidolon-ops/pi5/retired-owner-domain-20260917-150202/`。
+  副本（含 Owner 根私钥，逐文件校验一致），复核通过后已删除——六份密钥/证书与现役材料
+  逐字节相同，副本里唯一独有的是采纳前那两份 gen 9 文件，而它们属于 9 月 10 日那块板子。
 
   只读诊断复现出的分歧与本文 §2 逐字一致：板子 gen 8 / `authority-state_LJxSTZE2…`，
   材料 gen 9 / `authority-state_Ebiff…`。`trust-host-authority --apply --replace` 之后：
