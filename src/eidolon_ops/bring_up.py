@@ -434,6 +434,12 @@ visudo -c -q -f /etc/sudoers.d/"$USER"
 # sshd, and the mDNS that lets Ops find the Host by name at all.
 command -v avahi-daemon >/dev/null 2>&1 || {{ apt-get update && apt-get install -y avahi-daemon; }}
 systemctl enable --now ssh avahi-daemon
+# And restart avahi, because the hostname above is the name it publishes and
+# `enable --now` does not touch a daemon that is already running. A board
+# renamed by this script otherwise keeps announcing the name it had, so Ops
+# resolves nothing and the operator is told the Host is unreachable — while it
+# is up, healthy, and answering to a name nobody is asking for.
+systemctl restart avahi-daemon
 
 # The wired link, last: this drops a session running over it. `link-local
 # fallback` keeps the connection up on a point-to-point cable where nothing
@@ -446,7 +452,12 @@ CONNECTION=$(nmcli -t -f NAME,DEVICE con show | awk -F: -v d="$DEVICE" '$2==d{{p
   nmcli con add type ethernet ifname "$DEVICE" con-name eidolon-wired
   CONNECTION=eidolon-wired
 }}
-nmcli con modify "$CONNECTION" ipv4.method auto ipv4.link-local fallback ipv6.method link-local
+# `ipv4.addresses` and `ipv4.gateway` are cleared rather than left to be
+# ignored. `method auto` does ignore them, so a link configured by hand keeps
+# working — and keeps carrying the literal that was typed into it, which comes
+# back the moment anyone sets the method back. A declaration that leaves the
+# thing it replaced in place has not replaced it.
+nmcli con modify "$CONNECTION" ipv4.method auto ipv4.link-local fallback ipv4.addresses "" ipv4.gateway "" ipv6.method link-local
 if ! nmcli con up "$CONNECTION"; then
   echo "configuration written; wired activation failed or disconnected; reconnect and rerun to verify" >&2
   exit 75

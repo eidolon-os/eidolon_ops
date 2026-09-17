@@ -174,6 +174,29 @@ def test_the_shell_form_asks_which_device_is_ethernet_rather_than_naming_one() -
     # self-assigned, so no board carries a literal and no workstation is
     # configured to match one.
     assert "ipv4.link-local fallback" in script
+    # Including whatever literal a hand-configured link is already carrying.
+    # `method auto` ignores a manual address but does not remove it, and an
+    # ignored address comes back the moment somebody sets the method again —
+    # so the declaration that replaces it has to clear it.
+    assert 'ipv4.addresses ""' in script
+    assert 'ipv4.gateway ""' in script
+
+
+def test_the_name_this_sets_is_the_name_the_board_then_publishes() -> None:
+    """Setting a hostname and not restarting avahi is a Host nobody can find.
+
+    `enable --now` starts a daemon that is stopped and leaves a running one
+    alone, so a board renamed here keeps announcing the name it had. Ops then
+    resolves nothing and reports the Host unreachable, while it is up, healthy
+    and answering to a name nobody asks for — measured on this bench, on the
+    board this platform was declared for.
+    """
+
+    script = render(_bring_up(), foundation=RK3588, via=SHELL)[SCRIPT]
+
+    rename = script.index("hostnamectl set-hostname")
+    restart = script.index("systemctl restart avahi-daemon")
+    assert rename < restart, "the restart has to follow the rename to publish it"
 
 
 @pytest.mark.parametrize("value", ["not-a-key", f"{KEY}\nssh-ed25519 second"])

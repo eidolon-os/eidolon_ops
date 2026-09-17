@@ -435,9 +435,17 @@ def test_a_deployed_host_is_read_from_the_file_that_states_it(tmp_path: Path) ->
         replace(_pi_profile(tmp_path), operations_config=operations), Runner()
     )
 
-    assert controller._offered_to_devices(["10.42.0.2", "192.168.100.19"]) == [
+    # The bench link is filtered without the profile saying anything about it:
+    # it self-assigns into 169.254/16, which is link-local everywhere. That is
+    # why this profile no longer declares a management network — it used to
+    # carry a routable 10.42.0.0/24, which looked to the board exactly like the
+    # product LAN and had to be named to be excluded.
+    assert controller._offered_to_devices(["169.254.192.66", "192.168.100.19"]) == [
         "192.168.100.19"
     ]
+    # And an address it does not know to be the workstation's is still offered,
+    # so the filtering above is the link-local rule and not a blanket one.
+    assert controller._offered_to_devices(["10.42.0.2"]) == ["10.42.0.2"]
 
 
 def test_a_declaration_that_cannot_be_read_shows_more_rather_than_less(

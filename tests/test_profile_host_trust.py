@@ -15,6 +15,7 @@ would report.
 
 from __future__ import annotations
 
+import ipaddress
 import subprocess
 import tomllib
 from pathlib import Path
@@ -145,22 +146,55 @@ def test_a_profile_keeps_its_private_material_out_of_the_repository(profile: Pat
 
 
 @pytest.mark.parametrize("profile", PROFILES, ids=_identifier)
-def test_the_bench_address_is_left_alone(profile: Path) -> None:
-    """Where trust is written is not how the board is found.
+def test_a_profile_names_its_host_rather_than_addressing_one(profile: Path) -> None:
+    """The first domino, and the reason a bench needed aligning at all.
 
-    The rk3588 profile reaches its board at a literal point-to-point address,
-    with its reasons and its exit condition written beside it. Moving its trust
-    into the profile's own file changed neither, and this says so — the next
-    reader of that unusual `hostname` should find a test that expects it rather
-    than guess it survived by accident.
+    A Host with a name is found by it: the board self-assigns a link-local
+    address, publishes the name over mDNS, and Ops resolves it per run. A Host
+    with an address instead needs that address to be fixed, which means the
+    board is configured to hold it and the workstation is configured onto its
+    subnet — and then swapping to a board that does it the other way means
+    reconfiguring both ends by hand.
+
+    That is not hypothetical: this profile carried `10.42.0.2` because
+    `bring-up` had no declaration for its platform, so its link was configured
+    by hand, and by hand meant a literal. Two boards then could not share one
+    cable without someone editing the workstation in between.
     """
 
     document = tomllib.loads(profile.read_text(encoding="utf-8"))
     hostname = document["host"]["hostname"]
-    alias_source = load_config(profile).host.hostname
 
-    # Whatever the profile names — mDNS name or literal address — is exactly
-    # what trust is granted under. That equality is the mechanism.
-    assert alias_source == hostname
-    if profile.name == "eidolon-rk3588.toml":
-        assert hostname == "10.42.0.2"
+    with pytest.raises(ValueError):
+        ipaddress.ip_address(hostname.removesuffix(".local"))
+
+    # And whatever the profile names is exactly what trust is granted under.
+    # That equality is the mechanism: the name, not the link, is the identity.
+    assert load_config(profile).host.hostname == hostname
+
+
+@pytest.mark.parametrize("profile", PROFILES, ids=_identifier)
+def test_no_profile_declares_a_management_network_it_no_longer_needs(
+    profile: Path,
+) -> None:
+    """A link nothing has to be told about is one nothing can get wrong.
+
+    `management_networks` exists for a bench link the Host cannot tell apart
+    from the product LAN — a routable subnet only this workstation is on. A
+    self-assigned 169.254/16 is not that: every service that publishes an
+    address to a device already filters link-local, without being told. The
+    declaration was the cost of the literal, and it is not free — until it was
+    added, a device took the workstation's address and could not route to the
+    Host at all (2026-09-15, BOX-3).
+
+    Not forbidden, because a future Host may genuinely have such a link. But a
+    profile that names its Host has no reason to carry one, and a profile that
+    grows one back is worth a second look.
+    """
+
+    declared = load_config(profile).host.management_networks
+
+    assert declared == (), (
+        f"{profile.name} declares {declared}, which a link-local bench cable does not "
+        "need — check whether this Host is being addressed rather than named again."
+    )

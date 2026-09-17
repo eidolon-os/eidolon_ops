@@ -10,19 +10,15 @@ user = "eidolon-opi5max"
 # measured 100 MB/s against 3.9 MB/s over Wi-Fi. Neither end configures a
 # subnet: both self-assign into 169.254/16 when the cable is in, and the Pi's
 # "eidolon-wired" profile is never-default so Wi-Fi keeps the route out.
-# 台架上用网线的静态地址而不是 mDNS 名字。理由不是"名字不好"——
-# 而是 macOS 不在这条 USB 网口上发 mDNS 查询：板子确实在 enP3p49s0 上注册了
-# A 记录（avahi 日志可查），但 getaddrinfo 只在 avahi 主动广播后的 120 秒 TTL
-# 内能看到它，之后就只剩 Wi-Fi 那条。而 require_wired_release_upload 需要的
-# 正是有线端点。
+# 名字，不是地址。板子自分配 link-local 并用 avahi 广播这个名字，ops 用
+# getaddrinfo 解析它，并对 link-local 端点绑定接口（endpoints.py 写了为什么必须
+# 绑）。换板子不用改这一行，工作站上也不用改任何东西。
 #
-# 10.42.0.2 是配置出来的常量，不是自分配地址：网线是点对点、一次只接一块板，
-# 所以每块烧好的板子都是这个地址，插上就在，不用探测也不用逐台改。
-# Mac 那一侧对应 `networksetup -setmanual "USB 10/100/1000 LAN" 10.42.0.1
-# 255.255.255.0 ""`。
-#
-# 出厂的 Host 不接这根线，那时改回 mDNS 名字。
-hostname = "10.42.0.2"
+# 这里曾经是 10.42.0.2，一个配置出来的常量，理由在当时成立：bring-up 没有声明这
+# 个平台（PLATFORMS 里只有 Pi），于是板子的有线口只能手配，而手配的结果必然是静
+# 态地址——工作站也得配成同网段，换板子要两头一起改。补上那个声明之后，这条理由
+# 连同它带来的每一处对齐都没了。
+hostname = "eidolon-opi5max.local"
 port = 22
 # This machine's own private key — the only value here that is machine-local.
 identity_file = "~/.ssh/id_ed25519_eidolon_opi5max"
@@ -43,24 +39,18 @@ remote_uv = "/usr/local/bin/uv"
 # Release payloads must never fall back to Wi-Fi, where this workstation's VPN
 # accounts for the transfer. Status and maintenance commands remain reachable.
 require_wired_release_upload = true
-# The same cable, said once more — this time to the board rather than to this
-# workstation. The two lines above are what Ops does with the wire; this is
-# what the wire *is*, and it is the only statement of that anywhere: to the
-# kernel on either end, 10.42.0.0/24 is an ordinary subnet, indistinguishable
-# from the Wi-Fi the devices are on.
+# No `management_networks` here any more, and that is the point of the line
+# above. It existed because this cable carried a routable subnet — 10.42.0.0/24
+# looked to the board exactly like the product LAN, so the Hub, the Channel
+# provider and Admin each published the workstation's address to devices, and
+# on 2026-09-15 BOX-3 took it and spent the evening retrying a connection to an
+# address no device can route to.
 #
-# Until it was declared, the board published both addresses under one mDNS
-# name and a device took whichever of the two it was handed. On 2026-09-15
-# BOX-3 took this one and spent the evening retrying a connection to an
-# address no device can route to, with every service on the board healthy.
+# A self-assigned 169.254/16 needs no such declaration: it is filtered as
+# link-local everywhere that matters, by every one of those services, without
+# being told. Naming the board rather than addressing it removed the subnet,
+# and removing the subnet removed the thing that had to be declared about it.
 #
-# It is delivered with the rest of the /etc/eidolon facts, and the Hub, the
-# Channel provider and Admin each narrow what they publish to devices and
-# phones by it. Nothing here changes which link Ops itself uses: Ops can
-# measure a candidate, and it needs this one.
-#
-# A shipped Host has no cable to a workstation and declares nothing.
-management_networks = ["10.42.0.0/24"]
 # 2026-09-16。开发台架：claim 窗口常开，Setup code 单独即可添加 Host Admin。
 # 这台机器证明"人持有它"的每条路——commissioning-code、controller-reset——都要走
 # 这台工作站，所以管理手机一丢，台架就把自己锁在外面；而这块板子正是 mobile 和
