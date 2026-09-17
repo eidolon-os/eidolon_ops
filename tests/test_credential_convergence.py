@@ -773,3 +773,177 @@ def test_repair_refuses_to_run_with_nothing_declared(tmp_path) -> None:
 
     with pytest.raises(TargetError, match="requires the credential classes"):
         secret_inputs.repair({"apply": False}, tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# The other granularity: whole files the contract already calls optional.
+#
+# The gap these pin is not "a Host is short a key" but "a Host is short a file
+# it is allowed not to have, and the only verb that could create one was a full
+# reinstall". `factory_setup_code` is the case: a Host declaring
+# `claim_window = always_open` cannot keep that promise without it, and
+# write-once was being read as install-only.
+# ---------------------------------------------------------------------------
+
+
+def _code_stage(root: Path, body: str) -> Path:
+    stage = root / "var/tmp/eidolon-secrets-credential-convergence"
+    stage.mkdir(parents=True, exist_ok=True)
+    path = stage / "factory_setup_code"
+    path.write_text(body, encoding="utf-8")
+    path.chmod(0o600)
+    return path
+
+
+def _code_on_host(root: Path) -> Path:
+    return root / contract.INSTALL_INPUTS["factory_setup_code"][0].relative_to("/")
+
+
+def _files_payload(*, apply: bool, offered=("factory_setup_code",)) -> dict:
+    payload = _payload(declared_secret_env_keys(), apply=apply)
+    payload["declared_files"] = list(offered)
+    return payload
+
+
+def test_a_host_missing_the_optional_file_is_told_before_it_is_written(tmp_path) -> None:
+    """Dry by default here too, and reported in its own field.
+
+    Separate from `missing` on purpose: gaining a key inside a file the Host
+    already had and gaining a whole file are different events, and only the
+    second one can make a declaration start being true.
+    """
+
+    _code_stage(tmp_path, "12345678\n")
+
+    report = secret_inputs.converge(_files_payload(apply=False), tmp_path)
+
+    assert report["missing_files"] == ["factory_setup_code"]
+    assert report["added_files"] == []
+    assert report["status"] == "planned"
+    assert report["applied"] is False
+    assert not _code_on_host(tmp_path).exists(), "a dry run writes nothing"
+
+
+def test_applying_delivers_the_optional_file_with_its_declared_mode(tmp_path) -> None:
+    """The delivery the declaration needed, at the permissions the contract names."""
+
+    _code_stage(tmp_path, "12345678\n")
+
+    report = secret_inputs.converge(_files_payload(apply=True), tmp_path)
+
+    assert report["added_files"] == ["factory_setup_code"]
+    assert report["status"] == "converged"
+    assert report["applied"] is True
+    delivered = _code_on_host(tmp_path)
+    assert delivered.read_text(encoding="utf-8") == "12345678\n"
+    assert delivered.stat().st_mode & 0o777 == contract.INSTALL_INPUTS["factory_setup_code"][3]
+
+
+def test_a_file_the_host_already_holds_is_never_touched(tmp_path) -> None:
+    """The half of "additive" that makes this safe on a Host somebody uses.
+
+    Not compared, not rewritten, not chmod'ed — and deliberately not reported as
+    a difference either. Whether the Host's copy matches the workstation's is
+    `install`'s question, answered byte for byte; a second opinion here could
+    only ever disagree with it.
+    """
+
+    _code_stage(tmp_path, "12345678\n")
+    existing = _code_on_host(tmp_path)
+    existing.parent.mkdir(parents=True, exist_ok=True)
+    existing.write_text("87654321\n", encoding="utf-8")
+    existing.chmod(0o600)
+    before = existing.stat().st_mtime_ns
+
+    report = secret_inputs.converge(_files_payload(apply=True), tmp_path)
+
+    assert report["added_files"] == []
+    assert report["missing_files"] == []
+    assert report["status"] == "already_current"
+    assert existing.read_text(encoding="utf-8") == "87654321\n", "no rotation, ever"
+    assert existing.stat().st_mtime_ns == before
+
+
+def test_a_profile_that_names_no_code_converges_nothing(tmp_path) -> None:
+    """A workstation with nothing to offer offers nothing, and this is a no-op.
+
+    The controller decides that — `_convergeable_file_inputs` mirrors the same
+    condition `stage_install_files` uses — so an absent declaration must not be
+    read here as "deliver it anyway" and must not raise for a missing stage.
+    """
+
+    report = secret_inputs.converge(_files_payload(apply=True, offered=()), tmp_path)
+
+    assert report["added_files"] == []
+    assert report["missing_files"] == []
+    assert not _code_on_host(tmp_path).exists()
+
+
+def test_only_inputs_the_contract_calls_optional_can_be_delivered_this_way(
+    tmp_path,
+) -> None:
+    """The boundary is an existing set, not a door this opened.
+
+    `host_identity.ed25519` is the one that matters: replacing a Host identity
+    is replacing the Host, and it has its own verbs. Refused by name here so
+    that widening the set stays a deliberate edit to the contract.
+    """
+
+    assert set(contract.OPTIONAL_INSTALL_INPUTS) == {"factory_setup_code"}
+
+    with pytest.raises(TargetError, match="not an optional install input"):
+        secret_inputs.converge(
+            _files_payload(apply=True, offered=("host_identity.ed25519",)), tmp_path
+        )
+    with pytest.raises(TargetError, match="not an optional install input"):
+        secret_inputs.converge(
+            _files_payload(apply=True, offered=("hub.env",)), tmp_path
+        )
+
+
+def test_a_symlink_where_the_file_belongs_is_refused_rather_than_followed(
+    tmp_path,
+) -> None:
+    """Writing through one would put a secret wherever it pointed."""
+
+    _code_stage(tmp_path, "12345678\n")
+    planted = _code_on_host(tmp_path)
+    planted.parent.mkdir(parents=True, exist_ok=True)
+    planted.symlink_to(tmp_path / "elsewhere")
+
+    with pytest.raises(TargetError, match="input path is unsafe"):
+        secret_inputs.converge(_files_payload(apply=True), tmp_path)
+
+
+def test_applying_without_the_staged_file_refuses_rather_than_inventing_one(
+    tmp_path,
+) -> None:
+    """The stage is the only source. Nothing here mints a Setup code."""
+
+    (tmp_path / "var/tmp/eidolon-secrets-credential-convergence").mkdir(parents=True)
+
+    with pytest.raises(TargetError, match="staged input is missing"):
+        secret_inputs.converge(_files_payload(apply=True), tmp_path)
+
+
+def test_a_malformed_file_declaration_is_refused(tmp_path) -> None:
+    payload = _payload(declared_secret_env_keys(), apply=False)
+    payload["declared_files"] = "factory_setup_code"
+
+    with pytest.raises(TargetError, match="not a list of names"):
+        secret_inputs.converge(payload, tmp_path)
+
+
+def test_a_payload_from_before_this_existed_still_converges(tmp_path) -> None:
+    """No `declared_files` means no file half, not a refusal.
+
+    Worth pinning: the agent is injected from the workstation on every call, so
+    the two sides are always the same commit — but the payload shape is still a
+    contract, and defaulting to "do nothing" is the only safe reading of an
+    absent declaration.
+    """
+
+    report = secret_inputs.converge(_payload(declared_secret_env_keys(), apply=False), tmp_path)
+
+    assert report["added_files"] == []
+    assert report["missing_files"] == []

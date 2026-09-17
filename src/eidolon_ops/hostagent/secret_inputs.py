@@ -16,11 +16,20 @@ different verbs, and this is the additive one.
 
 What it will do
 ---------------
-Add **declared keys the Host is missing**, and nothing else. The declaration
-travels in the payload rather than living here: the workstation owns what the
-product requires, and an agent that carried its own copy would be a second
-opinion that drifts. Every value comes from the staged file, so a secret shared
-between two files arrives identical on both sides.
+Add **declared keys the Host is missing**, and **optional whole-file inputs the
+Host is missing**, and nothing else. Both declarations travel in the payload
+rather than living here: the workstation owns what the product requires, and an
+agent that carried its own copy would be a second opinion that drifts. Every
+value comes from the staged file, so a secret shared between two files arrives
+identical on both sides.
+
+The second granularity is newer and narrower. It exists because "write-once"
+and "install-only" had been collapsed into one rule: ``factory_setup_code`` may
+never be overwritten, which was read as "only ``install`` may ever create it" —
+so a Host declaring `claim_window = always_open` could hold that promise for
+weeks with no way to receive the eight bytes that keep it, short of rebuilding
+and reinstalling the whole release. Only inputs the contract already names in
+``OPTIONAL_INSTALL_INPUTS`` are eligible, and only when they are absent.
 
 What it will not do
 -------------------
@@ -28,8 +37,11 @@ Change a value the Host already has. That is rotation — a different operation,
 with a blast radius this one deliberately does not have — and a convergence that
 quietly rotated would make "add the missing key" unsafe to run on a working
 Host, which is the only kind of Host anybody runs it on. It also will not create
-a file that is absent: a credential file that does not exist means this Host was
-never installed, and inventing one here would paper over that.
+a *declared environment file* that is absent: one of those missing means this
+Host was never installed, and inventing one here would paper over that. The
+optional file inputs above are the opposite case and that is why they are
+separable — their absence is a documented state the contract already allows,
+not evidence that something else went wrong.
 """
 
 from __future__ import annotations
@@ -161,11 +173,92 @@ def verify_relationships(
     }
 
 
+def _converge_opaque_files(
+    data: dict, root: Path, *, apply: bool, stage: Path | None
+) -> tuple[list[str], list[str], Path | None]:
+    """Create the optional whole-file inputs this Host is missing, and no others.
+
+    The second half of "additive", at the only other granularity an input comes
+    in. The first half adds a key an environment file lacks and refuses to
+    replace one; this adds a *file* the Host lacks and does not so much as read
+    one that is there. Same rule, same refusal, one level up.
+
+    It exists because write-once and install-only were being treated as one
+    thing. ``factory_setup_code`` is write-once — nothing may overwrite it — and
+    that was read as "only ``install`` may create it", which left a Host whose
+    own declaration needed the file with no way to receive it short of a full
+    reinstall: rebuild the release, stop the product, run the data baseline,
+    switch every component. For eight bytes. Worse, the readiness fact that
+    catches the gap (``claim_window_honored``) then reports a failure whose only
+    remedy is that reinstall, which is how a red light becomes one people learn
+    to ignore.
+
+    Three things keep this narrow, and each is a refusal rather than a judgement:
+
+    * **the workstation names what it offers.** The list travels in the payload
+      like ``declared`` does, so a profile that names no Setup code offers no
+      file and this does nothing at all;
+    * **only what the contract already calls optional.** Anything outside
+      ``OPTIONAL_INSTALL_INPUTS`` is refused here. That set is not a door this
+      opens — it is an existing boundary that had no verb behind it;
+    * **absence is the only thing it acts on.** A file that exists is not read,
+      not compared, not chmod'ed. So this cannot rotate a secret, and it cannot
+      disagree with ``install`` about one either: install's byte-for-byte gate
+      still owns every file that is already there.
+    """
+
+    offered = data.get("declared_files") or []
+    if not isinstance(offered, list) or any(not isinstance(name, str) for name in offered):
+        raise TargetError("declared file inputs are not a list of names")
+
+    added: list[str] = []
+    missing: list[str] = []
+    for name in sorted(set(offered)):
+        if name not in contract.OPTIONAL_INSTALL_INPUTS:
+            raise TargetError(f"{name} is not an optional install input")
+        destination_value, user, group, mode = contract.INSTALL_INPUTS[name]
+        destination = primitives.host_path(root, destination_value)
+        if destination.is_symlink() or (
+            destination.exists() and not destination.is_file()
+        ):
+            raise TargetError(f"input path is unsafe: {destination_value}")
+        if destination.exists():
+            # Held, not inspected. Whether this Host's copy matches the
+            # workstation's is `install`'s question and it answers it byte for
+            # byte; asking it here would be a second opinion that can only
+            # disagree.
+            continue
+        missing.append(name)
+        if not apply:
+            continue
+        if stage is None:
+            stage = _staging_directory(data, root)
+        staged = stage / name
+        if not staged.is_file():
+            raise TargetError(f"staged input is missing: {name}")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            shutil.copyfile(staged, temporary)
+            os.chmod(temporary, mode)
+            _chown(temporary, user, group, root)
+            os.replace(temporary, destination)
+        finally:
+            temporary.unlink(missing_ok=True)
+        added.append(name)
+    return added, missing, stage
+
+
 def converge(data: dict, root: Path) -> dict:
     """Add every declared key this Host is missing, from the staged files.
 
     ``apply`` false reports and writes nothing, because whoever runs this is
     holding a Host that currently works and is entitled to see the diff first.
+
+    Two granularities, one rule. Keys inside an environment file, and whole
+    files the contract already calls optional — see
+    :func:`_converge_opaque_files`. Both add what is absent and refuse to touch
+    what is present.
     """
 
     declared = data.get("declared")
@@ -260,12 +353,26 @@ def converge(data: dict, root: Path) -> dict:
             temporary.unlink(missing_ok=True)
         added[name] = sorted(wanted)
 
+    added_files, missing_files, stage = _converge_opaque_files(
+        data, root, apply=apply, stage=stage
+    )
+
     return {
-        "status": "converged" if added else ("planned" if missing else "already_current"),
+        "status": (
+            "converged"
+            if added or added_files
+            else ("planned" if missing or missing_files else "already_current")
+        ),
         # Names only. A report carrying the values would put every new secret in
         # a terminal's scrollback and in whatever captured it.
         "added": {name: keys for name, keys in sorted(added.items())},
         "missing": {name: keys for name, keys in sorted(missing.items())},
+        # Kept in their own fields rather than folded in beside the key sets.
+        # An operator reading this has to be able to tell "this Host gained a
+        # key inside a file it already had" from "this Host gained a file",
+        # because only the second one can make a declaration start being true.
+        "added_files": added_files,
+        "missing_files": missing_files,
         # Reported rather than raised: a profile may legitimately not install
         # every input, and the caller can tell which case it is looking at.
         "absent": sorted(absent),
@@ -273,7 +380,7 @@ def converge(data: dict, root: Path) -> dict:
         # pair that disagrees, so raising would stop a convergence that is
         # otherwise correct and leave the Host worse off than before.
         "relationships": relationships,
-        "applied": bool(added),
+        "applied": bool(added or added_files),
         "redaction": "credential values are never returned",
     }
 

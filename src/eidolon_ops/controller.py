@@ -15,7 +15,7 @@ import stat
 import tarfile
 import tempfile
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
 
@@ -964,8 +964,26 @@ class EidolonPiController:
         except ASSET_ERRORS as exc:
             raise OperationsError(str(exc)) from exc
 
+    def _convergeable_file_inputs(self) -> list[str]:
+        """Which optional file inputs this workstation can hand over right now.
+
+        Offered only when there is something to offer. ``stage_install_files``
+        uploads the factory Setup code whenever this profile names one, so the
+        condition here is the same condition — a profile with no code stages no
+        file, and promising the Host one it would then fail to find is how a
+        convergence would start raising on Hosts that are fine.
+        """
+
+        return ["factory_setup_code"] if self._configured_setup_code() else []
+
     @staticmethod
-    def _converged_next_step(applied: bool, relationships: Mapping[str, object]) -> str:
+    def _converged_next_step(
+        applied: bool,
+        relationships: Mapping[str, object],
+        *,
+        added_files: Sequence[str] = (),
+        outstanding: bool = True,
+    ) -> str:
         """What to do next, including the part this verb cannot do.
 
         A pair that disagrees is named here rather than left in a nested report
@@ -973,6 +991,13 @@ class EidolonPiController:
         adds keys, and both sides already have one. Saying so is the whole
         point — the alternative is a green `converged` over a Host whose Hub
         cannot authenticate to its Channel provider.
+
+        A delivered factory Setup code gets its own sentence rather than the
+        generic one about services reading credentials. It is not a credential a
+        service reads on request: it is what `bootstrapd` looks for while
+        initialising to decide whether to stand a claim window up. Until that
+        unit restarts, the Host holds the code and still opens nothing, which
+        looks exactly like the delivery not having worked.
         """
 
         broken = relationships.get("mismatched") or []
@@ -983,8 +1008,20 @@ class EidolonPiController:
                 "keys and cannot replace one; run `repair-credentials` to set every copy "
                 "of those to this machine's value"
             )
+        if "factory_setup_code" in added_files:
+            return (
+                "restart `eidolon-bootstrapd` so it reads the factory Setup code it now "
+                "holds; a Host declaring `claim_window = always_open` stands its window "
+                "up while initialising, so the code is inert until then"
+            )
         if applied:
             return "run `restart` so the services read their new credentials"
+        if not outstanding:
+            # Nothing was listed, so there is nothing to rerun for. Saying
+            # "rerun with --apply" to somebody who just did exactly that reads
+            # as a failure, which is how a Host that is fine gets operated on
+            # again.
+            return "this Host holds every declared input; nothing to converge"
         return "rerun with --apply to write what is listed"
 
     def converge_inputs(self, *, apply: bool = False) -> dict[str, object]:
@@ -1015,6 +1052,13 @@ class EidolonPiController:
         local = self.add_missing_input_credentials(apply=apply)
         payload: dict[str, object] = {
             "declared": declared_secret_env_keys(),
+            # The optional whole-file inputs this profile can actually produce,
+            # named here rather than assumed on the Host. Today that is the
+            # factory Setup code and only when the profile points at one: a
+            # Host declaring `claim_window = always_open` needs it to keep that
+            # promise, and until this carried it the only verb that could
+            # deliver one was a full `install`.
+            "declared_files": self._convergeable_file_inputs(),
             # Answered on the same pass and repaired by neither half of this
             # verb: adding a key a Host lacks is not the fix for two files that
             # hold different values. Reported because somebody running this is
@@ -1052,8 +1096,21 @@ class EidolonPiController:
             # Named rather than performed: an env file is read at start, so the
             # units that read a changed file have to be restarted — and deciding
             # *when* a Host restarts is the operator's call, not this verb's.
-            "restart_required": sorted(host.get("added") or {}),
-            "next": self._converged_next_step(applied, host.get("relationships") or {}),
+            #
+            # A delivered file input is here for the same reason and not a
+            # weaker one: the factory Setup code is read by `bootstrapd` when it
+            # initialises, so a Host that has just been given one is still
+            # standing no window until it restarts. Reporting the delivery
+            # without that would be reporting a promise as kept.
+            "restart_required": sorted(
+                [*(host.get("added") or {}), *(host.get("added_files") or [])]
+            ),
+            "next": self._converged_next_step(
+                applied,
+                host.get("relationships") or {},
+                added_files=list(host.get("added_files") or []),
+                outstanding=bool(host.get("missing") or host.get("missing_files")),
+            ),
         }
 
     def repair_credentials(self, *, apply: bool = False) -> dict[str, object]:
