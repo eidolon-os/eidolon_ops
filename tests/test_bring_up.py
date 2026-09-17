@@ -125,20 +125,55 @@ def test_a_key_only_host_does_not_also_accept_passwords() -> None:
     assert "passwd" not in config["user"]
 
 
-def test_a_foundation_with_no_declared_payload_is_refused() -> None:
-    """The capability lives on the SSH/systemd adapter, which several boards use.
+RK3588 = "ubuntu-2604-rk3588-arm64-v1"
 
-    The rk3588 profile reached this command and would have been handed `eth0`
-    for an interface called `enP3p49s0` — a card that boots, comes up with no
-    wired link, and says nothing about why. A platform gets its own renderer
-    declared beside it rather than another's guessed at.
+
+def test_a_platform_is_declared_for_the_channel_it_has_and_refuses_the_other() -> None:
+    """rk3588 has a shell form and no first-boot form, and says which is which.
+
+    It used to have neither, and the reason was real: the shell script named
+    `eth0`, which on this board is `enP3p49s0` — a card that boots, comes up
+    with no wired link, and says nothing about why. That renderer asks nmcli
+    which device is ethernet now, so the objection is spent for this channel
+    and not for the other, where the seeding convention is still the image's
+    own and has not been established here.
+
+    Leaving it undeclared was not free. `bring-up` refused the board outright,
+    so its wired link was configured by hand, and by hand means a static
+    address — which is how one board came to be found by name and the other by
+    literal, and why the workstation had to be reconfigured between them.
     """
 
-    assert set(PLATFORMS) == {FOUNDATION}
+    assert set(PLATFORMS) == {FOUNDATION, RK3588}
 
-    for via in (BOOT_MEDIUM, SHELL):
-        with pytest.raises(OperationsError, match="no bring-up is declared"):
-            render(_bring_up(), foundation="ubuntu-2604-rk3588-arm64-v1", via=via)
+    rendered = render(_bring_up(), foundation=RK3588, via=SHELL)
+    assert set(rendered) == {SCRIPT}
+
+    with pytest.raises(OperationsError, match="no first-boot payload is declared"):
+        render(_bring_up(), foundation=RK3588, via=BOOT_MEDIUM)
+    # Distinct from a foundation nobody declared, which is a different mistake
+    # and sends the reader somewhere else — to their config, for a typo.
+    with pytest.raises(OperationsError, match="no bring-up is declared"):
+        render(_bring_up(), foundation="ubuntu-2604-made-up-v9", via=SHELL)
+
+
+def test_the_shell_form_asks_which_device_is_ethernet_rather_than_naming_one() -> None:
+    """The exact reason this board went unreached, held to so it stays fixed.
+
+    A hard-coded `eth0` is wrong on every board whose interface is named by
+    firmware path, and wrong silently: the card applies, the board boots, and
+    the link that was supposed to come up simply does not.
+    """
+
+    script = render(_bring_up(), foundation=RK3588, via=SHELL)[SCRIPT]
+
+    assert "nmcli -t -f DEVICE,TYPE dev status" in script
+    assert "eth0" not in script
+    assert "enP3p49s0" not in script
+    # And the link it configures is the one that needs no address anywhere:
+    # self-assigned, so no board carries a literal and no workstation is
+    # configured to match one.
+    assert "ipv4.link-local fallback" in script
 
 
 @pytest.mark.parametrize("value", ["not-a-key", f"{KEY}\nssh-ed25519 second"])
@@ -328,3 +363,23 @@ def test_the_declaration_is_read_as_the_format_the_board_wants() -> None:
         read_operator_keys(f"{KEY}\nnot-a-key\n", label="operators")
     with pytest.raises(OperationsError, match="declares no operator keys"):
         read_operator_keys("# nobody yet\n", label="operators")
+
+
+def test_a_host_addressed_rather_than_named_cannot_be_brought_up() -> None:
+    """The shape that forces a static address onto everything around it.
+
+    A board told to call itself `10.42.0.2` sets that as its hostname and
+    publishes it over mDNS. And it is the reason such a board needs a fixed
+    address at all: a name is what a self-assigned link-local address is found
+    by, so a Host with no name must have an address — and then the workstation
+    must be configured onto its subnet, and swapping boards means reconfiguring
+    both ends. Refusing here is refusing the first domino.
+    """
+
+    for literal in ("10.42.0.2", "169.254.181.137"):
+        with pytest.raises(OperationsError, match="is an address"):
+            BringUp(hostname=literal, user="eidolon-opi5max", authorized_keys=(KEY,))
+
+    # A name that merely contains digits is still a name.
+    BringUp(hostname="eidolon-pi5.local", user="pi", authorized_keys=(KEY,))
+    BringUp(hostname="eidolon-opi5max.local", user="opi", authorized_keys=(KEY,))

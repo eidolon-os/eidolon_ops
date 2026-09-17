@@ -33,6 +33,7 @@ tests check what is rendered with a real parser and a real shell.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import shlex
 from collections.abc import Callable
@@ -55,6 +56,16 @@ SCRIPT = "eidolon-bring-up.sh"
 USER_DATA = "user-data"
 META_DATA = "meta-data"
 NETWORK_CONFIG = "network-config"
+
+
+def _is_address(value: str) -> bool:
+    """Whether this names a Host or points at one."""
+
+    try:
+        ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return True
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,6 +109,22 @@ class BringUp:
         if not self.authorized_keys:
             raise OperationsError(
                 "this Host accepts no operator keys, which is a board nobody can log into"
+            )
+        # A profile that addresses its Host instead of naming it would have the
+        # board set its own hostname to an address, and then publish that over
+        # mDNS — a name that resolves to itself on a good day and to somebody
+        # else's lease on a bad one. It is also the shape that made a bench
+        # board need a static address and a workstation configured to match:
+        # the name is what a self-assigned link is found by, so a Host that has
+        # no name has to have an address, and then so does the machine
+        # reaching it.
+        if _is_address(self.short_hostname):
+            raise OperationsError(
+                f"host.hostname is an address, {self.hostname!r}, and a board cannot be "
+                "brought up under one: it would set that as its own hostname and publish "
+                "it. Name this Host instead — the name is what its link-local address is "
+                "found by, which is what lets a board be swapped without configuring "
+                "anything to match it."
             )
         for key in self.authorized_keys:
             if not key.startswith(("ssh-", "ecdsa-", "sk-")) or "\n" in key:
@@ -313,8 +340,15 @@ def _raspberry_pi_os_trixie_medium(bring_up: BringUp) -> dict[str, str]:
     }
 
 
-def _raspberry_pi_os_trixie_shell(bring_up: BringUp) -> str:
+def _networkmanager_avahi_shell(bring_up: BringUp) -> str:
     """The same requirement, applied to a board that is already running.
+
+    Named for what it uses rather than for the first board it ran on. Every
+    command here is NetworkManager's, avahi's or coreutils' — and both
+    foundations this repository declares install exactly those, from one shared
+    package list and one shared service list. A renderer named after a platform
+    but shared by two is one the third board's author rewrites instead of
+    reusing.
 
     This is the channel for every board the boot medium cannot reach: one that
     boots from an SSD the workstation cannot mount, one somebody else flashed
@@ -435,9 +469,44 @@ ip -4 -br addr show "$DEVICE"
 #: Which platforms Ops knows how to bring up, and in which forms. Keyed by
 #: `foundation.profile` so an OS that changes either convention is a new
 #: foundation with a new declaration, not an edit to this one.
+def _no_boot_medium(foundation: str) -> Callable[[BringUp], dict[str, str]]:
+    """A first-boot payload this platform has not declared.
+
+    Stated rather than omitted. `Platform` asks for both channels because a
+    platform reachable in only one situation should say which one at the moment
+    somebody asks for the other — not by being absent from the table, which
+    fails as "unknown foundation" and sends the reader to their config to look
+    for a typo that is not there.
+    """
+
+    def render(_bring_up: BringUp) -> dict[str, str]:
+        raise OperationsError(
+            f"no first-boot payload is declared for {foundation!r}. This image's own seeding "
+            "convention has not been established here, and guessing at one writes files a "
+            "board ignores in silence. A board that is already running takes the same "
+            f"requirement down the other channel: `bring-up --via {SHELL}`."
+        )
+
+    return render
+
+
 PLATFORMS = {
     "raspberry-pi-os-debian-arm64-v2": Platform(
         boot_medium=_raspberry_pi_os_trixie_medium,
-        shell=_raspberry_pi_os_trixie_shell,
-    )
+        shell=_networkmanager_avahi_shell,
+    ),
+    # Declared for the channel this board actually has. Without an entry here
+    # `bring-up` refused it outright, so its wired link was configured by hand
+    # — and what a person reaches for by hand is a static address. That is how
+    # this bench ended up with one board found by name and one by literal, and
+    # with a workstation that had to be reconfigured to talk to either.
+    #
+    # The shell form is not the Pi's to lend. Both foundations install the same
+    # NetworkManager and the same avahi, from one shared package list, so this
+    # is one convention that happens to cover two images rather than a borrowed
+    # one — which is why it is named after the convention.
+    "ubuntu-2604-rk3588-arm64-v1": Platform(
+        boot_medium=_no_boot_medium("ubuntu-2604-rk3588-arm64-v1"),
+        shell=_networkmanager_avahi_shell,
+    ),
 }
