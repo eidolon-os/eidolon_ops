@@ -7,7 +7,7 @@ from eidolon_ops.errors import InstallInputError
 from eidolon_ops.host_identity import derive_host_lan_identity
 from eidolon_ops.identity_replacement import replacement_inputs
 from eidolon_ops.install_inputs import initialize_install_inputs, target_directory
-from eidolon_ops.owner_domain_assets import ensure_owner_domain_assets
+from eidolon_ops.owner_domain_assets import HostAuthority, ensure_owner_domain_assets
 
 
 def snapshot(root):
@@ -20,7 +20,7 @@ def established(config, tmp_path):
     target = target_directory(configured)
     identity = derive_host_lan_identity((target / "host_identity.ed25519").read_bytes())
     owner_root = target.parent / "owner-domain"
-    owner = ensure_owner_domain_assets(owner_root, identity, 8443)
+    owner = ensure_owner_domain_assets(owner_root, identity, 8443, HostAuthority.fresh())
     return configured, target, owner_root, identity, owner
 
 
@@ -33,7 +33,7 @@ def test_preparation_failure_preserves_old_identity(config, tmp_path):
 
     with (
         pytest.raises(InstallInputError, match="exact settings unavailable"),
-        replacement_inputs(configured, broken_settings, owner_root=owner_root, port=8443),
+        replacement_inputs(configured, broken_settings, owner_root=owner_root),
     ):
         pytest.fail("must not reach the destructive operation")
     assert snapshot(target.parent) == before
@@ -44,7 +44,7 @@ def test_failed_host_reset_discards_staged_identity(config, tmp_path):
     before = snapshot(target.parent)
     with (
         pytest.raises(RuntimeError, match="Host reset refused"),
-        replacement_inputs(configured, _settings_reader, owner_root=owner_root, port=8443),
+        replacement_inputs(configured, _settings_reader, owner_root=owner_root),
     ):
         raise RuntimeError("Host reset refused")
     assert snapshot(target.parent) == before
@@ -54,12 +54,12 @@ def test_factory_reset_replaces_both_identities_and_keeps_retired_material(confi
     configured, target, owner_root, old_host, old_owner = established(config, tmp_path)
     old_inputs, old_material = snapshot(target), snapshot(owner_root)
     with replacement_inputs(
-        configured, _settings_reader, owner_root=owner_root, port=8443
+        configured, _settings_reader, owner_root=owner_root
     ) as staged:
         assert snapshot(target) == old_inputs
         result = staged.commit()
     new_host = derive_host_lan_identity((target / "host_identity.ed25519").read_bytes())
-    new_owner = ensure_owner_domain_assets(owner_root, new_host, 8443)
+    new_owner = ensure_owner_domain_assets(owner_root, new_host, 8443, HostAuthority.fresh())
     assert new_host.host_id != old_host.host_id
     assert new_owner.owner_domain_id != old_owner.owner_domain_id
     assert new_owner.owner_domain_generation == 1
@@ -77,7 +77,7 @@ def test_publish_failure_rolls_back_local_identity(config, tmp_path, monkeypatch
     before = snapshot(target.parent)
     rename = Path.rename
     with replacement_inputs(
-        configured, _settings_reader, owner_root=owner_root, port=8443
+        configured, _settings_reader, owner_root=owner_root
     ) as staged:
 
         def fail_owner_publish(source, destination):

@@ -17,9 +17,12 @@ from eidolon_ops.host_identity import (
 from eidolon_ops.hub_assets import render_hub_settings
 from eidolon_ops.install_inputs import host_rendered_fields
 from eidolon_ops.owner_domain_assets import (
+    HostAuthority,
     OwnerDomainAssetError,
     OwnerDomainAssets,
     ensure_owner_domain_assets,
+    ensure_owner_material,
+    owner_domain_id_of,
 )
 from eidolon_ops.paths import AppAccess
 from eidolon_ops.source_assets import PORTS
@@ -52,14 +55,25 @@ class HostApplicationAssets:
 
 
 class HostApplicationMaterializer:
-    """Keep TLS stable across retries while rendering public assets deterministically."""
+    """Keep TLS stable across retries while rendering public assets deterministically.
+
+    Renders for the Authority a Host holds, never for one this side remembers:
+    ``host_authority`` is what the Host reported (or a fresh one for a Host that
+    holds nothing), and nothing that names a generation can be rendered
+    without it.  What can be answered from the material alone — which Owner
+    Domain it speaks for — is answered from the material alone.
+    """
 
     def __init__(self, config: OperationsConfig, app: AppAccess, ingress_source: bytes,
-                 *, installed_identity: HostLanIdentity | None = None) -> None:
+                 *, installed_identity: HostLanIdentity | None = None,
+                 host_authority: HostAuthority | None = None,
+                 served_directory: bytes | None = None) -> None:
         self.config = config
         self.app = app
         self.ingress_source = ingress_source
         self._installed_identity = installed_identity
+        self._host_authority = host_authority
+        self._served_directory = served_directory
 
     @property
     def material_root(self) -> Path:
@@ -100,13 +114,38 @@ class HostApplicationMaterializer:
     def owner_assets(
         self, *, identity: HostLanIdentity | None = None
     ) -> OwnerDomainAssets:
-        """Return the controller-held Authority contract, never its signing keys."""
+        """The public bundle for the Authority this Host holds, never its signing keys."""
 
+        if self._host_authority is None:
+            raise HostApplicationError(
+                "the Host's Authority has not been observed; nothing naming a generation "
+                "can be rendered for it"
+            )
         return ensure_owner_domain_assets(
             self.material_root,
             identity or self.identity(),
             self.app.hub_https_port,
+            self._host_authority,
+            served_directory=self._served_directory,
         )
+
+    def owner_domain_id(self) -> str:
+        """Which Owner Domain this profile's material speaks for.
+
+        A function of the Owner root and nothing else, so it needs no Host.  A
+        profile that has an identity but no Owner material yet gets one: the
+        root is created on first touch, as it always was, and only the keys —
+        a directory names a generation, and no Host is being addressed here.
+        """
+
+        if not (self.material_root / "owner-domain-root-ca.pem").is_file():
+            return ensure_owner_material(self.material_root, self.identity())
+        return owner_domain_id_of(self.material_root)
+
+    def initialize_owner_material(self) -> str:
+        """Create the Owner root, signer and Host TLS leaf; issue no directory."""
+
+        return ensure_owner_material(self.material_root, self.identity())
 
     def identity(self) -> HostLanIdentity:
         if self._installed_identity is not None:
@@ -136,13 +175,11 @@ class HostApplicationMaterializer:
         replacements: dict[str, str]
         if name == "local-api.env":
             try:
-                owner = ensure_owner_domain_assets(
-                    self.material_root, identity, self.app.hub_https_port
-                )
+                owner_domain_id = self.owner_domain_id()
             except OwnerDomainAssetError as exc:
                 raise HostApplicationError(str(exc)) from exc
             replacements = host_rendered_fields(name, {
-                "EIDOLON_LOCAL_API_OWNER_DOMAIN_ID": owner.owner_domain_id,
+                "EIDOLON_LOCAL_API_OWNER_DOMAIN_ID": owner_domain_id,
                 "EIDOLON_LOCAL_API_OWNER_DOMAIN_DESCRIPTOR_URI": (
                     identity.hub_origin(self.app.hub_https_port)
                     + "/api/device-onboarding/v1/descriptor"
@@ -172,7 +209,7 @@ class HostApplicationMaterializer:
         identity = self.identity()
         if owner_domain_id is None:
             try:
-                owner_domain_id = self.owner_assets(identity=identity).owner_domain_id
+                owner_domain_id = self.owner_domain_id()
             except OwnerDomainAssetError as exc:
                 raise HostApplicationError(str(exc)) from exc
         return {

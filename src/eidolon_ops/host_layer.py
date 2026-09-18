@@ -20,11 +20,19 @@ from eidolon_ops.host_application import (
     HostApplicationError,
     HostApplicationMaterializer,
 )
-from eidolon_ops.host_delivery import bind_delivery
+from eidolon_ops.host_delivery import bind_delivery, recorded_delivery
 from eidolon_ops.host_identity import HostIdentityError, host_lan_identity_from_id
 from eidolon_ops.hostagent.hardware import HostHardwareError
+from eidolon_ops.hostagent.primitives import file_sha256
 from eidolon_ops.hub_assets import HubAssetError, hub_settings_template
+from eidolon_ops.install_decision import (
+    InstallContext,
+    InstallDecision,
+    decide_install,
+    refusal,
+)
 from eidolon_ops.install_inputs import declared_credential_relationships
+from eidolon_ops.owner_domain_assets import HostAuthority
 from eidolon_ops.paths import AppAccess
 from eidolon_ops.private_inputs import INSTALL_DESTINATION_NAMES
 from eidolon_ops.readiness import product_payload
@@ -91,6 +99,14 @@ class HostLayer:
         self._source_revisions = source_revisions
         self._read_component_contract = read_component_contract
         self._deployment_identity: dict[str, object] | None = None
+        #: What the Host reported and what was decided from it, for the one
+        #: operation this layer is serving. Observed once per operation and
+        #: threaded through every render, so a fresh Authority's state id is
+        #: minted exactly once and every rendered copy agrees.
+        self._install_context: InstallContext | None = None
+        self._install_decision: InstallDecision | None = None
+        self._host_authority: HostAuthority | None = None
+        self._served_directory: bytes | None = None
 
     def _port_registry(self) -> str:
         """The registry a Host is given: the reviewed baseline, plus the port
@@ -290,7 +306,132 @@ class HostLayer:
         identity = (None if self._deployment_identity is None else
                     host_lan_identity_from_id(self._deployment_identity["host_id"]))
         return HostApplicationMaterializer(self.config, self.app, source,
-                                           installed_identity=identity)
+                                           installed_identity=identity,
+                                           host_authority=self._host_authority,
+                                           served_directory=self._served_directory)
+
+    def forget_host(self) -> None:
+        """Drop everything observed of a Host; the next operation asks again."""
+
+        self._deployment_identity = None
+        self._install_context = None
+        self._install_decision = None
+        self._host_authority = None
+        self._served_directory = None
+
+    def initialize_owner_material(self) -> dict[str, object]:
+        """Create this profile's Owner root, signer and TLS leaf; address no Host."""
+
+        try:
+            self.materializer().initialize_owner_material()
+        except ASSET_ERRORS as exc:
+            raise OperationsError(str(exc)) from exc
+        return self.public_contract()
+
+    # -- what the Host holds, asked before anything names a generation -------
+
+    def observe_install_context(self) -> InstallContext:
+        """Ask the Host what it holds: lineage, directory, hardware, identity."""
+
+        observed = self.transport.run_agent("install-context", self.target_payload(), timeout=120)
+        try:
+            context = InstallContext.from_observation(observed)
+        except ValueError as exc:
+            raise OperationsError(str(exc)) from exc
+        self._install_context = context
+        return context
+
+    def decide_install(self, context: InstallContext) -> InstallDecision:
+        """Name the situation, from the Host's report and this profile's record."""
+
+        materializer = self.materializer()
+        try:
+            owner_domain_id = materializer.owner_domain_id()
+            host_id = materializer.identity().host_id
+        except ASSET_ERRORS as exc:
+            raise OperationsError(str(exc)) from exc
+        decision = decide_install(
+            context,
+            owner_domain_id=owner_domain_id,
+            host_id=host_id,
+            identity_sha256=file_sha256(self.config.install_files["host_identity"]),
+            binding=recorded_delivery(self.delivery_root()),
+        )
+        self._install_decision = decision
+        return decision
+
+    def refusal(self, decision: InstallDecision, context: InstallContext) -> OperationsError:
+        try:
+            owner_domain_id = self.materializer().owner_domain_id()
+        except ASSET_ERRORS as exc:
+            return OperationsError(str(exc))
+        return OperationsError(refusal(decision, context, owner_domain_id=owner_domain_id))
+
+    def adopt_decision(self, context: InstallContext, decision: InstallDecision) -> HostAuthority:
+        """Render for what the Host holds from here on: its Authority, or a fresh one.
+
+        The directory the Host serves travels with an established Authority, so
+        the issuer adopts it as the revision line's baseline rather than
+        reissuing over it.
+        """
+
+        if not decision.proceeds:
+            raise self.refusal(decision, context)
+        if decision.host_established:
+            assert context.established is not None
+            authority = HostAuthority.established_from(context.established)
+            served = None if context.directory is None else context.directory.encode("utf-8")
+        else:
+            authority, served = HostAuthority.fresh(), None
+        self.use_host_authority(authority, served_directory=served)
+        return authority
+
+    def use_host_authority(
+        self, authority: HostAuthority, *, served_directory: bytes | None = None
+    ) -> None:
+        self._host_authority = authority
+        self._served_directory = served_directory
+
+    def require_established_host(self) -> InstallDecision:
+        """For an operation addressing a Host that must already be installed.
+
+        Observes, decides, and accepts only a Host that holds this Owner's
+        Authority and either is the board this identity went to or proves it
+        holds that identity. A legacy Host proving it gets its delivery
+        recorded here, because the operation is about to hand it this profile's
+        inputs, and that is the evidence the binding exists to record.
+        """
+
+        context = self.observe_install_context()
+        decision = self.decide_install(context)
+        if not decision.host_established:
+            if decision.proceeds:
+                raise OperationsError(
+                    "this Host has established no Authority; deliver it with install first"
+                )
+            raise self.refusal(decision, context)
+        self.adopt_decision(context, decision)
+        if decision.records_delivery:
+            self.record_delivery()
+        return decision
+
+    def delivery_root(self) -> Path:
+        return self.materializer().material_root.parent
+
+    def record_delivery(self) -> bytes:
+        """Write which board this profile's identity is on, from the Host's own report."""
+
+        if self._install_context is None:
+            raise OperationsError("the Host's hardware has not been observed; nothing to record")
+        try:
+            return bind_delivery(
+                self.delivery_root(),
+                self.materializer().identity().host_id,
+                dict(self._install_context.hardware),
+                allow_create=True,
+            )
+        except (HostHardwareError, *ASSET_ERRORS) as exc:
+            raise OperationsError(str(exc)) from exc
 
     def prepare(self):
         materializer = self.materializer()
@@ -313,19 +454,16 @@ class HostLayer:
         # The full name set gates the private inputs, which are written once.
         # The Host layer is derived rather than kept, so it is staged whenever
         # this profile has one — a refresh asks for it without the credentials.
-        application = self.prepare() if self.app else None
-        if application is not None:
-            observation = self.transport.run_agent("host-hardware", {}, timeout=30)
-            try:
-                if observation.get("status") != "observed":
-                    raise OperationsError("target hardware could not be observed")
-                bind_delivery(
-                    self.materializer().material_root.parent,
-                    application.identity.host_id, observation["hardware"],
-                    allow_create=application.bootstrap_pending,
-                )
-            except (HostHardwareError, KeyError, TypeError) as exc:
-                raise OperationsError(str(exc)) from exc
+        application = None
+        if self.app:
+            # Whoever stages knows what the Host holds, or asks first. An install
+            # decided before it got here; a convergence or repair addresses a
+            # Host that must already be installed, and proves that now — which
+            # is also where a wrong board is refused before it is handed a
+            # single credential.
+            if self._host_authority is None:
+                self.require_established_host()
+            application = self.prepare()
         self.transport.run_agent("cleanup-stage", {"release_id": release_id})
         self.transport.run(
             ("/usr/bin/install", "-d", "-m", "0700", stage),

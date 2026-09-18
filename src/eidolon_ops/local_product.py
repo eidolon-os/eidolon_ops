@@ -18,7 +18,7 @@ from eidolon_ops import environment, lan_observation, probes, source_assets
 from eidolon_ops.config import OperationsConfig
 from eidolon_ops.environment import EnvironmentFileError
 from eidolon_ops.errors import InstallInputError, OperationsError
-from eidolon_ops.host_delivery import bind_delivery
+from eidolon_ops.host_delivery import bind_delivery, recorded_delivery
 from eidolon_ops.host_identity import (
     HostIdentityError,
     HostLanIdentity,
@@ -40,23 +40,26 @@ from eidolon_ops.hostagent.kernel_schema import (
     set_aside,
     set_aside_suffix,
 )
-from eidolon_ops.hostagent.primitives import TargetError
+from eidolon_ops.hostagent.primitives import TargetError, file_sha256
 from eidolon_ops.hub_assets import (
     hub_settings_are_bound,
     hub_settings_template,
     render_hub_settings,
 )
 from eidolon_ops.identity_replacement import replacement_inputs
+from eidolon_ops.install_decision import (
+    InstallContext,
+    InstallDecision,
+    decide_install,
+    refusal,
+)
 from eidolon_ops.install_inputs import host_rendered_fields, validate_install_input_contract
 from eidolon_ops.owner_domain_assets import (
-    AuthorityDecision,
+    HostAuthority,
     OwnerDomainAssetError,
     OwnerDomainAssets,
-    authority_lineage,
-    authority_recovery_required,
-    decide_owner_authority,
     ensure_owner_domain_assets,
-    mark_authority_bootstrapped,
+    ensure_owner_material,
 )
 from eidolon_ops.paths import AppAccess, HostProfile
 from eidolon_ops.private_files import atomic_private_file
@@ -338,7 +341,7 @@ class LocalProductSource:
         if wipe_authority_data:
             with replacement_inputs(
                 self.sources.resolved_config(), self._read_exact_file,
-                owner_root=self._owner_material_root(), port=self._require_app_access().hub_https_port,
+                owner_root=self._owner_material_root(),
             ) as replacement:
                 # New inputs are complete before deleting any user state.
                 remove_present()
@@ -403,8 +406,10 @@ class LocalProductSource:
         destination = self._host_identity_path()
         if not destination.exists():
             raw = source_inputs.joinpath("host_identity.ed25519").read_bytes()
-            identity = derive_host_lan_identity(raw)
-            bind_delivery(source_inputs.parent, identity.host_id, observe_hardware())
+            # Placed, not yet bound. The delivery binding is evidence that this
+            # machine established the Authority this identity was issued for,
+            # so it is written once Hub has done that (`commit_owner_authority`),
+            # not when the file lands.
             atomic_private_file(destination, raw)
             return
         if (
@@ -886,7 +891,7 @@ class LocalProductSource:
         return generation
 
     def _ensure_owner_domain_assets(self) -> OwnerDomainAssets:
-        assets = self._decided_owner_authority(self._issue_owner_domain_assets())
+        assets = self._issue_owner_domain_assets()
         targets = {
             "tls_certificate": self._hub_certificate_path(),
             "tls_private_key": self._hub_private_key_path(),
@@ -906,16 +911,98 @@ class LocalProductSource:
         return assets
 
     def _issue_owner_domain_assets(self) -> OwnerDomainAssets:
-        """Read or mint this Host's Owner material, placing none of it."""
+        """Read or mint this Host's Owner material for the Authority its Hub holds.
 
+        The same decision a product Host gets, made against this machine's own
+        Hub database, anchor, placed directory and hardware: a Hub that holds
+        nothing is rendered a fresh capability at generation 1, and one that
+        has established an Authority is rendered exactly that.  Nothing is
+        placed here.
+        """
+
+        decision, context = self._decide_install()
+        if not decision.proceeds:
+            raise OperationsError(refusal(decision, context, owner_domain_id=self._material_owner_domain_id()))
+        if decision.host_established:
+            assert context.established is not None
+            authority = HostAuthority.established_from(context.established)
+            served = None if context.directory is None else context.directory.encode("utf-8")
+        else:
+            authority, served = HostAuthority.fresh(), None
         try:
             return ensure_owner_domain_assets(
                 self._owner_material_root(),
                 self._host_lan_identity(),
                 self._require_app_access().hub_https_port,
+                authority,
+                served_directory=served,
             )
         except OwnerDomainAssetError as exc:
             raise OperationsError(f"Mac Owner Domain material is {exc}") from exc
+
+    def _material_owner_domain_id(self) -> str:
+        try:
+            return ensure_owner_material(self._owner_material_root(), self._host_lan_identity())
+        except OwnerDomainAssetError as exc:
+            raise OperationsError(f"Mac Owner Domain material is {exc}") from exc
+
+    def _delivery_root(self) -> Path:
+        """Where this machine's delivery binding lives: under the identity it placed.
+
+        This machine is both the profile and the Host, so the binding sits with
+        the Host-side identity rather than the input set. It shares that root's
+        fate: a reset that wipes authority takes it too, and one that keeps
+        authority keeps it, which is exactly the fate the binding should share.
+        A private subdirectory, because the binding is written the way every
+        private input is and the state root itself is not private.
+        """
+
+        return self.profile.paths.bootstrap_state_root / "delivery"
+
+    def _install_context(self) -> InstallContext:
+        """What this machine holds as a Host, read the way a product Host is read."""
+
+        evidence = self._observed_authority_lineage()
+        identity = self._host_identity_path()
+        return InstallContext(
+            marker=evidence["marker"],
+            anchor=evidence["anchor"],
+            established=evidence["established"],
+            directory=self._directory_this_machine_serves(),
+            hardware=observe_hardware(),
+            identity_sha256=file_sha256(identity) if identity.is_file() else None,
+        )
+
+    def _directory_this_machine_serves(self) -> str | None:
+        """The signed directory this machine serves, or will serve at its next prepare.
+
+        The placed copy when there is one.  A reset that keeps authority clears
+        the generated configuration — the placed copy with it — while the
+        material it was placed from stays, and prepare places it again from
+        there.  On a single machine the two are one document, so the material's
+        copy is what this machine serves; a product Host is asked over the wire.
+        """
+
+        for path in (self._owner_descriptor_path(), self._owner_material_root() / "owner-domain-descriptor.json"):
+            if path.is_file():
+                return path.read_text(encoding="utf-8")
+        return None
+
+    def _decide_install(self) -> tuple[InstallDecision, InstallContext]:
+        context = self._install_context()
+        root = self._delivery_root()
+        decision = decide_install(
+            context,
+            owner_domain_id=self._material_owner_domain_id(),
+            host_id=self._host_lan_identity().host_id,
+            # This machine is both the profile and the Host. The identity it
+            # holds is the one this code placed from its own inputs, so holding
+            # it is the proof; a product Host is compared against the profile's
+            # copy, and here the two are one file.
+            identity_sha256=context.identity_sha256 or "",
+            binding=recorded_delivery(root),
+        )
+        return decision, context
 
     # -- Owner Authority lineage ---------------------------------------------
 
@@ -944,92 +1031,41 @@ class LocalProductSource:
         except TargetError as exc:
             raise OperationsError(f"Mac Owner Authority lineage is unreadable: {exc}") from exc
 
-    def _decided_owner_authority(self, current: OwnerDomainAssets) -> OwnerDomainAssets:
-        """Preserve established identity; missing authorization requires recovery."""
-
-        observed = self._observed_authority_lineage()
-        if observed["anchor"] is not None and observed["marker"] != observed["anchor"]:
-            raise OperationsError("AUTHORITY_RECOVERY_REQUIRED: database and saved authorization state disagree; restore the complete backup")
-        decision = decide_owner_authority(
-            current, marker=observed["marker"], established=observed["established"]
-        )
-        if decision is AuthorityDecision.RECORD_CONSUMED:
-            current = self._recorded_authority_bootstrap(current)
-            decision = decide_owner_authority(
-                current, marker=observed["marker"], established=observed["established"]
-            )
-        if decision is AuthorityDecision.RECOVERY_REQUIRED:
-            raise OperationsError(
-                self._authority_recovery_required(observed["marker"], current)
-            )
-        return current
-
     def commit_owner_authority(self) -> dict[str, object]:
-        """Record the one-shot capability as spent, against this Host's proof.
+        """Record which machine this identity is on, once its Hub proves it established the Authority.
 
-        The other half of the decision above, and not optional: consumption has
-        to be recorded when it happens, because it is the only thing that later
-        tells a wipe apart from a retry. Without it a first ``start`` leaves the
-        Owner material ``bootstrap_pending`` — which is the state
-        ``authority-backup`` refuses — and the next ``reset
-        --wipe-authority-data`` reads that pending capability as a failed
-        bootstrap to retry and hands the empty Hub the destroyed state id back.
-
-        Evidence-driven, so it is safe to call after any start: a Host that
-        cannot prove the lineage twice over has nothing to record, and the next
-        ``prepare`` will make the same decision from the same pair of files.
-        Advancing a generation is not done here — only ``prepare`` can render
-        the inputs a new generation needs.
+        Called after a ``start``.  Nothing about the Authority itself is
+        recorded — this side keeps no copy of what Hub established, so there is
+        nothing to keep in step.  What is recorded, once, is the delivery
+        binding: this hardware holds this profile's identity and has stood an
+        Authority up on it.  A Hub that has not yet done so has nothing to
+        prove, and the next ``prepare`` decides again from the same files.
         """
 
-        current = self._issue_owner_domain_assets()
-        observed = self._observed_authority_lineage()
-        if observed["anchor"] is not None and observed["marker"] != observed["anchor"]:
-            raise OperationsError("AUTHORITY_RECOVERY_REQUIRED: database and saved authorization state disagree; restore the complete backup")
-        decision = decide_owner_authority(
-            current, marker=observed["marker"], established=observed["established"]
-        )
-        if decision is AuthorityDecision.RECOVERY_REQUIRED:
-            raise OperationsError(
-                self._authority_recovery_required(observed["marker"], current)
-            )
-        if decision is not AuthorityDecision.RECORD_CONSUMED:
+        decision, context = self._decide_install()
+        if decision is InstallDecision.FIRST_INSTALL:
             return {
                 "status": "authority_bootstrap_unproven",
                 "decision": str(decision),
-                "observed": observed,
+                "observed": context.report(),
             }
-        consumed = self._recorded_authority_bootstrap(current)
-        return {
-            "status": "authority_bootstrap_consumed",
-            "authority": authority_lineage(consumed),
-            "observed": observed,
-        }
-
-    def _recorded_authority_bootstrap(self, current: OwnerDomainAssets) -> OwnerDomainAssets:
-        try:
-            mark_authority_bootstrapped(
-                self._owner_material_root(),
-                owner_domain_id=current.owner_domain_id,
-                owner_domain_generation=current.owner_domain_generation,
-                authority_state_id=current.authority_state_id,
+        if not decision.proceeds:
+            raise OperationsError(refusal(decision, context, owner_domain_id=self._material_owner_domain_id()))
+        assert context.established is not None
+        if decision.records_delivery:
+            bind_delivery(
+                self._delivery_root(),
+                self._host_lan_identity().host_id,
+                dict(context.hardware),
+                allow_create=True,
             )
-        except OwnerDomainAssetError as exc:
-            raise OperationsError(
-                f"Mac Owner Authority bootstrap cannot be recorded: {exc}"
-            ) from exc
-        return self._issue_owner_domain_assets()
-
-    @staticmethod
-    def _authority_recovery_required(marker: object, current: OwnerDomainAssets) -> str:
-        return authority_recovery_required(
-            marker,
-            authority_lineage(current),
-            remedy=(
-                "A source run must not start past that. Restore the matching Hub "
-                "state, or explicitly create a new Host with reset --wipe-authority-data --apply."
-            ),
-        )
+        return {
+            "status": "authority_established",
+            "decision": str(decision),
+            "authority": dict(context.established),
+            "delivery": "recorded" if decision.records_delivery else "verified",
+            "observed": context.report(),
+        }
 
     @staticmethod
     def _require_every_owner_domain_asset_is_placed(

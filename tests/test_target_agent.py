@@ -2725,32 +2725,74 @@ def test_authority_lineage_reports_what_a_started_hub_established(tmp_path: Path
     }
 
 
-def test_installed_owner_directory_is_served_with_the_lineage_it_names(tmp_path: Path) -> None:
+_BOARD = {"kind": "device-tree:raspberrypi,5-model-b", "fingerprint": "sha256:" + "a" * 64}
+
+
+def test_install_context_reports_everything_an_install_decides_on(tmp_path: Path, monkeypatch) -> None:
+    """One round trip: lineage, the served directory, the board, the identity held."""
+
     lineage = _establish_lineage(tmp_path)
     descriptor = tmp_path / authority_state.OWNER_DESCRIPTOR.relative_to("/")
     descriptor.parent.mkdir(parents=True, exist_ok=True)
     descriptor.write_text(json.dumps({"owner_domain_id": "owner-x"}), encoding="utf-8")
+    identity = tmp_path / contract.INSTALL_INPUTS["host_identity.ed25519"][0].relative_to("/")
+    identity.parent.mkdir(parents=True, exist_ok=True)
+    identity.write_bytes(b"i" * 32)
+    monkeypatch.setattr(authority_state, "observe_hardware", lambda *, root: dict(_BOARD))
 
-    observed = authority_state.installed_owner_directory(
+    observed = authority_state.install_context(
         {"units": list(contract.PRODUCT_UNITS)}, root=tmp_path
     )
 
     assert observed == {
         "status": "observed",
-        "directory": json.dumps({"owner_domain_id": "owner-x"}),
         "marker": lineage,
         "anchor": lineage,
         "established": lineage,
+        "directory": json.dumps({"owner_domain_id": "owner-x"}),
+        "hardware": _BOARD,
+        "identity_sha256": hashlib.sha256(b"i" * 32).hexdigest(),
     }
 
 
-def test_installed_owner_directory_refuses_a_host_that_serves_none(tmp_path: Path) -> None:
-    _establish_lineage(tmp_path)
+def test_install_context_says_what_an_unowned_host_lacks_rather_than_refusing(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A blank board is a situation an install has to be able to name, not an error."""
 
-    with pytest.raises(TargetError, match="Owner directory is missing"):
-        authority_state.installed_owner_directory(
-            {"units": list(contract.PRODUCT_UNITS)}, root=tmp_path
-        )
+    monkeypatch.setattr(authority_state, "observe_hardware", lambda *, root: dict(_BOARD))
+
+    observed = authority_state.install_context(
+        {"units": list(contract.PRODUCT_UNITS)}, root=tmp_path
+    )
+
+    assert observed == {
+        "status": "observed",
+        "marker": None,
+        "anchor": None,
+        "established": None,
+        "directory": None,
+        "hardware": _BOARD,
+        "identity_sha256": None,
+    }
+
+
+def test_install_context_refuses_an_unsafe_directory_or_identity(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(authority_state, "observe_hardware", lambda *, root: dict(_BOARD))
+    descriptor = tmp_path / authority_state.OWNER_DESCRIPTOR.relative_to("/")
+    descriptor.parent.mkdir(parents=True, exist_ok=True)
+    descriptor.symlink_to(tmp_path / "elsewhere")
+
+    with pytest.raises(TargetError, match="Owner directory is not a safe regular file"):
+        authority_state.install_context({"units": list(contract.PRODUCT_UNITS)}, root=tmp_path)
+
+    descriptor.unlink()
+    identity = tmp_path / contract.INSTALL_INPUTS["host_identity.ed25519"][0].relative_to("/")
+    identity.parent.mkdir(parents=True, exist_ok=True)
+    identity.symlink_to(tmp_path / "elsewhere")
+
+    with pytest.raises(TargetError, match="Host identity is not a safe regular file"):
+        authority_state.install_context({"units": list(contract.PRODUCT_UNITS)}, root=tmp_path)
 
 
 def test_a_database_without_its_anchor_is_reported_but_not_called_established(

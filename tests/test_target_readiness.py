@@ -14,7 +14,7 @@ from eidolon_ops import readiness
 from eidolon_ops.host_identity import derive_host_lan_identity
 from eidolon_ops.hostagent import app_contract, contract, primitives, probe
 from eidolon_ops.hostagent.primitives import TargetError
-from eidolon_ops.owner_domain_assets import ensure_owner_domain_assets
+from eidolon_ops.owner_domain_assets import HostAuthority, ensure_owner_domain_assets
 from eidolon_ops.readiness import (
     HostKind,
     describe_failures,
@@ -51,7 +51,7 @@ def _materialize(monkeypatch, root: Path, app: dict[str, object]) -> None:
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     root.chmod(0o700)
     identity = derive_host_lan_identity(b"a" * 32)
-    owner = ensure_owner_domain_assets(root / "owner-private", identity, 8443)
+    owner = ensure_owner_domain_assets(root / "owner-private", identity, 8443, HostAuthority.fresh())
     (root / "hub.crt").write_bytes(owner.tls_certificate)
     (root / "hub.key").write_bytes(owner.tls_private_key)
     (root / "owner.json").write_bytes(owner.descriptor)

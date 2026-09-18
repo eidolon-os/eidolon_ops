@@ -16,7 +16,6 @@ import tarfile
 import tempfile
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import replace
 from pathlib import Path
 
 from eidolon_ops import bring_up as bring_up_module
@@ -31,11 +30,11 @@ from eidolon_ops.foundation import (
     python_bootstrap_script,
     python_probe_script,
 )
-from eidolon_ops.host_delivery import bind_delivery, recorded_delivery
 from eidolon_ops.host_layer import ASSET_ERRORS, HostLayer
 from eidolon_ops.hostagent.contract import RESET_AUTHORITY_ROOTS
-from eidolon_ops.hostagent.hardware import BINDING_FILE, HostHardwareError, verify_binding
+from eidolon_ops.hostagent.hardware import BINDING_FILE
 from eidolon_ops.identity_replacement import replacement_inputs
+from eidolon_ops.install_decision import InstallDecision
 from eidolon_ops.install_inputs import (
     add_missing_install_credentials,
     declared_credential_classes,
@@ -44,15 +43,14 @@ from eidolon_ops.install_inputs import (
     initialize_install_inputs,
 )
 from eidolon_ops.owner_domain_assets import (
+    LEGACY_AUTHORITY_STATE,
     OWNER_DOMAIN_MATERIAL_NAMES,
-    AuthorityDecision,
+    HostAuthority,
     OwnerDomainAssetError,
-    adopt_host_authority,
-    authority_lineage,
-    authority_recovery_required,
-    decide_owner_authority,
     ensure_owner_domain_assets,
-    mark_authority_bootstrapped,
+    owner_domain_id_of,
+    retire_legacy_authority_state,
+    verify_served_directory,
 )
 from eidolon_ops.paths import AppAccess
 from eidolon_ops.process import ProcessRunner
@@ -164,19 +162,55 @@ def _pending_detail(
     return "; ".join(parts)
 
 
-def _authority_recovery_required(marker: object, lineage: dict[str, object]) -> str:
-    return authority_recovery_required(
-        marker,
-        lineage,
-        remedy=(
-            "An install must not ship past that. If both name the same Owner Domain and this "
-            "Host is intact, the stale side is this controller — one Owner's material used to "
-            "commission a second board names that board — and trust-host-authority adopts what "
-            "this Host established without touching it. Otherwise restore the matching "
-            "Authority backup, or create a new Host (all data is lost; Mobile must pair again) "
-            "with install --reset-existing --wipe-authority-data --apply."
-        ),
-    )
+def _owner_material_names_complete(owner_files: Mapping[str, object]) -> bool:
+    """Whether a restore package carries exactly the Owner material.
+
+    The Authority record this side used to keep may travel in an older package;
+    it is allowed, and not read for anything the Host state beside it does not
+    already say.
+    """
+
+    return set(owner_files) - {LEGACY_AUTHORITY_STATE} == set(OWNER_DOMAIN_MATERIAL_NAMES)
+
+
+def _packaged_directory_generation(material_root: Path) -> int | None:
+    """The generation a packaged signed directory names, before anything reissues it."""
+
+    try:
+        value = json.loads((material_root / "owner-domain-descriptor.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    generation = value.get("owner_domain_generation") if isinstance(value, dict) else None
+    return generation if type(generation) is int else None
+
+
+def _held_directory(material_root: Path) -> bytes | None:
+    """The signed directory this material last issued or adopted, verbatim."""
+
+    try:
+        return (material_root / "owner-domain-descriptor.json").read_bytes()
+    except OSError:
+        return None
+
+
+def _previously_issued_directory(material_root: Path) -> dict[str, object] | None:
+    """What this material last put a directory to, if anything.
+
+    Shown on a first install so an operator sees that this Owner material has
+    spoken for a Host before. Not a refusal: a first install that failed before
+    Hub consumed its capability leaves exactly this behind and must be retried.
+    """
+
+    try:
+        value = json.loads((material_root / "owner-domain-descriptor.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(value, dict):
+        return None
+    return {
+        key: value.get(key)
+        for key in ("owner_domain_generation", "directory_revision", "issued_at", "descriptor_uri")
+    }
 
 
 def _same_state(entry: str, declared: str) -> bool:
@@ -264,7 +298,7 @@ class EidolonPiController:
             reset=self.reset,
             app_ready=self.app_ready,
             authority_capability=self.authority_capability,
-            commit_authority_capability=self.commit_authority_capability,
+            confirm_authority_established=self.confirm_authority_established,
             progress=progress,
         )
 
@@ -1006,12 +1040,11 @@ class EidolonPiController:
             if new_identity and self.app is not None:
                 with replacement_inputs(
                     self.preflight.sources.resolved_config(), self.preflight.read_exact_source_file,
-                    owner_root=self.host_layer.materializer().material_root, port=self.app.hub_https_port,
+                    owner_root=self.host_layer.materializer().material_root,
                 ) as replacement:
                     result = replacement.commit()
-                self.host_layer._deployment_identity = None
-                self.host_layer.prepare()
-                return {**result, "host_application": self.host_layer.public_contract()}
+                self.host_layer.forget_host()
+                return {**result, "host_application": self.host_layer.initialize_owner_material()}
             result = initialize_install_inputs(
                 self.preflight.sources.resolved_config(),
                 self.preflight.read_exact_source_file,
@@ -1019,10 +1052,10 @@ class EidolonPiController:
             )
             if self.app is None:
                 return result
-            self.host_layer.prepare()
-            # The contract describes the Host binding, which the materializer
-            # owns; the assets it produced are the private material itself.
-            return {**result, "host_application": self.host_layer.public_contract()}
+            # The Owner root, signer and TLS leaf are created here; no directory
+            # is, because a directory names a generation and that is something a
+            # Host establishes. The contract describes the Host binding.
+            return {**result, "host_application": self.host_layer.initialize_owner_material()}
         except ASSET_ERRORS as exc:
             raise OperationsError(str(exc)) from exc
 
@@ -1343,13 +1376,13 @@ class EidolonPiController:
         if wipe_authority_data and self.app is not None:
             with replacement_inputs(
                 self.preflight.sources.resolved_config(), self.preflight.read_exact_source_file,
-                owner_root=self.host_layer.materializer().material_root, port=self.app.hub_https_port,
+                owner_root=self.host_layer.materializer().material_root,
             ) as replacement:
                 result = self.transport.run_agent("reset-host", payload, timeout=600)
                 if result.get("status") != "reset":
                     raise OperationsError("Host reset returned invalid evidence")
                 result = {**result, "identity": replacement.commit()}
-                self.host_layer._deployment_identity = None
+                self.host_layer.forget_host()
         else:
             result = self.transport.run_agent("reset-host", payload, timeout=600)
             if result.get("status") != "reset":
@@ -1477,88 +1510,84 @@ class EidolonPiController:
 
     # -- Owner Authority capability an install carries -------------------------
 
-    def _observed_authority_lineage(self) -> dict[str, object]:
-        """What the Host holds today, asked before anything is shipped to it."""
-
-        observed = self.transport.run_agent(
-            "authority-lineage", self.host_layer.target_payload(), timeout=120
-        )
-        if observed.get("status") != "observed" or set(observed) != {
-            "status",
-            "marker",
-            "anchor",
-            "established",
-        }:
-            raise OperationsError("Owner Authority lineage observation is invalid")
-        return observed
-
     def authority_capability(self, *, will_wipe: bool, apply: bool) -> dict[str, object] | None:
-        """Bootstrap a new identity or preserve an established one; never rebuild implicitly."""
+        """Decide what this install is, from the Host's report and this profile's record.
+
+        Nothing here compares a generation this side kept against one the Host
+        holds: this side keeps none. The Host is asked what it has established
+        and which board it is, this profile is asked which board it delivered
+        to, and the situation is named (:mod:`eidolon_ops.install_decision`).
+        A Host holding nothing is rendered a fresh capability at generation 1;
+        a Host that has established an Authority is rendered exactly that, with
+        the directory it already serves adopted rather than reissued.
+
+        A plan observes and decides. Only an apply renders, because rendering
+        adopts the Host's directory into this material, and a plan writes
+        nothing.
+        """
 
         if self.app is None:
             return None
         if will_wipe:
             raise OperationsError("factory reset must prepare a new Host identity before install")
         materializer = self.host_layer.materializer()
-        try:
-            current = materializer.owner_assets()
-        except OwnerDomainAssetError as exc:
-            raise OperationsError(str(exc)) from exc
-        observed = self._observed_authority_lineage()
-        if observed["anchor"] is not None and observed["marker"] != observed["anchor"]:
-            raise OperationsError("AUTHORITY_RECOVERY_REQUIRED: database and saved authorization state disagree; restore the complete backup")
-        # A capability the Host can prove it used, but whose use this
-        # controller never got to record, is consumed. Reading it as pending
-        # would hand a wiped Host the state id its destroyed database carried.
-        if (
-            decide_owner_authority(
-                current,
-                marker=observed["marker"],
-                established=observed["established"],
-            )
-            is AuthorityDecision.RECORD_CONSUMED
-        ):
+        retired = retire_legacy_authority_state(materializer.material_root)
+        context = self.host_layer.observe_install_context()
+        decision = self.host_layer.decide_install(context)
+        authority = self.host_layer.adopt_decision(context, decision)
+        owner_domain_id = materializer.owner_domain_id()
+        served = None if context.directory is None else context.directory.encode("utf-8")
+        held = _held_directory(materializer.material_root)
+        report: dict[str, object] = {
+            "decision": str(decision),
+            "owner_domain_id": owner_domain_id,
+            "owner_domain_generation": authority.owner_domain_generation,
+            "lineage": authority.lineage(owner_domain_id),
+            "delivery": (
+                "verified"
+                if decision is InstallDecision.CONTINUE
+                else "recorded once the Host proves it established this Authority"
+            ),
+            "directory": (
+                "current"
+                if served is not None and held == served
+                else "adopted from the Host"
+                if served is not None
+                else "issued"
+            ),
+            "observed": context.report(),
+            "legacy_state_removed": retired,
+        }
+        if decision is InstallDecision.FIRST_INSTALL:
+            # The state id a plan shows is not the one an apply mints; it says
+            # so rather than letting a reader match two values that never will.
+            report["state_id_provisional"] = not apply
+            previous = _previously_issued_directory(materializer.material_root)
+            if previous is not None:
+                report["material_previously_issued"] = previous
+        if apply:
             try:
-                if apply:
-                    mark_authority_bootstrapped(
-                        materializer.material_root,
-                        owner_domain_id=current.owner_domain_id,
-                        owner_domain_generation=current.owner_domain_generation,
-                        authority_state_id=current.authority_state_id,
-                    )
-                current = replace(current, bootstrap_pending=False)
+                rendered = self.host_layer.materializer().owner_assets()
             except OwnerDomainAssetError as exc:
                 raise OperationsError(str(exc)) from exc
-        lineage = authority_lineage(current)
-        marker = observed["marker"]
-        decision = decide_owner_authority(
-            current, marker=marker, established=observed["established"]
-        )
-        if decision is AuthorityDecision.RECOVERY_REQUIRED:
-            raise OperationsError(_authority_recovery_required(marker, lineage))
-        if decision in {
-            AuthorityDecision.CARRY_PENDING,
-            AuthorityDecision.KEEP_ESTABLISHED,
-        }:
-            return {
-                "decision": str(decision),
-                "owner_domain_id": current.owner_domain_id,
-                "owner_domain_generation": current.owner_domain_generation,
-                "generation_advanced": False,
-                "observed": observed,
-                "lineage": lineage,
-            }
-        raise OperationsError("AUTHORITY_RECOVERY_REQUIRED: restore the complete Host backup or explicitly initialize a new Host")
+            if served is not None and rendered.descriptor != served:
+                report["directory"] = (
+                    "delivering this material's newer revision"
+                    if rendered.descriptor == held
+                    else "reissued at the next revision"
+                )
+        return report
 
-    def commit_authority_capability(
+    def confirm_authority_established(
         self, capability: dict[str, object] | None, installed: object
     ) -> dict[str, object] | None:
-        """Record the one-shot capability as spent, against the Host's proof.
+        """Take the Host's word that it established what was shipped, then record the board.
 
-        Nothing else does this.  A first install left the controller saying
-        ``bootstrap_pending`` forever, which is why ``authority-backup``
-        refused every Host that had only ever been installed, and why the
-        decision above could not have been made from the material root alone.
+        The Host's report of its own marker is the only proof accepted. What
+        gets written on it is the delivery binding, and only for an install
+        that had none — a first install, or a Host from before bindings were
+        written that proved it holds this identity. Nothing about the
+        Authority itself is written anywhere on this side.
         """
 
         if capability is None:
@@ -1570,142 +1599,31 @@ class EidolonPiController:
                 "the installed Host did not establish the Owner Authority lineage this "
                 f"install carried: expected {expected}, Host reported {reported}"
             )
-        materializer = self.host_layer.materializer()
-        try:
-            mark_authority_bootstrapped(
-                materializer.material_root,
-                owner_domain_id=str(expected["owner_domain_id"]),
-                owner_domain_generation=int(expected["owner_domain_generation"]),
-                authority_state_id=str(expected["state_id"]),
-            )
-        except OwnerDomainAssetError as exc:
-            raise OperationsError(str(exc)) from exc
-        return {"status": "authority_bootstrap_consumed", "authority": expected}
-
-    def trust_host_authority(
-        self, *, apply: bool = False, replace: str | None = None
-    ) -> dict[str, object]:
-        """Record which Authority lineage this profile's Owner material speaks for.
-
-        The counterpart of the refusal in :meth:`authority_capability`, and the
-        answer that refusal could not give. Disagreement is always worth
-        refusing, but the vocabulary named only two ways out — a backup, and a
-        factory reset — and both assume the *Host* is the side that lost
-        something. On a bench the common case is the other one: one Owner's
-        material was used to commission a second board, so the material now
-        names that board, while the board in front of you is intact and holds
-        every Claim it ever issued. Nothing is wrong with the Host, and until
-        this existed there was no way to say so that did not destroy it.
-
-        Like ``trust-host-key``, this reports what it found and makes the
-        operator name what they confirmed, because the part that matters cannot
-        be proved from here: the directory is accepted only if this Owner root
-        signed it, but a state id is a value in the Host's database and carries
-        no signature. Unlike ``trust-host-key``, what gets recorded is checked
-        again by every later operation — the install gate asks the Host itself,
-        so adopting the wrong lineage blocks an install rather than permitting
-        one. That is also why this writes nothing to the Host and asks it to
-        change nothing.
-        """
-
-        self.preflight.validate_ssh_material()
-        if self.app is None:
-            raise OperationsError("Owner Authority adoption requires the Pi Host app contract")
-        materializer = self.host_layer.materializer()
-        try:
-            current = materializer.owner_assets()
-        except OwnerDomainAssetError as exc:
-            raise OperationsError(str(exc)) from exc
-        observed = self.transport.run_agent(
-            "owner-directory", self.host_layer.target_payload(), timeout=120
-        )
-        directory = observed.get("directory")
-        established = observed.get("established")
-        if observed.get("status") != "observed" or not isinstance(directory, str):
-            raise OperationsError("Host Owner directory observation is invalid")
-        if not isinstance(established, dict):
-            # Exactly the case adoption must not paper over: the two copies of
-            # the Host's own lineage disagree, so there is no established one to
-            # adopt and the Host is the side that lost something after all.
-            raise OperationsError(
-                "AUTHORITY_RECOVERY_REQUIRED: this Host's database and saved authorization "
-                "state do not agree, so it has no established lineage to adopt; restore its "
-                "complete backup"
-            )
-        profile = authority_lineage(current)
-        report: dict[str, object] = {
-            "host": self.config.host.target,
-            "material_root": str(materializer.material_root),
-            "profile_lineage": profile,
-            "host_lineage": established,
-            "directory_matches": current.descriptor.decode("utf-8") == directory,
+        decision = InstallDecision(str(capability["decision"]))
+        if decision.records_delivery:
+            self.host_layer.record_delivery()
+        return {
+            "status": "authority_established",
+            "authority": expected,
+            "delivery": "recorded" if decision.records_delivery else "verified",
         }
-        if profile == established and report["directory_matches"]:
-            report["status"] = "current"
-            report["detail"] = (
-                "this profile's Owner material already speaks for the lineage this Host "
-                "established; nothing to write"
-            )
-            return report
-        report["status"] = "differs"
-        report["detail"] = (
-            f"this profile's Owner material names {profile}, and this Host has established "
-            f"{established}. Adopting takes nothing from the Host and reissues nothing — the "
-            "signed directory it serves is adopted as it stands. Confirm the state id against "
-            "the Host itself (`/var/lib/eidolon/hub/authority-lineage.json`), then name it: "
-            f"--replace {established['state_id']} --apply"
-        )
-        if not apply:
-            return report
-        if replace is None:
-            raise OperationsError(str(report["detail"]))
-        if replace != established["state_id"]:
-            raise OperationsError(
-                f"--replace names {replace!r}, but this Host has established "
-                f"{established['state_id']!r}. Nothing was written. Either the Host's lineage "
-                "changed since the plan ran, or the state id being confirmed is not this Host's."
-            )
-        try:
-            adopted = adopt_host_authority(
-                materializer.material_root,
-                directory=directory.encode("utf-8"),
-                lineage=established,
-            )
-        except OwnerDomainAssetError as exc:
-            raise OperationsError(str(exc)) from exc
-        report["status"] = "recorded"
-        report["adopted"] = {
-            "contract_version": adopted["contract_version"],
-            "owner_domain_id": adopted["owner_domain_id"],
-            "owner_domain_generation": adopted["owner_domain_generation"],
-            "state_id": adopted["authority_state_id"],
-        }
-        report["directory_matches"] = True
-        report["detail"] = (
-            "this profile's Owner material now speaks for the lineage this Host established, "
-            "and holds the directory this Host serves. No key, no device Claim and nothing on "
-            "the Host was changed."
-        )
-        return report
 
     def trust_host_delivery(self, *, apply: bool = False) -> dict[str, object]:
         """Record which board this profile's Host identity was delivered to.
 
-        An install writes this binding as it hands a new Host its identity, and
-        every install after that only verifies it — which is what stops one
-        profile's credentials from being handed to a second board that happens
-        to answer at the same name. Hosts installed before the binding existed
-        have no such evidence, so that verification has nothing to check and
-        refuses instead, permanently, on Hosts that are perfectly fine.
+        An install writes this binding once the Host has proved it established
+        the Authority the install carried, and every operation after that only
+        verifies it — which is what stops one profile's credentials from being
+        handed to a second board that happens to answer at the same name. Hosts
+        installed before the binding existed have no such evidence, and an
+        install adopts it on its own when the Host proves it holds the identity;
+        this verb records the same evidence without shipping a release.
 
-        The evidence is recoverable without trusting the operator's memory,
-        because a Host that already holds this identity can prove it: it serves
-        an Owner directory naming this profile's public Host id, it holds the
-        very identity secret this profile issued, and it has established the
-        Authority this profile speaks for. A board that merely answers at this
-        address proves none of those. All three are required here, and the
-        second is the one that matters — the first two survive a restore onto
-        different hardware, which is a migration, not a delivery.
+        The proof is the Host's, not the operator's memory: it serves an Owner
+        directory naming this profile's public Host id and signed by this
+        profile's Owner root, it holds the very identity secret this profile
+        issued, and it has established this Owner's Authority. A board that
+        merely answers at this address proves none of those.
 
         Recording only ever fills an absent binding. One that names another
         board is refused, not replaced: moving an identity between boards is a
@@ -1717,62 +1635,51 @@ class EidolonPiController:
         if self.app is None:
             raise OperationsError("Host delivery evidence requires the Pi Host app contract")
         materializer = self.host_layer.materializer()
+        context = self.host_layer.observe_install_context()
+        decision = self.host_layer.decide_install(context)
         try:
-            identity = materializer.identity()
-            owner = authority_lineage(materializer.owner_assets(identity=identity))
+            host_id = materializer.identity().host_id
         except ASSET_ERRORS as exc:
             raise OperationsError(str(exc)) from exc
-        installed = self.transport.run_agent("deployment-identity", {}, timeout=30)
-        hardware = self.transport.run_agent("host-hardware", {}, timeout=30).get("hardware")
-        if installed.get("status") != "observed" or not isinstance(hardware, dict):
-            raise OperationsError("installed Host identity or hardware could not be observed")
-        preserved = installed.get("preserved_files")
-        recorded_secret = preserved.get("host_identity.ed25519") if isinstance(preserved, dict) else None
-        proof = {
-            "serves_this_host_id": installed.get("host_id") == identity.host_id,
-            "holds_this_identity": recorded_secret
-            == file_sha256(self.config.install_files["host_identity"]),
-            "established_this_authority": installed.get("authority") == owner,
-        }
         report: dict[str, object] = {
             "host": self.config.host.target,
-            "host_id": identity.host_id,
-            "hardware": hardware,
-            "proof": proof,
-            "binding_file": str(materializer.material_root.parent / BINDING_FILE),
+            "host_id": host_id,
+            "hardware": dict(context.hardware),
+            "decision": str(decision),
+            "binding_file": str(self.host_layer.delivery_root() / BINDING_FILE),
         }
-        if not all(proof.values()):
-            raise OperationsError(
-                "this Host does not prove it already holds this profile's identity "
-                f"{proof}. A Host that cannot is either a different board or one this "
-                "profile has never installed; deliver it with install, or reconcile the "
-                "Authority first with trust-host-authority. Nothing was written."
-            )
-        root = materializer.material_root.parent
-        existing = recorded_delivery(root)
-        if existing is not None:
-            # Mismatch raises out of here, carrying hardware.py's own sentence
-            # about what reusing another board's credentials would mean.
-            try:
-                verify_binding(existing, identity.host_id, hardware)
-            except HostHardwareError as exc:
-                raise OperationsError(str(exc)) from exc
+        if decision is InstallDecision.CONTINUE:
             report["status"] = "current"
             report["detail"] = "this profile already records this board as holding its identity"
             return report
+        if decision is InstallDecision.FIRST_INSTALL:
+            raise OperationsError(
+                "this Host holds no Authority, so there is no delivery to record; deliver it "
+                "with install. Nothing was written."
+            )
+        if decision is not InstallDecision.ADOPT_DELIVERY:
+            raise self.host_layer.refusal(decision, context)
+        # The decision checked the id the directory names and the identity
+        # digest; the third proof is that this Owner root signed that directory.
+        try:
+            verify_served_directory(
+                materializer.material_root, (context.directory or "").encode("utf-8")
+            )
+        except OwnerDomainAssetError as exc:
+            raise OperationsError(
+                f"this Host does not prove it holds this profile's identity: {exc}. "
+                "Nothing was written."
+            ) from exc
         report["status"] = "absent"
         report["detail"] = (
-            "this profile has no delivery evidence, which is why install refuses it. This "
-            "Host proves it already holds the identity, so recording what it reports adds "
-            "the evidence rather than the fact. Afterwards this identity cannot be moved to "
-            "another board except by a complete restore: --apply"
+            "this profile has no delivery evidence for this Host. The Host proves it already "
+            "holds the identity, so recording what it reports adds the evidence rather than "
+            "the fact. Afterwards this identity cannot be moved to another board except by "
+            "a complete restore: --apply"
         )
         if not apply:
             return report
-        try:
-            bind_delivery(root, identity.host_id, hardware, allow_create=True)
-        except (HostHardwareError, OperationsError) as exc:
-            raise OperationsError(str(exc)) from exc
+        self.host_layer.record_delivery()
         report["status"] = "recorded"
         report["detail"] = (
             "this profile now records the board it had already delivered this identity to; "
@@ -1853,19 +1760,26 @@ class EidolonPiController:
         if self.app is None:
             raise OperationsError("Owner Authority backup requires the Pi Host app contract")
         materializer = self.host_layer.materializer()
-        try:
-            owner = materializer.owner_assets()
-        except OwnerDomainAssetError as exc:
-            raise OperationsError(str(exc)) from exc
-        if owner.bootstrap_pending:
-            raise OperationsError(
-                "AUTHORITY_RESTORE_INCOMPLETE: Host authorization has not completed initialization; only established state can be backed up"
-            )
+        # What is backed up is what the Host has established, read from the
+        # Host. A Host holding nothing has nothing to back up; one that is not
+        # this profile's is refused with the reason.
+        context = self.host_layer.observe_install_context()
+        decision = self.host_layer.decide_install(context)
+        if not decision.host_established:
+            if decision.proceeds:
+                raise OperationsError(
+                    "AUTHORITY_RESTORE_INCOMPLETE: this Host has established no Authority; "
+                    "only established state can be backed up"
+                )
+            raise self.host_layer.refusal(decision, context)
+        assert context.established is not None
+        established = dict(context.established)
+        retire_legacy_authority_state(materializer.material_root)
         release_id = self._active_release("release_id")
         request = {
-            "owner_domain_id": owner.owner_domain_id,
-            "owner_domain_generation": owner.owner_domain_generation,
-            "state_id": owner.authority_state_id,
+            "owner_domain_id": established["owner_domain_id"],
+            "owner_domain_generation": established["owner_domain_generation"],
+            "state_id": established["state_id"],
         }
         captured = self.transport.run_agent(
             "authority-backup",
@@ -1998,7 +1912,7 @@ class EidolonPiController:
             or not isinstance(host_files, dict)
             or set(host_files) != {"database", "anchor"}
             or not isinstance(owner_files, dict)
-            or set(owner_files) != set(OWNER_DOMAIN_MATERIAL_NAMES)
+            or not _owner_material_names_complete(owner_files)
         ):
             raise OperationsError("AUTHORITY_RESTORE_INVALID: restore manifest shape is invalid")
         try:
@@ -2065,27 +1979,33 @@ class EidolonPiController:
                     raise OperationsError(
                         "AUTHORITY_RESTORE_INVALID: restore file evidence drifted"
                     )
-        state_path = source / "owner-material/owner-domain-state.json"
-        try:
-            recovery_state = json.loads(state_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            raise OperationsError(
-                "AUTHORITY_RESTORE_INVALID: Owner recovery state is invalid"
-            ) from exc
-        if (
-            not isinstance(recovery_state, dict)
-            or recovery_state.get("owner_domain_id") != authority["owner_domain_id"]
-            or recovery_state.get("owner_domain_generation") != authority["owner_domain_generation"]
-            or recovery_state.get("authority_state_id") != authority["state_id"]
-            or recovery_state.get("bootstrap_pending") is not False
-        ):
-            raise OperationsError(
-                "AUTHORITY_RESTORE_MISMATCH: Owner root state and Authority snapshot differ"
-            )
+        # A package from before this side stopped keeping an Authority record
+        # still carries one. It is checked against the snapshot it travelled
+        # with and not otherwise read: the Host state in the same package is
+        # what the restore establishes.
+        if LEGACY_AUTHORITY_STATE in owner_files:
+            state_path = source / "owner-material" / LEGACY_AUTHORITY_STATE
+            try:
+                recovery_state = json.loads(state_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise OperationsError(
+                    "AUTHORITY_RESTORE_INVALID: Owner recovery state is invalid"
+                ) from exc
+            if (
+                not isinstance(recovery_state, dict)
+                or recovery_state.get("owner_domain_id") != authority["owner_domain_id"]
+                or recovery_state.get("owner_domain_generation") != authority["owner_domain_generation"]
+                or recovery_state.get("authority_state_id") != authority["state_id"]
+                or recovery_state.get("bootstrap_pending") is not False
+            ):
+                raise OperationsError(
+                    "AUTHORITY_RESTORE_MISMATCH: Owner root state and Authority snapshot differ"
+                )
+        restored_authority = HostAuthority.established_from(authority)
         materializer = self.host_layer.materializer()
         # Validate the complete private root, key pairs, certificates,
-        # descriptor signature, endpoint binding and recovery state without
-        # allowing validation to rewrite the supplied backup package.
+        # descriptor signature and endpoint binding without allowing validation
+        # to rewrite the supplied backup package.
         try:
             with tempfile.TemporaryDirectory(prefix="eidolon-authority-restore-") as temporary:
                 validation_root = Path(temporary) / "owner-domain"
@@ -2093,18 +2013,18 @@ class EidolonPiController:
                 os.chmod(validation_root, 0o700)
                 for path in validation_root.iterdir():
                     os.chmod(path, 0o600)
+                packaged_generation = _packaged_directory_generation(validation_root)
                 validated = ensure_owner_domain_assets(
                     validation_root,
                     materializer.identity(),
                     self.app.hub_https_port,
+                    restored_authority,
                 )
         except OwnerDomainAssetError as exc:
             raise OperationsError(f"AUTHORITY_RESTORE_INVALID: {exc}") from exc
         if (
             validated.owner_domain_id != authority["owner_domain_id"]
-            or validated.owner_domain_generation != authority["owner_domain_generation"]
-            or validated.authority_state_id != authority["state_id"]
-            or validated.bootstrap_pending
+            or packaged_generation != authority["owner_domain_generation"]
         ):
             raise OperationsError(
                 "AUTHORITY_RESTORE_MISMATCH: validated Owner root lineage differs from snapshot"
@@ -2112,15 +2032,10 @@ class EidolonPiController:
         material_installed = False
         if materializer.material_root.exists():
             try:
-                current = materializer.owner_assets()
+                current = owner_domain_id_of(materializer.material_root)
             except OwnerDomainAssetError as exc:
                 raise OperationsError(str(exc)) from exc
-            if (
-                current.owner_domain_id != authority["owner_domain_id"]
-                or current.owner_domain_generation != authority["owner_domain_generation"]
-                or current.authority_state_id != authority["state_id"]
-                or current.bootstrap_pending
-            ):
+            if current != authority["owner_domain_id"]:
                 raise OperationsError(
                     "AUTHORITY_RESTORE_MISMATCH: current Owner root lineage differs from backup"
                 )
@@ -2141,7 +2056,6 @@ class EidolonPiController:
                 "readiness_compatibility": readiness,
                 "authority": authority,
                 "owner_root_import_required": not materializer.material_root.exists(),
-                "generation_advanced": False,
                 "next": "rerun with --apply to restore this exact same-generation package",
             }
         # Re-render Host endpoint/TLS material from the restored root before Hub
@@ -2173,6 +2087,10 @@ class EidolonPiController:
                 materializer.material_root.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copytree(source / "owner-material", materializer.material_root)
                 material_installed = True
+            retire_legacy_authority_state(materializer.material_root)
+            # The Host is about to hold what the package says; render for that,
+            # not for whatever its database held a moment ago.
+            self.host_layer.use_host_authority(restored_authority)
             refreshed = self.host_layer.refresh(release_id)
             result = self.transport.run_agent("authority-restore", payload, timeout=420)
             if result.get("status") != "authority_restored" or result.get("authority") != authority:

@@ -16,7 +16,11 @@ from eidolon_ops.install_inputs import (
     InstallInputError,
     host_rendered_fields,
 )
+from eidolon_ops.owner_domain_assets import HostAuthority
 from eidolon_ops.paths import AppAccess
+
+#: A Host holding nothing, with the state id fixed so two renders compare equal.
+FRESH = HostAuthority(owner_domain_generation=1, state_id="authority-state_test", established=False)
 
 HUB_TEMPLATE = """\
 onboarding:
@@ -50,7 +54,7 @@ def test_pi_application_assets_are_stable_and_owner_scoped(config) -> None:
     identity_path = config.install_files["host_identity"]
     identity_path.write_bytes(b"a" * 32)
     identity_path.chmod(0o600)
-    materializer = HostApplicationMaterializer(config, _app("192.168.100.15"), b"runtime")
+    materializer = HostApplicationMaterializer(config, _app("192.168.100.15"), b"runtime", host_authority=FRESH)
 
     first = materializer.prepare(HUB_TEMPLATE)
     second = materializer.prepare(HUB_TEMPLATE)
@@ -78,7 +82,7 @@ def test_host_replacement_keeps_owner_contract_and_changes_observation(config) -
     identity_path = config.install_files["host_identity"]
     identity_path.write_bytes(b"a" * 32)
     identity_path.chmod(0o600)
-    first = HostApplicationMaterializer(config, _app("192.168.100.15"), b"runtime")
+    first = HostApplicationMaterializer(config, _app("192.168.100.15"), b"runtime", host_authority=FRESH)
     first_contract = first.public_contract()
 
     identity_path.write_bytes(b"b" * 32)
@@ -94,7 +98,7 @@ def test_pi_environment_targets_the_same_host_bound_hub(config) -> None:
     identity_path = config.install_files["host_identity"]
     identity_path.write_bytes(b"a" * 32)
     identity_path.chmod(0o600)
-    materializer = HostApplicationMaterializer(config, _app("192.168.100.15"), b"runtime")
+    materializer = HostApplicationMaterializer(config, _app("192.168.100.15"), b"runtime", host_authority=FRESH)
     owner = materializer.prepare(HUB_TEMPLATE)
     local_api = materializer.render_environment(
         "local-api.env",
@@ -121,7 +125,7 @@ def test_host_application_rejects_unsafe_or_drifting_material(config) -> None:
     identity_path = config.install_files["host_identity"]
     identity_path.write_bytes(b"a" * 32)
     identity_path.chmod(0o600)
-    materializer = HostApplicationMaterializer(config, _app("192.168.100.15"), b"runtime")
+    materializer = HostApplicationMaterializer(config, _app("192.168.100.15"), b"runtime", host_authority=FRESH)
     assert materializer.render_environment("data.env", "KEY=value\n") == "KEY=value\n"
     with pytest.raises(EnvironmentFileError, match="Host application environment is invalid"):
         materializer.render_environment("local-api.env", "invalid")
@@ -142,7 +146,7 @@ def test_host_application_rejects_incomplete_and_unsafe_paths(config) -> None:
     identity_path = config.install_files["host_identity"]
     identity_path.write_bytes(b"a" * 32)
     identity_path.chmod(0o600)
-    materializer = HostApplicationMaterializer(config, _app("192.168.100.15"), b"runtime")
+    materializer = HostApplicationMaterializer(config, _app("192.168.100.15"), b"runtime", host_authority=FRESH)
     root = materializer.material_root
     root.mkdir(mode=0o700)
     (root / "hub.crt").write_text("partial", encoding="utf-8")
@@ -179,7 +183,7 @@ def test_starting_the_hub_opens_the_lan_with_it(config) -> None:
     identity_path = config.install_files["host_identity"]
     identity_path.write_bytes(b"a" * 32)
     identity_path.chmod(0o600)
-    materializer = HostApplicationMaterializer(config, _app("192.168.100.15"), b"runtime")
+    materializer = HostApplicationMaterializer(config, _app("192.168.100.15"), b"runtime", host_authority=FRESH)
 
     assets = materializer.prepare(HUB_TEMPLATE)
 

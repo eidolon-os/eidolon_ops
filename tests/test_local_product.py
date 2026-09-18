@@ -749,12 +749,10 @@ def test_a_new_owner_domain_asset_cannot_be_silently_dropped(tmp_path: Path) -> 
         )
 
 
-def _authority_state(product: LocalProductSource) -> dict[str, object]:
-    """The controller-side Authority record, read the way this Host stores it."""
+def _placed_capability(product: LocalProductSource) -> dict[str, object]:
+    """The capability the last prepare placed for Hub, read where Hub reads it."""
 
-    return json.loads(
-        (product._owner_material_root() / "owner-domain-state.json").read_text(encoding="utf-8")
-    )
+    return json.loads(product._authority_bootstrap_path().read_text(encoding="utf-8"))
 
 
 def _established_hub_authority(product: LocalProductSource) -> dict[str, object]:
@@ -825,7 +823,7 @@ def _started_source_run(product: LocalProductSource) -> dict[str, object]:
     product._ensure_hub_tls_identity()
     lineage = _established_hub_authority(product)
     recorded = product.commit_owner_authority()
-    assert recorded["status"] == "authority_bootstrap_consumed"
+    assert recorded["status"] == "authority_established"
     assert recorded["authority"] == lineage
     return lineage
 
@@ -875,27 +873,34 @@ def test_a_bootstrapped_source_run_is_not_left_pending_a_reset_authority(
     product.profile.paths.config_root.chmod(0o700)
 
     product._ensure_hub_tls_identity()
-    assert _authority_state(product)["bootstrap_pending"] is True
+    assert _placed_capability(product)["operation"] == "owner-authority.bootstrap"
 
-    _established_hub_authority(product)
-    product.commit_owner_authority()
+    lineage = _established_hub_authority(product)
+    recorded = product.commit_owner_authority()
 
-    assert _authority_state(product)["bootstrap_pending"] is False
-    # The capability the next prepare places says so too, so a Hub that reads it
-    # against a populated database has nothing to accept.
+    assert recorded["status"] == "authority_established"
+    assert recorded["delivery"] == "recorded"
+    # Nothing on this side keeps a record of the Authority to be left pending:
+    # the capability the next prepare places is rendered from what Hub holds,
+    # so a Hub that reads it against a populated database has nothing to accept.
     product._ensure_hub_tls_identity()
-    placed = json.loads(product._authority_bootstrap_path().read_text(encoding="utf-8"))
+    placed = _placed_capability(product)
     assert placed["operation"] == "owner-authority.bootstrap-consumed"
+    assert {key: placed[key] for key in lineage} == lineage
+    assert not (product._owner_material_root() / "owner-domain-state.json").exists()
 
 
 def test_a_bootstrap_the_host_never_completed_retries_the_same_generation(
     tmp_path: Path,
 ) -> None:
-    """A pending generation is a durable retry journal, not a fresh decision.
+    """A ``start`` whose Hub never came up is retried as the first install it still is.
 
-    A ``start`` whose Hub never came up leaves no marker and no anchor. Minting
-    a second generation for the retry would fence off an Authority that was
-    never established, and burn a generation per failed attempt.
+    It leaves no marker and no anchor, and this side records no delivery until
+    Hub proves it established something. So the retry is another first
+    install at generation 1: nothing was fenced off, and no generation is
+    burnt per failed attempt. The state id is minted afresh — nothing has ever
+    seen the previous one — and the Hub takes whichever capability is present
+    when it first comes up.
     """
 
     product = _product(tmp_path, foundation_mode="external")
@@ -903,14 +908,19 @@ def test_a_bootstrap_the_host_never_completed_retries_the_same_generation(
     product.profile.paths.config_root.chmod(0o700)
 
     product._ensure_hub_tls_identity()
-    first = json.loads(product._authority_bootstrap_path().read_text(encoding="utf-8"))
+    first = _placed_capability(product)
     unproven = product.commit_owner_authority()
 
     assert unproven["status"] == "authority_bootstrap_unproven"
-    assert unproven["decision"] == "carry_pending_capability"
+    assert unproven["decision"] == "first_install"
+    assert not (product._delivery_root() / "host_delivery.json").exists()
 
     product._ensure_hub_tls_identity()
-    assert json.loads(product._authority_bootstrap_path().read_text(encoding="utf-8")) == first
+    retried = _placed_capability(product)
+    assert retried["operation"] == first["operation"] == "owner-authority.bootstrap"
+    assert retried["owner_domain_id"] == first["owner_domain_id"]
+    assert retried["owner_domain_generation"] == first["owner_domain_generation"] == 1
+    assert product._owner_domain_generation() == 1
 
 
 def test_a_source_run_refuses_to_start_over_an_authority_it_cannot_account_for(
@@ -1183,6 +1193,8 @@ def test_accidentally_lost_source_authority_never_rebuilds(tmp_path):
     before = {p.name: p.read_bytes() for p in root.iterdir()}
     product._hub_database_path().unlink()
     product._authority_anchor_path().unlink()
-    with pytest.raises(OperationsError, match=r"AuthorityRecoveryRequired|AUTHORITY_RECOVERY_REQUIRED"):
+    # This machine recorded that it stood an Authority up on this identity,
+    # so a Hub holding nothing is a loss, not a first install to retry.
+    with pytest.raises(OperationsError, match="AUTHORITY_LOST"):
         product._ensure_hub_tls_identity()
     assert {p.name: p.read_bytes() for p in root.iterdir()} == before

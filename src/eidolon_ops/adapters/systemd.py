@@ -44,7 +44,6 @@ class SystemdSupervisor:
                 Capability.KERNEL_SCHEMA_RESET,
                 Capability.DIAGNOSE,
                 Capability.TRUST_HOST_KEY,
-                Capability.TRUST_HOST_AUTHORITY,
                 Capability.TRUST_HOST_DELIVERY,
                 Capability.SSH_CONFIG,
                 Capability.BRING_UP,

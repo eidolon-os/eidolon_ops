@@ -293,21 +293,6 @@ class HostController:
             plan, report, applied=apply and report.get("status") == "recorded"
         )
 
-    def trust_host_authority(
-        self, *, apply: bool = False, replace: str | None = None
-    ) -> Evidence:
-        plan = plans.trust_host_authority(
-            self.profile.host_id, apply=apply, adopting=replace is not None
-        )
-        release = self.adapter.require_release(Capability.TRUST_HOST_AUTHORITY)
-        report = release.trust_host_authority(apply=apply, replace=replace)
-        # A profile that already speaks for this Host's lineage is a read;
-        # reporting it as applied would put a write in the run ledger that
-        # never happened.
-        return self._planned_or_applied(
-            plan, report, applied=apply and report.get("status") == "recorded"
-        )
-
     def trust_host_key(self, *, apply: bool = False, replace: str | None = None) -> Evidence:
         plan = plans.trust_host_key(
             self.profile.host_id, apply=apply, replacing=replace is not None

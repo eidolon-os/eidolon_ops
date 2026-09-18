@@ -30,8 +30,11 @@ from eidolon_ops.endpoints import HostEndpoint
 from eidolon_ops.host_application import (
     HOST_APPLICATION_STAGE_NAMES,
 )
+from eidolon_ops.host_delivery import bind_delivery
 from eidolon_ops.host_identity import derive_host_lan_identity
+from eidolon_ops.hostagent.hardware import verify_binding
 from eidolon_ops.hub_assets import HUB_SETTINGS_TEMPLATE as HUB_SETTINGS_TEMPLATE_CONTRACT
+from eidolon_ops.owner_domain_assets import HostAuthority
 from eidolon_ops.paths import AppAccess
 from eidolon_ops.process import ProcessResult
 from eidolon_ops.readiness import HostKind, expected_facts
@@ -444,6 +447,18 @@ class FakeTransport:
                 "marker": None,
                 "anchor": None,
                 "established": None,
+            },
+            # The same Host as an install sees it: nothing established, no
+            # directory served, no identity held, one permanent hardware id.
+            # `_host_established` replaces this for an installed Host.
+            "install-context": {
+                "status": "observed",
+                "marker": None,
+                "anchor": None,
+                "established": None,
+                "directory": None,
+                "hardware": {"kind": "device-tree:raspberrypi,5-model-b", "fingerprint": "sha256:" + "a" * 64},
+                "identity_sha256": None,
             },
             "ensure-service-identities": {
                 "status": "service_identities_ready",
@@ -1319,6 +1334,7 @@ def test_host_application_refresh_carries_host_identity_and_bound_environments(
     identity.chmod(0o600)
     for name in ("local_api_env", "channel_env"):
         controller.config.install_files[name].write_text("TOKEN=test\n", encoding="utf-8")
+    _host_established(controller, transport)
 
     controller.host_layer.refresh("r1")
 
@@ -1758,6 +1774,7 @@ def test_unified_pi_stage_renders_host_bound_application_assets(config) -> None:
     transport = CapturingTransport()
     controller = EidolonPiController(config, Runner(config), transport=transport, app=_app())
     stage = "/var/tmp/eidolon-secrets-host-bound"
+    _host_established(controller, transport)
 
     controller.host_layer.stage_install_files("host-bound", stage)
     payload = controller.host_layer.target_payload()
@@ -1781,6 +1798,7 @@ def test_unified_pi_stage_renders_host_bound_application_assets(config) -> None:
         transport=CapturingTransport(),
         app=dataclasses.replace(_app(), setup_code="48213097"),
     )
+    _host_established(coded, coded.transport)
     coded.host_layer.stage_install_files("host-bound", stage)
     delivered = {
         key: value
@@ -2690,15 +2708,20 @@ def test_resuming_a_bundle_after_a_commit_names_both_ways_out(config) -> None:
     assert "--release-id" in str(f.value)
 
 
-# -- the Owner Authority capability an install carries -------------------------
+# -- the Owner Authority an install carries -------------------------------------
 #
-# The bootstrap capability is one-shot: Hub takes it only into an empty
-# database and deletes it on use. What an install ships is therefore a
-# decision, and for a long time nobody made one — the install copied whatever
-# the Owner material last said. On any Host whose Hub had ever started, that
-# said `owner-authority.bootstrap-consumed`, so `--reset-existing
-# --wipe-authority-data` emptied the database and then handed it a capability
-# Hub is right to refuse. No supported sequence could reinstall such a Host.
+# The Host is the only ledger of what Authority it has established. An install
+# used to compare a generation this side kept against the Host's first, and
+# consult the hardware delivery binding — the one fact that could say whether
+# this is even the same board — last. On 2026-09-10 that let one Owner's
+# material commission a second board without a word, and then refused the first
+# board with a sentence naming only a backup nobody had and a factory reset.
+# Now this side keeps no copy: it asks the Host what it holds, asks its own
+# record which board it delivered to, names the situation, and renders for what
+# the Host holds.
+
+_BOARD = {"kind": "device-tree:raspberrypi,5-model-b", "fingerprint": "sha256:" + "a" * 64}
+_OTHER_BOARD = {"kind": "device-tree:raspberrypi,5-model-b", "fingerprint": "sha256:" + "f" * 64}
 
 
 def _authority_controller(config, transport=None) -> EidolonPiController:
@@ -2721,378 +2744,393 @@ def _authority_controller(config, transport=None) -> EidolonPiController:
     return controller
 
 
-def _material_state(controller: EidolonPiController) -> dict[str, object]:
-    path = controller.host_layer.materializer().material_root / "owner-domain-state.json"
-    return json.loads(path.read_text(encoding="utf-8"))
+def _material_root(controller: EidolonPiController) -> Path:
+    return controller.host_layer.materializer().material_root
 
 
-def _lineage_of(controller: EidolonPiController) -> dict[str, object]:
-    owner = controller.host_layer.materializer().owner_assets()
+def _material_bytes(controller: EidolonPiController) -> dict[str, bytes]:
+    root = _material_root(controller)
+    return {p.name: p.read_bytes() for p in root.iterdir()} if root.exists() else {}
+
+
+def _keys(controller: EidolonPiController) -> dict[str, bytes]:
+    root = _material_root(controller)
     return {
-        "contract_version": 1,
-        "owner_domain_id": owner.owner_domain_id,
-        "owner_domain_generation": owner.owner_domain_generation,
-        "state_id": owner.authority_state_id,
-    }
-
-
-def _host_has_established(controller: EidolonPiController, transport: FakeTransport) -> None:
-    """Say the Host's Hub started on the capability the controller now holds."""
-
-    lineage = _lineage_of(controller)
-    transport.overrides["authority-lineage"] = {
-        "status": "observed",
-        "marker": lineage,
-        "anchor": lineage,
-        "established": lineage,
-    }
-
-
-def _consume(controller: EidolonPiController) -> dict[str, object]:
-    """Bring the Owner material to the state a started Hub leaves behind."""
-
-    lineage = _lineage_of(controller)
-    controller_module.mark_authority_bootstrapped(
-        controller.host_layer.materializer().material_root,
-        owner_domain_id=str(lineage["owner_domain_id"]),
-        owner_domain_generation=int(lineage["owner_domain_generation"]),
-        authority_state_id=str(lineage["state_id"]),
-    )
-    return lineage
-
-
-def test_missing_consumed_authority_requires_recovery_without_changing_identity(config):
-    transport = FakeTransport()
-    controller = _authority_controller(config, transport)
-    _consume(controller)
-    root = controller.host_layer.materializer().material_root
-    before = {p.name: p.read_bytes() for p in root.iterdir()}
-    for apply in (False, True):
-        with pytest.raises(OperationsError, match="AuthorityRecoveryRequired"):
-            controller.authority_capability(will_wipe=False, apply=apply)
-    assert {p.name: p.read_bytes() for p in root.iterdir()} == before
-
-
-def test_wipe_cannot_reissue_an_existing_owner(config):
-    controller = _authority_controller(config, FakeTransport())
-    before = _consume(controller)
-    with pytest.raises(OperationsError, match="new Host identity"):
-        controller.authority_capability(will_wipe=True, apply=True)
-    assert _lineage_of(controller) == before
-
-
-def test_an_ordinary_install_keeps_the_generation_the_host_established(config) -> None:
-    transport = FakeTransport()
-    controller = _authority_controller(config, transport)
-    spent = _consume(controller)
-    _host_has_established(controller, transport)
-
-    capability = controller.authority_capability(will_wipe=False, apply=True)
-
-    assert capability is not None
-    assert capability["decision"] == "keep_established_lineage"
-    assert capability["generation_advanced"] is False
-    assert capability["lineage"] == spent
-    assert (
-        _material_state(controller)["owner_domain_generation"] == (spent["owner_domain_generation"])
-    )
-
-
-def test_a_host_whose_hub_names_another_authority_is_refused_not_overwritten(
-    config,
-) -> None:
-    transport = FakeTransport()
-    controller = _authority_controller(config, transport)
-    spent = _consume(controller)
-    stranger = {**spent, "state_id": "authority-state_someone-else"}
-    transport.overrides["authority-lineage"] = {
-        "status": "observed",
-        "marker": stranger,
-        "anchor": stranger,
-        "established": stranger,
-    }
-
-    with pytest.raises(OperationsError, match="AuthorityRecoveryRequired"):
-        controller.authority_capability(will_wipe=False, apply=True)
-
-
-def _commissioned_a_second_board(controller) -> tuple[dict[str, object], bytes]:
-    """Move this material on the way a second board's first install moved it.
-
-    That install found a Host with no Hub database, read it as an Authority
-    whose state was gone, and advanced the generation — leaving the material
-    naming the board it had just commissioned rather than the one still on the
-    bench. Returns what the first board keeps: its lineage, and the signed
-    directory it goes on serving.
-    """
-
-    root = controller.host_layer.materializer().material_root
-    kept = _lineage_of(controller)
-    kept_directory = (root / "owner-domain-descriptor.json").read_bytes()
-    moved = {
-        "contract_version": 1,
-        "owner_domain_id": kept["owner_domain_id"],
-        "owner_domain_generation": int(kept["owner_domain_generation"]) + 1,
-        "authority_state_id": "authority-state_the-other-board",
-        "bootstrap_pending": False,
-    }
-    (root / "owner-domain-state.json").write_text(
-        json.dumps(moved, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8"
-    )
-    # The second board's install reissued the directory at its generation, which
-    # is the other half of what this side is left holding.
-    controller.host_layer.materializer().owner_assets()
-    return kept, kept_directory
-
-
-def _host_serves(controller, transport, lineage, directory: bytes) -> None:
-    observation = {
-        "status": "observed",
-        "marker": lineage,
-        "anchor": lineage,
-        "established": lineage,
-    }
-    transport.overrides["authority-lineage"] = observation
-    transport.overrides["owner-directory"] = {
-        **observation,
-        "directory": directory.decode("utf-8"),
-    }
-
-
-def test_a_second_boards_install_leaves_this_material_naming_the_other_host(config) -> None:
-    transport = FakeTransport()
-    controller = _authority_controller(config, transport)
-    kept, kept_directory = _commissioned_a_second_board(controller)
-    _host_serves(controller, transport, kept, kept_directory)
-
-    with pytest.raises(OperationsError, match="AuthorityRecoveryRequired") as refused:
-        controller.authority_capability(will_wipe=False, apply=True)
-
-    # The refusal is right, and now says the thing that is true about this
-    # shape instead of offering only a backup and a factory reset.
-    assert "trust-host-authority" in str(refused.value)
-
-
-def test_adopting_this_hosts_lineage_unblocks_install_without_reissuing_anything(config) -> None:
-    transport = FakeTransport()
-    controller = _authority_controller(config, transport)
-    kept, kept_directory = _commissioned_a_second_board(controller)
-    _host_serves(controller, transport, kept, kept_directory)
-    root = controller.host_layer.materializer().material_root
-    keys = {
         name: (root / name).read_bytes()
         for name in ("owner-domain-root.key.pem", "authority-signing.key.pem", "hub.key", "hub.crt")
     }
 
-    planned = controller.trust_host_authority()
-    assert planned["status"] == "differs"
-    assert planned["host_lineage"] == kept
-    assert str(kept["state_id"]) in str(planned["detail"])
 
-    applied = controller.trust_host_authority(apply=True, replace=str(kept["state_id"]))
+def _host_id(controller: EidolonPiController) -> str:
+    return controller.host_layer.materializer().identity().host_id
 
-    assert applied["status"] == "recorded"
-    assert applied["adopted"] == kept
-    # Adopted, not reissued: the directory every device already holds is the
-    # directory this side now holds, byte for byte.
-    assert (root / "owner-domain-descriptor.json").read_bytes() == kept_directory
-    assert _lineage_of(controller) == kept
-    assert {name: (root / name).read_bytes() for name in keys} == keys
+
+def _identity_sha256(controller: EidolonPiController) -> str:
+    return hashlib.sha256(controller.config.install_files["host_identity"].read_bytes()).hexdigest()
+
+
+def _binding_path(controller: EidolonPiController) -> Path:
+    return _material_root(controller).parent / "host_delivery.json"
+
+
+def _lineage(
+    controller: EidolonPiController, *, generation: int = 8, state_id: str = "authority-state_board"
+) -> dict[str, object]:
+    return {
+        "contract_version": 1,
+        "owner_domain_id": controller.host_layer.materializer().owner_domain_id(),
+        "owner_domain_generation": generation,
+        "state_id": state_id,
+    }
+
+
+def _directory_at(controller: EidolonPiController, lineage: dict[str, object]) -> bytes:
+    """The signed directory a Host at this lineage serves: this Owner's, at that generation."""
+
+    materializer = controller.host_layer.materializer()
+    return controller_module.ensure_owner_domain_assets(
+        materializer.material_root,
+        materializer.identity(),
+        8443,
+        HostAuthority.established_from(lineage),
+    ).descriptor
+
+
+def _host_reports(
+    transport: FakeTransport,
+    *,
+    lineage: dict[str, object] | None = None,
+    directory: bytes | None = None,
+    hardware: dict[str, str] = _BOARD,
+    identity_sha256: str | None = None,
+    marker=...,
+    anchor=...,
+) -> None:
+    """Say what the Host answers when asked what it holds."""
+
+    marker = lineage if marker is ... else marker
+    anchor = lineage if anchor is ... else anchor
+    transport.overrides["install-context"] = {
+        "status": "observed",
+        "marker": marker,
+        "anchor": anchor,
+        "established": marker if marker is not None and marker == anchor else None,
+        "directory": None if directory is None else directory.decode("utf-8"),
+        "hardware": hardware,
+        "identity_sha256": identity_sha256,
+    }
+
+
+def _bind(controller: EidolonPiController, hardware: dict[str, str]) -> None:
+    bind_delivery(_material_root(controller).parent, _host_id(controller), hardware, allow_create=True)
+
+
+def _host_established(
+    controller: EidolonPiController, transport: FakeTransport, *, generation: int = 8, bound: bool = True
+) -> dict[str, object]:
+    """A Host that stood this Owner's Authority up and serves the directory for it.
+
+    Bound by default: it is the board this profile delivered its identity to.
+    Unbound is a Host from before delivery bindings were written.
+    """
+
+    lineage = _lineage(controller, generation=generation)
+    directory = _directory_at(controller, lineage)
+    _host_reports(
+        transport, lineage=lineage, directory=directory, identity_sha256=_identity_sha256(controller)
+    )
+    if bound:
+        _bind(controller, _BOARD)
+    return lineage
+
+
+class _StagingTransport(FakeTransport):
+    """Answers `install` the way a Host does: with the lineage the shipped capability named."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.staged: dict[str, bytes] = {}
+
+    def run_agent(self, action, payload, **keywords):
+        if action == "reset-host":
+            # A wiped Host holds nothing again, and the same board answers.
+            self.overrides.pop("install-context", None)
+        if action == "install":
+            self.agent_calls.append((action, dict(payload), "", True))
+            staged = json.loads(
+                self.staged[f"/var/tmp/eidolon-secrets-{payload['release_id']}/authority-bootstrap.json"]
+            )
+            return {
+                "status": "installed",
+                "authority": {key: value for key, value in staged.items() if key != "operation"},
+            }
+        return super().run_agent(action, payload, **keywords)
+
+    def upload(self, source, destination, *, recursive=False):
+        super().upload(source, destination, recursive=recursive)
+        if not recursive:
+            self.staged[destination] = Path(source).read_bytes()
+
+
+def test_a_host_holding_nothing_gets_a_fresh_capability_at_generation_one(config) -> None:
+    transport = FakeTransport()
+    controller = _authority_controller(config, transport)
+    root = _material_root(controller)
+
+    plan = controller.authority_capability(will_wipe=False, apply=False)
+
+    assert plan["decision"] == "first_install"
+    assert plan["owner_domain_generation"] == 1
+    assert plan["state_id_provisional"] is True
+    assert plan["directory"] == "issued"
+    # A plan decides. It issues no directory and mints nothing that lasts.
+    assert not (root / "owner-domain-descriptor.json").exists()
+
+    applied = controller.authority_capability(will_wipe=False, apply=True)
+
+    assert applied["decision"] == "first_install"
+    assert applied["state_id_provisional"] is False
+    bootstrap = json.loads(controller.host_layer.materializer().owner_assets().authority_bootstrap)
+    assert bootstrap["operation"] == "owner-authority.bootstrap"
+    assert bootstrap["owner_domain_generation"] == 1
+    assert bootstrap["state_id"] == applied["lineage"]["state_id"]
+    issued = json.loads((root / "owner-domain-descriptor.json").read_bytes())
+    assert issued["owner_domain_generation"] == 1
+    assert not (root / "owner-domain-state.json").exists()
+
+
+def test_the_board_this_identity_went_to_is_continued_at_what_it_established(config) -> None:
+    transport = FakeTransport()
+    controller = _authority_controller(config, transport)
+    established = _host_established(controller, transport, generation=8)
+    before = _material_bytes(controller)
+
+    for apply in (False, True):
+        capability = controller.authority_capability(will_wipe=False, apply=apply)
+        assert capability["decision"] == "continue_established_lineage"
+        assert capability["owner_domain_generation"] == 8
+        assert capability["lineage"] == established
+        assert capability["delivery"] == "verified"
+        assert capability["directory"] == "current"
+    assert _material_bytes(controller) == before
+    assert json.loads(
+        controller.host_layer.materializer().owner_assets().authority_bootstrap
+    )["operation"] == "owner-authority.bootstrap-consumed"
+
+
+def test_a_second_board_is_refused_at_the_first_gate_and_no_generation_moves(config) -> None:
+    """The 2026-09-10 shape, met the way it should have been.
+
+    This profile delivered its identity to the board on the bench. A blank
+    second board answers at the same name. It used to pass the Authority gate
+    — nothing on it to disagree with — and be commissioned at a new generation.
+    Now the binding is the first question, and the refusal names the board.
+    """
+
+    transport = FakeTransport()
+    controller = _authority_controller(config, transport)
+    _host_established(controller, transport)
+    _host_reports(transport, hardware=_OTHER_BOARD)
+    before = _material_bytes(controller)
+
+    for apply in (False, True):
+        with pytest.raises(OperationsError, match="WRONG_BOARD") as refused:
+            controller.authority_capability(will_wipe=False, apply=apply)
+        assert "sha256:" + "f" * 64 in str(refused.value)
+        assert "trust-host-authority" not in str(refused.value)
+
+    assert _material_bytes(controller) == before
     assert not transport.uploads
 
-    capability = controller.authority_capability(will_wipe=False, apply=True)
-    assert capability is not None
-    assert capability["decision"] == "keep_established_lineage"
-    assert capability["lineage"] == kept
 
+def test_the_hosts_own_directory_replaces_a_stale_one_this_side_holds(config) -> None:
+    """What that second board left behind, met without a confirmation step.
 
-def test_adoption_refuses_until_the_state_id_is_confirmed_on_the_host(config) -> None:
+    This material names generation 9 and holds a directory at it; the board on
+    the bench established 8 and serves the directory devices hold. The board's
+    directory is signed by this Owner root, so it is adopted as it stands, and
+    the record this side used to keep is retired. Nothing to name, nothing to
+    confirm: this side no longer holds an opinion to reconcile.
+    """
+
     transport = FakeTransport()
     controller = _authority_controller(config, transport)
-    kept, kept_directory = _commissioned_a_second_board(controller)
-    _host_serves(controller, transport, kept, kept_directory)
-    root = controller.host_layer.materializer().material_root
-    before = {path.name: path.read_bytes() for path in root.iterdir()}
+    kept = _host_established(controller, transport, generation=8)
+    root = _material_root(controller)
+    kept_directory = (root / "owner-domain-descriptor.json").read_bytes()
+    keys = _keys(controller)
+    _directory_at(controller, _lineage(controller, generation=9, state_id="authority-state_the-other-board"))
+    legacy = root / "owner-domain-state.json"
+    legacy.write_text('{"owner_domain_generation": 9}\n', encoding="utf-8")
+    legacy.chmod(0o600)
+    assert json.loads((root / "owner-domain-descriptor.json").read_bytes())["owner_domain_generation"] == 9
 
-    with pytest.raises(OperationsError, match="--replace"):
-        controller.trust_host_authority(apply=True)
-    with pytest.raises(OperationsError, match="Nothing was written"):
-        controller.trust_host_authority(apply=True, replace="authority-state_not-this-host")
+    plan = controller.authority_capability(will_wipe=False, apply=False)
 
-    assert {path.name: path.read_bytes() for path in root.iterdir()} == before
+    assert plan["decision"] == "continue_established_lineage"
+    assert plan["lineage"] == kept
+    assert plan["directory"] == "adopted from the Host"
+    assert plan["legacy_state_removed"] is True
+    assert not legacy.exists()
+    # A plan writes no directory: the stale one is still there to be replaced.
+    assert json.loads((root / "owner-domain-descriptor.json").read_bytes())["owner_domain_generation"] == 9
+
+    applied = controller.authority_capability(will_wipe=False, apply=True)
+
+    assert applied["lineage"] == kept
+    assert applied["directory"] == "adopted from the Host"
+    assert (root / "owner-domain-descriptor.json").read_bytes() == kept_directory
+    assert _keys(controller) == keys
+    assert not transport.uploads
 
 
-def test_adoption_refuses_a_host_whose_two_copies_of_its_lineage_disagree(config) -> None:
+def test_an_undelivered_newer_revision_is_kept_over_the_one_the_host_serves(config) -> None:
     transport = FakeTransport()
     controller = _authority_controller(config, transport)
-    kept, kept_directory = _commissioned_a_second_board(controller)
-    _host_serves(controller, transport, kept, kept_directory)
-    # A Host that lost its database, or its anchor, has no established lineage
-    # to adopt — which is the one case that really is the Host's loss.
-    transport.overrides["owner-directory"] = {
-        **transport.overrides["owner-directory"],
-        "anchor": None,
-        "established": None,
+    kept = _host_established(controller, transport, generation=8)
+    root = _material_root(controller)
+    served = (root / "owner-domain-descriptor.json").read_bytes()
+    # The endpoint moved, so this side issued the next revision and has not
+    # delivered it yet; the Host still serves the one above.
+    materializer = controller.host_layer.materializer()
+    issued = controller_module.ensure_owner_domain_assets(
+        root, materializer.identity(), 9443, HostAuthority.established_from(kept)
+    ).descriptor
+    assert json.loads(issued)["directory_revision"] == json.loads(served)["directory_revision"] + 1
+    controller.host_layer.app = dataclasses.replace(_app(), hub_https_port=9443)
+
+    applied = controller.authority_capability(will_wipe=False, apply=True)
+
+    assert applied["directory"] == "delivering this material's newer revision"
+    assert (root / "owner-domain-descriptor.json").read_bytes() == issued
+
+
+def test_a_legacy_host_that_proves_it_holds_the_identity_has_its_delivery_recorded_by_install(
+    config,
+) -> None:
+    transport = FakeTransport()
+    controller = _authority_controller(config, transport)
+    established = _host_established(controller, transport, bound=False)
+    transport.overrides["install"] = {"status": "installed", "authority": established}
+    assert not _binding_path(controller).exists()
+
+    plan = controller.install(release_id="r1", resume=False, apply=False)
+    assert plan["authority"]["decision"] == "adopt_delivery_evidence"
+    assert not _binding_path(controller).exists()
+
+    result = controller.install(release_id="r1", resume=False, apply=True)
+
+    assert result["authority_established"] == {
+        "status": "authority_established",
+        "authority": established,
+        "delivery": "recorded",
     }
-    root = controller.host_layer.materializer().material_root
-    before = {path.name: path.read_bytes() for path in root.iterdir()}
+    verify_binding(_binding_path(controller).read_bytes(), _host_id(controller), _BOARD)
+
+
+def test_a_first_install_records_the_board_once_the_host_proves_what_it_established(config) -> None:
+    transport = _StagingTransport()
+    controller = _authority_controller(config, transport)
+
+    result = controller.install(release_id="r1", resume=False, apply=True)
+
+    staged = json.loads(transport.staged["/var/tmp/eidolon-secrets-r1/authority-bootstrap.json"])
+    assert staged["operation"] == "owner-authority.bootstrap"
+    assert staged["owner_domain_generation"] == 1
+    assert result["authority"]["decision"] == "first_install"
+    assert result["authority"]["lineage"] == {
+        key: value for key, value in staged.items() if key != "operation"
+    }
+    assert result["authority_established"]["delivery"] == "recorded"
+    verify_binding(_binding_path(controller).read_bytes(), _host_id(controller), _BOARD)
+    # Nothing on this side remembers the generation or the state id.
+    assert not (_material_root(controller) / "owner-domain-state.json").exists()
+
+
+def test_an_install_refuses_to_take_a_hosts_word_for_a_lineage_it_did_not_ship(config) -> None:
+    transport = FakeTransport()
+    controller = _authority_controller(config, transport)
+    transport.overrides["install"] = {
+        "status": "installed",
+        "authority": {**_lineage(controller, generation=99), "state_id": "authority-state_x"},
+    }
+
+    with pytest.raises(OperationsError, match="did not establish the Owner Authority"):
+        controller.install(release_id="r1", resume=False, apply=True)
+
+    # The binding records a delivery that happened; this one did not.
+    assert not _binding_path(controller).exists()
+
+
+def test_the_delivered_board_holding_nothing_is_refused_as_lost_not_reinstalled(config) -> None:
+    transport = FakeTransport()
+    controller = _authority_controller(config, transport)
+    _host_established(controller, transport)
+    _host_reports(transport)
+    before = _material_bytes(controller)
+
+    for apply in (False, True):
+        with pytest.raises(OperationsError, match="AUTHORITY_LOST"):
+            controller.authority_capability(will_wipe=False, apply=apply)
+
+    assert _material_bytes(controller) == before
+
+
+@pytest.mark.parametrize("missing", ["marker", "anchor"])
+def test_a_host_whose_two_copies_disagree_is_an_incident(config, missing) -> None:
+    transport = FakeTransport()
+    controller = _authority_controller(config, transport)
+    lineage = _host_established(controller, transport)
+    _host_reports(
+        transport,
+        lineage=lineage,
+        directory=(_material_root(controller) / "owner-domain-descriptor.json").read_bytes(),
+        identity_sha256=_identity_sha256(controller),
+        **{missing: None},
+    )
+    before = _material_bytes(controller)
 
     with pytest.raises(OperationsError, match="AUTHORITY_RECOVERY_REQUIRED"):
-        controller.trust_host_authority(apply=True, replace=str(kept["state_id"]))
+        controller.authority_capability(will_wipe=False, apply=True)
 
-    assert {path.name: path.read_bytes() for path in root.iterdir()} == before
+    assert _material_bytes(controller) == before
 
 
-def test_adoption_is_a_read_when_this_material_already_speaks_for_the_host(config) -> None:
+def test_a_host_established_by_another_owner_is_refused_not_overwritten(config) -> None:
     transport = FakeTransport()
     controller = _authority_controller(config, transport)
-    spent = _consume(controller)
-    root = controller.host_layer.materializer().material_root
-    _host_serves(
-        controller, transport, spent, (root / "owner-domain-descriptor.json").read_bytes()
-    )
-    before = {path.name: path.read_bytes() for path in root.iterdir()}
+    _host_established(controller, transport)
+    stranger = {**_lineage(controller), "owner_domain_id": "owner-" + "b" * 20}
+    _host_reports(transport, lineage=stranger, identity_sha256=_identity_sha256(controller))
+    before = _material_bytes(controller)
 
-    report = controller.trust_host_authority(apply=True, replace=str(spent["state_id"]))
+    with pytest.raises(OperationsError, match="FOREIGN_AUTHORITY") as refused:
+        controller.authority_capability(will_wipe=False, apply=True)
 
-    assert report["status"] == "current"
-    assert {path.name: path.read_bytes() for path in root.iterdir()} == before
-
-
-def _host_holds_this_identity(controller, transport) -> None:
-    """Say the Host reports the identity and Authority this profile issued it."""
-
-    identity = derive_host_lan_identity(b"a" * 32)
-    transport.overrides["deployment-identity"] = {
-        "status": "observed",
-        "host_id": identity.host_id,
-        "authority": _lineage_of(controller),
-        "descriptor_uri": identity.hub_origin(8443) + "/api/device-onboarding/v1/descriptor",
-        "preserved_files": {"host_identity.ed25519": hashlib.sha256(b"a" * 32).hexdigest()},
-    }
+    assert "owner-" + "b" * 20 in str(refused.value)
+    assert _material_bytes(controller) == before
 
 
-def _binding_path(controller) -> Path:
-    return controller.host_layer.materializer().material_root.parent / "host_delivery.json"
-
-
-def test_delivery_evidence_is_recorded_for_a_host_that_proves_it_holds_the_identity(
-    config,
-) -> None:
+def test_an_observation_the_agent_did_not_send_is_refused(config) -> None:
     transport = FakeTransport()
     controller = _authority_controller(config, transport)
-    _consume(controller)
-    _host_holds_this_identity(controller, transport)
+    transport.overrides["install-context"] = {"status": "observed", "marker": None}
 
-    planned = controller.trust_host_delivery()
-    assert planned["status"] == "absent"
-    assert planned["proof"] == {
-        "serves_this_host_id": True,
-        "holds_this_identity": True,
-        "established_this_authority": True,
-    }
-    # A plan is a read even here, where the thing missing is a local file.
-    assert not _binding_path(controller).exists()
-
-    applied = controller.trust_host_delivery(apply=True)
-
-    assert applied["status"] == "recorded"
-    assert json.loads(_binding_path(controller).read_bytes()) == {
-        "contract_version": 1,
-        "host_id": applied["host_id"],
-        "hardware": applied["hardware"],
-    }
-    assert not transport.uploads
-    assert controller.trust_host_delivery(apply=True)["status"] == "current"
+    with pytest.raises(OperationsError, match="install context observation is invalid"):
+        controller.authority_capability(will_wipe=False, apply=False)
 
 
-@pytest.mark.parametrize(
-    "broken",
-    [
-        {"host_id": "ehost-" + "b" * 20},
-        {"preserved_files": {"host_identity.ed25519": "0" * 64}},
-        {"authority": {"contract_version": 1, "owner_domain_id": "owner-" + "c" * 20,
-                       "owner_domain_generation": 1, "state_id": "authority-state_elsewhere"}},
-    ],
-)
-def test_delivery_refuses_a_host_that_cannot_prove_it_holds_the_identity(config, broken) -> None:
+def test_wipe_cannot_reissue_an_existing_owner(config):
+    controller = _authority_controller(config, FakeTransport())
+    with pytest.raises(OperationsError, match="new Host identity"):
+        controller.authority_capability(will_wipe=True, apply=True)
+
+
+def test_factory_install_plan_names_a_new_identity_without_changing_it(config) -> None:
     transport = FakeTransport()
     controller = _authority_controller(config, transport)
-    _consume(controller)
-    _host_holds_this_identity(controller, transport)
-    transport.overrides["deployment-identity"] = {
-        **transport.overrides["deployment-identity"], **broken
-    }
-
-    with pytest.raises(OperationsError, match="does not prove it already holds"):
-        controller.trust_host_delivery(apply=True)
-
-    assert not _binding_path(controller).exists()
-
-
-def test_delivery_refuses_to_move_an_identity_to_another_board(config) -> None:
-    transport = FakeTransport()
-    controller = _authority_controller(config, transport)
-    _consume(controller)
-    _host_holds_this_identity(controller, transport)
-    controller.trust_host_delivery(apply=True)
-    recorded = _binding_path(controller).read_bytes()
-    # The same identity, proving itself just as well, on different hardware:
-    # a second board that was restored onto, or one that was handed these
-    # credentials. Recording is not how that becomes allowed.
-    transport.overrides["host-hardware"] = {
-        "status": "observed",
-        "hardware": {"kind": "device-tree:rockchip,rk3588", "fingerprint": "sha256:" + "d" * 64},
-    }
-
-    with pytest.raises(OperationsError, match="provisioned for another board"):
-        controller.trust_host_delivery(apply=True)
-
-    assert _binding_path(controller).read_bytes() == recorded
-
-
-@pytest.mark.parametrize("activate", [False, True])
-def test_deploy_preserves_board_authority_without_reading_workstation_issuer(config, activate, monkeypatch):
-    transport = FakeTransport()
-    controller = _authority_controller(config, transport)
-    spent = _consume(controller)
-    before = {p.name: p.read_bytes() for p in controller.host_layer.materializer().material_root.iterdir()}
-    def no_issuer(*args, **kwargs):
-        raise AssertionError("ordinary deploy must not read or issue Owner material")
-    monkeypatch.setattr(controller_module, "ensure_owner_domain_assets", no_issuer)
-    from eidolon_ops.host_application import HostApplicationMaterializer
-    monkeypatch.setattr(HostApplicationMaterializer, "owner_assets", no_issuer)
-    controller.config.install_files["host_identity"].unlink()
-    result = controller.deploy(release_id="r1", resume=True, activate=activate)
-    assert result["status"] == ("activated" if activate else "dry_run")
-    assert result["local"]["installed_identity"]["authority"]["owner_domain_generation"] == 8
-    assert _material_state(controller)["owner_domain_generation"] == spent["owner_domain_generation"]
-    assert {p.name: p.read_bytes() for p in controller.host_layer.materializer().material_root.iterdir()} == before
-    names = {Path(destination).name for _, destination, _ in transport.uploads}
-    assert not {"hub.key", "hub.crt", "owner-domain-descriptor.json", "authority-bootstrap.json", "local-api.env", "channel.env", "factory_setup_code"} & names
-    if activate:
-        assert {"hub.generated.yaml", "agent.yaml", "channel.yaml", "memory.yaml"} <= names
-
-
-def test_used_capability_plan_is_read_only_and_apply_records_consumption(config):
-    transport = FakeTransport()
-    controller = _authority_controller(config, transport)
-    established = _lineage_of(controller)
-    _host_has_established(controller, transport)
-    capability = controller.authority_capability(will_wipe=False, apply=False)
-    assert capability["lineage"] == established
-    assert _material_state(controller)["bootstrap_pending"] is True
-    capability = controller.authority_capability(will_wipe=False, apply=True)
-    assert capability["lineage"] == established
-    assert _material_state(controller)["bootstrap_pending"] is False
-
-
-def test_factory_install_plan_names_a_new_identity_without_changing_it(
-    config,
-) -> None:
-    transport = FakeTransport()
-    controller = _authority_controller(config, transport)
-    spent = _consume(controller)
+    _host_established(controller, transport)
+    before = _material_bytes(controller)
 
     plan = controller.install(
         release_id="r1",
@@ -3102,86 +3140,25 @@ def test_factory_install_plan_names_a_new_identity_without_changing_it(
         wipe_authority_data=True,
     )
 
-    authority = plan["authority"]
-    assert authority["decision"] == "new_host_identity"
+    assert plan["authority"]["decision"] == "new_host_identity"
     assert any("new Host/Owner" in mutation for mutation in plan["mutations"])
-    state = _material_state(controller)
-    assert state["owner_domain_generation"] == spent["owner_domain_generation"]
-    assert state["authority_state_id"] == spent["state_id"]
-    assert state["bootstrap_pending"] is False
-
-
-def test_an_install_records_the_capability_as_spent_against_the_hosts_own_proof(
-    config,
-) -> None:
-    """Nothing used to do this, so `bootstrap_pending` stayed true forever."""
-
-    transport = FakeTransport()
-    controller = _authority_controller(config, transport)
-    shipped = _lineage_of(controller)
-    transport.overrides["install"] = {"status": "installed", "authority": shipped}
-
-    result = controller.install(release_id="r1", resume=False, apply=True)
-
-    assert result["authority"]["decision"] == "carry_pending_capability"
-    assert result["authority_bootstrap"] == {
-        "status": "authority_bootstrap_consumed",
-        "authority": shipped,
-    }
-    assert _material_state(controller)["bootstrap_pending"] is False
-
-
-def test_an_install_refuses_to_spend_a_capability_the_host_did_not_use(config) -> None:
-    transport = FakeTransport()
-    controller = _authority_controller(config, transport)
-    shipped = _lineage_of(controller)
-    transport.overrides["install"] = {
-        "status": "installed",
-        "authority": {**shipped, "owner_domain_generation": 99},
-    }
-
-    with pytest.raises(OperationsError, match="did not establish the Owner Authority"):
-        controller.install(release_id="r1", resume=False, apply=True)
-
-    assert _material_state(controller)["bootstrap_pending"] is True
+    assert _material_bytes(controller) == before
 
 
 def test_a_wiped_host_is_reinstalled_end_to_end_with_a_fresh_capability(config) -> None:
     """The sequence that had no supported path at all.
 
-    A Host whose Hub has started, wiped and reinstalled in one operation: the
-    generation advances once, the Host is handed a capability an empty Hub
-    accepts, and only the Host's own proof retires it.
+    A Host whose Hub has started, wiped and reinstalled in one operation: a
+    new Owner, a capability at generation 1 an empty Hub accepts, and the board
+    recorded only once the Host's own proof arrives.
     """
 
-    class LineageTransport(FakeTransport):
-        def __init__(self, lineage) -> None:
-            super().__init__()
-            self.lineage = lineage
-            self.staged: dict[str, bytes] = {}
-
-        def run_agent(self, action, payload, **keywords):
-            if action == "reset-host":
-                self.overrides.pop("authority-lineage", None)
-            if action == "install":
-                self.agent_calls.append((action, dict(payload), "", True))
-                # Hub started on whatever capability the install shipped.
-                return {"status": "installed", "authority": self.lineage()}
-            return super().run_agent(action, payload, **keywords)
-
-        def upload(self, source, destination, *, recursive=False):
-            super().upload(source, destination, recursive=recursive)
-            if not recursive:
-                self.staged[destination] = Path(source).read_bytes()
-
     from test_install_inputs import _config_for_init
+
     _config_for_init(config, config.workspace.bundle_root.parent)
-    held: list[EidolonPiController] = []
-    transport = LineageTransport(lambda: _lineage_of(held[0]))
+    transport = _StagingTransport()
     controller = _authority_controller(config, transport)
-    held.append(controller)
-    spent = _consume(controller)
-    _host_has_established(controller, transport)
+    spent = _host_established(controller, transport)
 
     result = controller.install(
         release_id="r1",
@@ -3192,22 +3169,18 @@ def test_a_wiped_host_is_reinstalled_end_to_end_with_a_fresh_capability(config) 
     )
 
     assert result["status"] == "installed"
-    assert result["authority"]["decision"] == "carry_pending_capability"
+    assert result["authority"]["decision"] == "first_install"
     assert result["authority"]["owner_domain_id"] != spent["owner_domain_id"]
     staged = json.loads(transport.staged["/var/tmp/eidolon-secrets-r1/authority-bootstrap.json"])
     assert staged["operation"] == "owner-authority.bootstrap"
     assert staged["owner_domain_generation"] == 1
-    assert result["authority_bootstrap"] == {
-        "status": "authority_bootstrap_consumed",
+    assert result["authority_established"] == {
+        "status": "authority_established",
         "authority": {key: value for key, value in staged.items() if key != "operation"},
+        "delivery": "recorded",
     }
-    assert _material_state(controller) == {
-        "contract_version": 1,
-        "owner_domain_id": staged["owner_domain_id"],
-        "owner_domain_generation": 1,
-        "authority_state_id": staged["state_id"],
-        "bootstrap_pending": False,
-    }
+    verify_binding(_binding_path(controller).read_bytes(), _host_id(controller), _BOARD)
+    assert not (_material_root(controller) / "owner-domain-state.json").exists()
 
 
 def test_reinstall_bundle_failure_precedes_wipe_and_generation_change(setup_controller, monkeypatch):
@@ -3221,19 +3194,111 @@ def test_reinstall_bundle_failure_precedes_wipe_and_generation_change(setup_cont
     assert not any(call[0] == "reset-host" for call in transport.agent_calls)
 
 
-@pytest.mark.parametrize("missing", ["marker", "anchor"])
-def test_consumed_authority_requires_both_copies_of_state(config, missing):
+@pytest.mark.parametrize("activate", [False, True])
+def test_deploy_preserves_board_authority_without_reading_workstation_issuer(config, activate, monkeypatch):
     transport = FakeTransport()
     controller = _authority_controller(config, transport)
-    lineage = _consume(controller)
-    transport.overrides["authority-lineage"] = {
-        "status": "observed", "marker": lineage, "anchor": lineage, "established": None,
-        missing: None,
-    }
-    before = _material_state(controller)
-    with pytest.raises(OperationsError, match=r"AuthorityRecoveryRequired|AUTHORITY_RECOVERY_REQUIRED"):
-        controller.authority_capability(will_wipe=False, apply=True)
-    assert _material_state(controller) == before
+    controller.host_layer.materializer().owner_domain_id()
+    before = _material_bytes(controller)
+    def no_issuer(*args, **kwargs):
+        raise AssertionError("ordinary deploy must not read or issue Owner material")
+    monkeypatch.setattr(controller_module, "ensure_owner_domain_assets", no_issuer)
+    from eidolon_ops.host_application import HostApplicationMaterializer
+    monkeypatch.setattr(HostApplicationMaterializer, "owner_assets", no_issuer)
+    controller.config.install_files["host_identity"].unlink()
+    result = controller.deploy(release_id="r1", resume=True, activate=activate)
+    assert result["status"] == ("activated" if activate else "dry_run")
+    assert result["local"]["installed_identity"]["authority"]["owner_domain_generation"] == 8
+    assert _material_bytes(controller) == before
+    names = {Path(destination).name for _, destination, _ in transport.uploads}
+    assert not {"hub.key", "hub.crt", "owner-domain-descriptor.json", "authority-bootstrap.json", "local-api.env", "channel.env", "factory_setup_code"} & names
+    if activate:
+        assert {"hub.generated.yaml", "agent.yaml", "channel.yaml", "memory.yaml"} <= names
+
+
+def test_converge_refuses_a_host_that_holds_no_authority_before_staging_anything(config) -> None:
+    transport = FakeTransport()
+    controller = _authority_controller(config, transport)
+    _stub_workstation_half(controller)
+
+    with pytest.raises(OperationsError, match="deliver it with install first"):
+        controller.converge_inputs(apply=True)
+
+    assert not transport.uploads
+
+
+def test_delivery_evidence_is_recorded_for_a_host_that_proves_it_holds_the_identity(
+    config,
+) -> None:
+    transport = FakeTransport()
+    controller = _authority_controller(config, transport)
+    _host_established(controller, transport, bound=False)
+
+    planned = controller.trust_host_delivery()
+
+    assert planned["status"] == "absent"
+    assert planned["decision"] == "adopt_delivery_evidence"
+    assert not _binding_path(controller).exists()
+
+    recorded = controller.trust_host_delivery(apply=True)
+
+    assert recorded["status"] == "recorded"
+    verify_binding(_binding_path(controller).read_bytes(), _host_id(controller), _BOARD)
+    assert controller.trust_host_delivery(apply=True)["status"] == "current"
+    assert not transport.uploads
+
+
+@pytest.mark.parametrize("broken", ["identity", "other_host", "unsigned"])
+def test_delivery_refuses_a_host_that_cannot_prove_it_holds_the_identity(config, broken) -> None:
+    transport = FakeTransport()
+    controller = _authority_controller(config, transport)
+    _host_established(controller, transport, bound=False)
+    context = transport.overrides["install-context"]
+    document = json.loads(context["directory"])
+    if broken == "identity":
+        context["identity_sha256"] = "0" * 64
+    elif broken == "other_host":
+        document["descriptor_uri"] = (
+            "https://eidolon-hub-" + "d" * 20 + ".local:8443/api/device-onboarding/v1/descriptor"
+        )
+        context["directory"] = json.dumps(document)
+    else:
+        document["issued_at"] = "2020-01-01T00:00:00Z"
+        context["directory"] = json.dumps(document)
+
+    with pytest.raises(OperationsError, match=r"IDENTITY_UNPROVEN|does not prove"):
+        controller.trust_host_delivery(apply=True)
+
+    assert not _binding_path(controller).exists()
+
+
+def test_delivery_refuses_to_move_an_identity_to_another_board(config) -> None:
+    transport = FakeTransport()
+    controller = _authority_controller(config, transport)
+    lineage = _host_established(controller, transport)
+    before = _binding_path(controller).read_bytes()
+    _host_reports(
+        transport,
+        lineage=lineage,
+        directory=(_material_root(controller) / "owner-domain-descriptor.json").read_bytes(),
+        hardware=_OTHER_BOARD,
+        identity_sha256=_identity_sha256(controller),
+    )
+
+    with pytest.raises(OperationsError, match="WRONG_BOARD"):
+        controller.trust_host_delivery(apply=True)
+
+    assert _binding_path(controller).read_bytes() == before
+
+
+def test_delivery_has_nothing_to_record_for_a_host_holding_nothing(config) -> None:
+    transport = FakeTransport()
+    controller = _authority_controller(config, transport)
+
+    with pytest.raises(OperationsError, match="no delivery to record"):
+        controller.trust_host_delivery(apply=True)
+
+    assert not _binding_path(controller).exists()
 
 
 def _stub_workstation_half(controller: EidolonPiController) -> None:
@@ -3275,6 +3340,7 @@ def test_converge_takes_its_staged_credentials_back_off_the_host(config):
     transport = FakeTransport()
     controller = _authority_controller(config, transport)
     _stub_workstation_half(controller)
+    _host_established(controller, transport)
     transport.overrides["converge-secret-inputs"] = {
         "status": "already_current", "added": {}, "missing": {}, "absent": [],
         "applied": False, "relationships": {"status": "agreed", "mismatched": []},
@@ -3291,6 +3357,7 @@ def test_converge_clears_its_stage_even_when_the_host_refuses(config):
     transport = FakeTransport()
     controller = _authority_controller(config, transport)
     _stub_workstation_half(controller)
+    _host_established(controller, transport)
     transport.fail_actions["converge-secret-inputs"] = OperationsError("refused")
 
     with pytest.raises(OperationsError):
@@ -3319,6 +3386,7 @@ def test_repair_takes_its_staged_credentials_back_off_the_host(config):
     transport = FakeTransport()
     controller = _authority_controller(config, transport)
     _stub_workstation_half(controller)
+    _host_established(controller, transport)
     transport.overrides["repair-secret-relationships"] = {
         "status": "consistent", "classes": 13, "divided": [], "repaired": [],
         "unchecked": [], "restart_required": [], "applied": False,
@@ -3340,6 +3408,7 @@ def test_the_host_layer_refresh_takes_its_staged_private_keys_back(config):
 
     transport = FakeTransport()
     controller = _authority_controller(config, transport)
+    _host_established(controller, transport)
     transport.overrides["refresh-host-application"] = {
         "status": "refreshed", "changed": [], "removed": [],
     }

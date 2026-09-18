@@ -248,6 +248,10 @@ write-once）。挡住 install 的两道闸门 2026-09-17 都已清掉。
 
 ## 6. 收尾状态（2026-09-17）
 
+> 2026-09-18 追记：本文的收敛动词 `trust-host-authority` 已退役。工作站不再保存 generation，
+> `install` 直接从板子学并自动采纳它服务的目录，这一类分歧在结构上不再可能出现；见
+> [Owner 授权单一账本](owner-authority-single-ledger-2026-09-18.md)。下文保留为当时的记录。
+
 两道闸门的代码侧都已完成并合入 main，**pi5 的材料侧也已在真机上执行完毕**。
 
 - ✅ `trust-host-authority`（`beadaa6`）：12 条新测试，两块板子的分叉在原语层和 controller

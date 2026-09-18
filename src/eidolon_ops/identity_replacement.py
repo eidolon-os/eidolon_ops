@@ -14,7 +14,7 @@ from eidolon_ops.config import OperationsConfig
 from eidolon_ops.errors import InstallInputError
 from eidolon_ops.host_identity import derive_host_lan_identity
 from eidolon_ops.install_inputs import initialize_install_inputs, target_directory
-from eidolon_ops.owner_domain_assets import ensure_owner_domain_assets
+from eidolon_ops.owner_domain_assets import ensure_owner_material
 from eidolon_ops.private_inputs import ensure_private_parent
 
 
@@ -24,7 +24,6 @@ def replacement_inputs(
     read_exact_file: Callable[[str, str, str], str],
     *,
     owner_root: Path,
-    port: int,
 ) -> Iterator[IdentityReplacement]:
     """Nothing live changes until commit; keep retired inputs private for recovery."""
     target = target_directory(config)
@@ -52,9 +51,11 @@ def replacement_inputs(
             prefix=".new-owner-", dir=owner_root.parent
         ) as owner_temporary:
             staged_owner = Path(owner_temporary) / "owner"
-            owner = ensure_owner_domain_assets(staged_owner, identity, port)
+            # Keys only. The new Host has established nothing, so there is no
+            # generation to put a directory to yet; its first install does that.
+            owner_domain_id = ensure_owner_material(staged_owner, identity)
             replacement = IdentityReplacement(
-                target, owner_root, staged, staged_owner, identity.host_id, owner.owner_domain_id
+                target, owner_root, staged, staged_owner, identity.host_id, owner_domain_id
             )
             yield replacement
 

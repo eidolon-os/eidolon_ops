@@ -234,6 +234,14 @@ ops 目前把它硬编码成 1（`owner_domain_assets.py:535` 与 `:568`）。�
 - **不要把局部 `backup` 改名成整机恢复。**
   `authorization-recovery-simplification-2026-09-11.md` 已写明这条边界，值得保持。
 
+## 8. 后记（2026-09-18）
+
+§4 的 A、B、C 已实施：工作站不再持有 generation / state id / `bootstrap_pending`，`install`
+先观察板子再渲染；交付绑定成为第一道闸门，且在板子证明建立之后才写；判定是一个纯函数，
+八个具名情形。`trust-host-authority` 随 A 一起退役——正如 §4E 预告的那样。D（签名的纪元链）
+没有做，也不需要做：generation 对新 Host 恒为 1。实施记录与迁移说明见
+[Owner 授权单一账本](owner-authority-single-ledger-2026-09-18.md)。
+
 ## 7. 引用位置
 
 | 事实 | 位置 |

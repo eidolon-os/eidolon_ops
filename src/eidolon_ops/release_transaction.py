@@ -61,7 +61,7 @@ class ReleaseTransaction:
         reset: Callable[..., dict[str, object]],
         app_ready: Callable[[], dict[str, object]],
         authority_capability: Callable[..., dict[str, object] | None],
-        commit_authority_capability: Callable[..., dict[str, object] | None],
+        confirm_authority_established: Callable[..., dict[str, object] | None],
         progress: ProgressSink | None = None,
     ) -> None:
         self.config = config
@@ -73,7 +73,7 @@ class ReleaseTransaction:
         self._reset = reset
         self._app_ready = app_ready
         self._authority_capability = authority_capability
-        self._commit_authority_capability = commit_authority_capability
+        self._confirm_authority_established = confirm_authority_established
         self.progress = progress
 
     def _require_declared_credentials(self) -> dict[str, object]:
@@ -757,8 +757,8 @@ class ReleaseTransaction:
                 self._abort_candidate(release_id, phases, primary_error)
             raise primary_error
         # Only now, and only against the Host's own account of what Hub
-        # established, is the one-shot capability recorded as spent.
-        authority_consumed = self._commit_authority_capability(authority, installed)
+        # established, does this profile record the board it delivered to.
+        authority_established = self._confirm_authority_established(authority, installed)
         phases.begin("release_reclaim_commit")
         committed = self.bundles.reclaim(release_id, phase="commit")
         self.bundles.require_reclamation(committed, "committed")
@@ -776,7 +776,7 @@ class ReleaseTransaction:
             "foundation": foundation,
             "local": local,
             "authority": authority,
-            "authority_bootstrap": authority_consumed,
+            "authority_established": authority_established,
             "phases": phases,
         }
 

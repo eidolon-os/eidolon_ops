@@ -61,8 +61,8 @@ Admin/Local API、Agent/Channel、Memory 与 LiveKit 的共享 token 在一次�
 ## 普通更新保留身份与授权
 
 `deploy/update` 从已安装 Host 读取数据库 marker、lineage anchor 和签名目录，确认目标自身一致；
-然后用这套现有 Owner ID/generation 渲染本次精确提交的 Hub 配置。工作站 Owner 材料的 generation
-不参与普通代码更新，更新也不会读取本地 issuer 来生成另一份描述。
+然后用板子建立的 Owner ID/generation 渲染本次精确提交的 Hub 配置。工作站不保存 generation——
+`install` 同样先问板子（见「板子是它自己授权的唯一账本」）——更新也不会读取本地 issuer 来生成另一份描述。
 
 普通更新只写 Hub/Agent/Channel/Memory 业务配置及 ingress 程序和 unit；Host identity、TLS 私钥和
 证书、Owner 签名描述和根证书、配对码、`local-api.env`/`channel.env` 等凭据保持原样。预检与实际
@@ -341,54 +341,63 @@ profile 刚从 `~/.ssh/known_hosts` 搬过来时是第 3 步的一个特例：�
 当初是按地址首次信任的，而这个文件是按 Host 的名字记的，把一个没人重新核过的值搬进来正好是这套机
 制存在的理由。重新跑一次 `trust-host-key` 并核指纹就是全部代价。
 
-### 一份 Owner 材料只能认一台 Host
+### 板子是它自己授权的唯一账本
 
-换板子还有第二面，比 host key 深一层。Owner 材料里的 generation 不是一个可以随手推的计数
-器，它说的是这份材料**为哪一次安装代言**。拿同一个 profile 去给第二块空白板子做首次安装，材
-料就改成认那块板子了——而台架上那块完好无损、握着它发过的每一个 Claim，此后每个 `install`
-都被正确地拒绝，理由是两边说的不是同一代。
+`owner_domain_generation` 和 `state_id` 说的是「这台 Host 建立过的授权」。它们诞生在板子上——
+Hub 消费 bootstrap 能力票时写下 marker——也只活在板子上。工作站**不保存**这两个值：任何需要
+它们的操作先问板子，再渲染。`deploy` 一直是这个形状，`install` 现在也是。于是工作站
+`owner-domain/` 里只剩密钥（Owner 根、目录签名者、Host TLS 叶子）和上次签发或采纳的目录
+（revision 线的记忆）；旧的 `owner-domain-state.json` 不再被读取，首次触碰时删除并在结果里
+报 `legacy_state_removed`。
 
-在这种形状里，错的是工作站，不是板子。`trust-host-authority` 就是说出这句话的那条命令：
+`install` 的判定是一个纯函数：一次往返（hostagent `install-context`）读齐板子的两份 lineage
+副本、它服务的签名目录、永久硬件标识和它持有的身份密钥摘要，再对照这个 profile 的交付记录，
+给出一个具名的情形。plan 里原样呈现。
 
-```bash
-./eidolon pi5 trust-host-authority                                      # 打印两边各认哪一代
-./eidolon pi5 trust-host-authority --apply --replace authority-state_...  # 采纳板子已建立的那一代
-```
+| 判定 | 含义 | 结果 |
+| --- | --- | --- |
+| `first_install` | 无交付绑定，板子无 Authority | 签第 1 代、铸 state id；板子证明建立之后写绑定 |
+| `continue_established_lineage` | 绑定匹配，板子建立的是这个 Owner 的 Authority | 按板子建立的那一代渲染，采纳它服务的目录 |
+| `adopt_delivery_evidence` | 无绑定，板子建立的是这个 Owner 的、且证明持有这份身份 | 补录绑定，然后同上 |
+| `wrong_board` | 绑定指向另一块板子 | 拒：给这块板子新开 profile，或显式完整恢复 |
+| `authority_lost` | 绑定匹配，板子无 Authority | 拒：真正的恢复场景 |
+| `host_incident` | 板子 marker 与 anchor 不一致 | 拒：恢复它的完整备份 |
+| `foreign_authority` | 板子建立的是另一个 Owner 的 | 拒 |
+| `identity_unproven` | 无绑定，建立的是这个 Owner 的，但证明不了持有这份身份 | 拒 |
 
-它**采纳**而不是重签：板子正在服务的那份签名目录被原样收下，所以每台已经缓存过它的设备手里
-那份继续成立，revision 线也不重开。它只在那份目录确实由这份材料自己的 Owner 根签过时才接受
-——这挡住的是一台板子报出这个 Owner 从没签发过的世代。state id 没有任何签名覆盖，所以那一半
-要操作者在板子上核对后用 `--replace` 指名，和 `trust-host-key` 同一个理由。
+2026-09-10 那件事——同一个 profile 给第二块空白板子做首次安装——落在 `wrong_board`，第一道
+就挡住；世代不会再因此前进，工作站上也没有一个会因此走偏的数字。
 
-它不写板子、不动任何 key、不作废任何 Claim。采纳错了也不会放行什么：install 的闸门会再问一
-次板子，然后照样拒绝。同代目录只退不进——如果这边已经签发了更新的 revision 还没送出去，采纳
-一份更旧的会被拒绝，因为那会静默地撤掉操作者刚做的改动。
-
-板子两份授权记录（Hub 库标记和 `authority-lineage.json`）互相不一致时，它也拒绝：那种情况下
-板子确实丢了东西，该走恢复，没有"已建立的那一代"可以采纳。
+**采纳而不是重签。** 板子服务的目录用这份材料的 Owner 根验签后逐字节收下，所以每台缓存过它
+的设备手里那份继续成立，revision 线不重开。唯一不倒退的是这边已签发、还没投递的更新 revision
+（同代更高）——那是操作者刚做的改动，deploy 会把它送过去。签名管住了世代（板子报不出这个
+Owner 没签过的世代）；state id 直接读板子 marker==anchor 那一份。工作站上已经没有可以与之
+对比的东西，所以也没有 `--replace` 这样的人工确认——`trust-host-authority` 随之退役。
 
 ### 身份交付给了哪块板子，也是一份证据
 
-`install` 把身份交给一台新 Host 的同时，会写下 `host_delivery.json`：这个 profile 的身份
-交付给了哪一块**物理**板子（用永久硬件标识，不是地址、不是 machine-id）。此后每次 install
-只校验它，不重写——这是"同名的第二块板子不能悄悄拿走这套凭据"的落点。
+`host_delivery.json` 记录这个 profile 的身份交付给了哪一块**物理**板子（永久硬件标识，不是
+地址、不是 machine-id）。它在**板子证明自己建立了本次 install 送去的 Authority 之后**才写。
+所以"有绑定、板子却没有 Authority"真的意味着丢失（`authority_lost`）；而一次 Hub 还没消费
+能力票就失败的首次安装留不下绑定，重试仍是首次安装。此后每次操作只校验它，不改写——这是
+"同名的第二块板子不能悄悄拿走这套凭据"的落点。
 
-代价是：在这份绑定存在之前装好的 Host，没有这份证据可校验，于是 install 永远拒绝它们，
-而它们本身完全正常。`trust-host-delivery` 补的就是这个：
+绑定存在之前装好的 Host 没有这份证据。install 遇到这样的板子会自己补：板子建立的是这个
+Owner 的 Authority、服务的目录里是这个 profile 的公开 Host id 且由这个 Owner 根签发、手上那
+份身份密钥就是这个 profile 签发的那一份——三条齐了就是 `adopt_delivery_evidence`，绑定在
+install 收尾时写下。第二条是关键：前两条在换硬件恢复之后依然成立，那叫迁移，不叫交付。
+不想发 release、只想补这份证据，`trust-host-delivery` 做同一件事：
 
 ```bash
-./eidolon pi5 trust-host-delivery            # 打印证明结果和板子报的硬件标识
+./eidolon pi5 trust-host-delivery            # 打印判定和板子报的硬件标识
 ./eidolon pi5 trust-host-delivery --apply
 ```
 
-它不靠操作者的记忆，而是要板子自己证明**它已经持有这套身份**，三条缺一不可：它服务的
-Owner 目录里是这个 profile 的公开 Host id；它手上那份身份密钥就是这个 profile 签发的那
-一份；它建立的授权世代正是这个 profile 认的那一代。只是"在这个地址上应答"证明不了任何
-一条。第二条是关键——前两条在换硬件恢复之后依然成立，那叫迁移，不叫交付。
+**只填空，不改写。** 绑定指向另一块板子时拒绝（`wrong_board`），不替换：把身份挪到另一块
+板子是完整恢复或新建 Host，绝不能是"一个专门用来发现这件事的操作"的副作用。记下之后也不能
+再用 ops 挪走，所以 plan 里它标的是 `irreversible`。
 
-**只填空，不改写。** 已有绑定指向另一块板子时它拒绝，不替换：把身份挪到另一块板子是完整
-恢复或新建 Host，绝不能是"一个专门用来发现这件事的操作"的副作用。记下之后也不能再用 ops
-挪走，所以 plan 里它标的是 `irreversible`。
+设计与迁移记录见 [docs/owner-authority-single-ledger-2026-09-18.md](docs/owner-authority-single-ledger-2026-09-18.md)。
 
 ## 基础环境 profile
 
@@ -560,7 +569,6 @@ session：只能用一次，并把之前的窗口作废。它**不会自己过�
 ./eidolon pi5 bring-up --via boot-medium|shell --output DIR [--apply]
 ./eidolon pi5 trust-host-key [--apply] [--replace SHA256:...]
 ./eidolon pi5 ssh-config [--apply]            # 让手打的 ssh 走同一套选项
-./eidolon pi5 trust-host-authority [--apply] [--replace authority-state_...]
 ./eidolon pi5 trust-host-delivery [--apply]
 ./eidolon pi5 provision [--apply]
 ./eidolon pi5 init-inputs
@@ -594,8 +602,9 @@ unit、配置和运行态，保留 `/var/lib`；它不会让已有数据自动�
 
 ## 授权状态、重置与备份
 
-日常更新沿用板端 Host/Owner 和配对关系。Ops 不再递增 `owner_domain_generation`；已有 8、9 等值
-作为签名协议兼容字段原样保留，不代表部署版本，也不需要与工作站数字对齐。
+日常更新沿用板端 Host/Owner 和配对关系。Ops 不产生也不保存 `owner_domain_generation`：新 Host
+恒为 1，已有 8、3 等历史值是各台板子自己建立的，作为签名协议字段原样保留，不代表部署版本；工作站
+上没有一个可以与之对齐或失配的数字。
 
 授权库、状态标记或离线 Owner 材料意外缺失/损坏时，停止初始化并要求恢复；不能删除文件来触发
 自动重新认领。`authority-reset` 已移除。确实要放弃全部数据时，使用
@@ -610,8 +619,9 @@ unit、配置和运行态，保留 `/var/lib`；它不会让已有数据自动�
 | `authority-backup` / `authority-restore` | Hub 授权库、anchor、对应离线 Owner 材料 | 局部授权恢复，不包含 Bootstrap 手机管理授权或所有业务数据 |
 | 完整换板迁移 | 同一快照内的身份、全部授权/撤销记录、凭据、配置、业务数据 | 需要单独的完整快照及恢复验收；上述两类局部包都不能替代 |
 
-`authority-backup` 必须拿到与板端一致的离线 Owner 材料；如果工作站与板端状态不同，恢复匹配的
-原材料后再备份，不能靠改 generation 或重新签发来凑齐。旧格式授权包继续可恢复。
+`authority-backup` 备份的 lineage 直接读自板子（marker 与 anchor 一致的那一份），随包带走工作站的
+密钥与目录；工作站上没有可能与板端不一致的授权状态。带旧 `owner-domain-state.json` 的旧格式授权包
+继续可恢复，该文件只与包内快照互校，不再被读作权威。
 恢复旧快照会回到备份时的授权状态，可能包含随后撤销的权限；恢复后需核对，原板同时退出使用。
 手机管理授权的 `controller-reset` 和逐设备撤销保持原有含义，不会改变全局 Host/Owner 身份。
 

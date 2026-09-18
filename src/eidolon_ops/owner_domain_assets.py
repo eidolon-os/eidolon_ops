@@ -2,8 +2,20 @@
 
 The Owner root and delegated directory signer live only in the controller-side
 private material directory.  A Host receives the signed directory, public
-certificates, and its own TLS leaf/key.  A complete Host restore preserves this material. An explicit new Host receives
-a new Owner root; ordinary endpoint changes only revise its signed directory.
+certificates, and its own TLS leaf/key.  A complete Host restore preserves this
+material.  An explicit new Host receives a new Owner root; ordinary endpoint
+changes only revise its signed directory.
+
+What this side does *not* keep is which Authority a Host has established.
+That fact is born on the Host — Hub writes its marker when it consumes a
+bootstrap capability — and the Host is its only ledger.  Every operation that
+needs the generation or the state id observes the Host first and renders from
+what it finds (:class:`HostAuthority`).  This module used to hold a second
+copy in ``owner-domain-state.json``; the copy could disagree with the Host,
+did on 2026-09-10 when one Owner's material commissioned a second board, and
+then had no honest way back.  Nothing here can produce a generation the Host
+did not establish: a Host holding nothing is rendered at 1, and a Host holding
+something is rendered at exactly that.
 """
 
 from __future__ import annotations
@@ -14,9 +26,7 @@ import stat
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from enum import StrEnum
 from pathlib import Path
-from typing import TypedDict, cast
 
 from cryptography import x509
 from cryptography.exceptions import InvalidSignature
@@ -25,9 +35,11 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from eidolon_sdk.device_foundation.v1 import (
     AuthorityLocator,
+    AuthorityLocatorError,
     OwnerDomainDescriptor,
     OwnerDomainTrustAnchor,
     descriptor_key_id,
+    verify_descriptor,
 )
 from eidolon_sdk.device_foundation.v1.directory_tool import issue_descriptor
 
@@ -39,14 +51,6 @@ class OwnerDomainAssetError(ValueError):
     """The offline trust material or issued public bundle is unsafe."""
 
 
-class _AuthorityState(TypedDict):
-    contract_version: int
-    owner_domain_id: str
-    owner_domain_generation: int
-    authority_state_id: str
-    bootstrap_pending: bool
-
-
 _ROOT_KEY = "owner-domain-root.key.pem"
 _ROOT_CERTIFICATE = "owner-domain-root-ca.pem"
 _SIGNER_KEY = "authority-signing.key.pem"
@@ -54,7 +58,6 @@ _SIGNER_CERTIFICATE = "authority-signing-certificate.pem"
 _DESCRIPTOR = "owner-domain-descriptor.json"
 _TLS_CERTIFICATE = "hub.crt"
 _TLS_KEY = "hub.key"
-_STATE = "owner-domain-state.json"
 _MATERIAL_NAMES = {
     _ROOT_KEY,
     _ROOT_CERTIFICATE,
@@ -63,9 +66,75 @@ _MATERIAL_NAMES = {
     _DESCRIPTOR,
     _TLS_CERTIFICATE,
     _TLS_KEY,
-    _STATE,
 }
 OWNER_DOMAIN_MATERIAL_NAMES = frozenset(_MATERIAL_NAMES)
+#: The controller-side Authority record this module used to keep. Inert now:
+#: it named a generation and a state id the Host is the only ledger for. It is
+#: tolerated in a material directory so an older backup still restores, and
+#: :func:`retire_legacy_authority_state` removes it, because a file that looks
+#: authoritative and is not is where the next confident wrong answer comes from.
+LEGACY_AUTHORITY_STATE = "owner-domain-state.json"
+
+
+@dataclass(frozen=True, slots=True)
+class HostAuthority:
+    """What one Host has established, or that it has established nothing yet.
+
+    Built from the Host's own report — its database marker and lineage anchor,
+    agreeing — or minted fresh for a Host that holds nothing.  Fresh means
+    generation 1 and a new state id: the only generation this side will ever
+    put a name to, because advancing one was removed with the epochs it served,
+    and every higher value in the field is history a Host already holds.
+    """
+
+    owner_domain_generation: int
+    state_id: str
+    established: bool
+    owner_domain_id: str | None = None
+
+    @classmethod
+    def fresh(cls) -> HostAuthority:
+        return cls(
+            owner_domain_generation=1,
+            state_id="authority-state_" + secrets.token_urlsafe(24),
+            established=False,
+        )
+
+    @classmethod
+    def established_from(cls, lineage: Mapping[str, object]) -> HostAuthority:
+        if (
+            not isinstance(lineage, Mapping)
+            or set(lineage) != {"contract_version", "owner_domain_id", "owner_domain_generation", "state_id"}
+            or lineage.get("contract_version") != 1
+            or not isinstance(lineage.get("owner_domain_id"), str)
+            or not str(lineage["owner_domain_id"]).startswith("owner-")
+            or type(lineage.get("owner_domain_generation")) is not int
+            or int(lineage["owner_domain_generation"]) < 1
+            or not isinstance(lineage.get("state_id"), str)
+            or not str(lineage["state_id"]).startswith("authority-state_")
+        ):
+            raise OwnerDomainAssetError("Host Authority lineage is invalid")
+        return cls(
+            owner_domain_generation=int(lineage["owner_domain_generation"]),
+            state_id=str(lineage["state_id"]),
+            established=True,
+            owner_domain_id=str(lineage["owner_domain_id"]),
+        )
+
+    def lineage(self, owner_domain_id: str) -> dict[str, object]:
+        """The marker a Hub writes, or has written, for this Authority."""
+
+        if self.established and self.owner_domain_id != owner_domain_id:
+            raise OwnerDomainAssetError(
+                "this Host has established another Owner's Authority; "
+                "this material cannot speak for it"
+            )
+        return {
+            "contract_version": 1,
+            "owner_domain_id": owner_domain_id,
+            "owner_domain_generation": self.owner_domain_generation,
+            "state_id": self.state_id,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,270 +151,6 @@ class OwnerDomainAssets:
     tls_private_key: bytes
 
 
-def ensure_owner_domain_assets(
-    material_root: Path,
-    identity: HostLanIdentity,
-    port: int,
-    *,
-    now: datetime | None = None,
-) -> OwnerDomainAssets:
-    """Issue or reuse one Owner Domain bundle without exporting signing keys."""
-
-    if not 1 <= port <= 65535:
-        raise OwnerDomainAssetError("Owner Domain endpoint port is invalid")
-    instant = (now or datetime.now(UTC)).astimezone(UTC)
-    _require_private_material_root(material_root)
-    if any(material_root.iterdir()) and not all(
-        (material_root / name).is_file()
-        for name in (_ROOT_KEY, _ROOT_CERTIFICATE, _STATE)
-    ):
-        raise OwnerDomainAssetError(
-            "AUTHORITY_RECOVERY_REQUIRED: existing Owner identity is incomplete; restore its backup"
-        )
-    root_key, root_certificate = _owner_root(material_root, instant)
-    owner_domain_id = _owner_domain_id(root_certificate)
-    authority_state = _authority_state(material_root, owner_domain_id)
-    signer_key, signer_certificate = _directory_signer(
-        material_root, root_key, root_certificate, instant
-    )
-    tls_certificate, tls_private_key = _host_tls(
-        material_root, identity, root_key, root_certificate, instant
-    )
-    descriptor = _directory(
-        material_root,
-        identity,
-        port,
-        owner_domain_id,
-        authority_state["owner_domain_generation"],
-        root_certificate,
-        signer_certificate,
-        signer_key,
-        instant,
-    )
-    return OwnerDomainAssets(
-        owner_domain_id=owner_domain_id,
-        owner_domain_generation=authority_state["owner_domain_generation"],
-        authority_state_id=authority_state["authority_state_id"],
-        bootstrap_pending=authority_state["bootstrap_pending"],
-        authority_bootstrap=_bootstrap_document(authority_state),
-        descriptor=descriptor,
-        owner_root_certificate=root_certificate.public_bytes(serialization.Encoding.PEM),
-        authority_signing_certificate=signer_certificate.public_bytes(
-            serialization.Encoding.PEM
-        ),
-        tls_certificate=tls_certificate,
-        tls_private_key=tls_private_key,
-    )
-
-
-def _require_private_material_root(root: Path) -> None:
-    if root.exists():
-        if root.is_symlink() or not root.is_dir() or stat.S_IMODE(root.stat().st_mode) != 0o700:
-            raise OwnerDomainAssetError("Owner Domain material directory is unsafe")
-        extra = {path.name for path in root.iterdir()} - _MATERIAL_NAMES
-        if extra:
-            raise OwnerDomainAssetError("Owner Domain material directory has extra files")
-        for path in root.iterdir():
-            if path.is_symlink() or not path.is_file() or stat.S_IMODE(path.stat().st_mode) != 0o600:
-                raise OwnerDomainAssetError(f"Owner Domain material is unsafe: {path.name}")
-        return
-    ensure_private_parent(root.parent)
-    root.mkdir(mode=0o700)
-
-
-def _authority_state(root: Path, owner_domain_id: str) -> _AuthorityState:
-    path = root / _STATE
-    if path.is_file():
-        try:
-            value = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError) as exc:
-            raise OwnerDomainAssetError("Owner Authority state is invalid") from exc
-        expected_keys = {
-            "contract_version",
-            "owner_domain_id",
-            "owner_domain_generation",
-            "authority_state_id",
-            "bootstrap_pending",
-        }
-        if (
-            not isinstance(value, dict)
-            or set(value) != expected_keys
-            or value.get("contract_version") != 1
-            or value.get("owner_domain_id") != owner_domain_id
-            or type(value.get("owner_domain_generation")) is not int
-            or value["owner_domain_generation"] < 1
-            or not isinstance(value.get("authority_state_id"), str)
-            or not value["authority_state_id"].startswith("authority-state_")
-            or not isinstance(value.get("bootstrap_pending"), bool)
-        ):
-            raise OwnerDomainAssetError("Owner Authority state does not match its root")
-        return cast(_AuthorityState, value)
-    value: _AuthorityState = {
-        "contract_version": 1,
-        "owner_domain_id": owner_domain_id,
-        "owner_domain_generation": 1,
-        "authority_state_id": "authority-state_" + secrets.token_urlsafe(24),
-        "bootstrap_pending": True,
-    }
-    write_private_file(
-        path,
-        (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode(),
-    )
-    return value
-
-
-def mark_authority_bootstrapped(
-    material_root: Path,
-    *,
-    owner_domain_id: str,
-    owner_domain_generation: int,
-    authority_state_id: str,
-) -> None:
-    """Consume a bootstrap capability only after target marker proof."""
-
-    _require_private_material_root(material_root)
-    state = _authority_state(material_root, owner_domain_id)
-    if (
-        state["owner_domain_generation"] != owner_domain_generation
-        or state["authority_state_id"] != authority_state_id
-    ):
-        raise OwnerDomainAssetError("Authority bootstrap proof does not match")
-    if not state["bootstrap_pending"]:
-        return
-    state["bootstrap_pending"] = False
-    write_private_file(
-        material_root / _STATE,
-        (json.dumps(state, sort_keys=True, separators=(",", ":")) + "\n").encode(),
-    )
-
-
-def adopt_host_authority(
-    material_root: Path,
-    *,
-    directory: bytes,
-    lineage: Mapping[str, object],
-    now: datetime | None = None,
-) -> _AuthorityState:
-    """Bind this material to the Authority lineage a Host has already established.
-
-    A generation is not a counter this side may move at will: it names *which
-    installation* of this Owner Domain the material speaks for.  One Owner's
-    material used to commission a second board therefore ends up naming the
-    board it commissioned last, and every operation that reaches the first board
-    refuses — correctly, and including the install that would have told it
-    anything.  Until this existed the vocabulary had no way to say the true
-    thing, which is that the Host is right and this side holds the stale answer,
-    so the only ways out were a backup nobody had taken and a factory reset that
-    destroys the Host being argued about.
-
-    This adopts rather than reissues.  The signed directory comes from the Host
-    and is accepted only if this material's own Owner root signed it, which is
-    what stops a Host from naming a generation this Owner never issued; because
-    it is adopted byte for byte, every device already holding that directory
-    keeps holding exactly it and no revision line restarts.  The state id comes
-    from the Host's database and anchor, which is the one part no signature can
-    prove — which is why the operation is explicit and why the caller, not this
-    function, is where the operator confirms it.
-
-    Nothing about the Host is written, asked for, or invalidated.  Adopting the
-    wrong lineage authorizes nothing by itself: the install gate still requires
-    the Host to independently present the same one.
-    """
-
-    _require_private_material_root(material_root)
-    root_certificate = _certificate(material_root / _ROOT_CERTIFICATE)
-    signer_certificate = _certificate(material_root / _SIGNER_CERTIFICATE)
-    owner_domain_id = _owner_domain_id(root_certificate)
-    instant = (now or datetime.now(UTC)).astimezone(UTC)
-    try:
-        descriptor = OwnerDomainDescriptor.model_validate_json(directory.decode("utf-8"))
-    except (UnicodeDecodeError, ValueError) as exc:
-        raise OwnerDomainAssetError("installed Owner directory is not a readable document") from exc
-    if descriptor.owner_domain_id != owner_domain_id:
-        raise OwnerDomainAssetError(
-            "installed Owner directory names another Owner Domain; this material cannot adopt it"
-        )
-    # The signature check is the whole reason a Host may be believed here: this
-    # document is only acceptable because the Owner root in this directory
-    # signed it, so the generation being adopted is one this Owner did issue.
-    _validate_directory(descriptor, root_certificate, signer_certificate, instant)
-    if (
-        not isinstance(lineage, Mapping)
-        or lineage.get("contract_version") != 1
-        or lineage.get("owner_domain_id") != owner_domain_id
-        or type(lineage.get("owner_domain_generation")) is not int
-        or lineage["owner_domain_generation"] != descriptor.owner_domain_generation
-        or not isinstance(lineage.get("state_id"), str)
-        or not str(lineage["state_id"]).startswith("authority-state_")
-    ):
-        raise OwnerDomainAssetError(
-            "Host Authority lineage does not match the directory this Host serves"
-        )
-    _require_not_older_directory(material_root, descriptor)
-    state = _authority_state(material_root, owner_domain_id)
-    adopted: _AuthorityState = {
-        "contract_version": 1,
-        "owner_domain_id": owner_domain_id,
-        "owner_domain_generation": descriptor.owner_domain_generation,
-        "authority_state_id": str(lineage["state_id"]),
-        # A lineage the Host established is a spent capability by definition.
-        "bootstrap_pending": False,
-    }
-    if state == adopted and (material_root / _DESCRIPTOR).read_bytes() == directory:
-        return state
-    # Directory first, state last. Each write is atomic on its own, and until
-    # the state names this lineage nothing claims it: a failure in between
-    # leaves the install gate refusing exactly as it does now, which is the
-    # recoverable side to land on.
-    write_private_file(material_root / _DESCRIPTOR, directory)
-    write_private_file(
-        material_root / _STATE,
-        (json.dumps(adopted, sort_keys=True, separators=(",", ":")) + "\n").encode(),
-    )
-    return adopted
-
-
-def _require_not_older_directory(
-    material_root: Path, adopted: OwnerDomainDescriptor
-) -> None:
-    """Never let adoption walk a live revision line backwards.
-
-    Two directories at the same generation are the same line, and this side
-    advances it whenever the Host's endpoint changes — so between issuing a
-    revision and delivering it, the Host still serves the older one. Adopting
-    then would silently undo the change the operator had just made. Different
-    generations are different lines and have no revision to compare.
-    """
-
-    path = material_root / _DESCRIPTOR
-    if not path.is_file():
-        return
-    try:
-        current = OwnerDomainDescriptor.model_validate_json(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        # Older than the contract, or unreadable. Either way it states no
-        # revision this can be sure it would be walking back.
-        return
-    if (
-        current.owner_domain_id == adopted.owner_domain_id
-        and current.owner_domain_generation == adopted.owner_domain_generation
-        and current.directory_revision > adopted.directory_revision
-    ):
-        raise OwnerDomainAssetError(
-            "this material holds a newer directory for the Host's own lineage; "
-            "deliver it instead of adopting an older revision"
-        )
-
-
-class AuthorityDecision(StrEnum):
-    """What an operation must do with the one-shot bootstrap capability."""
-
-    RECORD_CONSUMED = "record_consumed_capability"
-    CARRY_PENDING = "carry_pending_capability"
-    KEEP_ESTABLISHED = "keep_established_lineage"
-    RECOVERY_REQUIRED = "recovery_required"
-
-
 def authority_lineage(assets: OwnerDomainAssets) -> dict[str, object]:
     """The Authority marker a Hub writes when it accepts this capability."""
 
@@ -357,50 +162,175 @@ def authority_lineage(assets: OwnerDomainAssets) -> dict[str, object]:
     }
 
 
-def decide_owner_authority(
-    assets: OwnerDomainAssets, *, marker: object, established: object
-) -> AuthorityDecision:
-    """Only bootstrap a new identity, or continue its proven installed state.
+def ensure_owner_material(
+    material_root: Path, identity: HostLanIdentity, *, now: datetime | None = None
+) -> str:
+    """Create the Owner root, directory signer and Host TLS leaf if absent.
 
-    A consumed identity with missing state requires recovery. Explicit factory
-    reset creates another Host/Owner; it never reissues this identity at a new epoch.
+    The keys only.  No directory is issued and no capability rendered, because
+    both name a generation, and a generation is something a Host establishes —
+    there is none to name until a Host is being addressed.  Returns the Owner
+    Domain id, which is a function of the root and nothing else.
     """
 
-    lineage = authority_lineage(assets)
-    if assets.bootstrap_pending:
-        if established == lineage:
-            return AuthorityDecision.RECORD_CONSUMED
-        if marker is None or marker == lineage:
-            return AuthorityDecision.CARRY_PENDING
-        return AuthorityDecision.RECOVERY_REQUIRED
-    if marker is None:
-        return AuthorityDecision.RECOVERY_REQUIRED
-    if established == lineage:
-        return AuthorityDecision.KEEP_ESTABLISHED
-    return AuthorityDecision.RECOVERY_REQUIRED
+    instant = (now or datetime.now(UTC)).astimezone(UTC)
+    _require_private_material_root(material_root)
+    _require_complete_or_empty(material_root)
+    root_key, root_certificate = _owner_root(material_root, instant)
+    _directory_signer(material_root, root_key, root_certificate, instant)
+    _host_tls(material_root, identity, root_key, root_certificate, instant)
+    return _owner_domain_id(root_certificate)
 
 
-def authority_recovery_required(marker: object, lineage: object, *, remedy: str) -> str:
-    """The refusal :func:`decide_owner_authority` never lets an operation skip."""
+def owner_domain_id_of(material_root: Path) -> str:
+    """The Owner Domain this material speaks for, read from its root and nothing else."""
 
-    return (
-        "AuthorityRecoveryRequired: this Host's Hub database identifies "
-        f"{marker}, and this controller's Owner material identifies {lineage}. "
-        f"{remedy}"
+    _require_private_material_root(material_root)
+    path = material_root / _ROOT_CERTIFICATE
+    if not path.is_file():
+        raise OwnerDomainAssetError("Owner Domain material has no root; initialize inputs first")
+    return _owner_domain_id(_certificate(path))
+
+
+def ensure_owner_domain_assets(
+    material_root: Path,
+    identity: HostLanIdentity,
+    port: int,
+    host_authority: HostAuthority,
+    *,
+    served_directory: bytes | None = None,
+    now: datetime | None = None,
+) -> OwnerDomainAssets:
+    """Issue or reuse one Owner Domain bundle for the Authority a Host holds.
+
+    ``host_authority`` is what the Host reported, or a fresh one for a Host that
+    holds nothing.  ``served_directory`` is the signed directory the Host
+    serves, when it serves one: it is adopted byte for byte as the baseline of
+    this material's revision line, so every device already holding it goes on
+    holding exactly it, and only a real endpoint change issues a revision after
+    it.  Signing keys never leave ``material_root``.
+    """
+
+    if not 1 <= port <= 65535:
+        raise OwnerDomainAssetError("Owner Domain endpoint port is invalid")
+    instant = (now or datetime.now(UTC)).astimezone(UTC)
+    _require_private_material_root(material_root)
+    _require_complete_or_empty(material_root)
+    root_key, root_certificate = _owner_root(material_root, instant)
+    owner_domain_id = _owner_domain_id(root_certificate)
+    lineage = host_authority.lineage(owner_domain_id)
+    signer_key, signer_certificate = _directory_signer(
+        material_root, root_key, root_certificate, instant
+    )
+    tls_certificate, tls_private_key = _host_tls(
+        material_root, identity, root_key, root_certificate, instant
+    )
+    descriptor = _directory(
+        material_root,
+        identity,
+        port,
+        owner_domain_id,
+        host_authority.owner_domain_generation,
+        root_certificate,
+        signer_certificate,
+        signer_key,
+        instant,
+        served=served_directory,
+    )
+    return OwnerDomainAssets(
+        owner_domain_id=owner_domain_id,
+        owner_domain_generation=host_authority.owner_domain_generation,
+        authority_state_id=host_authority.state_id,
+        bootstrap_pending=not host_authority.established,
+        authority_bootstrap=_bootstrap_document(lineage, established=host_authority.established),
+        descriptor=descriptor,
+        owner_root_certificate=root_certificate.public_bytes(serialization.Encoding.PEM),
+        authority_signing_certificate=signer_certificate.public_bytes(
+            serialization.Encoding.PEM
+        ),
+        tls_certificate=tls_certificate,
+        tls_private_key=tls_private_key,
     )
 
 
-def _bootstrap_document(state: _AuthorityState) -> bytes:
+def verify_served_directory(material_root: Path, directory: bytes) -> OwnerDomainDescriptor:
+    """The directory a Host serves, accepted only if this material's Owner root signed it.
+
+    Signature and delegation only — not the validity window, because an expired
+    directory a Host still serves is still this Owner's, and the answer to
+    expired is a reissue, not a refusal.  Reads the material; writes nothing.
+    """
+
+    _require_private_material_root(material_root)
+    root_certificate = _certificate(material_root / _ROOT_CERTIFICATE)
+    signer_certificate = _certificate(material_root / _SIGNER_CERTIFICATE)
+    descriptor = _parse_directory(directory, label="the directory this Host serves")
+    if descriptor.owner_domain_id != _owner_domain_id(root_certificate):
+        raise OwnerDomainAssetError(
+            "the directory this Host serves names another Owner Domain"
+        )
+    _require_signed_by_this_owner(descriptor, root_certificate, signer_certificate)
+    return descriptor
+
+
+def retire_legacy_authority_state(material_root: Path) -> bool:
+    """Remove the controller-side Authority record, if this material still has one.
+
+    Nothing reads it any more.  Returns whether there was one to remove, so the
+    operation that did it can say so.
+    """
+
+    path = material_root / LEGACY_AUTHORITY_STATE
+    if path.is_symlink() or not path.is_file():
+        return False
+    path.unlink()
+    return True
+
+
+def _require_private_material_root(root: Path) -> None:
+    if root.exists():
+        if root.is_symlink() or not root.is_dir() or stat.S_IMODE(root.stat().st_mode) != 0o700:
+            raise OwnerDomainAssetError("Owner Domain material directory is unsafe")
+        extra = {path.name for path in root.iterdir()} - _MATERIAL_NAMES - {LEGACY_AUTHORITY_STATE}
+        if extra:
+            raise OwnerDomainAssetError("Owner Domain material directory has extra files")
+        for path in root.iterdir():
+            if path.is_symlink() or not path.is_file() or stat.S_IMODE(path.stat().st_mode) != 0o600:
+                raise OwnerDomainAssetError(f"Owner Domain material is unsafe: {path.name}")
+        return
+    ensure_private_parent(root.parent)
+    root.mkdir(mode=0o700)
+
+
+def _require_complete_or_empty(root: Path) -> None:
+    present = {path.name for path in root.iterdir()} - {LEGACY_AUTHORITY_STATE}
+    if present and not all(
+        (root / name).is_file() for name in (_ROOT_KEY, _ROOT_CERTIFICATE)
+    ):
+        raise OwnerDomainAssetError(
+            "AUTHORITY_RECOVERY_REQUIRED: existing Owner identity is incomplete; restore its backup"
+        )
+
+
+def _bootstrap_document(lineage: Mapping[str, object], *, established: bool) -> bytes:
+    """The one-shot capability an empty Hub consumes, or the tombstone of one it did.
+
+    Hub takes the pending form only into an empty database and deletes it on
+    use.  A Host that has established its Authority is sent the consumed form
+    naming exactly what it established, so the file on the Host agrees with
+    the Host rather than with anything this side remembers.
+    """
+
     value = {
         "contract_version": 1,
         "operation": (
-            "owner-authority.bootstrap"
-            if state["bootstrap_pending"]
-            else "owner-authority.bootstrap-consumed"
+            "owner-authority.bootstrap-consumed"
+            if established
+            else "owner-authority.bootstrap"
         ),
-        "owner_domain_id": state["owner_domain_id"],
-        "owner_domain_generation": state["owner_domain_generation"],
-        "state_id": state["authority_state_id"],
+        "owner_domain_id": lineage["owner_domain_id"],
+        "owner_domain_generation": lineage["owner_domain_generation"],
+        "state_id": lineage["state_id"],
     }
     return (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
 
@@ -577,8 +507,19 @@ def _directory(
     signer_certificate: x509.Certificate,
     signer_key: ec.EllipticCurvePrivateKey,
     now: datetime,
+    *,
+    served: bytes | None = None,
 ) -> bytes:
     path = root / _DESCRIPTOR
+    if served is not None:
+        _adopt_served_directory(
+            path,
+            served,
+            owner_domain_id,
+            owner_domain_generation,
+            root_certificate,
+            signer_certificate,
+        )
     origin = identity.hub_origin(port)
     # This Host serves the document at its own onboarding route, and it is the
     # only party that knows that route. Stating it inside the signed document is
@@ -672,13 +613,69 @@ def _directory(
     return encoded
 
 
-def _validate_directory(
+def _adopt_served_directory(
+    path: Path,
+    served: bytes,
+    owner_domain_id: str,
+    owner_domain_generation: int,
+    root_certificate: x509.Certificate,
+    signer_certificate: x509.Certificate,
+) -> None:
+    """Make the directory the Host serves the baseline of this material's revision line.
+
+    Adopted rather than reissued, and byte for byte: every device that cached
+    this document keeps holding exactly it, and no revision line restarts.  It
+    is believed only because this material's own Owner root signed it — which
+    is also what stops a Host from naming a generation this Owner never issued.
+
+    One thing is never walked back: a newer revision at the same generation
+    that this side issued and has not yet delivered.  Between issuing it and
+    the deploy that carries it, the Host still serves the older one, and taking
+    that would silently undo the change the operator just made.
+    """
+
+    descriptor = _parse_directory(served, label="the directory this Host serves")
+    if descriptor.owner_domain_id != owner_domain_id:
+        raise OwnerDomainAssetError(
+            "the directory this Host serves names another Owner Domain; this material cannot adopt it"
+        )
+    _require_signed_by_this_owner(descriptor, root_certificate, signer_certificate)
+    if descriptor.owner_domain_generation != owner_domain_generation:
+        raise OwnerDomainAssetError(
+            "AUTHORITY_RECOVERY_REQUIRED: this Host serves a directory at generation "
+            f"{descriptor.owner_domain_generation} but has established generation "
+            f"{owner_domain_generation}; its own copies disagree"
+        )
+    if path.is_file():
+        if path.read_bytes() == served:
+            return
+        try:
+            current = OwnerDomainDescriptor.model_validate_json(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            current = None
+        if (
+            current is not None
+            and current.owner_domain_id == owner_domain_id
+            and current.owner_domain_generation == owner_domain_generation
+            and current.directory_revision > descriptor.directory_revision
+        ):
+            return
+    write_private_file(path, served)
+
+
+def _parse_directory(raw: bytes, *, label: str) -> OwnerDomainDescriptor:
+    try:
+        return OwnerDomainDescriptor.model_validate_json(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise OwnerDomainAssetError(f"{label} is not a readable document") from exc
+
+
+def _trust_anchor(
     descriptor: OwnerDomainDescriptor,
     root_certificate: x509.Certificate,
     signer_certificate: x509.Certificate,
-    now: datetime,
-) -> None:
-    trust = OwnerDomainTrustAnchor(
+) -> OwnerDomainTrustAnchor:
+    return OwnerDomainTrustAnchor(
         owner_domain_id=descriptor.owner_domain_id,
         owner_root_certificate_pem=root_certificate.public_bytes(serialization.Encoding.PEM).decode(),
         authority_signing_certificate_pem=signer_certificate.public_bytes(
@@ -686,7 +683,30 @@ def _validate_directory(
         ).decode(),
         trust_epoch=1,
     )
-    AuthorityLocator(trust).accept(descriptor, now=now)
+
+
+def _require_signed_by_this_owner(
+    descriptor: OwnerDomainDescriptor,
+    root_certificate: x509.Certificate,
+    signer_certificate: x509.Certificate,
+) -> None:
+    try:
+        verify_descriptor(descriptor, _trust_anchor(descriptor, root_certificate, signer_certificate))
+    except (AuthorityLocatorError, ValueError) as exc:
+        raise OwnerDomainAssetError(
+            f"the directory this Host serves was not signed by this Owner root: {exc}"
+        ) from exc
+
+
+def _validate_directory(
+    descriptor: OwnerDomainDescriptor,
+    root_certificate: x509.Certificate,
+    signer_certificate: x509.Certificate,
+    now: datetime,
+) -> None:
+    AuthorityLocator(_trust_anchor(descriptor, root_certificate, signer_certificate)).accept(
+        descriptor, now=now
+    )
 
 
 def _owner_domain_id(certificate: x509.Certificate) -> str:

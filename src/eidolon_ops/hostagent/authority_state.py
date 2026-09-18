@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from . import contract, primitives
+from .hardware import observe_hardware
 from .primitives import TargetError
 
 HUB_DATABASE = Path("/var/lib/eidolon/hub/eidolon-hub.sqlite3")
@@ -97,23 +98,41 @@ def authority_lineage(
     return {"status": "observed", **established_lineage(root=root)}
 
 
-def installed_owner_directory(
+def install_context(
     payload: Mapping[str, object], *, root: Path = Path("/")
 ) -> dict[str, object]:
-    """The signed Owner directory this Host serves, beside the lineage it names.
+    """Everything an install decides on, read from this Host in one round trip.
 
-    The document itself, not a digest of it: a controller adopting this Host's
-    Authority verifies the signature against the Owner root it already holds,
-    and a digest cannot be checked against a key. Read-only in both directions —
-    this says what the Host has and changes nothing about it.
+    The lineage in both its copies; the signed Owner directory this Host serves,
+    as the document rather than a digest, because a controller believes it only
+    after verifying its signature against the Owner root it holds; the permanent
+    hardware identifier; and a digest of the Host identity secret, so a
+    controller can tell a Host it delivered that secret to from one that merely
+    answers at the same name.  Read-only in every direction.
     """
 
     contract.fixed_units(payload)
-    path = primitives.host_path(root.resolve(), OWNER_DESCRIPTOR)
-    if path.is_symlink() or not path.is_file():
-        raise TargetError("installed Owner directory is missing or unsafe")
-    try:
-        directory = path.read_text(encoding="utf-8")
-    except (OSError, ValueError) as exc:
-        raise TargetError("installed Owner directory is unreadable") from exc
-    return {"status": "observed", "directory": directory, **established_lineage(root=root)}
+    root = root.resolve()
+    evidence = established_lineage(root=root)
+    directory_path = primitives.host_path(root, OWNER_DESCRIPTOR)
+    directory: str | None = None
+    if directory_path.is_symlink():
+        raise TargetError("installed Owner directory is not a safe regular file")
+    if directory_path.is_file():
+        try:
+            directory = directory_path.read_text(encoding="utf-8")
+        except (OSError, ValueError) as exc:
+            raise TargetError("installed Owner directory is unreadable") from exc
+    identity_path = primitives.host_path(
+        root, contract.INSTALL_INPUTS["host_identity.ed25519"][0]
+    )
+    if identity_path.is_symlink():
+        raise TargetError("installed Host identity is not a safe regular file")
+    identity = primitives.file_sha256(identity_path) if identity_path.is_file() else None
+    return {
+        "status": "observed",
+        **evidence,
+        "directory": directory,
+        "hardware": observe_hardware(root=root),
+        "identity_sha256": identity,
+    }

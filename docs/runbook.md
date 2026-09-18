@@ -34,19 +34,16 @@ uv run eidolon-ops --config /absolute/path/hosts/pi5.toml trust-host-key --apply
 uv run eidolon-ops --config /absolute/path/hosts/pi5.toml ssh-config --apply
 ```
 
-A profile that has commissioned a second board names that board's Authority, and every install to the
-first one is then refused for naming a different generation. `trust-host-authority` reports what each
-side names and adopts the signed directory the Host already serves, after you confirm its state id
-against the Host. It writes nothing to the Host. README, "一份 Owner 材料只能认一台 Host".
+An install decides what it is from the Host's own report and this profile's delivery record — never
+from a generation kept on this workstation, which keeps none. The plan names the situation
+(`first_install`, `continue_established_lineage`, `adopt_delivery_evidence`, or a refusal such as
+`wrong_board`), and a second board answering under a bound profile is refused at the first gate with
+no generation moved. README, "板子是它自己授权的唯一账本".
 
-```bash
-uv run eidolon-ops --config /absolute/path/hosts/pi5.toml trust-host-authority
-```
-
-A Host installed before `host_delivery.json` existed has no delivery evidence for install to verify, so
-install refuses it although nothing is wrong with it. `trust-host-delivery` records that evidence, but
-only for a Host that proves it already holds this profile's identity, and only into an absent binding.
-README, "身份交付给了哪块板子，也是一份证据".
+A Host installed before `host_delivery.json` existed has no delivery evidence. An install adopts it
+when the Host proves it holds this profile's identity, and records the binding once the Host proves
+what it established. `trust-host-delivery` records the same evidence without shipping a release, and
+only into an absent binding. README, "身份交付给了哪块板子，也是一份证据".
 
 ```bash
 uv run eidolon-ops --config /absolute/path/hosts/pi5.toml trust-host-delivery

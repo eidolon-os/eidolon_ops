@@ -201,37 +201,6 @@ def trust_host_delivery(host_id: str, *, apply: bool) -> Plan:
     )
 
 
-def trust_host_authority(host_id: str, *, apply: bool, adopting: bool) -> Plan:
-    """Record which Authority lineage this profile's Owner material speaks for.
-
-    Reversible, and narrowly so: what it withdraws is this side's claim about
-    which installation its material speaks for, which the previous value plus
-    the Host's own directory can put back. What it cannot put back is a
-    directory this side had issued and not yet delivered, which is why adopting
-    an older revision of a live line is refused rather than acknowledged.
-
-    It reaches a Host but takes nothing from one, so nothing here is destructive
-    to the Host at any level: the Host is read, and every later operation checks
-    the adopted answer against it again.
-    """
-
-    flags = {"--apply"} if apply else set()
-    if adopting:
-        flags.add("--replace")
-    return Plan(
-        operation="trust-host-authority",
-        host_id=host_id,
-        steps=_steps(
-            ("read", "read the signed Owner directory and lineage this Host serves"),
-            ("verify", "accept it only if this profile's own Owner root signed it"),
-            ("record", "write the profile's Owner material: lineage and that directory"),
-        ),
-        destructive=DestructiveLevel.REVERSIBLE if adopting else DestructiveLevel.NONE,
-        requires_flags=frozenset(flags),
-        touches=frozenset({ActionKind.SECRET}) if apply else frozenset(),
-    )
-
-
 def ssh_config(host_id: str, *, apply: bool) -> Plan:
     """Write this profile's SSH options where a hand-typed `ssh` reads them.
 
