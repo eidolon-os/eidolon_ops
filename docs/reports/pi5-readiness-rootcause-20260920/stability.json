@@ -1,0 +1,330 @@
+[
+  {
+    "observed_at_unix": 1789918151.218786,
+    "livekit_process": {
+      "MainPID": "22943",
+      "ActiveState": "active",
+      "InvocationID": "54c859ea80c642f6a72c77f1bc9d2d2b"
+    },
+    "services": [
+      {
+        "service_id": "agent",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": null
+      },
+      {
+        "service_id": "channel",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": null
+      },
+      {
+        "service_id": "channel-provider",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": null
+      },
+      {
+        "service_id": "data",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": null
+      },
+      {
+        "service_id": "data-workspace",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": null
+      },
+      {
+        "service_id": "hub",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": null
+      },
+      {
+        "service_id": "kernel",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": null
+      },
+      {
+        "service_id": "livekit",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": true
+      },
+      {
+        "service_id": "memory-discovery",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": null
+      },
+      {
+        "service_id": "memory-embedder",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": null
+      },
+      {
+        "service_id": "memory-supervisor",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": null
+      },
+      {
+        "service_id": "nats",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": null
+      }
+    ]
+  },
+  {
+    "observed_at_unix": 1789918181.660136,
+    "livekit_process": {
+      "MainPID": "22943",
+      "ActiveState": "active",
+      "InvocationID": "54c859ea80c642f6a72c77f1bc9d2d2b"
+    },
+    "services": [
+      {
+        "service_id": "agent",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": null
+      },
+      {
+        "service_id": "channel",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": null
+      },
+      {
+        "service_id": "channel-provider",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": null
+      },
+      {
+        "service_id": "data",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": null
+      },
+      {
+        "service_id": "data-workspace",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": null
+      },
+      {
+        "service_id": "hub",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": null
+      },
+      {
+        "service_id": "kernel",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": null
+      },
+      {
+        "service_id": "livekit",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": true
+      },
+      {
+        "service_id": "memory-discovery",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": null
+      },
+      {
+        "service_id": "memory-embedder",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": null
+      },
+      {
+        "service_id": "memory-supervisor",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": null
+      },
+      {
+        "service_id": "nats",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": null
+      }
+    ]
+  },
+  {
+    "observed_at_unix": 1789918212.0613382,
+    "livekit_process": {
+      "MainPID": "22943",
+      "ActiveState": "active",
+      "InvocationID": "54c859ea80c642f6a72c77f1bc9d2d2b"
+    },
+    "services": [
+      {
+        "service_id": "agent",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": null
+      },
+      {
+        "service_id": "channel",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": null
+      },
+      {
+        "service_id": "channel-provider",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": null
+      },
+      {
+        "service_id": "data",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": null
+      },
+      {
+        "service_id": "data-workspace",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": null
+      },
+      {
+        "service_id": "hub",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": null
+      },
+      {
+        "service_id": "kernel",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": null
+      },
+      {
+        "service_id": "livekit",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": true
+      },
+      {
+        "service_id": "memory-discovery",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": null
+      },
+      {
+        "service_id": "memory-embedder",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": null
+      },
+      {
+        "service_id": "memory-supervisor",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": null
+      },
+      {
+        "service_id": "nats",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": null
+      }
+    ]
+  },
+  {
+    "observed_at_unix": 1789918242.4588,
+    "livekit_process": {
+      "MainPID": "22943",
+      "ActiveState": "active",
+      "InvocationID": "54c859ea80c642f6a72c77f1bc9d2d2b"
+    },
+    "services": [
+      {
+        "service_id": "agent",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": null
+      },
+      {
+        "service_id": "channel",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": null
+      },
+      {
+        "service_id": "channel-provider",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": null
+      },
+      {
+        "service_id": "data",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": null
+      },
+      {
+        "service_id": "data-workspace",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": null
+      },
+      {
+        "service_id": "hub",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": null
+      },
+      {
+        "service_id": "kernel",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": null
+      },
+      {
+        "service_id": "livekit",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": true
+      },
+      {
+        "service_id": "memory-discovery",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": null
+      },
+      {
+        "service_id": "memory-embedder",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": null
+      },
+      {
+        "service_id": "memory-supervisor",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": null
+      },
+      {
+        "service_id": "nats",
+        "runtime_state": "ready",
+        "detail": null,
+        "network_current": null
+      }
+    ]
+  }
+]

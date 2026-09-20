@@ -1,0 +1,18 @@
+{
+  "release_id": "pi5-readiness-rootcause-20260920a",
+  "status": "activated",
+  "previous_release": "pi5-companion-desktop-20260920c",
+  "kernel_revision": "6ae07520f8a83b6ef6efea02f913a0f789154dac",
+  "other_component_revisions_unchanged": true,
+  "tests": {
+    "system_passed": 136,
+    "system_skipped": 1,
+    "ruff": "passed"
+  },
+  "device_inventory_http_status": 200,
+  "device_inventory": [
+    "m5stack-stackchan",
+    "eidolon-mobile-android",
+    "esp-box-3"
+  ]
+}
