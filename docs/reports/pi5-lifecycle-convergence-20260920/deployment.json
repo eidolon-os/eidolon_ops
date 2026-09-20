@@ -1,0 +1,18 @@
+{
+  "release_id": "pi5-lifecycle-convergence-20260920a",
+  "status": "activated",
+  "outcome": "applied",
+  "kernel_revision": "09cda386d0c9f775a091923865d695a353eb1d47",
+  "previous_release": "pi5-readiness-rootcause-20260920a",
+  "other_component_revisions_unchanged": true,
+  "tests": {
+    "related_suites_passed": 337,
+    "skipped": 1,
+    "layer_contracts_kept": 10,
+    "modified_files_ruff": "passed"
+  },
+  "live_fault_injection": {
+    "status": "not_executed",
+    "reason": "auto_review rejected real service interruption without explicit fault-injection authorization"
+  }
+}

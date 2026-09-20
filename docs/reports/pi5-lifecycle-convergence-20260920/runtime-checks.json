@@ -1,0 +1,124 @@
+{
+  "pending_intents": 0,
+  "device_authority_endpoint_status": 200,
+  "services": [
+    {
+      "service_id": "agent",
+      "runtime_state": "ready",
+      "detail": null,
+      "network_current": null
+    },
+    {
+      "service_id": "channel",
+      "runtime_state": "ready",
+      "detail": null,
+      "network_current": null
+    },
+    {
+      "service_id": "channel-provider",
+      "runtime_state": "ready",
+      "detail": null,
+      "network_current": null
+    },
+    {
+      "service_id": "data",
+      "runtime_state": "ready",
+      "detail": null,
+      "network_current": null
+    },
+    {
+      "service_id": "data-workspace",
+      "runtime_state": "ready",
+      "detail": null,
+      "network_current": null
+    },
+    {
+      "service_id": "hub",
+      "runtime_state": "ready",
+      "detail": null,
+      "network_current": null
+    },
+    {
+      "service_id": "kernel",
+      "runtime_state": "ready",
+      "detail": null,
+      "network_current": null
+    },
+    {
+      "service_id": "livekit",
+      "runtime_state": "ready",
+      "detail": null,
+      "network_current": true
+    },
+    {
+      "service_id": "memory-discovery",
+      "runtime_state": "ready",
+      "detail": null,
+      "network_current": null
+    },
+    {
+      "service_id": "memory-embedder",
+      "runtime_state": "ready",
+      "detail": null,
+      "network_current": null
+    },
+    {
+      "service_id": "memory-supervisor",
+      "runtime_state": "ready",
+      "detail": null,
+      "network_current": null
+    },
+    {
+      "service_id": "nats",
+      "runtime_state": "ready",
+      "detail": null,
+      "network_current": null
+    }
+  ],
+  "accepted_operations": [
+    {
+      "timestamp": "1789919835433607",
+      "message": "INFO eidolon.unitapplier: accepted start eidolon-nats.service for pid 32353"
+    },
+    {
+      "timestamp": "1789919835554189",
+      "message": "INFO eidolon.unitapplier: accepted start eidolon-memory-embedder.service for pid 32353"
+    },
+    {
+      "timestamp": "1789919835660864",
+      "message": "INFO eidolon.unitapplier: accepted start eidolon-data.service for pid 32353"
+    },
+    {
+      "timestamp": "1789919835801231",
+      "message": "INFO eidolon.unitapplier: accepted start eidolon-kernel.service for pid 32353"
+    },
+    {
+      "timestamp": "1789919836006802",
+      "message": "INFO eidolon.unitapplier: accepted start eidolon-hub.service for pid 32353"
+    },
+    {
+      "timestamp": "1789919841169360",
+      "message": "INFO eidolon.unitapplier: accepted start eidolon-memory-supervisor.service for pid 32353"
+    },
+    {
+      "timestamp": "1789919841256008",
+      "message": "INFO eidolon.unitapplier: accepted start eidolon-memory-discovery.service for pid 32353"
+    },
+    {
+      "timestamp": "1789919841558283",
+      "message": "INFO eidolon.unitapplier: accepted start eidolon-data-workspace.service for pid 32353"
+    },
+    {
+      "timestamp": "1789919846879804",
+      "message": "INFO eidolon.unitapplier: accepted start eidolon-agent.service for pid 32353"
+    },
+    {
+      "timestamp": "1789919846941302",
+      "message": "INFO eidolon.unitapplier: accepted restart eidolon-livekit.service for pid 32353"
+    },
+    {
+      "timestamp": "1789919868322559",
+      "message": "INFO eidolon.unitapplier: accepted start eidolon-channel.service for pid 32353"
+    }
+  ]
+}
