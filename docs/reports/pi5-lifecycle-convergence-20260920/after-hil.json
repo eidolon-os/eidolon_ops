@@ -1,0 +1,147 @@
+{
+  "host": {
+    "authority": [
+      {
+        "singleton_id": 1,
+        "owner_domain_id": "owner-b0a862b0aab941d64554",
+        "owner_domain_generation": 8,
+        "state_id": "authority-state_LJxSTZE2bamD2OGWCj-2BazBbosGT_AE"
+      }
+    ],
+    "claims": [
+      {
+        "device_instance_id": "device-instance-06480c8b03673db5b63f7a37d6c31258f93c131b87f5618c464fb953e3cff9b9",
+        "owner_domain_id": "owner-b0a862b0aab941d64554",
+        "owner_domain_generation": 8,
+        "claim_generation": 1,
+        "trust_epoch": 1,
+        "state": "revoked"
+      },
+      {
+        "device_instance_id": "device-instance-0a077354bfffda11d13fa50730868d2609b26f376b6531cc4d26f43af814172f",
+        "owner_domain_id": "owner-b0a862b0aab941d64554",
+        "owner_domain_generation": 8,
+        "claim_generation": 1,
+        "trust_epoch": 1,
+        "state": "active"
+      },
+      {
+        "device_instance_id": "device-instance-130bc19d283055990eb2d3c84638afdb5b1e9d0ab0717fffa3e4992a12aeabd6",
+        "owner_domain_id": "owner-b0a862b0aab941d64554",
+        "owner_domain_generation": 8,
+        "claim_generation": 1,
+        "trust_epoch": 1,
+        "state": "revoked"
+      },
+      {
+        "device_instance_id": "device-instance-191468d44fe1c4604dc51b20c6e92b9219b6fcb0222a7aa78474c23254e006c5",
+        "owner_domain_id": "owner-b0a862b0aab941d64554",
+        "owner_domain_generation": 8,
+        "claim_generation": 1,
+        "trust_epoch": 1,
+        "state": "revoked"
+      },
+      {
+        "device_instance_id": "device-instance-2a9c8e32887a94b58d851fd80f0b8d41424b911e85f13be7be17f988c9628ac0",
+        "owner_domain_id": "owner-b0a862b0aab941d64554",
+        "owner_domain_generation": 8,
+        "claim_generation": 1,
+        "trust_epoch": 1,
+        "state": "revoked"
+      },
+      {
+        "device_instance_id": "device-instance-584788522a0e36f799ad0da52e78c2696c60e59252855514c2603dac19307414",
+        "owner_domain_id": "owner-b0a862b0aab941d64554",
+        "owner_domain_generation": 8,
+        "claim_generation": 1,
+        "trust_epoch": 1,
+        "state": "revoked"
+      },
+      {
+        "device_instance_id": "device-instance-a1d19dcbd4e39898d3f8ed07e622e0861c36ebfab3e0a9f01a5371b64053627f",
+        "owner_domain_id": "owner-b0a862b0aab941d64554",
+        "owner_domain_generation": 8,
+        "claim_generation": 1,
+        "trust_epoch": 1,
+        "state": "revoked"
+      },
+      {
+        "device_instance_id": "device-instance-cbaca296ba9f3016de9a5957731288b1272b691d3108091ec3c4e8106f8beec0",
+        "owner_domain_id": "owner-b0a862b0aab941d64554",
+        "owner_domain_generation": 8,
+        "claim_generation": 1,
+        "trust_epoch": 1,
+        "state": "active"
+      },
+      {
+        "device_instance_id": "device-instance-cf52e5fa20dd71cdc510ad870c0013b769be757a568887f0afe257db1313ff08",
+        "owner_domain_id": "owner-b0a862b0aab941d64554",
+        "owner_domain_generation": 8,
+        "claim_generation": 1,
+        "trust_epoch": 1,
+        "state": "revoked"
+      },
+      {
+        "device_instance_id": "device-instance-e7e8b4a09bb75f55cd61c874b7a9fdf8b71ce30f8abe062e7f66c812a39a5ed9",
+        "owner_domain_id": "owner-b0a862b0aab941d64554",
+        "owner_domain_generation": 8,
+        "claim_generation": 1,
+        "trust_epoch": 1,
+        "state": "active"
+      }
+    ],
+    "counts": [
+      {
+        "proposals": 16,
+        "acks": 10
+      }
+    ]
+  },
+  "mobile_claims": {
+    "eidolon.mobile-body-claim.v1.owner-f774cf8e1b667eb0ca7b": {
+      "device_ref": {
+        "device_instance_id": "device-instance-08b2358fd82bf6c46c182251d5bfb3ab7aea4384e06ca24858921453cfdf268d",
+        "owner_domain_id": "owner-f774cf8e1b667eb0ca7b",
+        "owner_domain_generation": 3,
+        "claim_generation": 1,
+        "trust_epoch": 1
+      },
+      "grant_id": "grant_j2YpeyC277fPqN9TDLUTCxkM",
+      "owner_domain_id": "owner-f774cf8e1b667eb0ca7b",
+      "device_instance_id": "device-instance-08b2358fd82bf6c46c182251d5bfb3ab7aea4384e06ca24858921453cfdf268d",
+      "acknowledged_at": "2026-09-08T14:07:59.566036Z",
+      "enrollment_id": "enrollment_4hevsE_Eiheyc3Y94YhEHAMC",
+      "ack_pending": false
+    },
+    "eidolon.mobile-body-claim.v1.owner-b0a862b0aab941d64554": {
+      "device_ref": {
+        "claim_generation": 1,
+        "device_instance_id": "device-instance-cbaca296ba9f3016de9a5957731288b1272b691d3108091ec3c4e8106f8beec0",
+        "owner_domain_generation": 8,
+        "owner_domain_id": "owner-b0a862b0aab941d64554",
+        "trust_epoch": 1
+      },
+      "grant_id": "grant_cRLwcL6LrNtUaruD7mE5hEal",
+      "owner_domain_id": "owner-b0a862b0aab941d64554",
+      "device_instance_id": "device-instance-cbaca296ba9f3016de9a5957731288b1272b691d3108091ec3c4e8106f8beec0",
+      "acknowledged_at": "2026-09-20T11:05:53.153831Z",
+      "enrollment_id": "enrollment_nISHXc4lPMogc2A1BVyAY6e1",
+      "ack_pending": false
+    },
+    "eidolon.mobile-body-claim.v1.owner-0342958c2e259f177f43": {
+      "device_ref": {
+        "claim_generation": 1,
+        "device_instance_id": "device-instance-c56a833e11d8804e74cb299efaeea210543c2ba561467e81d0a7173418b38f4c",
+        "owner_domain_generation": 1,
+        "owner_domain_id": "owner-0342958c2e259f177f43",
+        "trust_epoch": 1
+      },
+      "grant_id": "grant_DHotpNeySfdjpfoNghXkNC0H",
+      "owner_domain_id": "owner-0342958c2e259f177f43",
+      "device_instance_id": "device-instance-c56a833e11d8804e74cb299efaeea210543c2ba561467e81d0a7173418b38f4c",
+      "acknowledged_at": "2026-09-09T16:44:12.291965Z",
+      "enrollment_id": "enrollment_FJS6DpYFWkgZyepvD0mYBwYp",
+      "ack_pending": false
+    }
+  }
+}

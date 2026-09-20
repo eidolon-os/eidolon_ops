@@ -21,6 +21,18 @@
 
 证据：[发布](deployment.json)、[服务与操作记录](runtime-checks.json)、[稳定性](stability.json)、[授权不变](checks.json)、[发布前](before-authority.json)、[发布后](after.json)。
 
-**未执行：** 主动提交 LiveKit 重启，并在 job 中途重启 eidolond 的实机交错测试。自动审批拒绝该操作：可能中断真实服务，当前授权未明确包含生产环境故障注入。请求重放和监督器中途重启已在确定性测试中验证，不能将它们记作真机通过。待用户明确授权后才可执行；当前未绕过该限制。
+## 2026-09-21 真机交错验收完成
+
+用户明确授权短暂中断服务后，执行了此前被自动审批拦截的故障交错验收。本次没有修改产品代码或重新部署。
+
+- LiveKit 重启请求 0.328 秒返回时，旧 PID 32956 仍处于 `deactivating/stop-sigterm`，systemd job 38483 尚未完成。
+- 确认 job 尚在执行后重启 eidolond；监督器从 PID 32353 变为 74599，InvocationID 也改变。重启后的监督器观察并恢复已有操作。
+- LiveKit 最终从 PID 32956 变为 74815。91.36 秒观测窗口内，只记录一次 applier 重启提交、一次进程实例替换，未发生重复刷新。
+- 监督器重启前、恢复后各重放同一个请求，均返回 `replayed=true`，保持原 audit position 14，未追加重启。
+- 首次观测全部 12 个服务 ready 在约 24.77 秒；最终未完成操作为 0。媒体重启期间 Hub 仍 ready；恢复后设备授权入口解析返回 200。
+- Owner authority、10 个 Claim、16 个 Proposal、10 个 ACK 和全部 Mobile Claim 检查点在本次故障注入前后完全一致。
+
+证据：[交错与重放完整记录](host-job-recovery.json)、[授权和入口检查](hil-checks.json)、[验收前](before-hil.json)、[验收后](after-hil.json)、[实机验收脚本](exercise-host-job.py)。脚本会中断服务，只能在得到明确授权的 Host 上执行。
+
 
 这不是 exactly-once 执行承诺；进程管理器是外部执行者。覆盖的是已列明的可观察时序及收敛规则。物理 Wi-Fi 换网和双向音频质量不在本轮实机验收范围内。

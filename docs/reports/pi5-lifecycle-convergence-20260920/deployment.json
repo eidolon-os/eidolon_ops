@@ -12,7 +12,18 @@
     "modified_files_ruff": "passed"
   },
   "live_fault_injection": {
-    "status": "not_executed",
-    "reason": "auto_review rejected real service interruption without explicit fault-injection authorization"
+    "status": "passed",
+    "user_authorized_service_interruption": true,
+    "performed_at_utc": "2026-09-20T17:14:03.117046+00:00",
+    "evidence": "host-job-recovery.json",
+    "checks": {
+      "manager_restarted_while_job_pending": true,
+      "command_returned_before_completion": true,
+      "only_one_restart_submitted": true,
+      "one_replacement_observed": true,
+      "all_services_ready": true,
+      "pending_intents_empty": true,
+      "hub_ready_while_media_restarting": true
+    }
   }
 }
