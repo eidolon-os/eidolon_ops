@@ -862,3 +862,17 @@ def test_an_optional_channel_credential_is_neither_required_nor_repaired(
     # Absent and present are both legal, and neither is a repair.
     assert add_missing_install_credentials(configured, apply=False)["added"] == {}
     validate_install_input_contract(configured, _settings_reader)
+
+
+def test_team_channel_credential_is_added_from_existing_agent_without_rotation(config, tmp_path):
+    configured = _config_for_init(config, tmp_path)
+    initialize_install_inputs(configured, _settings_reader)
+    target = next(iter(configured.install_files.values())).parent
+    original = _env(target / 'agent.env')['EIDOLON_AGENT_ADMIN_API_TOKEN']
+    _strip_keys(target, {'channel.env': {'EIDOLON_AGENT_ADMIN_API_TOKEN'}})
+    result = add_missing_install_credentials(configured, apply=True)
+    assert result['added'] == {'channel.env': ['EIDOLON_AGENT_ADMIN_API_TOKEN']}
+    assert _env(target / 'channel.env')['EIDOLON_AGENT_ADMIN_API_TOKEN'] == original
+    assert _env(target / 'agent.env')['EIDOLON_AGENT_ADMIN_API_TOKEN'] == original
+    assert _env(target / 'admin.env')['EIDOLON_AGENT_ADMIN_API_TOKEN'] == original
+    validate_install_input_contract(configured, _settings_reader)

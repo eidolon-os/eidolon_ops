@@ -161,6 +161,7 @@ def initialize_install_inputs(
         },
         "channel.env": {
             **channel_external,
+            "EIDOLON_AGENT_ADMIN_API_TOKEN": agent_admin_token,
             "LIVEKIT_API_KEY": livekit_key,
             "LIVEKIT_API_SECRET": livekit_secret,
             "EIDOLON_CHANNEL_PROVIDER_TOKEN": hub_provider_token,
@@ -223,6 +224,7 @@ SHARED_CREDENTIALS: tuple[tuple[str, str, str, str, str], ...] = (
     ("agent.env", "EIDOLON_MEMORY_MCP_TOKEN", "memory.env", "EIDOLON_MEMORY_MCP_TOKEN", "Agent/Memory MCP token"),
     ("admin.env", "EIDOLON_ADMIN_MEMORY_API_SERVICE_TOKEN", "memory.env", "EIDOLON_MEMORY_API_TOKEN", "Admin/Memory API service token"),
     ("admin.env", "EIDOLON_AGENT_ADMIN_API_TOKEN", "agent.env", "EIDOLON_AGENT_ADMIN_API_TOKEN", "Admin/Agent admin API token"),
+    ("agent.env", "EIDOLON_AGENT_ADMIN_API_TOKEN", "channel.env", "EIDOLON_AGENT_ADMIN_API_TOKEN", "Agent/Channel team API token"),
     ("admin.env", "EIDOLON_CHANNEL_PROVIDER_TOKEN", "channel.env", "EIDOLON_CHANNEL_PROVIDER_TOKEN", "Admin/Channel Provider token"),
     ("channel.env", "LIVEKIT_API_KEY", "livekit.env", "LIVEKIT_API_KEY", "Channel/LiveKit key"),
     ("channel.env", "LIVEKIT_API_SECRET", "livekit.env", "LIVEKIT_API_SECRET", "Channel/LiveKit secret"),
@@ -348,6 +350,7 @@ DECLARED_ENV_KEYS: dict[str, EnvFileKeys] = {
     "channel.env": EnvFileKeys(
         required=frozenset({
             "OPENAI_LLM_API_KEY",
+            "EIDOLON_AGENT_ADMIN_API_TOKEN",
             "BAILIAN_STT_API_KEY",
             "BAILIAN_TTS_API_KEY",
             "LIVEKIT_API_KEY",
@@ -579,10 +582,20 @@ def add_missing_install_credentials(
         )
 
     #: Where each shared secret can be copied from, keyed by (file, key).
-    partners: dict[tuple[str, str], tuple[str, str]] = {}
+    partners: dict[tuple[str, str], set[tuple[str, str]]] = {}
     for left_file, left_key, right_file, right_key, _label in SHARED_CREDENTIALS:
-        partners.setdefault((left_file, left_key), (right_file, right_key))
-        partners.setdefault((right_file, right_key), (left_file, left_key))
+        left, right = (left_file, left_key), (right_file, right_key)
+        partners.setdefault(left, set()).add(right)
+        partners.setdefault(right, set()).add(left)
+
+    def shared_group(node):
+        found, pending = {node}, [node]
+        while pending:
+            for peer in partners.get(pending.pop(), ()):
+                if peer not in found:
+                    found.add(peer)
+                    pending.append(peer)
+        return found
 
     added: dict[str, list[str]] = {}
     minted: dict[tuple[str, str], str] = {}
@@ -590,17 +603,12 @@ def add_missing_install_credentials(
         for key in sorted(declared.required - set(envs[name])):
             value = FIXED_ENV_VALUES.get(key)
             if value is None:
-                partner = partners.get((name, key))
-                if partner is not None and envs[partner[0]].get(partner[1]):
-                    value = envs[partner[0]][partner[1]]
-                elif partner is not None:
-                    # Neither side has it: mint once for the pair, so both get
-                    # the same value in one pass.
-                    value = minted.setdefault(
-                        min((name, key), partner), secrets.token_urlsafe(32)
-                    )
-                else:
-                    value = secrets.token_urlsafe(32)
+                group = shared_group((name, key))
+                existing = {envs[file].get(field) for file, field in group} - {None, ""}
+                if len(existing) > 1:
+                    raise InstallInputError("existing shared credential values disagree")
+                value = next(iter(existing)) if existing else minted.setdefault(
+                    min(group), secrets.token_urlsafe(32))
             envs[name][key] = value
             added.setdefault(name, []).append(key)
 
