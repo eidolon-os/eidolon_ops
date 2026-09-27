@@ -159,6 +159,14 @@ memory_settings = "../.eidolon-ops/opi5max/inputs/memory.yaml"
 [capabilities]
 provides = ["rknpu2", "local_asr", "local_llm", "local_tts"]
 
+# Bench decision fixture, reached through an authenticated operator SSH tunnel.
+# The fixture is test-only; losing the tunnel fails the turn closed. Production
+# Hosts must configure their own decision provider, never fall back to fixtures.
+[[settings.overlay]]
+document = "agent.yaml"
+path = "participation.url"
+value = "http://127.0.0.1:8772/v1/participation/decide"
+
 [[settings.overlay]]
 document = "channel.yaml"
 path = "providers.stt_provider"
