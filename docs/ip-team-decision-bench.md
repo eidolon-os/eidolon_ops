@@ -16,4 +16,6 @@ fixture 属于测试进程，不是新产品 systemd 服务；不得将它当作
 
 Mobile 启动/结束及 Host 服务健康不能证明语音链路通过。完整验收需要真实按住说话，核对 ASR 文本、决策请求、真实成员回复、TTS、设备播放完成回执和下一步决策。fixture 精确匹配文档中的原始输入，ASR 的标点差异也可能导致弃权；这种情况记录为 fixture 覆盖差异，不能改业务流程去补说。
 
-2026-09-27 配套版本：SDK 7fd4ab3、Agent 998806e、Hub 6cf3a15、Channel b57769d、Admin 92d2b52、Mobile e4b8d2b、ESP32 4b6d4023。Host 发布标识为 rk3588-semantic-team-20260927-1；实际激活及真机结果以发布日志和 IP 团队证据文档为准。
+2026-09-27 配套版本：SDK 7fd4ab3、Agent 998806e、Hub 6cf3a15、Channel dfd782d、Admin 92d2b52、Mobile b33fdbf、ESP32 4b6d4023。Host 发布标识为 rk3588-semantic-team-20260927-2；实际激活及真机结果以发布日志和 IP 团队证据文档为准。
+
+使用真实 Companion 展示名“小方／小栈”验收时，可将用例路径换成同目录 `bench-decision-cases.json`。这是 fixture 输入数据，不是产品角色或设备身份配置。
