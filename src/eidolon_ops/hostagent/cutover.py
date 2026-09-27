@@ -259,6 +259,14 @@ def restore(payload: Mapping[str, object], *, root: Path = Path("/")) -> dict[st
         finally:
             temporary.unlink(missing_ok=True)
     primitives.checked("Host layer rollback systemd reload", ("/usr/bin/systemctl", "daemon-reload"))
+    # A capability change rewrites host.env before component activation. The
+    # component rollback starts the old manager while that candidate env is
+    # still present; reload its restored declaration so removed model services
+    # are reconciled back onto the previous Host topology.
+    primitives.checked(
+        "Host layer rollback manager reconcile",
+        ("/usr/bin/systemctl", "restart", "eidolond.service"),
+    )
     document["status"] = "host_restored"
     primitives.atomic_json(path / "cutover.json", document)
     return {

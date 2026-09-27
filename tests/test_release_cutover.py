@@ -132,13 +132,22 @@ def test_reversible_cutover_restores_host_files_and_absence(
     certificate = _path(tmp_path, contract.INSTALL_INPUTS["hub.crt"][0])
     certificate.parent.mkdir(parents=True, exist_ok=True)
     certificate.write_text("candidate certificate", encoding="utf-8")
-    monkeypatch.setattr(cutover.primitives, "checked", lambda *args, **kwargs: None)
+    commands: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        cutover.primitives,
+        "checked",
+        lambda _operation, command: commands.append(command),
+    )
 
     restored = cutover.restore(_payload(captured), root=tmp_path)
 
     assert restored["status"] == "host_cutover_restored"
     assert settings.read_text() == "previous\n"
     assert not certificate.exists()
+    assert commands[-2:] == [
+        ("/usr/bin/systemctl", "daemon-reload"),
+        ("/usr/bin/systemctl", "restart", "eidolond.service"),
+    ]
 
 
 def test_forward_only_cutover_restores_only_while_previous_graph_proves_pre_barrier(
