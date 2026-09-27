@@ -23,6 +23,7 @@ from .primitives import TargetError
 #: knows how to attest, and a drift test keeps the two identical.
 READINESS_FACTS = (
     "backend_healthy",
+    "participation_model_ready",
     "lan_address_observed",
     "lan_name_resolves",
     "host_identity_material",
@@ -497,10 +498,31 @@ def app_ready(payload: Mapping[str, object]) -> dict[str, object]:
     media_service = primitives.unix_http_json(
         Path("/run/eidolon/system.sock"), "/api/system/v1/services/livekit"
     ) or {}
+    participation_required = payload.get("participation_model_required", False)
+    participation_port = payload.get("participation_model_port")
+    if type(participation_required) is not bool or (
+        participation_required and not primitives.is_port(participation_port)
+    ):
+        raise TargetError("participation readiness configuration is invalid")
+    participation_status, participation = (
+        primitives.http_json("127.0.0.1", participation_port, "/participation/readyz")
+        if participation_required else (None, None)
+    )
     checks = {
         "backend_healthy": all(
             value.get("ActiveState") == "active" and value.get("SubState") == "running"
             for value in units.values()
+        ),
+        "participation_model_ready": not participation_required or (
+            participation_status == 200
+            and isinstance(participation, dict)
+            and participation.get("status") == "ready"
+            and participation.get("task") == "ip_team.participation"
+            and participation.get("schema_version") == 2
+            and isinstance(participation.get("model_version"), str)
+            and bool(participation["model_version"])
+            and isinstance(participation.get("policy_version"), str)
+            and bool(participation["policy_version"])
         ),
         "lan_address_observed": address in app_contract.host_addresses(),
         # An address of this Host, not a particular one. Two things make the
@@ -614,6 +636,7 @@ def app_ready(payload: Mapping[str, object]) -> dict[str, object]:
         "hub_health": hub_health,
         "channel_worker": {**channel, "livekit_link": link},
         "livekit_service": media_service,
+        "participation_provider": participation if participation_required else None,
         "waiting": waiting,
         "resolution": sorted(resolved),
         "mdns": {

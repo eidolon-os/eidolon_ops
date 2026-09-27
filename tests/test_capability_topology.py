@@ -554,6 +554,47 @@ def test_every_local_address_setting_names_a_capability_and_a_port_that_exist() 
         assert role in PORTS
 
 
+def test_local_participation_route_requires_laya_and_the_v2_path() -> None:
+    from eidolon_ops.config import ConfigurationError, _require_declared_capability_for_overlay
+    from eidolon_ops.settings_overlay import OverlayAssignment, parse_path
+    from eidolon_ops.source_assets import PORTS
+
+    def route(path: str):
+        return (OverlayAssignment(
+            "agent.yaml", parse_path("participation.url", label="agent.yaml"),
+            f"http://127.0.0.1:{PORTS['laya_api']}{path}",
+        ),)
+
+    with pytest.raises(ConfigurationError, match="local_laya"):
+        _require_declared_capability_for_overlay(
+            route("/v1/participation/decide"), frozenset(),
+        )
+    with pytest.raises(ConfigurationError, match="participation v2"):
+        _require_declared_capability_for_overlay(
+            route("/v1/systemone"), frozenset({"local_laya"}),
+        )
+    _require_declared_capability_for_overlay(
+        route("/v1/participation/decide"), frozenset({"local_laya"}),
+    )
+
+
+def test_only_local_model_route_enables_the_task_readiness_gate() -> None:
+    from eidolon_ops.host_layer import local_participation_model_required
+    from eidolon_ops.settings_overlay import OverlayAssignment, parse_path
+
+    def route(value: str):
+        return (OverlayAssignment(
+            "agent.yaml", parse_path("participation.url", label="agent.yaml"), value,
+        ),)
+
+    assert not local_participation_model_required(route(
+        "http://127.0.0.1:8772/v1/participation/decide",
+    ))
+    assert local_participation_model_required(route(
+        "http://127.0.0.1:8771/v1/participation/decide",
+    ))
+
+
 def test_the_local_board_backup_preserves_the_local_model_route() -> None:
     from eidolon_ops.config import load_config
     from eidolon_ops.source_assets import PORTS

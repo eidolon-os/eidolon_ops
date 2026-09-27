@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import tempfile
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from eidolon_ops.component_contract import read_component_contracts
 from eidolon_ops.config import INSTALL_FILE_NAMES, OperationsConfig
@@ -36,6 +37,7 @@ from eidolon_ops.owner_domain_assets import HostAuthority
 from eidolon_ops.paths import AppAccess
 from eidolon_ops.private_inputs import INSTALL_DESTINATION_NAMES
 from eidolon_ops.readiness import product_payload
+from eidolon_ops.settings_overlay import OverlayAssignment
 from eidolon_ops.source_assets import PORTS
 from eidolon_ops.transport import SSHTransport
 
@@ -76,6 +78,22 @@ HOST_BOUND_INPUTS = frozenset({"local_api_env", "channel_env"})
 # selected for this release. They belong to every cutover, not only first
 # install; the Host snapshot makes replacing them reversible with the code.
 PRODUCT_SETTINGS_INPUTS = ("agent_settings", "channel_settings", "memory_settings")
+
+
+def local_participation_model_required(overlay: tuple[OverlayAssignment, ...]) -> bool:
+    """The fixture tunnel is a bench endpoint; only local Laya needs a task gate."""
+
+    for assignment in overlay:
+        if assignment.document != "agent.yaml" or assignment.display != "participation.url":
+            continue
+        address = urlsplit(str(assignment.value))
+        if (
+            address.hostname in {"127.0.0.1", "localhost", "::1"}
+            and address.port == PORTS["laya_api"]
+            and address.path == "/v1/participation/decide"
+        ):
+            return True
+    return False
 
 
 class HostLayer:
@@ -183,6 +201,9 @@ class HostLayer:
         """
 
         port_registry = self._port_registry()
+        participation_model_required = local_participation_model_required(
+            self.config.settings_overlay
+        )
         payload: dict[str, object] = {
             "units": list(self.config.units),
             # Sent so the agent can derive the unit set itself rather than
@@ -204,6 +225,8 @@ class HostLayer:
             # the side that knows which one it configured.
             "claim_window": self.config.host.claim_window,
             "port_registry": port_registry,
+            "participation_model_required": participation_model_required,
+            "participation_model_port": PORTS["laya_api"],
             # Where memory's supervisor answers. A backup asks it for a
             # snapshot of each space rather than copying a palace the agent
             # does not understand, and the injected agent carries no YAML

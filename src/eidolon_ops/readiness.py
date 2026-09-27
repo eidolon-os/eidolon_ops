@@ -83,6 +83,7 @@ class ReadinessFact(StrEnum):
     """A fact a device's first conversation depends on."""
 
     BACKEND_HEALTHY = "backend_healthy"
+    PARTICIPATION_MODEL_READY = "participation_model_ready"
     LAN_ADDRESS_OBSERVED = "lan_address_observed"
     LAN_NAME_RESOLVES = "lan_name_resolves"
     HOST_IDENTITY_MATERIAL = "host_identity_material"
@@ -153,6 +154,11 @@ READINESS_CONTRACT: tuple[ReadinessCheck, ...] = (
     _both(
         ReadinessFact.BACKEND_HEALTHY,
         "every product service answers its own health surface",
+    ),
+    _only(
+        HostKind.PRODUCT,
+        ReadinessFact.PARTICIPATION_MODEL_READY,
+        "a configured local IP-team provider serves participation v2 with model and policy versions",
     ),
     _both(
         ReadinessFact.LAN_ADDRESS_OBSERVED,

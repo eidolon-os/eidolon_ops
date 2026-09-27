@@ -696,6 +696,22 @@ def _require_declared_capability_for_overlay(
 
     for assignment in overlay:
         key = (assignment.document, assignment.display)
+        if key == ("agent.yaml", "participation.url") and isinstance(assignment.value, str):
+            address = urlsplit(assignment.value)
+            if address.hostname in {"127.0.0.1", "localhost", "::1"} and address.port == PORTS["laya_api"]:
+                if "local_laya" not in capabilities:
+                    raise ConfigurationError(
+                        "participation.url points at local Laya without local_laya capability"
+                    )
+                if (
+                    address.scheme != "http"
+                    or address.path != "/v1/participation/decide"
+                    or address.query or address.fragment
+                ):
+                    raise ConfigurationError(
+                        "participation.url must name Laya's participation v2 endpoint, "
+                        "not its generic systemone API"
+                    )
         if key in CAPABILITY_LOCAL_ADDRESS_SETTINGS:
             capability, role = CAPABILITY_LOCAL_ADDRESS_SETTINGS[key]
             if capability not in capabilities:

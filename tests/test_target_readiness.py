@@ -332,6 +332,29 @@ def test_app_ready_attests_every_declared_fact(
     assert result["channel_worker"]["livekit_link"]["linked_processes"] == [4242]
 
 
+def test_local_ip_team_model_requires_task_specific_readiness(
+    monkeypatch, tmp_path: Path, bootstrap_socket: Path,
+) -> None:
+    app = _app()
+    _healthy_probe(monkeypatch, app, tmp_path)
+    payload = _payload(app)
+    payload["participation_model_required"] = True
+    payload["participation_model_port"] = 8771
+    monkeypatch.setattr(primitives, "http_json", lambda *_a: (503, {"status": "unavailable"}))
+
+    report = probe.app_ready(payload)
+    assert report["status"] == "degraded"
+    assert report["checks"]["participation_model_ready"] is False
+
+    monkeypatch.setattr(primitives, "http_json", lambda *_a: (200, {
+        "status": "ready", "task": "ip_team.participation", "schema_version": 2,
+        "model_version": "ip-v3-1", "policy_version": "calibration-1",
+    }))
+    report = probe.app_ready(payload)
+    assert report["status"] == "app_ready"
+    assert report["checks"]["participation_model_ready"] is True
+
+
 def test_a_hub_that_cannot_admit_a_device_fails_the_gate(
     monkeypatch, tmp_path: Path, bootstrap_socket: Path
 ) -> None:
