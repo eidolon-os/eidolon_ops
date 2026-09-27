@@ -329,6 +329,82 @@ def test_converge_restarts_only_the_unit_that_disagrees(
     }
 
 
+def test_converge_stops_models_removed_from_host_capabilities(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _link(tmp_path, "new")
+    _process(
+        tmp_path,
+        100,
+        unit="eidolon-laya.service",
+        argv=(_venv_python(tmp_path, "new", "eidolon_models"),),
+    )
+    for pid, unit in ((201, "eidolon-asr.service"), (202, "eidolon-tts.service")):
+        _process(
+            tmp_path,
+            pid,
+            unit=unit,
+            argv=(_venv_python(tmp_path, "old", "eidolon_models"),),
+        )
+    calls: list[tuple[str, ...]] = []
+
+    def stop(_operation: str, command: tuple[str, ...], **_kwargs: object):
+        calls.append(command)
+        for entry in (tmp_path / "proc").iterdir():
+            if command[-1] in (entry / "cgroup").read_text(encoding="utf-8"):
+                for child in entry.iterdir():
+                    child.unlink()
+                entry.rmdir()
+        return _ok()
+
+    monkeypatch.setattr(primitives, "checked", stop)
+    payload = {
+        "units": [*contract.PRODUCT_UNITS, "eidolon-laya.service"],
+        "capabilities": ["local_laya"],
+    }
+    result = runtime_release.converge(payload, root=tmp_path)
+
+    assert calls == [
+        ("/usr/bin/systemctl", "stop", "eidolon-asr.service"),
+        ("/usr/bin/systemctl", "stop", "eidolon-tts.service"),
+    ]
+    assert result["status"] == "reconverged"
+    assert result["stopped"] == ["eidolon-asr.service", "eidolon-tts.service"]
+    assert result["restarted"] == []
+    assert set(result["running_releases"]) == {"new"}
+
+
+def test_converge_stops_retired_model_even_if_it_restarted_on_current_release(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _link(tmp_path, "new")
+    _process(
+        tmp_path,
+        202,
+        unit="eidolon-tts.service",
+        argv=(_venv_python(tmp_path, "new", "eidolon_models"),),
+    )
+    calls: list[tuple[str, ...]] = []
+
+    def stop(_operation: str, command: tuple[str, ...], **_kwargs: object):
+        calls.append(command)
+        entry = tmp_path / "proc" / "202"
+        for child in entry.iterdir():
+            child.unlink()
+        entry.rmdir()
+        return _ok()
+
+    monkeypatch.setattr(primitives, "checked", stop)
+    payload = {
+        "units": [*contract.PRODUCT_UNITS, "eidolon-laya.service"],
+        "capabilities": ["local_laya"],
+    }
+    result = runtime_release.converge(payload, root=tmp_path)
+
+    assert calls == [("/usr/bin/systemctl", "stop", "eidolon-tts.service")]
+    assert result["stopped"] == ["eidolon-tts.service"]
+
+
 def test_converge_restarts_in_product_startup_order(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

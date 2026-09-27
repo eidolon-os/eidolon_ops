@@ -126,10 +126,7 @@ units = [
   "eidolon-agent.service",
   "eidolon-channel-provider.service",
   "eidolon-channel.service",
-  "eidolon-asr.service",
   "eidolon-laya.service",
-  "eidolon-llm.service",
-  "eidolon-tts.service",
 ]
 
 [data]
@@ -154,11 +151,10 @@ agent_settings = "../.eidolon-ops/opi5max/inputs/agent.yaml"
 channel_settings = "../.eidolon-ops/opi5max/inputs/channel.yaml"
 memory_settings = "../.eidolon-ops/opi5max/inputs/memory.yaml"
 
-# Installed local model capabilities remain available for comparison; this
-# profile routes ASR, TTS and every configured LLM to cloud providers.
-# The previous local routing is backed up beside this file.
+# Model services are selected per Host. ASR, TTS and LLM route to the cloud
+# providers configured below; only Laya runs locally.
 [capabilities]
-provides = ["rknpu2", "local_asr", "local_llm", "local_tts", "local_laya"]
+provides = ["rknpu2", "local_laya"]
 
 # Bench decision fixture, reached through an authenticated operator SSH tunnel.
 # The fixture is test-only; losing the tunnel fails the turn closed. Production

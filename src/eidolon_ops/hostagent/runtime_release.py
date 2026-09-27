@@ -64,6 +64,17 @@ _DELETED = " (deleted)"
 #: something an operator restarts.
 _UNIT = re.compile(r"[A-Za-z0-9@:_.-]+\.(?:service|socket)")
 
+# A Host can remove a local-model capability between releases. Its previous
+# process then remains on the old release even though the new topology no
+# longer asks eidolond to start it. Only these reviewed optional units may be
+# stopped as part of convergence; any other missing unit is an error.
+_OPTIONAL_MODEL_UNITS = frozenset({
+    "eidolon-asr.service",
+    "eidolon-llm.service",
+    "eidolon-tts.service",
+    "eidolon-laya.service",
+})
+
 
 def observe(*, root: Path = Path("/")) -> dict[str, object]:
     """Every live process running out of a release, grouped by release.
@@ -288,15 +299,28 @@ def converge(
             f"the Host publishes {sorted(active) or 'none'}"
         )
     before = observe(root=root)
-    stale = set(holders(before)).difference(active)
-    if not stale:
+    running_releases = holders(before)
+    stale = set(running_releases).difference(active)
+    retired = [
+        unit
+        for unit in units_running(before, set(running_releases))
+        if unit not in topology and unit in _OPTIONAL_MODEL_UNITS
+    ]
+    if not stale and not retired:
         return {
             "status": "converged",
             "release_id": next(iter(active)),
             "restarted": [],
             "running_releases": holders(before),
         }
-    restarted = [unit for unit in units_running(before, stale) if unit in topology]
+    running = units_running(before, stale)
+    restarted = [unit for unit in running if unit in topology]
+    for unit in retired:
+        primitives.checked(
+            f"retired model unit stop: {unit}",
+            ("/usr/bin/systemctl", "stop", unit),
+            timeout=seconds,
+        )
     for unit in restarted:
         primitives.checked(
             f"stale unit restart: {unit}",
@@ -311,10 +335,18 @@ def converge(
             + _describe(after, remaining)
             + f"; the Host's current links name {next(iter(active))}"
         )
+    still_retired = [
+        unit
+        for unit in units_running(after, set(holders(after)))
+        if unit in retired
+    ]
+    if still_retired:
+        raise TargetError("retired model units are still running: " + ", ".join(still_retired))
     return {
         "status": "reconverged",
         "release_id": next(iter(active)),
         "restarted": restarted,
+        "stopped": retired,
         "stale_release_ids": sorted(stale),
         "running_releases": holders(after),
     }

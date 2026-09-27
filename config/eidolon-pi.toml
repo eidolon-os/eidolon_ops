@@ -87,6 +87,9 @@ path = "../../eidolon_memory"
 [sources.eidolon_sdk]
 path = "../../eidolon_sdk"
 
+[sources.eidolon_models]
+path = "../../eidolon_models"
+
 [services]
 units = [
   "eidolon-bootstrapd.service",
@@ -108,7 +111,12 @@ units = [
   "eidolon-agent.service",
   "eidolon-channel-provider.service",
   "eidolon-channel.service",
+  "eidolon-laya.service",
 ]
+
+# Model services are selected per Host. This Pi runs only Laya locally.
+[capabilities]
+provides = ["local_laya"]
 
 [data]
 system_database = "/var/lib/eidolon/eidolon-system.sqlite3"
