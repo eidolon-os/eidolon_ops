@@ -19,3 +19,6 @@ Mobile 启动/结束及 Host 服务健康不能证明语音链路通过。完整
 2026-09-27 配套版本：SDK 7fd4ab3、Agent 998806e、Hub 6cf3a15、Channel dfd782d、Admin 92d2b52、Mobile b33fdbf、ESP32 4b6d4023。Host 发布标识为 rk3588-semantic-team-20260927-2；实际激活及真机结果以发布日志和 IP 团队证据文档为准。
 
 使用真实 Companion 展示名“小方／小栈”验收时，可将用例路径换成同目录 `bench-decision-cases.json`。这是 fixture 输入数据，不是产品角色或设备身份配置。
+
+
+2026-09-27 停播故障隔离修复：Host 已通过 Ops 激活 `rk3588-semantic-team-20260927-3`，SDK `df7d9e3`、Agent `29af959`、Channel `947de3a`，其余组件沿用上一版本明确 pin。doctor/app_ready 通过，无数据库迁移。Stop 的 capture_id 与 Receipt 的 error_code 需要这三个组件协调发布；本次没有 Mobile/ESP32 更新。506 项回归与跨项目 TCP 恢复测试通过，不能替代物理打断验收。
