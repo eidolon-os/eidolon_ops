@@ -55,6 +55,7 @@ ACTIONS: dict[str, tuple[ModuleType, str]] = {
     "converge-running-release": (runtime_release, "converge"),
     "component-artifact-state": (staging, "component_artifact_state"),
     "install-component-artifact": (staging, "install_component_artifact"),
+    "retire-component-artifact": (staging, "retire_component_artifact"),
     "install": (install, "install"),
     "converge-secret-inputs": (secret_inputs, "converge_secret_inputs"),
     "repair-secret-relationships": (secret_inputs, "repair_secret_relationships"),

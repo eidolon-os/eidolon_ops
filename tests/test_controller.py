@@ -400,6 +400,7 @@ class FakeTransport:
                     "sufficient": True,
                 },
                 "removed": {"releases": [], "uploads": [], "secrets": []},
+                "retained_running_release_ids": [],
             }
         values = {
             "status": {"status": "observed"},
@@ -418,6 +419,10 @@ class FakeTransport:
                 "missing": [],
             },
             "cleanup-stage": {"status": "cleaned"},
+            "retire-component-artifact": {
+                "status": "retired",
+                "destination": payload.get("destination"),
+            },
             "retire-legacy-root": {"status": "retired"},
             "abort-replacement": {"status": "aborted"},
             "reset-plan": {
@@ -1134,9 +1139,16 @@ def test_deploy_resume_activate_skips_transfer(setup_controller) -> None:
         "doctor",
         "app_ready",
         "release_reclaim_commit",
+        "unselected_model_cleanup",
         "local_bundle_cleanup",
     ]
     assert transport.uploads == []
+    retired_models = [
+        payload["destination"] for action, payload, _python, _sudo in transport.agent_calls
+        if action == "retire-component-artifact"
+    ]
+    assert retired_models == []
+    assert result["phases"][-2]["result"]["status"] == "none_declared"
     assert not any(len(call) > 1 and call[1] == "bundle" for call in runner.calls)
     # The operator's side must never be the first to give up on an activation.
     # A Host can spend its 300s readiness gate and then another 300s waiting for
@@ -1187,9 +1199,10 @@ def test_deploy_prestages_host_application_before_component_activation(
         "converge_running_release",
         "doctor",
         "app_ready",
-        "cutover_receipt",
-        "release_reclaim_commit",
-        "local_bundle_cleanup",
+            "cutover_receipt",
+            "release_reclaim_commit",
+            "unselected_model_cleanup",
+            "local_bundle_cleanup",
     ]
 
 

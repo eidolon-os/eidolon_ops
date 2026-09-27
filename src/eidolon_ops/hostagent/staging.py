@@ -397,3 +397,47 @@ def install_component_artifact(payload: Mapping[str, object]) -> dict[str, objec
             shutil.rmtree(temporary)
     shutil.rmtree(source)
     return {"status": "installed", "destination": str(target), "digest": digest}
+
+
+def retire_component_artifact(payload: Mapping[str, object]) -> dict[str, object]:
+    """Remove a deselected, exact pinned model after its release has committed.
+
+    Never delete a directory whose contents have changed or whose service may
+    still be using it. The caller supplies the owning units from the pinned
+    component contract, rather than the Host guessing from a directory name.
+    """
+
+    release_id = contract.fixed_release_id(payload)
+    capabilities = contract.declared_capabilities(payload)
+    retired_capability = payload.get("retired_capability")
+    if (not isinstance(retired_capability, str)
+            or retired_capability not in contract.HOST_CAPABILITIES
+            or retired_capability in capabilities):
+        raise TargetError("model retirement requires a deselected capability")
+    target, files, digest = _artifact_contract(payload)
+    units = payload.get("units")
+    if (not isinstance(units, list) or not units
+            or any(not isinstance(unit, str) or not unit.startswith("eidolon-")
+                   or not unit.endswith(".service") or not unit[8:-8].replace("-", "").isalnum()
+                   for unit in units)
+            or len(set(units)) != len(units)):
+        raise TargetError("artifact owning units are invalid")
+    if not contract.CURRENT_KERNEL.is_symlink():
+        raise TargetError("model retirement requires an active release")
+    active_root = contract.CURRENT_KERNEL.resolve(strict=True).parent
+    if active_root != contract.RELEASES / release_id:
+        raise TargetError("model retirement requires the committed release to remain active")
+    if contract.RECLAMATION_STATE.exists() or contract.RECLAMATION_STATE.is_symlink():
+        raise TargetError("model retirement requires release reclamation to be committed")
+    for unit in units:
+        state = primitives.run(
+            ("/usr/bin/systemctl", "show", unit, "--property=ActiveState"), timeout=20
+        )
+        if state.returncode != 0 or state.stdout.strip() != "ActiveState=inactive":
+            raise TargetError(f"model retirement requires {unit} to be inactive")
+    if not target.exists() and not target.is_symlink():
+        return {"status": "already_absent", "destination": str(target)}
+    if not _artifact_matches(target, files, digest):
+        return {"status": "retained_mismatch", "destination": str(target)}
+    shutil.rmtree(target)
+    return {"status": "retired", "destination": str(target), "digest": digest}

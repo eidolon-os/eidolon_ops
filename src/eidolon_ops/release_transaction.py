@@ -312,6 +312,16 @@ class ReleaseTransaction:
             committed = self.bundles.reclaim(release_id, phase="commit")
             self.bundles.require_reclamation(committed, "committed")
             phases.append({"phase": "release_reclaim_commit", "result": committed})
+            phases.begin("unselected_model_cleanup")
+            try:
+                model_cleanup = self.bundles.retire_unselected_model_artifacts(
+                    release_id, committed
+                )
+            except Exception as exc:
+                # The release is already healthy and committed. Cleanup can be
+                # retried on the next deploy, but cannot roll this release back.
+                model_cleanup = {"status": "deferred", "error": str(exc)}
+            phases.append({"phase": "unselected_model_cleanup", "result": model_cleanup})
             phases.begin("local_bundle_cleanup")
             phases.append(
                 {

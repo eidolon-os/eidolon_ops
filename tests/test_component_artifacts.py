@@ -7,7 +7,9 @@ restated: the point of the contract is that there is one place to look.
 from __future__ import annotations
 
 import hashlib
+import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -25,6 +27,7 @@ from eidolon_ops.component_contract import read_component_contracts
 from eidolon_ops.errors import OperationsError
 from eidolon_ops.hostagent import contract, staging
 from eidolon_ops.hostagent.primitives import TargetError
+from eidolon_ops.release_bundle import BundleTransfer
 
 pytestmark = pytest.mark.unit
 
@@ -446,3 +449,84 @@ def test_both_sides_spell_the_digest_record_the_same_way() -> None:
     """
 
     assert contract.EMBEDDING_DIGEST_RECORD == component_artifacts.DIGEST_RECORD
+
+
+def test_retirement_removes_only_the_exact_inactive_model(tmp_path, monkeypatch):
+    releases = tmp_path / "releases"
+    kernel = releases / "r1" / "eidolon_kernel"
+    kernel.mkdir(parents=True)
+    current = tmp_path / "current-kernel"
+    current.symlink_to(kernel, target_is_directory=True)
+    monkeypatch.setattr(contract, "RELEASES", releases)
+    monkeypatch.setattr(contract, "CURRENT_KERNEL", current)
+    monkeypatch.setattr(contract, "RECLAMATION_STATE", tmp_path / "reclamation-state.json")
+    monkeypatch.setattr(contract, "HOST_MODEL_ROOT", tmp_path / "models")
+    monkeypatch.setattr(
+        staging.primitives, "run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess([], 0, "ActiveState=inactive\n", ""),
+    )
+    destination = tmp_path / "models" / "old-chat"
+    files, _digest = _manifest(destination)
+    payload = {
+        "release_id": "r1", "destination": str(destination),
+        "capabilities": ["local_laya"], "retired_capability": "local_llm",
+        "files": files, "units": ["eidolon-llm.service"],
+    }
+    assert staging.retire_component_artifact(payload)["status"] == "retired"
+    assert not destination.exists()
+    assert staging.retire_component_artifact(payload)["status"] == "already_absent"
+    with pytest.raises(TargetError, match="deselected capability"):
+        staging.retire_component_artifact({**payload, "capabilities": ["local_llm"]})
+    contract.RECLAMATION_STATE.write_text("pending")
+    with pytest.raises(TargetError, match="reclamation to be committed"):
+        staging.retire_component_artifact(payload)
+    contract.RECLAMATION_STATE.unlink()
+    _manifest(destination)
+    (destination / "onnx/model.onnx").write_bytes(b"changed")
+    assert staging.retire_component_artifact(payload)["status"] == "retained_mismatch"
+    assert destination.exists()
+    monkeypatch.setattr(
+        staging.primitives, "run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess([], 0, "ActiveState=active\n", ""),
+    )
+    with pytest.raises(TargetError, match="inactive"):
+        staging.retire_component_artifact(payload)
+    with pytest.raises(TargetError, match="committed release"):
+        staging.retire_component_artifact({**payload, "release_id": "r2"})
+
+
+def test_laya_only_retirement_selects_only_the_old_chat_model():
+    model_root = _CHECKOUT_ROOT / "eidolon_models"
+    if not (model_root / "ops/component.toml").is_file():
+        pytest.skip("no sibling model checkout")
+
+    class Transport:
+        def __init__(self):
+            self.calls = []
+
+        def run_agent(self, action, payload):
+            self.calls.append((action, payload))
+            return {"status": "retired", "destination": payload["destination"]}
+
+    transfer = BundleTransfer.__new__(BundleTransfer)
+    transfer.config = SimpleNamespace(
+        capabilities=frozenset({"rknpu2", "local_laya"}),
+        sources={"eidolon_models": SimpleNamespace(path=model_root)},
+    )
+    transfer.sources = SimpleNamespace(
+        component_contract=lambda _source: (model_root / "ops/component.toml").read_text()
+    )
+    transfer.transport = Transport()
+    result = transfer.retire_unselected_model_artifacts(
+        "r1", {"retained_running_release_ids": []}
+    )
+    assert result["artifacts"] == 1
+    assert [payload["destination"] for _action, payload in transfer.transport.calls] == [
+        "/var/lib/eidolon/models/qwen3-1.7b"
+    ]
+    assert transfer.transport.calls[0][1]["units"] == ["eidolon-llm.service"]
+    transfer.transport.calls.clear()
+    assert transfer.retire_unselected_model_artifacts(
+        "r1", {"retained_running_release_ids": ["old-release"]}
+    )["status"] == "deferred_running_release"
+    assert transfer.transport.calls == []

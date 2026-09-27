@@ -14,6 +14,7 @@ import tempfile
 import time
 from pathlib import Path
 
+from eidolon_ops.capabilities import HOST_CAPABILITIES
 from eidolon_ops.component_artifacts import (
     carried_artifacts,
     ensure_workstation_artifact,
@@ -400,6 +401,66 @@ class BundleTransfer:
             "artifacts": len(carried),
             "detail": carried,
         }
+
+    def retire_unselected_model_artifacts(
+        self, release_id: str, reclamation: dict[str, object]
+    ) -> dict[str, object]:
+        """Reclaim pinned models this Host no longer selects, after commit.
+
+        An old release still running may need its model. An altered model
+        directory is never ours to erase. The Host repeats both checks before
+        deleting any bytes.
+        """
+
+        retained = reclamation.get("retained_running_release_ids")
+        if retained != []:
+            return {"status": "deferred_running_release", "retained": retained}
+        model_source = self.config.sources.get("eidolon_models")
+        if model_source is None:
+            return {"status": "none_declared", "artifacts": 0}
+        sources = {"eidolon_models": model_source.path}
+        selected = read_component_contracts(
+            sources, self.config.capabilities,
+            read_contract=self.sources.component_contract,
+        )
+        complete = read_component_contracts(
+            sources, HOST_CAPABILITIES,
+            read_contract=self.sources.component_contract,
+        )
+        selected_roots = {host_artifact_root(item) for item in carried_artifacts(selected)}
+        contract = complete.contracts[0]
+        retired: list[dict[str, object]] = []
+        for artifact in carried_artifacts(complete):
+            destination = host_artifact_root(artifact)
+            if destination in selected_roots or artifact.kind != "model":
+                continue
+            declaration = next(
+                entry for entry in contract.artifacts if entry["id"] == artifact.artifact_id
+            )
+            capability = declaration.get("requires_capability")
+            units = sorted(
+                f"{unit['id']}.service" for unit in contract.units
+                if unit.get("requires_capability") == capability
+            )
+            if not capability or not units:
+                raise OperationsError(
+                    f"deselected model {artifact.artifact_id} has no owning service"
+                )
+            evidence = self.transport.run_agent(
+                "retire-component-artifact",
+                {
+                    "release_id": release_id,
+                    "capabilities": sorted(self.config.capabilities),
+                    "retired_capability": capability,
+                    "destination": str(destination),
+                    "files": {item.path: item.sha256 for item in artifact.files},
+                    "units": units,
+                },
+            )
+            if evidence.get("status") not in {"retired", "already_absent", "retained_mismatch"}:
+                raise OperationsError("Host returned invalid model retirement evidence")
+            retired.append({"artifact": artifact.artifact_id, **evidence})
+        return {"status": "checked", "artifacts": len(retired), "detail": retired}
 
     def _carry_release_artifacts(self, output: Path, transfer_id: str) -> dict[str, object]:
         """Install only content-addressed objects this Host does not hold.
