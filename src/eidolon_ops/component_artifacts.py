@@ -20,6 +20,7 @@ import shutil
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlsplit
 from urllib.request import urlopen
 
 from eidolon_ops.errors import OperationsError
@@ -147,7 +148,7 @@ def ensure_workstation_artifact(toolchain_root: Path, artifact: CarriedArtifact)
                 and _digest_of(root / item.path) == item.sha256 for item in artifact.files)
     ):
         return root
-    return _materialize(root, artifact)
+    return _materialize(root, artifact, toolchain_root.parent / "artifact-sources")
 
 
 def _recorded_digest(root: Path) -> str:
@@ -155,13 +156,13 @@ def _recorded_digest(root: Path) -> str:
     return record.read_text(encoding="utf-8").strip() if record.is_file() else ""
 
 
-def _materialize(root: Path, artifact: CarriedArtifact) -> Path:
+def _materialize(root: Path, artifact: CarriedArtifact, local_sources: Path) -> Path:
     with tempfile.TemporaryDirectory(prefix="eidolon-artifact-") as scratch:
         staged = Path(scratch)
         for item in artifact.files:
             destination = staged / item.path
             destination.parent.mkdir(parents=True, exist_ok=True)
-            _download(item.url, destination)
+            _download(item.url, destination, local_sources=local_sources)
             actual = _digest_of(destination)
             if actual != item.sha256:
                 raise OperationsError(
@@ -176,7 +177,20 @@ def _materialize(root: Path, artifact: CarriedArtifact) -> Path:
     return root
 
 
-def _download(url: str, destination: Path) -> None:
+def _download(url: str, destination: Path, *, local_sources: Path) -> None:
+    parsed = urlsplit(url)
+    if parsed.scheme == "local-artifact":
+        # A private checkpoint has no public hub URL. The operator stages its
+        # frozen bytes beside the durable toolchain; the declaration still pins
+        # every byte. Refuse traversal and symlinks before opening the source.
+        parts = (parsed.netloc, *parsed.path.lstrip("/").split("/"))
+        if not parsed.netloc or any(part in {"", ".", ".."} for part in parts):
+            raise OperationsError(f"invalid local artifact URL: {url}")
+        source = local_sources.joinpath(*parts)
+        if any(path.is_symlink() for path in (source, *source.parents)) or not source.is_file():
+            raise OperationsError(f"local artifact source is missing or linked: {source}")
+        shutil.copyfile(source, destination)
+        return
     try:
         with (
             urlopen(url, timeout=_DOWNLOAD_TIMEOUT_SECONDS) as response,

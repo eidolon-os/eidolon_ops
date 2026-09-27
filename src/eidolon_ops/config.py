@@ -41,6 +41,7 @@ CAPABILITY_SOURCES: dict[str, tuple[str, ...]] = {
     "local_asr": ("eidolon_models",),
     "local_tts": ("eidolon_models",),
     "local_llm": ("eidolon_models",),
+    "local_laya": ("eidolon_models",),
 }
 
 #: What a capability adds to the unit topology. This states the same thing each
@@ -51,6 +52,7 @@ CAPABILITY_UNITS: dict[str, tuple[str, ...]] = {
     "local_asr": ("eidolon-asr.service",),
     "local_llm": ("eidolon-llm.service",),
     "local_tts": ("eidolon-tts.service",),
+    "local_laya": ("eidolon-laya.service",),
 }
 #: Supplementary groups the service user needs for a capability's hardware.
 #:

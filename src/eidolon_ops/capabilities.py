@@ -36,6 +36,7 @@ HOST_CAPABILITIES: frozenset[str] = frozenset(
         "local_tts",
         #: The conversational model runs on this Host instead of a provider.
         "local_llm",
+        "local_laya",
     }
 )
 

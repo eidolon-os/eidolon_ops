@@ -106,6 +106,41 @@ def test_the_chat_weights_are_declared_by_the_component_that_serves_them(
     assert [item.path for item in model.files] == ["Qwen3-1.7B-Q4_0.gguf"]
 
 
+def test_laya_release_is_capability_selected_and_versioned() -> None:
+    without = _declared(frozenset())
+    assert not any(item.artifact_id.startswith("laya-smart-home") for item in without)
+    with_laya = _declared(frozenset({"local_laya"}))
+    model = next(item for item in with_laya if item.artifact_id.startswith("laya-smart-home"))
+    assert model.install_root.name == "laya-smart-home-r14-onnx-45f3dedb"
+    assert {item.path for item in model.files} >= {
+        "manifest.json", "onnx/model.onnx", "onnx/model.onnx.data",
+        "onnx/export.json", "torch/tokenizer/tokenizer.json",
+    }
+    assert all(item.url.startswith("local-artifact://laya-r14-onnx/") for item in model.files)
+    unit = (_CHECKOUT_ROOT / "eidolon_models/deploy/systemd/eidolon-laya.service").read_text()
+    assert f"EIDOLON_LAYA_MODEL_DIR={model.install_root}" in unit
+    assert "train/runs" not in unit
+
+
+def test_local_artifact_carries_exact_bytes_and_refuses_source_drift(tmp_path: Path) -> None:
+    payload = b"r14-frozen"
+    source = tmp_path / "artifact-sources" / "laya-r14" / "onnx"
+    source.mkdir(parents=True)
+    (source / "model.onnx").write_bytes(payload)
+    artifact = CarriedArtifact(
+        "eidolon_models", "laya-r14", "model", contract.HOST_MODEL_ROOT / "laya-r14",
+        (CarriedFile("onnx/model.onnx", hashlib.sha256(payload).hexdigest(),
+                     "local-artifact://laya-r14/onnx/model.onnx"),),
+    )
+    held = ensure_workstation_artifact(tmp_path / "toolchain", artifact)
+    assert (held / "onnx/model.onnx").read_bytes() == payload
+    (source / "model.onnx").write_bytes(b"changed")
+    assert ensure_workstation_artifact(tmp_path / "toolchain", artifact) == held
+    (held / "onnx/model.onnx").write_bytes(b"damaged")
+    with pytest.raises(OperationsError, match="does not match its pin"):
+        ensure_workstation_artifact(tmp_path / "toolchain", artifact)
+
+
 def test_an_artifact_a_host_has_no_capability_for_is_not_carried() -> None:
     """Dropped where every other conditional entry is dropped, not skipped here.
 
@@ -129,7 +164,7 @@ def test_every_pinned_file_names_an_immutable_source(
     assert declared
     for artifact in declared:
         for item in artifact.files:
-            assert item.url.startswith("https://"), item
+            assert item.url.startswith(("https://", "local-artifact://")), item
             assert "/resolve/main/" not in item.url, item
             assert "/refs/heads/" not in item.url, item
 
@@ -162,7 +197,7 @@ def test_the_set_digest_changes_when_any_file_does() -> None:
 def offline(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     fetched: list[str] = []
 
-    def _download(url: str, destination: Path) -> None:
+    def _download(url: str, destination: Path, *, local_sources: Path) -> None:
         fetched.append(url)
         payload = _WEIGHTS if url.endswith(".onnx") else _TOKENIZER
         destination.write_bytes(payload)
@@ -210,7 +245,7 @@ def test_a_damaged_cached_file_is_refetched_despite_its_matching_record(tmp_path
 def test_files_that_do_not_match_the_pin_are_refused(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def _tampered(url: str, destination: Path) -> None:
+    def _tampered(url: str, destination: Path, *, local_sources: Path) -> None:
         destination.write_bytes(b"something else")
 
     monkeypatch.setattr(component_artifacts, "_download", _tampered)

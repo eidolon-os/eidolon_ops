@@ -146,6 +146,12 @@ SYSTEMD_ASSET_CONTRACTS = (
 #: not pin fails the whole matrix with a missing revision. eidolon_ops.config
 #: states the same capability/unit pairing and a test holds the two together.
 CAPABILITY_SYSTEMD_ASSETS: dict[str, tuple[SystemdAssetContract, ...]] = {
+    "local_laya": (
+        SystemdAssetContract(
+            "eidolon_models", "deploy/systemd/eidolon-laya.service",
+            "eidolon-laya.service", "eidolon_models",
+        ),
+    ),
     "local_asr": (
         SystemdAssetContract(
             "eidolon_models",

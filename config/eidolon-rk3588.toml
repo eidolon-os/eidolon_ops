@@ -127,6 +127,7 @@ units = [
   "eidolon-channel-provider.service",
   "eidolon-channel.service",
   "eidolon-asr.service",
+  "eidolon-laya.service",
   "eidolon-llm.service",
   "eidolon-tts.service",
 ]
@@ -157,7 +158,7 @@ memory_settings = "../.eidolon-ops/opi5max/inputs/memory.yaml"
 # profile routes ASR, TTS and every configured LLM to cloud providers.
 # The previous local routing is backed up beside this file.
 [capabilities]
-provides = ["rknpu2", "local_asr", "local_llm", "local_tts"]
+provides = ["rknpu2", "local_asr", "local_llm", "local_tts", "local_laya"]
 
 # Bench decision fixture, reached through an authenticated operator SSH tunnel.
 # The fixture is test-only; losing the tunnel fails the turn closed. Production
