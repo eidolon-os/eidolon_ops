@@ -76,6 +76,27 @@ _OPTIONAL_MODEL_UNITS = frozenset({
 })
 
 
+def _active_optional_units(topology: set[str], root: Path) -> set[str]:
+    """Find units whose process may not expose a release path (notably LLM)."""
+
+    if root != Path("/"):
+        return set()
+    active: set[str] = set()
+    for unit in sorted(_OPTIONAL_MODEL_UNITS.difference(topology)):
+        result = primitives.run(
+            ("/usr/bin/systemctl", "show", "--property=ActiveState", "--value", unit),
+            timeout=20,
+        )
+        state = result.stdout.strip()
+        if result.returncode != 0 or state not in {
+            "active", "activating", "reloading", "deactivating", "inactive", "failed"
+        }:
+            raise TargetError(f"cannot establish optional model unit state: {unit}")
+        if state not in {"inactive", "failed"}:
+            active.add(unit)
+    return active
+
+
 def observe(*, root: Path = Path("/")) -> dict[str, object]:
     """Every live process running out of a release, grouped by release.
 
@@ -301,11 +322,12 @@ def converge(
     before = observe(root=root)
     running_releases = holders(before)
     stale = set(running_releases).difference(active)
-    retired = [
+    retired_observed = {
         unit
         for unit in units_running(before, set(running_releases))
         if unit not in topology and unit in _OPTIONAL_MODEL_UNITS
-    ]
+    }
+    retired = sorted(retired_observed | _active_optional_units(topology, root))
     if not stale and not retired:
         return {
             "status": "converged",
@@ -335,13 +357,13 @@ def converge(
             + _describe(after, remaining)
             + f"; the Host's current links name {next(iter(active))}"
         )
-    still_retired = [
+    still_retired = {
         unit
         for unit in units_running(after, set(holders(after)))
         if unit in retired
-    ]
+    } | _active_optional_units(topology, root)
     if still_retired:
-        raise TargetError("retired model units are still running: " + ", ".join(still_retired))
+        raise TargetError("retired model units are still running: " + ", ".join(sorted(still_retired)))
     return {
         "status": "reconverged",
         "release_id": next(iter(active)),

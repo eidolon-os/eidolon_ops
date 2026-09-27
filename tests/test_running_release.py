@@ -405,6 +405,29 @@ def test_converge_stops_retired_model_even_if_it_restarted_on_current_release(
     assert result["stopped"] == ["eidolon-tts.service"]
 
 
+def test_converge_stops_external_llm_without_a_release_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _link(tmp_path, "new")
+    checked: list[tuple[str, ...]] = []
+    states = [{"eidolon-llm.service"}, set()]
+    monkeypatch.setattr(
+        runtime_release,
+        "_active_optional_units",
+        lambda _topology, _root: states.pop(0),
+    )
+    monkeypatch.setattr(
+        primitives,
+        "checked",
+        lambda _operation, command, **_kwargs: checked.append(command),
+    )
+
+    result = runtime_release.converge(_payload(), root=tmp_path)
+
+    assert checked == [("/usr/bin/systemctl", "stop", "eidolon-llm.service")]
+    assert result["stopped"] == ["eidolon-llm.service"]
+
+
 def test_converge_restarts_in_product_startup_order(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
