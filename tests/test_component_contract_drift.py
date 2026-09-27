@@ -357,6 +357,8 @@ def test_the_dev_port_registry_and_the_contracts_use_the_same_numbers(
         "llm_api": 8769,
         # Same again for the voice: the engine wants an NPU.
         "tts_stream": 8770,
+        # The source-run stack does not start the board's Laya model service.
+        "laya_api": 8771,
     }
 
     for role, port in topology.port_roles.items():

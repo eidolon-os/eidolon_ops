@@ -353,10 +353,10 @@ def test_the_relationships_travel_rather_than_being_known_on_the_host() -> None:
     # And it survives the wire: the agent refuses a shape it did not expect.
     assert contract.declared_credential_relationships({"credential_relationships": wire})
     # Every relationship the product declares, not only the ones that prompted
-    # this: six of them involve channel.env and four of those fail silently,
-    # but a Host can hold any of the seventeen wrongly and none was checked.
+    # this: seven now involve channel.env, including the Data companion token,
+    # and a Host can hold any of the eighteen wrongly.
     channel = [e for e in wire if "channel.env" in {e["left_file"], e["right_file"]}]
-    assert len(channel) == 6 and len(wire) == 17
+    assert len(channel) == 7 and len(wire) == 18
 
 
 def test_a_host_holding_two_different_values_is_named(tmp_path) -> None:
