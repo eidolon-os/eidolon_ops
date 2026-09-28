@@ -113,6 +113,7 @@ def initialize_install_inputs(
             "EIDOLON_DATA_AUDIT_NATS_URL": "nats://127.0.0.1:4222",
         },
         "hub.env": {
+            "EIDOLON_HUB_SMARTHOME_WORKSPACE_URL": "http://127.0.0.1:8085",
             "EIDOLON_HUB_MANAGEMENT_JWT_SECRET": hub_jwt_secret,
             "EIDOLON_HUB_DEVICE_REGISTRY_READER_TOKEN": hub_reader_token,
             "EIDOLON_HUB_CHANNEL_PROVIDER_TOKEN": hub_provider_token,
@@ -305,6 +306,7 @@ DECLARED_ENV_KEYS: dict[str, EnvFileKeys] = {
     ),
     "hub.env": EnvFileKeys(
         required=frozenset({
+            "EIDOLON_HUB_SMARTHOME_WORKSPACE_URL",
             "EIDOLON_DATA_WORKSPACE_AUTHORITY_TOKEN",
             "EIDOLON_HUB_SMARTHOME_TOKEN",
             "EIDOLON_HUB_MANAGEMENT_JWT_SECRET",
@@ -411,6 +413,7 @@ HOST_RENDERED_ENV_KEYS: dict[str, frozenset[str]] = {
 #: Entries that are product topology rather than secrets: the same on every
 #: Host, so a repair can write them and a check can prove they were not edited.
 FIXED_ENV_VALUES: dict[str, str] = {
+    "EIDOLON_HUB_SMARTHOME_WORKSPACE_URL": "http://127.0.0.1:8085",
     "EIDOLON_DATA_SQLITE_PATH": "/var/lib/eidolon/eidolon-system.sqlite3",
     "EIDOLON_DATA_DATABASE_URL": (
         "sqlite+aiosqlite:////var/lib/eidolon/eidolon-system.sqlite3"

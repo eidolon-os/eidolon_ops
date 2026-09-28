@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import sqlite3
 import tempfile
+from contextlib import closing
 from pathlib import Path
 
 from eidolon_ops.errors import OperationsError
@@ -34,8 +35,8 @@ def transfer(state_root: Path) -> None:
     temporary = Path(name)
     try:
         with (
-            sqlite3.connect(f"{source.as_uri()}?mode=ro", uri=True) as original,
-            sqlite3.connect(temporary) as copied,
+            closing(sqlite3.connect(f"{source.as_uri()}?mode=ro", uri=True)) as original,
+            closing(sqlite3.connect(temporary)) as copied,
         ):
             original.backup(copied)
             if copied.execute("PRAGMA integrity_check").fetchall() != [("ok",)]:
@@ -43,5 +44,10 @@ def transfer(state_root: Path) -> None:
         with temporary.open("rb") as stream:
             os.fsync(stream.fileno())
         os.link(temporary, target)  # atomic, fails if another destination appeared
+        directory = os.open(target.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
     finally:
         temporary.unlink(missing_ok=True)
