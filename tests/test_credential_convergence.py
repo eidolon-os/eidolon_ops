@@ -356,7 +356,7 @@ def test_the_relationships_travel_rather_than_being_known_on_the_host() -> None:
     # this: seven now involve channel.env, including the Data companion token,
     # and a Host can hold any of the eighteen wrongly.
     channel = [e for e in wire if "channel.env" in {e["left_file"], e["right_file"]}]
-    assert len(channel) == 7 and len(wire) == 18
+    assert len(channel) == 8 and len(wire) == 20
 
 
 def test_a_host_holding_two_different_values_is_named(tmp_path) -> None:

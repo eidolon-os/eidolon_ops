@@ -157,6 +157,7 @@ def initialize_install_inputs(
             "EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN": data_token,
             "EIDOLON_MEMORY_MCP_TOKEN": memory_token,
             "EIDOLON_AGENT_ADMIN_API_TOKEN": agent_admin_token,
+            "EIDOLON_CHANNEL_PROVIDER_TOKEN": hub_provider_token,
             "PAIRING_JWT_SECRET": pairing_token,
         },
         "channel.env": {
@@ -221,6 +222,7 @@ SHARED_CREDENTIALS: tuple[tuple[str, str, str, str, str], ...] = (
     ("hub.env", "EIDOLON_HUB_DEVICE_REGISTRY_READER_TOKEN", "kernel.env", "EIDOLON_KERNEL_HUB_MANAGEMENT_TOKEN", "Hub/Kernel management token"),
     ("hub.env", "EIDOLON_HUB_MANAGEMENT_JWT_SECRET", "admin.env", "EIDOLON_ADMIN_HUB_MANAGEMENT_JWT_SECRET", "Hub/Admin management JWT secret"),
     ("hub.env", "EIDOLON_HUB_CHANNEL_PROVIDER_TOKEN", "channel.env", "EIDOLON_CHANNEL_PROVIDER_TOKEN", "Hub/Channel Provider token"),
+    ("hub.env", "EIDOLON_HUB_CHANNEL_PROVIDER_TOKEN", "agent.env", "EIDOLON_CHANNEL_PROVIDER_TOKEN", "Hub/Agent smart-home runtime token"),
     ("admin.env", "EIDOLON_ADMIN_LOCAL_API_SERVICE_TOKEN", "local-api.env", "EIDOLON_LOCAL_API_ADMIN_SERVICE_TOKEN", "Admin/Local API service token"),
     ("agent.env", "PAIRING_JWT_SECRET", "channel.env", "PAIRING_JWT_SECRET", "Agent/Channel JWT"),
     ("agent.env", "EIDOLON_MEMORY_MCP_TOKEN", "memory.env", "EIDOLON_MEMORY_MCP_TOKEN", "Agent/Memory MCP token"),
@@ -344,6 +346,7 @@ DECLARED_ENV_KEYS: dict[str, EnvFileKeys] = {
         required=frozenset({
             "EIDOLON_AGENT_LLM_API_KEY",
             "EIDOLON_AGENT_ADMIN_API_TOKEN",
+            "EIDOLON_CHANNEL_PROVIDER_TOKEN",
             "EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN",
             "EIDOLON_MEMORY_MCP_TOKEN",
             "PAIRING_JWT_SECRET",
@@ -916,4 +919,3 @@ def _validate_existing(
         "refreshed_settings": refreshed,
         "redaction": "existing credential values were not read or returned",
     }
-
