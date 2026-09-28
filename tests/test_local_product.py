@@ -244,8 +244,9 @@ def test_prepare_materializes_one_canonical_mac_product_contract(
                         0,
                         "onboarding:\n  owner_domain_id: owner-local\n"
                         "  owner_domain_generation: 1\n"
-                        "  descriptor_uri: https://eidolon-hub.local/api/device-onboarding/v1/descriptor\n"
-                        "persistence:\n  path: $EIDOLON_STATE_ROOT/hub/eidolon-hub.sqlite3\n",
+                            "  descriptor_uri: https://eidolon-hub.local/api/device-onboarding/v1/descriptor\n"
+                            "discovery:\n  mdns:\n    enabled: true\n"
+                            "persistence:\n  path: $EIDOLON_STATE_ROOT/hub/eidolon-hub.sqlite3\n",
                         "",
                     )
                 return ProcessResult(0, "service: product\n", "")
@@ -264,12 +265,15 @@ def test_prepare_materializes_one_canonical_mac_product_contract(
     environment = (root / "product-source.env").read_text(encoding="utf-8")
     assert "EIDOLON_ADMIN_API_PORT=9000\n" in environment
     assert "EIDOLON_PRODUCT_DATA_PORT=8084\n" in environment
+    assert f"EIDOLON_APP_HUB_HOSTNAME={product._host_lan_identity().hub_hostname}\n" in environment
+    assert f"EIDOLON_APP_OWNER_DOMAIN_ID={product._owner_domain_id()}\n" in environment
+    assert f"EIDOLON_APP_OWNER_DESCRIPTOR_URI={product._descriptor_uri()}\n" in environment
     assert "18084" not in environment
     assert "NATS (external)" in (root / "settings/services.yaml").read_text(encoding="utf-8")
     assert "port: 8767" in (root / "settings/channel-provider.yaml").read_text(encoding="utf-8")
-    assert f"path: {profile.paths.state_root}/hub/eidolon-hub.sqlite3" in (
-        root / "settings/hub.yaml"
-    ).read_text(encoding="utf-8")
+    hub_settings = (root / "settings/hub.yaml").read_text(encoding="utf-8")
+    assert f"path: {profile.paths.state_root}/hub/eidolon-hub.sqlite3" in hub_settings
+    assert "discovery:\n  mdns:\n    enabled: false\n" in hub_settings
     # The key pair travels install inputs -> env files -> the server Ops starts.
     # It used to be read back out of whatever LiveKit config happened to be on
     # disk, which made a clean Host unpreparable and let a months-old file decide

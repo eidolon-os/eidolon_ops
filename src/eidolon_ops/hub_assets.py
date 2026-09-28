@@ -98,6 +98,8 @@ def render_hub_settings(
     owner_domain_generation: int,
     identity: HostLanIdentity,
     port: int,
+    *,
+    mdns_enabled: bool = True,
 ) -> str:
     """Bind stable Owner identity and the current Host candidate URI."""
 
@@ -113,7 +115,7 @@ def render_hub_settings(
         f"owner_domain_generation: {owner_domain_generation}",
         "Owner Domain generation",
     )
-    return _replace_once(
+    rendered = _replace_once(
         rendered,
         _DESCRIPTOR_URI_PLACEHOLDER,
         "descriptor_uri: "
@@ -121,6 +123,14 @@ def render_hub_settings(
         + "/api/device-onboarding/v1/descriptor",
         "Owner Domain descriptor URI",
     )
+    if not mdns_enabled:
+        rendered = _replace_once(
+            rendered,
+            "discovery:\n  mdns:\n    enabled: true",
+            "discovery:\n  mdns:\n    enabled: false",
+            "Hub mDNS publisher",
+        )
+    return rendered
 
 
 def hub_settings_are_bound(

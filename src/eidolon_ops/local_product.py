@@ -472,6 +472,9 @@ class LocalProductSource:
             self.config,
             hub_certificate=self._hub_certificate_path(),
             hub_private_key=self._hub_private_key_path(),
+            hub_hostname=self._host_lan_identity().hub_hostname,
+            owner_domain_id=self._owner_domain_id(),
+            descriptor_uri=self._descriptor_uri(),
             lan_ipv4=(
                 str(app.lan_ipv4)
                 if app.lan_ipv4 is not None
@@ -516,6 +519,7 @@ class LocalProductSource:
                 owner_domain_generation,
                 identity,
                 app.hub_https_port,
+                mdns_enabled=False,
             ),
         ).encode("utf-8")
         rendered[root / "settings/channel-provider.yaml"] = source_assets.translate_fhs(

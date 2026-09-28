@@ -290,6 +290,7 @@ def test_programs_outside_the_service_manifest_are_named_rather_than_assumed(
         "bootstrapd",
         "eidolond",
         "hub-ingress",
+        "hub-mdns",
         "local-api",
         "local-api-mdns",
     }
