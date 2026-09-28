@@ -85,7 +85,7 @@ RUN_DIR="$EIDOLON_RUNTIME_ROOT"
 # supervisord refuses to spawn a program if its log dir doesn't exist; pre-
 # create everything our own configs reference so the user never sees a phantom
 # "no such file" on first start.
-LOG_PROJECTS=(admin audit nats livekit memory data hub kernel agent channel client-web mementos admin/esp32-tools/jobs)
+LOG_PROJECTS=(admin audit nats livekit memory data hub kernel agent channel laya client-web mementos admin/esp32-tools/jobs)
 for _p in "${LOG_PROJECTS[@]}"; do
   mkdir -p "${LOG_DIR}/${_p}"
 done

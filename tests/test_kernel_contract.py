@@ -291,6 +291,7 @@ def test_programs_outside_the_service_manifest_are_named_rather_than_assumed(
         "eidolond",
         "hub-ingress",
         "hub-mdns",
+        "laya",
         "local-api",
         "local-api-mdns",
     }

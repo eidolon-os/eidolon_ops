@@ -73,7 +73,7 @@ PORTS = {
     # This Host's own voice. Also loopback, and also not in the dev stack: the
     # engine loads RKNN graphs onto an NPU a workstation does not have.
     "tts_stream": 8770,
-    # Laya is selected on product Hosts; the source-run stack does not start it.
+    # Local decision service for smart-home sessions on the Mac source Host.
     "laya_api": 8771,
     "admin": 9000,
     "admin_web": 9001,
