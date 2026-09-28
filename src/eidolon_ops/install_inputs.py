@@ -167,6 +167,7 @@ def initialize_install_inputs(
             "EIDOLON_CHANNEL_PROVIDER_TOKEN": hub_provider_token,
             "PAIRING_JWT_SECRET": pairing_token,
             "EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN": data_token,
+            "EIDOLON_DATA_WORKSPACE_AUTHORITY_TOKEN": workspace_token,
         },
         "memory.env": {
             "EIDOLON_DATA_MEMORY_RUNTIME_ROSTER_TOKEN": memory_roster_token,
@@ -216,6 +217,7 @@ SHARED_CREDENTIALS: tuple[tuple[str, str, str, str, str], ...] = (
     ("data.env", "EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN", "agent.env", "EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN", "Data/Agent companion authority token"),
     ("data.env", "EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN", "channel.env", "EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN", "Data/Channel companion authority token"),
     ("data.env", "EIDOLON_DATA_WORKSPACE_AUTHORITY_TOKEN", "admin.env", "EIDOLON_ADMIN_DATA_WORKSPACE_AUTHORITY_TOKEN", "Data/Admin Workspace authority token"),
+    ("data.env", "EIDOLON_DATA_WORKSPACE_AUTHORITY_TOKEN", "channel.env", "EIDOLON_DATA_WORKSPACE_AUTHORITY_TOKEN", "Data/Channel smart-home registry token"),
     ("hub.env", "EIDOLON_HUB_DEVICE_REGISTRY_READER_TOKEN", "kernel.env", "EIDOLON_KERNEL_HUB_MANAGEMENT_TOKEN", "Hub/Kernel management token"),
     ("hub.env", "EIDOLON_HUB_MANAGEMENT_JWT_SECRET", "admin.env", "EIDOLON_ADMIN_HUB_MANAGEMENT_JWT_SECRET", "Hub/Admin management JWT secret"),
     ("hub.env", "EIDOLON_HUB_CHANNEL_PROVIDER_TOKEN", "channel.env", "EIDOLON_CHANNEL_PROVIDER_TOKEN", "Hub/Channel Provider token"),
@@ -358,6 +360,7 @@ DECLARED_ENV_KEYS: dict[str, EnvFileKeys] = {
             "EIDOLON_CHANNEL_PROVIDER_TOKEN",
             "PAIRING_JWT_SECRET",
             "EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN",
+            "EIDOLON_DATA_WORKSPACE_AUTHORITY_TOKEN",
         }),
         # A second synthesis vendor the operator may or may not have bought.
         # This pair is why the whole file used to sit outside this table.
@@ -913,5 +916,4 @@ def _validate_existing(
         "refreshed_settings": refreshed,
         "redaction": "existing credential values were not read or returned",
     }
-
 
