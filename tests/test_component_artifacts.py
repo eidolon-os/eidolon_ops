@@ -121,7 +121,10 @@ def test_laya_release_is_capability_selected_and_versioned() -> None:
     }
     assert all(item.url.startswith("local-artifact://laya-r14-onnx/") for item in model.files)
     unit = (_CHECKOUT_ROOT / "eidolon_models/deploy/systemd/eidolon-laya.service").read_text()
-    assert f"EIDOLON_LAYA_MODEL_DIR={model.install_root}" in unit
+    launcher = (_CHECKOUT_ROOT / "eidolon_models/scripts/eidolon-laya").read_text()
+    assert str(model.install_root) in launcher
+    assert "EIDOLON_HOST_CAPABILITIES" in launcher
+    assert "EIDOLON_LAYA_BACKEND=onnx" not in unit
     assert "train/runs" not in unit
 
 

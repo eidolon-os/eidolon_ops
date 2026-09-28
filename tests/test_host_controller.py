@@ -11,7 +11,7 @@ from eidolon_ops.errors import OperationsError
 from eidolon_ops.host_controller import HostController
 from eidolon_ops.model import Capability, Outcome
 from eidolon_ops.paths import HostDriver, HostPaths, HostPlatform, HostProfile
-from eidolon_ops.process import ProcessResult
+from eidolon_ops.process import ProcessError, ProcessResult
 
 
 class Runner:
@@ -76,6 +76,33 @@ def _pi_profile(tmp_path: Path) -> HostProfile:
 
 def _with_product(controller: HostController, product: object) -> None:
     controller.adapter.supervisor._product = lambda: product
+
+
+@pytest.mark.parametrize("stop_succeeds", [True, False])
+def test_home_state_transfer_is_between_successful_stop_and_start(tmp_path, stop_succeeds):
+    import sqlite3
+
+    profile = _profile(tmp_path)
+    source = profile.paths.state_root / "channel/smarthome.sqlite3"
+    source.parent.mkdir(parents=True)
+    with sqlite3.connect(source) as db:
+        db.execute("CREATE TABLE state (value TEXT)")
+    runner = Runner(ProcessResult(0 if stop_succeeds else 1, "", "stop failed"))
+    controller = HostController(profile, runner)
+    _with_product(controller, SimpleNamespace(
+        prepare=lambda: {}, health=lambda **kwargs: {"status": "healthy"},
+        commit_owner_authority=lambda: {},
+    ))
+    target = profile.paths.state_root / "hub/smarthome.sqlite3"
+    if stop_succeeds:
+        controller.lifecycle("start")
+        assert [call[0][-1] for call in runner.calls] == ["stop", "start"]
+        assert target.is_file()
+    else:
+        with pytest.raises(ProcessError):
+            controller.lifecycle("start")
+        assert [call[0][-1] for call in runner.calls] == ["stop"]
+        assert not target.exists()
 
 
 def test_local_lifecycle_uses_canonical_product_source_profile(tmp_path: Path) -> None:

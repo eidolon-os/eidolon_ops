@@ -876,3 +876,14 @@ def test_team_channel_credential_is_added_from_existing_agent_without_rotation(c
     assert _env(target / 'agent.env')['EIDOLON_AGENT_ADMIN_API_TOKEN'] == original
     assert _env(target / 'admin.env')['EIDOLON_AGENT_ADMIN_API_TOKEN'] == original
     validate_install_input_contract(configured, _settings_reader)
+
+
+def test_home_authority_credentials_follow_the_runtime_move(config, tmp_path):
+    configured = _config_for_init(config, tmp_path)
+    initialize_install_inputs(configured, _settings_reader)
+    target = next(iter(configured.install_files.values())).parent
+    hub, agent, channel, data = [_env(target / n) for n in ('hub.env','agent.env','channel.env','data.env')]
+    assert hub['EIDOLON_HUB_SMARTHOME_TOKEN'] == agent['EIDOLON_HUB_SMARTHOME_TOKEN'] == channel['EIDOLON_HUB_SMARTHOME_TOKEN']
+    assert hub['EIDOLON_HUB_SMARTHOME_TOKEN'] != channel['EIDOLON_CHANNEL_PROVIDER_TOKEN']
+    assert hub['EIDOLON_DATA_WORKSPACE_AUTHORITY_TOKEN'] == data['EIDOLON_DATA_WORKSPACE_AUTHORITY_TOKEN']
+    assert 'EIDOLON_DATA_WORKSPACE_AUTHORITY_TOKEN' not in channel

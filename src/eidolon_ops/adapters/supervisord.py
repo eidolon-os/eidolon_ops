@@ -6,6 +6,7 @@ import os
 from collections.abc import Callable
 from pathlib import Path
 
+from eidolon_ops import smarthome_state
 from eidolon_ops.adapters.local_transport import LocalTransport
 from eidolon_ops.errors import OperationsError
 from eidolon_ops.model import Capability
@@ -216,6 +217,13 @@ class SupervisordSupervisor:
         if operation in _PREPARING_OPERATIONS:
             phases.begin("prepare")
             phases.append({"phase": "prepare", "result": product.prepare()})
+        if operation in {"start", "restart"} and smarthome_state.pending(self.profile.paths.state_root):
+            phases.begin("smart-home state transfer")
+            self.transport.run(
+                (str(script), PROFILE, "stop"), timeout=300,
+                operation="stop Host before smart-home state transfer",
+            )
+            smarthome_state.transfer(self.profile.paths.state_root)
         phases.begin(operation)
         result = self.transport.run(
             (str(script), PROFILE, operation, *arguments),
