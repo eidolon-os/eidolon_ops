@@ -1,0 +1,11 @@
+{
+  "release_id": "rk3588-p4-route-20260929-1",
+  "status": "activated",
+  "doctor": "healthy",
+  "app_ready": "app_ready",
+  "activate": {
+    "release_id": "rk3588-p4-route-20260929-1",
+    "status": "activated",
+    "transaction_id": "d7e7090275a542e6b4c699682700544c"
+  }
+}

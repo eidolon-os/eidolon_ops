@@ -158,19 +158,13 @@ memory_settings = "../.eidolon-ops/opi5max/inputs/memory.yaml"
 [capabilities]
 provides = ["rknpu2", "local_laya", "local_laya_participation"]
 
-# Bench decision fixture, reached through an authenticated operator SSH tunnel.
-# The fixture is test-only; losing the tunnel fails the turn closed. Production
-# Hosts must configure their own decision provider, never fall back to fixtures.
-#
-# The participation model now runs here (eidolon-laya-participation on
-# http://127.0.0.1:8773/v1/participation/decide) but is not yet what the Agent
-# asks: below its calibrated confidence it abstains, and the Agent ends a
-# role-team round on an abstained decision rather than deciding it another way.
-# Switch this address once that second decision exists (or the policy is chosen).
+# Use the local p4 NPU service. An abstained decision ends the current round;
+# participation LLM fallback remains disabled pending semantic acceptance.
+# Do not route product decisions through the operator's test fixture.
 [[settings.overlay]]
 document = "agent.yaml"
 path = "participation.url"
-value = "http://127.0.0.1:8772/v1/participation/decide"
+value = "http://127.0.0.1:8773/v1/participation/decide"
 
 [[settings.overlay]]
 document = "channel.yaml"

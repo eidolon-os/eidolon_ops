@@ -1,6 +1,12 @@
 # IP Team 决策契约台架
 
-此配置仅用于 opi5max 开发台架。决策模型尚未接入，只有决策 HTTP 接口使用输入匹配 fixture；成员回复、ASR、TTS、LiveKit 与设备回执使用真实实现。fixture 不具备通用语义理解，未匹配或歧义输入返回 abstained。
+2026-09-29：opi5max 已通过 Ops 发布 `rk3588-p4-route-20260929-1`，Agent
+使用板上 p4 的 `http://127.0.0.1:8773/v1/participation/decide`。
+doctor / app-ready 通过；参与 LLM 兜底未启用，拒答仍结束本轮。
+见[路由与推理验证](reports/p4-route-20260929/README.md)。
+
+以下保留早期 fixture 契约台架操作，仅用于显式测试。当前 Host 不依赖8772隧道。
+fixture 不具备通用语义理解，未匹配或歧义输入返回 abstained；不得作为模型故障的自动回退。
 
 ## 生命周期
 

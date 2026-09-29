@@ -1,0 +1,1376 @@
+{
+  "configured_url": "http://127.0.0.1:8772/v1/participation/decide",
+  "probe_url": "http://127.0.0.1:8773/v1/participation/decide",
+  "note": "synthetic SDK apartment, inference only, no device execution",
+  "rows": [
+    {
+      "kind": "participation",
+      "phase": "alone",
+      "id": "DC-0001#0",
+      "result": {
+        "schema_version": 2,
+        "decision_id": "DC-0001#0",
+        "context_ref": "DC-0001",
+        "context_version": 0,
+        "membership_revision": 0,
+        "cancellation_epoch": 0,
+        "status": "decided",
+        "proposal": {
+          "action": "respond",
+          "participants": [
+            "ning"
+          ],
+          "instruction": ""
+        },
+        "policy_version": "participation-laya-v1/ae6718a4/min0.95",
+        "model_version": "ae6718a4"
+      },
+      "matches_previous": true,
+      "ms": 888.31
+    },
+    {
+      "kind": "participation",
+      "phase": "alone",
+      "id": "DC-0001#1",
+      "result": {
+        "schema_version": 2,
+        "decision_id": "DC-0001#1",
+        "context_ref": "DC-0001",
+        "context_version": 1,
+        "membership_revision": 0,
+        "cancellation_epoch": 0,
+        "status": "decided",
+        "proposal": {
+          "action": "finish",
+          "participants": [],
+          "instruction": ""
+        },
+        "policy_version": "participation-laya-v1/ae6718a4/min0.95",
+        "model_version": "ae6718a4"
+      },
+      "matches_previous": true,
+      "ms": 446.51
+    },
+    {
+      "kind": "participation",
+      "phase": "alone",
+      "id": "DC-0001#2",
+      "result": {
+        "schema_version": 2,
+        "decision_id": "DC-0001#2",
+        "context_ref": "DC-0001",
+        "context_version": 2,
+        "membership_revision": 0,
+        "cancellation_epoch": 0,
+        "status": "decided",
+        "proposal": {
+          "action": "respond",
+          "participants": [
+            "ning"
+          ],
+          "instruction": ""
+        },
+        "policy_version": "participation-laya-v1/ae6718a4/min0.95",
+        "model_version": "ae6718a4"
+      },
+      "matches_previous": true,
+      "ms": 851.41
+    },
+    {
+      "kind": "participation",
+      "phase": "alone",
+      "id": "DC-0001#3",
+      "result": {
+        "schema_version": 2,
+        "decision_id": "DC-0001#3",
+        "context_ref": "DC-0001",
+        "context_version": 3,
+        "membership_revision": 0,
+        "cancellation_epoch": 0,
+        "status": "decided",
+        "proposal": {
+          "action": "finish",
+          "participants": [],
+          "instruction": ""
+        },
+        "policy_version": "participation-laya-v1/ae6718a4/min0.95",
+        "model_version": "ae6718a4"
+      },
+      "matches_previous": true,
+      "ms": 434.59
+    },
+    {
+      "kind": "participation",
+      "phase": "alone",
+      "id": "DC-0002#0",
+      "result": {
+        "schema_version": 2,
+        "decision_id": "DC-0002#0",
+        "context_ref": "DC-0002",
+        "context_version": 0,
+        "membership_revision": 0,
+        "cancellation_epoch": 0,
+        "status": "decided",
+        "proposal": {
+          "action": "respond",
+          "participants": [
+            "dafu"
+          ],
+          "instruction": ""
+        },
+        "policy_version": "participation-laya-v1/ae6718a4/min0.95",
+        "model_version": "ae6718a4"
+      },
+      "matches_previous": true,
+      "ms": 812.02
+    },
+    {
+      "kind": "participation",
+      "phase": "alone",
+      "id": "DC-0002#1",
+      "result": {
+        "schema_version": 2,
+        "decision_id": "DC-0002#1",
+        "context_ref": "DC-0002",
+        "context_version": 1,
+        "membership_revision": 0,
+        "cancellation_epoch": 0,
+        "status": "decided",
+        "proposal": {
+          "action": "finish",
+          "participants": [],
+          "instruction": ""
+        },
+        "policy_version": "participation-laya-v1/ae6718a4/min0.95",
+        "model_version": "ae6718a4"
+      },
+      "matches_previous": true,
+      "ms": 407.8
+    },
+    {
+      "kind": "participation",
+      "phase": "alone",
+      "id": "DC-0005#3",
+      "result": {
+        "schema_version": 2,
+        "decision_id": "DC-0005#3",
+        "context_ref": "DC-0005",
+        "context_version": 3,
+        "membership_revision": 0,
+        "cancellation_epoch": 0,
+        "status": "abstained",
+        "proposal": null,
+        "policy_version": "participation-laya-v1/ae6718a4/min0.95",
+        "model_version": "ae6718a4"
+      },
+      "matches_previous": true,
+      "ms": 408.72
+    },
+    {
+      "kind": "participation",
+      "phase": "alone",
+      "id": "DC-0006#4",
+      "result": {
+        "schema_version": 2,
+        "decision_id": "DC-0006#4",
+        "context_ref": "DC-0006",
+        "context_version": 4,
+        "membership_revision": 0,
+        "cancellation_epoch": 0,
+        "status": "abstained",
+        "proposal": null,
+        "policy_version": "participation-laya-v1/ae6718a4/min0.95",
+        "model_version": "ae6718a4"
+      },
+      "matches_previous": true,
+      "ms": 811.6
+    },
+    {
+      "kind": "participation",
+      "phase": "alone",
+      "id": "DC-0009#0",
+      "result": {
+        "schema_version": 2,
+        "decision_id": "DC-0009#0",
+        "context_ref": "DC-0009",
+        "context_version": 0,
+        "membership_revision": 0,
+        "cancellation_epoch": 0,
+        "status": "abstained",
+        "proposal": null,
+        "policy_version": "participation-laya-v1/ae6718a4/min0.95",
+        "model_version": "ae6718a4"
+      },
+      "matches_previous": true,
+      "ms": 815.01
+    },
+    {
+      "kind": "participation",
+      "phase": "alone",
+      "id": "DC-0009#2",
+      "result": {
+        "schema_version": 2,
+        "decision_id": "DC-0009#2",
+        "context_ref": "DC-0009",
+        "context_version": 2,
+        "membership_revision": 0,
+        "cancellation_epoch": 0,
+        "status": "decided",
+        "proposal": {
+          "action": "wait",
+          "participants": [],
+          "instruction": ""
+        },
+        "policy_version": "participation-laya-v1/ae6718a4/min0.95",
+        "model_version": "ae6718a4"
+      },
+      "matches_previous": true,
+      "ms": 426.94
+    },
+    {
+      "kind": "participation",
+      "phase": "alone",
+      "id": "DC-0013#1",
+      "result": {
+        "schema_version": 2,
+        "decision_id": "DC-0013#1",
+        "context_ref": "DC-0013",
+        "context_version": 1,
+        "membership_revision": 0,
+        "cancellation_epoch": 0,
+        "status": "decided",
+        "proposal": {
+          "action": "wait",
+          "participants": [],
+          "instruction": ""
+        },
+        "policy_version": "participation-laya-v1/ae6718a4/min0.95",
+        "model_version": "ae6718a4"
+      },
+      "matches_previous": true,
+      "ms": 416.3
+    },
+    {
+      "kind": "participation",
+      "phase": "alone",
+      "id": "DC-0015#0",
+      "result": {
+        "schema_version": 2,
+        "decision_id": "DC-0015#0",
+        "context_ref": "DC-0015",
+        "context_version": 0,
+        "membership_revision": 0,
+        "cancellation_epoch": 0,
+        "status": "decided",
+        "proposal": {
+          "action": "wait",
+          "participants": [],
+          "instruction": ""
+        },
+        "policy_version": "participation-laya-v1/ae6718a4/min0.95",
+        "model_version": "ae6718a4"
+      },
+      "matches_previous": true,
+      "ms": 436.9
+    },
+    {
+      "kind": "participation",
+      "phase": "alone",
+      "id": "DC-0029#0",
+      "result": {
+        "schema_version": 2,
+        "decision_id": "DC-0029#0",
+        "context_ref": "DC-0029",
+        "context_version": 0,
+        "membership_revision": 0,
+        "cancellation_epoch": 0,
+        "status": "decided",
+        "proposal": {
+          "action": "clarify",
+          "participants": [
+            "meimei"
+          ],
+          "instruction": "不确定用户想让大家做什么。用一句话请用户说清楚具体想要什么。"
+        },
+        "policy_version": "participation-laya-v1/ae6718a4/min0.95",
+        "model_version": "ae6718a4"
+      },
+      "matches_previous": true,
+      "ms": 1241.1
+    },
+    {
+      "kind": "participation",
+      "phase": "alone",
+      "id": "DC-0031#0",
+      "result": {
+        "schema_version": 2,
+        "decision_id": "DC-0031#0",
+        "context_ref": "DC-0031",
+        "context_version": 0,
+        "membership_revision": 0,
+        "cancellation_epoch": 0,
+        "status": "decided",
+        "proposal": {
+          "action": "clarify",
+          "participants": [
+            "sun"
+          ],
+          "instruction": "用户点到的角色不在场。用一句话告诉用户这位不在，并问用户想让在场的哪一位来回应。"
+        },
+        "policy_version": "participation-laya-v1/ae6718a4/min0.95",
+        "model_version": "ae6718a4"
+      },
+      "matches_previous": true,
+      "ms": 1236.44
+    },
+    {
+      "kind": "participation",
+      "phase": "alone",
+      "id": "DC-0032#3",
+      "result": {
+        "schema_version": 2,
+        "decision_id": "DC-0032#3",
+        "context_ref": "DC-0032",
+        "context_version": 3,
+        "membership_revision": 0,
+        "cancellation_epoch": 0,
+        "status": "decided",
+        "proposal": {
+          "action": "clarify",
+          "participants": [
+            "laoqin"
+          ],
+          "instruction": "用户说的对象不明确（不确定是哪一位或哪一个）。用一句话请用户说清楚指的是谁或哪一个，不要替用户猜。"
+        },
+        "policy_version": "participation-laya-v1/ae6718a4/min0.95",
+        "model_version": "ae6718a4"
+      },
+      "matches_previous": true,
+      "ms": 1215.84
+    },
+    {
+      "kind": "home",
+      "phase": "alone",
+      "utterance": "打开客厅空调",
+      "result": {
+        "schema_version": 1,
+        "interpretation_id": "probe-alone-0",
+        "status": "decided",
+        "proposal": {
+          "intent": "control",
+          "target_status": "resolved",
+          "targets": [
+            "living.ac"
+          ],
+          "action": {
+            "trait": "on_off",
+            "command": "on",
+            "slots": []
+          },
+          "mention": null
+        },
+        "policy_version": "laya-smarthome-v1",
+        "model_version": "laya-smart-home@45f3dedb",
+        "diagnostics": {
+          "intent_p": 0.9946,
+          "device_p": 0.9956,
+          "action_p": 0.9943,
+          "backend": "rknn",
+          "server_ms": 434.3
+        }
+      },
+      "ms": 438.81
+    },
+    {
+      "kind": "home",
+      "phase": "alone",
+      "utterance": "关闭客厅空调",
+      "result": {
+        "schema_version": 1,
+        "interpretation_id": "probe-alone-1",
+        "status": "decided",
+        "proposal": {
+          "intent": "control",
+          "target_status": "resolved",
+          "targets": [
+            "living.ac"
+          ],
+          "action": {
+            "trait": "on_off",
+            "command": "off",
+            "slots": []
+          },
+          "mention": null
+        },
+        "policy_version": "laya-smarthome-v1",
+        "model_version": "laya-smart-home@45f3dedb",
+        "diagnostics": {
+          "intent_p": 0.9937,
+          "device_p": 0.9948,
+          "action_p": 0.9972,
+          "backend": "rknn",
+          "server_ms": 441.8
+        }
+      },
+      "ms": 446.16
+    },
+    {
+      "kind": "home",
+      "phase": "alone",
+      "utterance": "打开卧室窗帘",
+      "result": {
+        "schema_version": 1,
+        "interpretation_id": "probe-alone-2",
+        "status": "decided",
+        "proposal": {
+          "intent": "control",
+          "target_status": "none",
+          "targets": [],
+          "action": {
+            "trait": "on_off",
+            "command": "on",
+            "slots": []
+          },
+          "mention": null
+        },
+        "policy_version": "laya-smarthome-v1",
+        "model_version": "laya-smart-home@45f3dedb",
+        "diagnostics": {
+          "intent_p": 0.9935,
+          "device_p": 0.9832,
+          "action_p": 0.997,
+          "backend": "rknn",
+          "server_ms": 457.8
+        }
+      },
+      "ms": 461.95
+    },
+    {
+      "kind": "home",
+      "phase": "alone",
+      "utterance": "打开客厅空调",
+      "result": {
+        "schema_version": 1,
+        "interpretation_id": "probe-alone-3",
+        "status": "decided",
+        "proposal": {
+          "intent": "control",
+          "target_status": "resolved",
+          "targets": [
+            "living.ac"
+          ],
+          "action": {
+            "trait": "on_off",
+            "command": "on",
+            "slots": []
+          },
+          "mention": null
+        },
+        "policy_version": "laya-smarthome-v1",
+        "model_version": "laya-smart-home@45f3dedb",
+        "diagnostics": {
+          "intent_p": 0.9946,
+          "device_p": 0.9956,
+          "action_p": 0.9943,
+          "backend": "rknn",
+          "server_ms": 426.3
+        }
+      },
+      "ms": 430.75
+    },
+    {
+      "kind": "home",
+      "phase": "alone",
+      "utterance": "关闭客厅空调",
+      "result": {
+        "schema_version": 1,
+        "interpretation_id": "probe-alone-4",
+        "status": "decided",
+        "proposal": {
+          "intent": "control",
+          "target_status": "resolved",
+          "targets": [
+            "living.ac"
+          ],
+          "action": {
+            "trait": "on_off",
+            "command": "off",
+            "slots": []
+          },
+          "mention": null
+        },
+        "policy_version": "laya-smarthome-v1",
+        "model_version": "laya-smart-home@45f3dedb",
+        "diagnostics": {
+          "intent_p": 0.9937,
+          "device_p": 0.9948,
+          "action_p": 0.9972,
+          "backend": "rknn",
+          "server_ms": 434.3
+        }
+      },
+      "ms": 438.86
+    },
+    {
+      "kind": "home",
+      "phase": "alone",
+      "utterance": "打开卧室窗帘",
+      "result": {
+        "schema_version": 1,
+        "interpretation_id": "probe-alone-5",
+        "status": "decided",
+        "proposal": {
+          "intent": "control",
+          "target_status": "none",
+          "targets": [],
+          "action": {
+            "trait": "on_off",
+            "command": "on",
+            "slots": []
+          },
+          "mention": null
+        },
+        "policy_version": "laya-smarthome-v1",
+        "model_version": "laya-smart-home@45f3dedb",
+        "diagnostics": {
+          "intent_p": 0.9935,
+          "device_p": 0.9832,
+          "action_p": 0.997,
+          "backend": "rknn",
+          "server_ms": 453.6
+        }
+      },
+      "ms": 457.71
+    },
+    {
+      "kind": "home",
+      "phase": "concurrent",
+      "utterance": "打开客厅空调",
+      "result": {
+        "schema_version": 1,
+        "interpretation_id": "probe-concurrent-0",
+        "status": "decided",
+        "proposal": {
+          "intent": "control",
+          "target_status": "resolved",
+          "targets": [
+            "living.ac"
+          ],
+          "action": {
+            "trait": "on_off",
+            "command": "on",
+            "slots": []
+          },
+          "mention": null
+        },
+        "policy_version": "laya-smarthome-v1",
+        "model_version": "laya-smart-home@45f3dedb",
+        "diagnostics": {
+          "intent_p": 0.9946,
+          "device_p": 0.9956,
+          "action_p": 0.9943,
+          "backend": "rknn",
+          "server_ms": 491.3
+        }
+      },
+      "ms": 495.74
+    },
+    {
+      "kind": "participation",
+      "phase": "concurrent",
+      "id": "DC-0001#0",
+      "result": {
+        "schema_version": 2,
+        "decision_id": "DC-0001#0",
+        "context_ref": "DC-0001",
+        "context_version": 0,
+        "membership_revision": 0,
+        "cancellation_epoch": 0,
+        "status": "decided",
+        "proposal": {
+          "action": "respond",
+          "participants": [
+            "ning"
+          ],
+          "instruction": ""
+        },
+        "policy_version": "participation-laya-v1/ae6718a4/min0.95",
+        "model_version": "ae6718a4"
+      },
+      "matches_previous": true,
+      "ms": 941.56
+    },
+    {
+      "kind": "home",
+      "phase": "concurrent",
+      "utterance": "关闭客厅空调",
+      "result": {
+        "schema_version": 1,
+        "interpretation_id": "probe-concurrent-1",
+        "status": "decided",
+        "proposal": {
+          "intent": "control",
+          "target_status": "resolved",
+          "targets": [
+            "living.ac"
+          ],
+          "action": {
+            "trait": "on_off",
+            "command": "off",
+            "slots": []
+          },
+          "mention": null
+        },
+        "policy_version": "laya-smarthome-v1",
+        "model_version": "laya-smart-home@45f3dedb",
+        "diagnostics": {
+          "intent_p": 0.9937,
+          "device_p": 0.9948,
+          "action_p": 0.9972,
+          "backend": "rknn",
+          "server_ms": 454.3
+        }
+      },
+      "ms": 458.56
+    },
+    {
+      "kind": "participation",
+      "phase": "concurrent",
+      "id": "DC-0001#1",
+      "result": {
+        "schema_version": 2,
+        "decision_id": "DC-0001#1",
+        "context_ref": "DC-0001",
+        "context_version": 1,
+        "membership_revision": 0,
+        "cancellation_epoch": 0,
+        "status": "decided",
+        "proposal": {
+          "action": "finish",
+          "participants": [],
+          "instruction": ""
+        },
+        "policy_version": "participation-laya-v1/ae6718a4/min0.95",
+        "model_version": "ae6718a4"
+      },
+      "matches_previous": true,
+      "ms": 518.01
+    },
+    {
+      "kind": "home",
+      "phase": "concurrent",
+      "utterance": "打开卧室窗帘",
+      "result": {
+        "schema_version": 1,
+        "interpretation_id": "probe-concurrent-2",
+        "status": "decided",
+        "proposal": {
+          "intent": "control",
+          "target_status": "none",
+          "targets": [],
+          "action": {
+            "trait": "on_off",
+            "command": "on",
+            "slots": []
+          },
+          "mention": null
+        },
+        "policy_version": "laya-smarthome-v1",
+        "model_version": "laya-smart-home@45f3dedb",
+        "diagnostics": {
+          "intent_p": 0.9935,
+          "device_p": 0.9832,
+          "action_p": 0.997,
+          "backend": "rknn",
+          "server_ms": 526.5
+        }
+      },
+      "ms": 530.67
+    },
+    {
+      "kind": "participation",
+      "phase": "concurrent",
+      "id": "DC-0001#2",
+      "result": {
+        "schema_version": 2,
+        "decision_id": "DC-0001#2",
+        "context_ref": "DC-0001",
+        "context_version": 2,
+        "membership_revision": 0,
+        "cancellation_epoch": 0,
+        "status": "decided",
+        "proposal": {
+          "action": "respond",
+          "participants": [
+            "ning"
+          ],
+          "instruction": ""
+        },
+        "policy_version": "participation-laya-v1/ae6718a4/min0.95",
+        "model_version": "ae6718a4"
+      },
+      "matches_previous": true,
+      "ms": 969.9
+    },
+    {
+      "kind": "home",
+      "phase": "concurrent",
+      "utterance": "打开客厅空调",
+      "result": {
+        "schema_version": 1,
+        "interpretation_id": "probe-concurrent-3",
+        "status": "decided",
+        "proposal": {
+          "intent": "control",
+          "target_status": "resolved",
+          "targets": [
+            "living.ac"
+          ],
+          "action": {
+            "trait": "on_off",
+            "command": "on",
+            "slots": []
+          },
+          "mention": null
+        },
+        "policy_version": "laya-smarthome-v1",
+        "model_version": "laya-smart-home@45f3dedb",
+        "diagnostics": {
+          "intent_p": 0.9946,
+          "device_p": 0.9956,
+          "action_p": 0.9943,
+          "backend": "rknn",
+          "server_ms": 519.2
+        }
+      },
+      "ms": 523.27
+    },
+    {
+      "kind": "participation",
+      "phase": "concurrent",
+      "id": "DC-0001#3",
+      "result": {
+        "schema_version": 2,
+        "decision_id": "DC-0001#3",
+        "context_ref": "DC-0001",
+        "context_version": 3,
+        "membership_revision": 0,
+        "cancellation_epoch": 0,
+        "status": "decided",
+        "proposal": {
+          "action": "finish",
+          "participants": [],
+          "instruction": ""
+        },
+        "policy_version": "participation-laya-v1/ae6718a4/min0.95",
+        "model_version": "ae6718a4"
+      },
+      "matches_previous": true,
+      "ms": 543.86
+    },
+    {
+      "kind": "home",
+      "phase": "concurrent",
+      "utterance": "关闭客厅空调",
+      "result": {
+        "schema_version": 1,
+        "interpretation_id": "probe-concurrent-4",
+        "status": "decided",
+        "proposal": {
+          "intent": "control",
+          "target_status": "resolved",
+          "targets": [
+            "living.ac"
+          ],
+          "action": {
+            "trait": "on_off",
+            "command": "off",
+            "slots": []
+          },
+          "mention": null
+        },
+        "policy_version": "laya-smarthome-v1",
+        "model_version": "laya-smart-home@45f3dedb",
+        "diagnostics": {
+          "intent_p": 0.9937,
+          "device_p": 0.9948,
+          "action_p": 0.9972,
+          "backend": "rknn",
+          "server_ms": 470.2
+        }
+      },
+      "ms": 474.86
+    },
+    {
+      "kind": "participation",
+      "phase": "concurrent",
+      "id": "DC-0002#0",
+      "result": {
+        "schema_version": 2,
+        "decision_id": "DC-0002#0",
+        "context_ref": "DC-0002",
+        "context_version": 0,
+        "membership_revision": 0,
+        "cancellation_epoch": 0,
+        "status": "decided",
+        "proposal": {
+          "action": "respond",
+          "participants": [
+            "dafu"
+          ],
+          "instruction": ""
+        },
+        "policy_version": "participation-laya-v1/ae6718a4/min0.95",
+        "model_version": "ae6718a4"
+      },
+      "matches_previous": true,
+      "ms": 956.33
+    },
+    {
+      "kind": "participation",
+      "phase": "concurrent",
+      "id": "DC-0002#1",
+      "result": {
+        "schema_version": 2,
+        "decision_id": "DC-0002#1",
+        "context_ref": "DC-0002",
+        "context_version": 1,
+        "membership_revision": 0,
+        "cancellation_epoch": 0,
+        "status": "decided",
+        "proposal": {
+          "action": "finish",
+          "participants": [],
+          "instruction": ""
+        },
+        "policy_version": "participation-laya-v1/ae6718a4/min0.95",
+        "model_version": "ae6718a4"
+      },
+      "matches_previous": true,
+      "ms": 507.64
+    },
+    {
+      "kind": "home",
+      "phase": "concurrent",
+      "utterance": "打开卧室窗帘",
+      "result": {
+        "schema_version": 1,
+        "interpretation_id": "probe-concurrent-5",
+        "status": "decided",
+        "proposal": {
+          "intent": "control",
+          "target_status": "none",
+          "targets": [],
+          "action": {
+            "trait": "on_off",
+            "command": "on",
+            "slots": []
+          },
+          "mention": null
+        },
+        "policy_version": "laya-smarthome-v1",
+        "model_version": "laya-smart-home@45f3dedb",
+        "diagnostics": {
+          "intent_p": 0.9935,
+          "device_p": 0.9832,
+          "action_p": 0.997,
+          "backend": "rknn",
+          "server_ms": 503.2
+        }
+      },
+      "ms": 507.12
+    },
+    {
+      "kind": "home",
+      "phase": "concurrent",
+      "utterance": "打开客厅空调",
+      "result": {
+        "schema_version": 1,
+        "interpretation_id": "probe-concurrent-6",
+        "status": "decided",
+        "proposal": {
+          "intent": "control",
+          "target_status": "resolved",
+          "targets": [
+            "living.ac"
+          ],
+          "action": {
+            "trait": "on_off",
+            "command": "on",
+            "slots": []
+          },
+          "mention": null
+        },
+        "policy_version": "laya-smarthome-v1",
+        "model_version": "laya-smart-home@45f3dedb",
+        "diagnostics": {
+          "intent_p": 0.9946,
+          "device_p": 0.9956,
+          "action_p": 0.9943,
+          "backend": "rknn",
+          "server_ms": 539.4
+        }
+      },
+      "ms": 543.6
+    },
+    {
+      "kind": "participation",
+      "phase": "concurrent",
+      "id": "DC-0005#3",
+      "result": {
+        "schema_version": 2,
+        "decision_id": "DC-0005#3",
+        "context_ref": "DC-0005",
+        "context_version": 3,
+        "membership_revision": 0,
+        "cancellation_epoch": 0,
+        "status": "abstained",
+        "proposal": null,
+        "policy_version": "participation-laya-v1/ae6718a4/min0.95",
+        "model_version": "ae6718a4"
+      },
+      "matches_previous": true,
+      "ms": 555.31
+    },
+    {
+      "kind": "home",
+      "phase": "concurrent",
+      "utterance": "关闭客厅空调",
+      "result": {
+        "schema_version": 1,
+        "interpretation_id": "probe-concurrent-7",
+        "status": "decided",
+        "proposal": {
+          "intent": "control",
+          "target_status": "resolved",
+          "targets": [
+            "living.ac"
+          ],
+          "action": {
+            "trait": "on_off",
+            "command": "off",
+            "slots": []
+          },
+          "mention": null
+        },
+        "policy_version": "laya-smarthome-v1",
+        "model_version": "laya-smart-home@45f3dedb",
+        "diagnostics": {
+          "intent_p": 0.9937,
+          "device_p": 0.9948,
+          "action_p": 0.9972,
+          "backend": "rknn",
+          "server_ms": 502.2
+        }
+      },
+      "ms": 506.21
+    },
+    {
+      "kind": "participation",
+      "phase": "concurrent",
+      "id": "DC-0006#4",
+      "result": {
+        "schema_version": 2,
+        "decision_id": "DC-0006#4",
+        "context_ref": "DC-0006",
+        "context_version": 4,
+        "membership_revision": 0,
+        "cancellation_epoch": 0,
+        "status": "abstained",
+        "proposal": null,
+        "policy_version": "participation-laya-v1/ae6718a4/min0.95",
+        "model_version": "ae6718a4"
+      },
+      "matches_previous": true,
+      "ms": 914.75
+    },
+    {
+      "kind": "home",
+      "phase": "concurrent",
+      "utterance": "打开卧室窗帘",
+      "result": {
+        "schema_version": 1,
+        "interpretation_id": "probe-concurrent-8",
+        "status": "decided",
+        "proposal": {
+          "intent": "control",
+          "target_status": "none",
+          "targets": [],
+          "action": {
+            "trait": "on_off",
+            "command": "on",
+            "slots": []
+          },
+          "mention": null
+        },
+        "policy_version": "laya-smarthome-v1",
+        "model_version": "laya-smart-home@45f3dedb",
+        "diagnostics": {
+          "intent_p": 0.9935,
+          "device_p": 0.9832,
+          "action_p": 0.997,
+          "backend": "rknn",
+          "server_ms": 473.3
+        }
+      },
+      "ms": 477.56
+    },
+    {
+      "kind": "participation",
+      "phase": "concurrent",
+      "id": "DC-0009#0",
+      "result": {
+        "schema_version": 2,
+        "decision_id": "DC-0009#0",
+        "context_ref": "DC-0009",
+        "context_version": 0,
+        "membership_revision": 0,
+        "cancellation_epoch": 0,
+        "status": "abstained",
+        "proposal": null,
+        "policy_version": "participation-laya-v1/ae6718a4/min0.95",
+        "model_version": "ae6718a4"
+      },
+      "matches_previous": true,
+      "ms": 904.43
+    },
+    {
+      "kind": "participation",
+      "phase": "concurrent",
+      "id": "DC-0009#2",
+      "result": {
+        "schema_version": 2,
+        "decision_id": "DC-0009#2",
+        "context_ref": "DC-0009",
+        "context_version": 2,
+        "membership_revision": 0,
+        "cancellation_epoch": 0,
+        "status": "decided",
+        "proposal": {
+          "action": "wait",
+          "participants": [],
+          "instruction": ""
+        },
+        "policy_version": "participation-laya-v1/ae6718a4/min0.95",
+        "model_version": "ae6718a4"
+      },
+      "matches_previous": true,
+      "ms": 499.13
+    },
+    {
+      "kind": "home",
+      "phase": "concurrent",
+      "utterance": "打开客厅空调",
+      "result": {
+        "schema_version": 1,
+        "interpretation_id": "probe-concurrent-9",
+        "status": "decided",
+        "proposal": {
+          "intent": "control",
+          "target_status": "resolved",
+          "targets": [
+            "living.ac"
+          ],
+          "action": {
+            "trait": "on_off",
+            "command": "on",
+            "slots": []
+          },
+          "mention": null
+        },
+        "policy_version": "laya-smarthome-v1",
+        "model_version": "laya-smart-home@45f3dedb",
+        "diagnostics": {
+          "intent_p": 0.9946,
+          "device_p": 0.9956,
+          "action_p": 0.9943,
+          "backend": "rknn",
+          "server_ms": 497.2
+        }
+      },
+      "ms": 500.95
+    },
+    {
+      "kind": "home",
+      "phase": "concurrent",
+      "utterance": "关闭客厅空调",
+      "result": {
+        "schema_version": 1,
+        "interpretation_id": "probe-concurrent-10",
+        "status": "decided",
+        "proposal": {
+          "intent": "control",
+          "target_status": "resolved",
+          "targets": [
+            "living.ac"
+          ],
+          "action": {
+            "trait": "on_off",
+            "command": "off",
+            "slots": []
+          },
+          "mention": null
+        },
+        "policy_version": "laya-smarthome-v1",
+        "model_version": "laya-smart-home@45f3dedb",
+        "diagnostics": {
+          "intent_p": 0.9937,
+          "device_p": 0.9948,
+          "action_p": 0.9972,
+          "backend": "rknn",
+          "server_ms": 494.6
+        }
+      },
+      "ms": 498.54
+    },
+    {
+      "kind": "participation",
+      "phase": "concurrent",
+      "id": "DC-0013#1",
+      "result": {
+        "schema_version": 2,
+        "decision_id": "DC-0013#1",
+        "context_ref": "DC-0013",
+        "context_version": 1,
+        "membership_revision": 0,
+        "cancellation_epoch": 0,
+        "status": "decided",
+        "proposal": {
+          "action": "wait",
+          "participants": [],
+          "instruction": ""
+        },
+        "policy_version": "participation-laya-v1/ae6718a4/min0.95",
+        "model_version": "ae6718a4"
+      },
+      "matches_previous": true,
+      "ms": 507.27
+    },
+    {
+      "kind": "home",
+      "phase": "concurrent",
+      "utterance": "打开卧室窗帘",
+      "result": {
+        "schema_version": 1,
+        "interpretation_id": "probe-concurrent-11",
+        "status": "decided",
+        "proposal": {
+          "intent": "control",
+          "target_status": "none",
+          "targets": [],
+          "action": {
+            "trait": "on_off",
+            "command": "on",
+            "slots": []
+          },
+          "mention": null
+        },
+        "policy_version": "laya-smarthome-v1",
+        "model_version": "laya-smart-home@45f3dedb",
+        "diagnostics": {
+          "intent_p": 0.9935,
+          "device_p": 0.9832,
+          "action_p": 0.997,
+          "backend": "rknn",
+          "server_ms": 509.5
+        }
+      },
+      "ms": 513.75
+    },
+    {
+      "kind": "participation",
+      "phase": "concurrent",
+      "id": "DC-0015#0",
+      "result": {
+        "schema_version": 2,
+        "decision_id": "DC-0015#0",
+        "context_ref": "DC-0015",
+        "context_version": 0,
+        "membership_revision": 0,
+        "cancellation_epoch": 0,
+        "status": "decided",
+        "proposal": {
+          "action": "wait",
+          "participants": [],
+          "instruction": ""
+        },
+        "policy_version": "participation-laya-v1/ae6718a4/min0.95",
+        "model_version": "ae6718a4"
+      },
+      "matches_previous": true,
+      "ms": 530.36
+    },
+    {
+      "kind": "home",
+      "phase": "concurrent",
+      "utterance": "打开客厅空调",
+      "result": {
+        "schema_version": 1,
+        "interpretation_id": "probe-concurrent-12",
+        "status": "decided",
+        "proposal": {
+          "intent": "control",
+          "target_status": "resolved",
+          "targets": [
+            "living.ac"
+          ],
+          "action": {
+            "trait": "on_off",
+            "command": "on",
+            "slots": []
+          },
+          "mention": null
+        },
+        "policy_version": "laya-smarthome-v1",
+        "model_version": "laya-smart-home@45f3dedb",
+        "diagnostics": {
+          "intent_p": 0.9946,
+          "device_p": 0.9956,
+          "action_p": 0.9943,
+          "backend": "rknn",
+          "server_ms": 495.3
+        }
+      },
+      "ms": 499.91
+    },
+    {
+      "kind": "participation",
+      "phase": "concurrent",
+      "id": "DC-0029#0",
+      "result": {
+        "schema_version": 2,
+        "decision_id": "DC-0029#0",
+        "context_ref": "DC-0029",
+        "context_version": 0,
+        "membership_revision": 0,
+        "cancellation_epoch": 0,
+        "status": "decided",
+        "proposal": {
+          "action": "clarify",
+          "participants": [
+            "meimei"
+          ],
+          "instruction": "不确定用户想让大家做什么。用一句话请用户说清楚具体想要什么。"
+        },
+        "policy_version": "participation-laya-v1/ae6718a4/min0.95",
+        "model_version": "ae6718a4"
+      },
+      "matches_previous": true,
+      "ms": 1305.81
+    },
+    {
+      "kind": "home",
+      "phase": "concurrent",
+      "utterance": "关闭客厅空调",
+      "result": {
+        "schema_version": 1,
+        "interpretation_id": "probe-concurrent-13",
+        "status": "decided",
+        "proposal": {
+          "intent": "control",
+          "target_status": "resolved",
+          "targets": [
+            "living.ac"
+          ],
+          "action": {
+            "trait": "on_off",
+            "command": "off",
+            "slots": []
+          },
+          "mention": null
+        },
+        "policy_version": "laya-smarthome-v1",
+        "model_version": "laya-smart-home@45f3dedb",
+        "diagnostics": {
+          "intent_p": 0.9937,
+          "device_p": 0.9948,
+          "action_p": 0.9972,
+          "backend": "rknn",
+          "server_ms": 491.1
+        }
+      },
+      "ms": 495.29
+    },
+    {
+      "kind": "participation",
+      "phase": "concurrent",
+      "id": "DC-0031#0",
+      "result": {
+        "schema_version": 2,
+        "decision_id": "DC-0031#0",
+        "context_ref": "DC-0031",
+        "context_version": 0,
+        "membership_revision": 0,
+        "cancellation_epoch": 0,
+        "status": "decided",
+        "proposal": {
+          "action": "clarify",
+          "participants": [
+            "sun"
+          ],
+          "instruction": "用户点到的角色不在场。用一句话告诉用户这位不在，并问用户想让在场的哪一位来回应。"
+        },
+        "policy_version": "participation-laya-v1/ae6718a4/min0.95",
+        "model_version": "ae6718a4"
+      },
+      "matches_previous": true,
+      "ms": 1341.01
+    },
+    {
+      "kind": "home",
+      "phase": "concurrent",
+      "utterance": "打开卧室窗帘",
+      "result": {
+        "schema_version": 1,
+        "interpretation_id": "probe-concurrent-14",
+        "status": "decided",
+        "proposal": {
+          "intent": "control",
+          "target_status": "none",
+          "targets": [],
+          "action": {
+            "trait": "on_off",
+            "command": "on",
+            "slots": []
+          },
+          "mention": null
+        },
+        "policy_version": "laya-smarthome-v1",
+        "model_version": "laya-smart-home@45f3dedb",
+        "diagnostics": {
+          "intent_p": 0.9935,
+          "device_p": 0.9832,
+          "action_p": 0.997,
+          "backend": "rknn",
+          "server_ms": 491.0
+        }
+      },
+      "ms": 495.3
+    },
+    {
+      "kind": "participation",
+      "phase": "concurrent",
+      "id": "DC-0032#3",
+      "result": {
+        "schema_version": 2,
+        "decision_id": "DC-0032#3",
+        "context_ref": "DC-0032",
+        "context_version": 3,
+        "membership_revision": 0,
+        "cancellation_epoch": 0,
+        "status": "decided",
+        "proposal": {
+          "action": "clarify",
+          "participants": [
+            "laoqin"
+          ],
+          "instruction": "用户说的对象不明确（不确定是哪一位或哪一个）。用一句话请用户说清楚指的是谁或哪一个，不要替用户猜。"
+        },
+        "policy_version": "participation-laya-v1/ae6718a4/min0.95",
+        "model_version": "ae6718a4"
+      },
+      "matches_previous": true,
+      "ms": 1352.1
+    }
+  ]
+}

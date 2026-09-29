@@ -1,0 +1,122 @@
+{
+  "configured_url": "http://127.0.0.1:8773/v1/participation/decide",
+  "probe_url": "http://127.0.0.1:8773/v1/participation/decide",
+  "note": "synthetic SDK apartment, inference only, no device execution",
+  "rows": [
+    {
+      "kind": "participation",
+      "phase": "configured-after-activation",
+      "id": "DC-0001#0",
+      "result": {
+        "schema_version": 2,
+        "decision_id": "DC-0001#0",
+        "context_ref": "DC-0001",
+        "context_version": 0,
+        "membership_revision": 0,
+        "cancellation_epoch": 0,
+        "status": "decided",
+        "proposal": {
+          "action": "respond",
+          "participants": [
+            "ning"
+          ],
+          "instruction": ""
+        },
+        "policy_version": "participation-laya-v1/ae6718a4/min0.95",
+        "model_version": "ae6718a4"
+      },
+      "matches_previous": true,
+      "ms": 920.12
+    },
+    {
+      "kind": "participation",
+      "phase": "configured-after-activation",
+      "id": "DC-0001#1",
+      "result": {
+        "schema_version": 2,
+        "decision_id": "DC-0001#1",
+        "context_ref": "DC-0001",
+        "context_version": 1,
+        "membership_revision": 0,
+        "cancellation_epoch": 0,
+        "status": "decided",
+        "proposal": {
+          "action": "finish",
+          "participants": [],
+          "instruction": ""
+        },
+        "policy_version": "participation-laya-v1/ae6718a4/min0.95",
+        "model_version": "ae6718a4"
+      },
+      "matches_previous": true,
+      "ms": 419.28
+    },
+    {
+      "kind": "participation",
+      "phase": "configured-after-activation",
+      "id": "DC-0005#3",
+      "result": {
+        "schema_version": 2,
+        "decision_id": "DC-0005#3",
+        "context_ref": "DC-0005",
+        "context_version": 3,
+        "membership_revision": 0,
+        "cancellation_epoch": 0,
+        "status": "abstained",
+        "proposal": null,
+        "policy_version": "participation-laya-v1/ae6718a4/min0.95",
+        "model_version": "ae6718a4"
+      },
+      "matches_previous": true,
+      "ms": 434.8
+    },
+    {
+      "kind": "participation",
+      "phase": "configured-after-activation",
+      "id": "DC-0009#2",
+      "result": {
+        "schema_version": 2,
+        "decision_id": "DC-0009#2",
+        "context_ref": "DC-0009",
+        "context_version": 2,
+        "membership_revision": 0,
+        "cancellation_epoch": 0,
+        "status": "decided",
+        "proposal": {
+          "action": "wait",
+          "participants": [],
+          "instruction": ""
+        },
+        "policy_version": "participation-laya-v1/ae6718a4/min0.95",
+        "model_version": "ae6718a4"
+      },
+      "matches_previous": true,
+      "ms": 435.88
+    },
+    {
+      "kind": "participation",
+      "phase": "configured-after-activation",
+      "id": "DC-0029#0",
+      "result": {
+        "schema_version": 2,
+        "decision_id": "DC-0029#0",
+        "context_ref": "DC-0029",
+        "context_version": 0,
+        "membership_revision": 0,
+        "cancellation_epoch": 0,
+        "status": "decided",
+        "proposal": {
+          "action": "clarify",
+          "participants": [
+            "meimei"
+          ],
+          "instruction": "不确定用户想让大家做什么。用一句话请用户说清楚具体想要什么。"
+        },
+        "policy_version": "participation-laya-v1/ae6718a4/min0.95",
+        "model_version": "ae6718a4"
+      },
+      "matches_previous": true,
+      "ms": 1252.02
+    }
+  ]
+}
