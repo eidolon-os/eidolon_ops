@@ -40,7 +40,7 @@ profile 每次请求都重新读盘，不缓存：profile 是操作者在两个�
 
 | 计划 | 要求 | 例子 |
 |---|---|---|
-| `applies=false`，或 `touches` 为空 | 无 | `status`、`doctor`、`install`（未勾 apply）、`restart --dry-run` |
+| `applies=false`，或 `touches` 为空 | 无 | `status`、`doctor`、`install`（未勾 apply）、`restart --dry-run`、`service-restart`（仅演练） |
 | 会改动、`destructive != irreversible` | 一次显式勾选 | `deploy --activate`、`restart`、`backup`、`init-inputs` |
 | `destructive == irreversible` | 勾选 + 手输该 Host 的 id | `reset --apply`、`controller-reset --apply`、`install --wipe-authority-data`、`init-inputs --new-identity` |
 

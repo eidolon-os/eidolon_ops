@@ -267,6 +267,9 @@ recovered.
 ## Lifecycle, logs and diagnosis
 
 - `start|stop|restart --dry-run` shows the fixed 15-unit scope; without dry-run it uses the current descriptor.
+- `service restart SERVICE` is the only way to restart one service: the host agent asks the Host's eidolond over
+  `/run/eidolon/system.sock`. eidolond's refusal is reported as `refused` and not retried; never restart a single unit
+  with systemctl by hand (Ops 总纲 §1.5).
 - `status` is read-only unit/link/receipt observation.
 - `logs` is bounded to fixed unit names, line count and optional time filter.
 - `diagnose` writes a new redacted archive and refuses overwrite. It omits env/key/DB/process-environment content;

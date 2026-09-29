@@ -9,6 +9,7 @@ from pathlib import Path
 from eidolon_ops import smarthome_state
 from eidolon_ops.adapters.local_transport import LocalTransport
 from eidolon_ops.errors import OperationsError
+from eidolon_ops.hostagent import services
 from eidolon_ops.model import Capability
 from eidolon_ops.paths import HostProfile
 from eidolon_ops.ports import SupervisorKind
@@ -63,6 +64,7 @@ class SupervisordSupervisor:
                 # describes. RESET is how this Host got out of it before,
                 # at the price of every other authority on the machine.
                 Capability.KERNEL_SCHEMA_RESET,
+                Capability.SERVICE_RESTART,
             }
         )
 
@@ -161,6 +163,21 @@ class SupervisordSupervisor:
                 "environment": self.profile.environment(),
             }
         return self.profile_operation(action)
+
+    def service_restart(
+        self, service: str, *, request_id: str, dry_run: bool
+    ) -> dict[str, object]:
+        """Ask this source run's eidolond, over its socket on this machine.
+
+        The same code a product Host runs inside its host agent; the only
+        difference is where the socket is. Never supervisorctl: that would be
+        a second writer beside eidolond's own reconciliation.
+        """
+
+        socket_path = self.profile.paths.runtime_root / "system.sock"
+        if dry_run:
+            return {"status": "planned", "service_id": service, "socket": str(socket_path)}
+        return services.restart_service(socket_path, service, request_id)
 
     def logs(self, *, service: str | None, lines: int, since: str | None) -> dict[str, object]:
         if lines < 1 or lines > 5000:

@@ -11,7 +11,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROFILES_DIR="${EIDOLON_HOSTS_DIR:-${ROOT}/config/hosts}"
 UV_BIN="${EIDOLON_UV_BIN:-uv}"
 
-ALL_COMMANDS="abandon app-ready pending trust-host-key ssh-config trust-host-delivery bring-up authority-backup authority-restore backup commissioning-code controller-reset converge-inputs repair-credentials debug deploy diagnose doctor init-inputs install kernel-schema-reset logs provision reset restart restore rollback start status stop update"
+ALL_COMMANDS="abandon app-ready pending trust-host-key ssh-config trust-host-delivery bring-up authority-backup authority-restore backup commissioning-code controller-reset converge-inputs repair-credentials debug deploy diagnose doctor init-inputs install kernel-schema-reset logs provision reset restart restore rollback start status stop update service"
 # Keyed on the Host's driver, not on its platform. What a Host can be asked to
 # do is decided by the adapter its driver selects — adapters/supervisord.py and
 # adapters/systemd.py each declare one capability set — so two boards Ops
@@ -19,8 +19,8 @@ ALL_COMMANDS="abandon app-ready pending trust-host-key ssh-config trust-host-del
 # The platform arms this replaces were the one place left that enumerated
 # boards by name: rk3588 shipped a driver these sets already covered and was
 # still unreachable through this script, because nobody added its name.
-LOCAL_SUPERVISORD_COMMANDS="status doctor app-ready start stop restart logs commissioning-code reset kernel-schema-reset debug"
-SSH_SYSTEMD_COMMANDS="abandon status pending trust-host-key ssh-config trust-host-delivery bring-up doctor app-ready start stop restart logs commissioning-code provision init-inputs converge-inputs repair-credentials backup restore install controller-reset authority-backup authority-restore reset kernel-schema-reset deploy update rollback diagnose"
+LOCAL_SUPERVISORD_COMMANDS="status doctor app-ready start stop restart logs commissioning-code reset kernel-schema-reset debug service"
+SSH_SYSTEMD_COMMANDS="abandon status pending trust-host-key ssh-config trust-host-delivery bring-up doctor app-ready start stop restart logs commissioning-code provision init-inputs converge-inputs repair-credentials backup restore install controller-reset authority-backup authority-restore reset kernel-schema-reset deploy update rollback diagnose service"
 
 die() {
   printf '错误：%s\n' "$*" >&2
@@ -138,6 +138,7 @@ command_summary() {
     start) printf '启动该 Host 的完整产品后端' ;;
     stop) printf '停止该 Host 的产品后端' ;;
     restart) printf '完整停止后重新准备并启动产品后端' ;;
+    service) printf '经 eidolond 重启单个服务(唯一的单服务途径):service restart SERVICE' ;;
     logs) printf '读取全部日志或指定服务日志' ;;
     commissioning-code) printf '生成手机 Setup/Commissioning Code' ;;
     debug) printf 'Mac source-run 的 prepare/validate/Web 诊断入口' ;;

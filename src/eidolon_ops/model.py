@@ -133,6 +133,10 @@ class Capability(StrEnum):
     BRING_UP = "bring-up"
     #: Workstation-only inspection of the source-run profile.
     SOURCE_PROFILE = "debug"
+    #: Restart one service by asking the Host's eidolond, its only executor.
+    #: Every Host with an eidolond has it; what differs is only how the socket
+    #: is reached (Ops 总纲 §1.5).
+    SERVICE_RESTART = "service-restart"
 
 
 @dataclass(frozen=True, slots=True)

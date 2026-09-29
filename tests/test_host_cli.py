@@ -74,6 +74,9 @@ class FakeHostController:
     def lifecycle(self, operation, **kwargs):
         return self._result("lifecycle", operation=operation, **kwargs)
 
+    def service_restart(self, service, **kwargs):
+        return self._result("service-restart", service=service, **kwargs)
+
     def local_profile(self, profile, operation, **kwargs):
         return self._result("local-profile", profile=profile, operation=operation, **kwargs)
 
@@ -138,6 +141,7 @@ def fake_host(monkeypatch) -> None:
             "lifecycle",
         ),
         (["restart", "--dry-run"], "lifecycle"),
+        (["service", "restart", "channel", "--dry-run"], "service-restart"),
         (["logs", "--service", "agent", "--lines", "10"], "logs"),
         (["controller-reset", "--apply"], "controller-reset"),
         (["authority-backup", "--output", "/tmp/authority"], "authority-backup"),

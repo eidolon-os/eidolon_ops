@@ -502,6 +502,24 @@ def lifecycle(host_id: str, action: str, *, dry_run: bool) -> Plan:
     )
 
 
+def service_restart(host_id: str, service: str, *, dry_run: bool) -> Plan:
+    """Restart one service, by asking the one component allowed to.
+
+    Reversible like the whole-Host restart: nothing but a running process is
+    replaced. eidolond decides whether the service may be touched now, so the
+    only step here is the request itself.
+    """
+
+    return Plan(
+        operation="service-restart",
+        host_id=host_id,
+        steps=_steps(("service-restart", f"ask eidolond to restart {service}")),
+        destructive=DestructiveLevel.REVERSIBLE,
+        requires_flags=frozenset({"--dry-run"}) if dry_run else frozenset(),
+        touches=frozenset({ActionKind.LIFECYCLE}),
+    )
+
+
 def logs(host_id: str) -> Plan:
     return Plan(
         operation="logs",

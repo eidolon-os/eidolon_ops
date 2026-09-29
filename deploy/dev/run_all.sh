@@ -1,40 +1,22 @@
 #!/usr/bin/env bash
-# Eidolon macOS host adapter — supervisord edition.
+# Eidolon macOS host adapter — the supervisord half of `./eidolon mac ...`.
 #
-# This Ops-owned wrapper does only what supervisord can't do for itself:
-#   1. first-run bootstrap (venv + uv install, pnpm install, log dirs)
-#   2. start the supervisord daemon (which then starts admin-api + every
-#      enabled sub-project under deploy/supervisor/enabled/*.conf)
-#   3. launch the vite dev server for the admin web (port 9001)
-#   4. clean stop of everything in reverse order
+# Not an operator entry point. `eidolon_ops/src/eidolon_ops/adapters/supervisord.py`
+# runs `run_all.sh product-source <operation>` and nothing else; every manual
+# operation starts from `./eidolon` (README, Ops 总纲 §1.5):
 #
-# admin-api itself is now a supervised program (see
-# deploy/supervisor/available/admin.conf), so it inherits auto-restart,
-# unified logs, and remote-controlled restart from the Configs page.
+#   ./eidolon mac start|stop|restart|status     the whole product, one boundary action
+#   ./eidolon mac service restart SERVICE       one service, through eidolond
+#   ./eidolon mac debug web-start|web-stop|...  the admin web (vite) program
 #
-# Per-program control (start/stop/restart memory-supervisor etc.) happens
-# via the admin UI or `supervisorctl`. This script is just the top-level
-# bootstrap + lifecycle.
+# What this script does that supervisord cannot do for itself: first-run
+# bootstrap (venv + uv install, pnpm install, log dirs), render and start the
+# product-source supervisord, and stop it cleanly (Channel first, so the worker
+# does not log LiveKit refusing it on the way down).
 #
-# Usage:
-#   ./deploy/dev/run_all.sh                # foreground admin-api + web only (no supervisord)
-#   ./deploy/dev/run_all.sh start          # cold start: ports must be free, then supervisord + vite
-#   ./deploy/dev/run_all.sh start --force-cleanup
-#                                        # SIGTERM Eidolon-looking port holders, then cold start
-#   ./deploy/dev/run_all.sh start --strict
-#                                        # fail if optional enabled services are degraded
-#   ./deploy/dev/run_all.sh start --no-wait-ready
-#                                        # skip post-start readiness wait
-#   ./deploy/dev/run_all.sh stop           # stop vite + supervisord (all supervised programs)
-#   ./deploy/dev/run_all.sh restart        # stop then start (use when stack is already running)
-#   ./deploy/dev/run_all.sh status         # show vite + supervisorctl status (no port check)
-#   ./deploy/dev/run_all.sh status --readiness
-#                                        # include one-shot service readiness diagnostics
-#   ./deploy/dev/run_all.sh foreground     # admin-api + web in foreground (no sub-projects)
-#                                        # supervised admin + agent + memory + nats only
-#
-#   ./deploy/dev/run_all.sh sv [...]       # passthrough to supervisorctl
-#                                        # e.g. sv status, sv restart channel:channel-worker
+# There is deliberately no supervisorctl passthrough here. A single service is
+# restarted by eidolond, which reconciles every service it manages every 5 s; a
+# second writer beside it is how a restart came back "already started".
 #
 set -euo pipefail
 OPS_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -120,96 +102,6 @@ API_HOST="${EIDOLON_ADMIN_API_HOST:-127.0.0.1}"
 API_PORT="${EIDOLON_ADMIN_API_PORT:-9000}"
 WEB_PORT="${EIDOLON_ADMIN_WEB_PORT:-9001}"
 
-load_ports_env() {
-  ensure_api_deps
-  # shellcheck disable=SC2046
-  eval "$("${VENV}/bin/python" -m eidolon_admin_server.app.ports export)"
-  API_HOST="${EIDOLON_ADMIN_API_HOST:-127.0.0.1}"
-  API_PORT="${EIDOLON_ADMIN_API_PORT:-9000}"
-  WEB_PORT="${EIDOLON_ADMIN_WEB_PORT:-9001}"
-}
-
-collect_ports_registry() {
-  ensure_api_deps
-  info "collecting config/ports.yaml from sub-project settings (read-only)"
-  "${VENV}/bin/python" -m eidolon_admin_server.app.ports collect || true
-}
-
-# First-start materialization of ``deploy/supervisor/enabled/*.conf``.
-# The directory is gitignored — runtime state, not source — so a fresh
-# clone has only ``.gitkeep`` and the Admin UI's Enable/Disable
-# choices need somewhere to live without git stomping on them. We seed
-# from ``config/default-enabled.txt`` exactly ONCE, marked by a
-# sentinel file. After that, the directory belongs to the operator
-# (UI + manual ln).
-#
-# Idempotency contract:
-#   - sentinel exists                 → do nothing, respect whatever
-#                                       symlinks the operator chose.
-#   - sentinel missing                → create symlinks for every name
-#                                       in default-enabled.txt that
-#                                       doesn't already have one;
-#                                       touch sentinel; never re-run.
-# This means: "deleting a symlink to disable" survives ``git pull`` /
-# ``run_all.sh restart`` / anything else, because the sentinel keeps
-# us from re-seeding.
-seed_enabled_symlinks() {
-  local enabled_dir="${EIDOLON_ADMIN_SUPERVISOR_ENABLED_DIR}"
-  local available_dir="${OPS_ROOT}/deploy/supervisor/available"
-  local defaults_file="${EIDOLON_CONFIG_ROOT}/default-enabled.txt"
-  local sentinel="${enabled_dir}/.seeded"
-
-  mkdir -p "$enabled_dir"
-
-  if [[ -f "$sentinel" ]]; then
-    return 0
-  fi
-  if [[ ! -f "$defaults_file" ]]; then
-    warn "seed: ${defaults_file} missing — skipping (Admin UI will need manual enable)"
-    return 0
-  fi
-
-  # Migration safety: if the operator already has *any* symlink in
-  # enabled/ but no sentinel yet, they're an existing checkout pulling
-  # the "untrack enabled/" change. Their current state is the truth —
-  # we must not re-seed and resurrect things they had disabled. Just
-  # claim the sentinel and exit, preserving their choices.
-  local existing
-  existing="$(find "$enabled_dir" -maxdepth 1 -type l -name '*.conf' 2>/dev/null | head -n 1)"
-  if [[ -n "$existing" ]]; then
-    info "enabled/ already populated; treating as existing checkout (no re-seed)"
-    touch "$sentinel"
-    return 0
-  fi
-
-  info "first-start seed: materializing enabled/ from $(basename "$defaults_file")"
-  local count=0 skipped=0
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    # strip inline comments + trim whitespace
-    local name="${line%%#*}"
-    name="${name#"${name%%[![:space:]]*}"}"
-    name="${name%"${name##*[![:space:]]}"}"
-    [[ -z "$name" ]] && continue
-
-    local available="${available_dir}/${name}.conf"
-    local link="${enabled_dir}/${name}.conf"
-    if [[ ! -f "$available" ]]; then
-      warn "  - ${name}: available/${name}.conf missing, skip"
-      skipped=$((skipped + 1))
-      continue
-    fi
-    if [[ -e "$link" || -L "$link" ]]; then
-      # Operator already has a symlink (or a file). Don't overwrite.
-      continue
-    fi
-    ln -s "$available" "$link"
-    count=$((count + 1))
-  done < "$defaults_file"
-
-  touch "$sentinel"
-  info "  seeded ${count} symlink(s) (${skipped} skipped); future enable/disable goes through Admin UI"
-}
-
 VENV="${OPS_ROOT}/.venv"
 export EIDOLON_OPS_VENV="$VENV"
 export EIDOLON_NATS_SERVER="${EIDOLON_NATS_SERVER:-$(command -v nats-server || true)}"
@@ -288,33 +180,6 @@ configure_supervisor_profile() {
   esac
 }
 
-materialize_supervisor_profile() {
-  [[ -n "$SV_PROFILE" ]] || return 0
-  local configs=()
-  case "$SV_PROFILE" in
-    product-source)
-      return 0
-      ;;
-    *)
-      error "unknown supervisor profile: $SV_PROFILE"
-      exit 1
-      ;;
-  esac
-
-  mkdir -p "$SUPERVISOR_PROFILE_ENABLED_DIR"
-  rm -f "${SUPERVISOR_PROFILE_ENABLED_DIR}"/*.conf
-  local name available link
-  for name in "${configs[@]}"; do
-    available="${OPS_ROOT}/deploy/supervisor/available/${name}.conf"
-    link="${SUPERVISOR_PROFILE_ENABLED_DIR}/${name}.conf"
-    if [[ ! -f "$available" ]]; then
-      error "profile ${SV_PROFILE}: missing supervisor config $available"
-      exit 1
-    fi
-    ln -s "$available" "$link"
-  done
-}
-
 # --- Deps -------------------------------------------------------------------
 
 ensure_api_deps() {
@@ -354,17 +219,6 @@ ensure_web_deps() {
       exit 1
     fi
   fi
-}
-
-migrate_system_data() {
-  ensure_api_deps
-  local data_root="${EIDOLON_ROOT}/eidolon_data"
-  if [[ ! -f "${data_root}/alembic.ini" ]]; then
-    error "eidolon_data migration project not found: ${data_root}"
-    exit 1
-  fi
-  info "migrating eidolon-system.sqlite3 to the current Alembic head"
-  (cd "$data_root" && "${VENV}/bin/alembic" -c alembic.ini upgrade head)
 }
 
 # --- process tree helpers --------------------------------------------------
@@ -430,129 +284,6 @@ kill_tree() {
 }
 
 # --- vite dev server --------------------------------------------------------
-
-proc_cwd() {
-  lsof -a -p "$1" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n 1 || true
-}
-
-web_pid_is_ours() {
-  local pid=$1 args cwd
-  kill -0 "$pid" 2>/dev/null || return 1
-  args="$(ps -o args= -p "$pid" 2>/dev/null || true)"
-  cwd="$(proc_cwd "$pid" || true)"
-  [[ "$args" == *"vite"* || "$args" == *"vite.js"* ]] || return 1
-  [[ "$cwd" == "$WEB_DIR" || "$args" == *"$WEB_DIR"* ]]
-}
-
-web_pid_from_file() {
-  local file pid
-  for file in "$WEB_PID_FILE" "$LEGACY_WEB_PID_FILE"; do
-    [[ -f "$file" ]] || continue
-    pid="$(cat "$file" 2>/dev/null || true)"
-    [[ "$pid" =~ ^[0-9]+$ ]] || continue
-    if web_pid_is_ours "$pid"; then
-      if [[ "$file" == "$LEGACY_WEB_PID_FILE" ]]; then
-        info "adopting legacy web PID file $LEGACY_WEB_PID_FILE (PID $pid)" >&2
-        echo "$pid" >"$WEB_PID_FILE"
-      fi
-      echo "$pid"
-      return 0
-    fi
-    warn "ignoring stale web pidfile $file (PID ${pid:-?} is not this Vite server)" >&2
-  done
-  return 1
-}
-
-web_listener_pids() {
-  lsof -nP -tiTCP:"$WEB_PORT" -sTCP:LISTEN 2>/dev/null || true
-}
-
-web_pid_from_port() {
-  local pid
-  while IFS= read -r pid; do
-    [[ -n "$pid" ]] || continue
-    if web_pid_is_ours "$pid"; then
-      warn "web PID file missing/stale; adopting Vite listener on :$WEB_PORT (PID $pid)" >&2
-      echo "$pid" >"$WEB_PID_FILE"
-      echo "$pid"
-      return 0
-    fi
-  done < <(web_listener_pids)
-  return 1
-}
-
-web_pid() {
-  web_pid_from_file || web_pid_from_port
-}
-
-web_alive() { web_pid >/dev/null; }
-
-print_web_port_conflict() {
-  error "port $WEB_PORT is already in use by a non-admin-web process:"
-  lsof -nP -iTCP:"$WEB_PORT" -sTCP:LISTEN >&2 || true
-  error "stop that process or change EIDOLON_ADMIN_WEB_PORT, then retry"
-}
-
-do_web_start() {
-  ensure_web_deps
-  local pid
-  if pid="$(web_pid)"; then
-    info "web already running (PID $pid)"
-    return 0
-  fi
-  if [[ -n "$(web_listener_pids)" ]]; then
-    print_web_port_conflict
-    return 1
-  fi
-  info "starting web (log $WEB_LOG_FILE)"
-  (
-    cd "$WEB_DIR"
-    nohup "./${VITE_BIN_REL}" --port "$WEB_PORT" --strictPort >>"$WEB_LOG_FILE" 2>&1 &
-    echo $! >"$WEB_PID_FILE"
-  )
-  sleep 1
-  if ! web_alive; then
-    error "web died immediately; tail $WEB_LOG_FILE :"
-    tail -30 "$WEB_LOG_FILE" >&2 || true
-    rm -f "$WEB_PID_FILE"
-    return 1
-  fi
-  info "web PID $(cat "$WEB_PID_FILE")  /  http://127.0.0.1:${WEB_PORT}/"
-}
-
-do_web_stop() {
-  local pid
-  if ! pid="$(web_pid)"; then
-    info "web not running"
-    rm -f "$WEB_PID_FILE" "$LEGACY_WEB_PID_FILE" 2>/dev/null || true
-    return 0
-  fi
-  # Vite spawns esbuild + occasional node worker children for HMR. Use
-  # kill_tree so they all go down together — otherwise we leave esbuild
-  # daemons holding scratch ports / file watches as orphans.
-  info "SIGTERM web $pid (+ descendants)"
-  kill_tree "$pid" "-TERM"
-  for _ in $(seq 1 10); do web_alive || break; sleep 0.2; done
-  if web_alive; then
-    warn "vite tree still alive after 2s; SIGKILL whole tree"
-    kill_tree "$pid" "-KILL"
-  fi
-  rm -f "$WEB_PID_FILE" "$LEGACY_WEB_PID_FILE"
-  info "web stopped"
-}
-
-do_web_status() {
-  header "admin web (vite)"
-  local pid
-  if pid="$(web_pid)"; then
-    info "running PID $pid"
-    echo "  URL: http://127.0.0.1:${WEB_PORT}/"
-    echo "  Log: $WEB_LOG_FILE"
-  else
-    info "not running"
-    rm -f "$WEB_PID_FILE" 2>/dev/null || true
-  fi
-}
 
 # --- supervisord ------------------------------------------------------------
 
@@ -768,151 +499,7 @@ do_sv_status() {
   fi
 }
 
-do_sv_passthrough() {
-  ensure_api_deps
-  exec "${VENV}/bin/supervisorctl" -c "$SV_CONF" "$@"
-}
-
 # --- combined ---------------------------------------------------------------
-
-# Pre-flight: refuse to start if any declared port is held by a process
-# not under our control. Catches the "previous run's orphan" case before
-# it cascades into supervisord's "Exited too quickly" failures.
-#
-# Pass --force-cleanup to auto-SIGTERM any orphans found (the audit CLI
-# handles SIGTERM → re-scan → escalate to SIGKILL → re-scan). If even
-# SIGKILL doesn't free the port, we still refuse to start because
-# something is deeply wrong and silent failure would be worse.
-do_preflight() {
-  ensure_api_deps
-  # Phase 33.A10: pass --emit-skip-list so the CLI writes any
-  # busy-but-optional service IDs (mementos when operator runs it
-  # standalone) to a temp file. do_start consumes that list after
-  # supervisord boots and stops the corresponding programs, closing the
-  # "autostart fires duplicate that crashes on bind" race.
-  SKIP_LIST_FILE="$(mktemp -t eidolon-skip-list.XXXXXX)"
-  export SKIP_LIST_FILE
-  local cli="${VENV}/bin/python -m eidolon_admin_server.app.system_health.cli check --emit-skip-list ${SKIP_LIST_FILE}"
-  if [[ -n "${PREFLIGHT_SERVICE_IDS:-}" ]]; then
-    cli="$cli --services ${PREFLIGHT_SERVICE_IDS}"
-  fi
-  if [[ "${PREFLIGHT_CLEANUP:-0}" == "1" ]]; then
-    cli="$cli --cleanup"
-    info "pre-flight: will SIGTERM Eidolon-looking listeners on declared ports, then continue"
-  else
-    info "pre-flight: checking declared ports are free (required for cold start)"
-  fi
-  if ! $cli; then
-    rm -f "$SKIP_LIST_FILE"
-    exit 1
-  fi
-}
-
-# Phase 33.A10: stop supervisord programs that correspond to optional
-# services whose ports were already bound at pre-flight. Without this,
-# supervisord's autostart fires a second copy that crashes on bind and
-# loops until autorestart gives up. The skip-list file is whatever
-# do_preflight wrote.
-do_stop_busy_optionals() {
-  local skip_file="${SKIP_LIST_FILE:-}"
-  if [[ -z "$skip_file" || ! -s "$skip_file" ]]; then
-    return 0
-  fi
-  info "stopping supervisord programs for already-running optional services"
-  while IFS= read -r sid; do
-    [[ -z "$sid" ]] && continue
-    info "  - $sid (port held by pre-existing process)"
-    "${VENV}/bin/supervisorctl" -c "$SV_CONF" stop "$sid" >/dev/null 2>&1 || true
-  done < "$skip_file"
-  rm -f "$skip_file"
-  unset SKIP_LIST_FILE
-}
-
-enabled_service_ids_csv() {
-  local enabled_dir="${SUPERVISOR_PROFILE_ENABLED_DIR:-${EIDOLON_ADMIN_SUPERVISOR_ENABLED_DIR}}"
-  local names=()
-  local conf base
-  for conf in "${enabled_dir}"/*.conf; do
-    [[ -e "$conf" || -L "$conf" ]] || continue
-    base="$(basename "$conf" .conf)"
-    [[ -n "$base" ]] && names+=("$base")
-  done
-  local IFS=,
-  echo "${names[*]}"
-}
-
-do_readiness_wait() {
-  local include_admin_web="${1:-0}"
-  local timeout="${2:-${EIDOLON_READY_TIMEOUT:-60}}"
-  local services="${PREFLIGHT_SERVICE_IDS:-}"
-  if [[ "${EIDOLON_SKIP_READY_WAIT:-0}" == "1" ]]; then
-    warn "readiness wait skipped by --no-wait-ready / EIDOLON_SKIP_READY_WAIT=1"
-    return 0
-  fi
-  ensure_api_deps
-  if [[ -z "$services" ]]; then
-    services="$(enabled_service_ids_csv)"
-  fi
-  if [[ -z "$services" ]]; then
-    warn "readiness: no enabled services found; skipping"
-    return 0
-  fi
-
-  local cmd=(
-    "${VENV}/bin/python"
-    -m eidolon_admin_server.app.system_health.cli
-    wait
-    --timeout "$timeout"
-    --interval "${EIDOLON_READY_INTERVAL:-0.5}"
-    --services "$services"
-    --include-supervisor-groups
-  )
-  if [[ "$include_admin_web" == "1" ]]; then
-    cmd+=(--include-admin-web)
-  fi
-  if [[ "${EIDOLON_READINESS_STRICT:-0}" == "1" ]]; then
-    cmd+=(--strict)
-  fi
-
-  info "readiness: waiting for ${services} (timeout ${timeout}s)"
-  "${cmd[@]}"
-}
-
-do_start() {
-  collect_ports_registry
-  load_ports_env
-  migrate_system_data
-  # Fresh-clone bootstrap of deploy/supervisor/enabled/. No-op on the
-  # second start onward (sentinel-gated), so the operator's Admin UI
-  # Enable/Disable decisions are never overridden by this script.
-  seed_enabled_symlinks
-  header "pre-flight port audit"
-  do_preflight
-  echo
-  header "supervisord (incl. admin-api)"
-  do_sv_start
-  do_stop_busy_optionals
-  echo
-  header "admin web"
-  do_web_start
-  echo
-  header "service readiness"
-  do_readiness_wait 1
-}
-
-do_stop() {
-  header "admin web"
-  do_web_stop
-  echo
-  header "supervisord"
-  do_sv_stop
-}
-
-do_restart() {
-  do_stop
-  sleep 1
-  do_start
-}
 
 # Audit the ports this topology is about to bind, before supervisord binds
 # them. The dev path has done this since two projects in this workspace first
@@ -1052,21 +639,6 @@ do_product_source_commissioning_code() {
        --ttl "$ttl" "${code_argument[@]}"
 }
 
-do_product_source_owner_reset() {
-  configure_supervisor_profile product-source
-  ensure_product_source_deps
-  "${OPS_ROOT}/deploy/supervisor/wrappers/with-env.sh" \
-    "$EIDOLON_SOURCE_ADMIN" \
-    "${EIDOLON_PRODUCT_ENV_ROOT}/bootstrap.env" \
-    -- "$EIDOLON_SOURCE_ADMIN/.venv/bin/eidolon-bootstrapctl" owner-reset
-}
-
-do_product_source_sv() {
-  configure_supervisor_profile product-source
-  ensure_product_source_deps
-  do_sv_passthrough "$@"
-}
-
 do_product_source_web_start() {
   configure_supervisor_profile product-source
   ensure_product_source_deps
@@ -1109,86 +681,12 @@ do_product_source_web_status() {
   "${VENV}/bin/supervisorctl" -c "$SV_CONF" status admin-web || true
 }
 
-do_status() {
-  do_web_status
-  echo
-  do_sv_status
-  if [[ "${EIDOLON_STATUS_READINESS:-0}" == "1" ]]; then
-    echo
-    load_ports_env
-    header "service readiness"
-    do_readiness_wait 1 "${EIDOLON_STATUS_READY_TIMEOUT:-2}" || true
-  fi
-}
-
-do_foreground() {
-  collect_ports_registry
-  load_ports_env
-  migrate_system_data
-  ensure_web_deps
-  cleanup() {
-    [[ -n "${API_PID:-}" ]] && kill "$API_PID" 2>/dev/null || true
-    [[ -n "${WEB_PID:-}" ]] && kill "$WEB_PID" 2>/dev/null || true
-  }
-  trap cleanup EXIT INT TERM
-
-  "${VENV}/bin/uvicorn" eidolon_admin_server.app.main:app \
-    --host "$API_HOST" --port "$API_PORT" \
-    > >(tee -a "$API_FOREGROUND_LOG_FILE") 2>&1 &
-  API_PID=$!
-  (
-    cd "$WEB_DIR"
-    "./${VITE_BIN_REL}" --port "$WEB_PORT" --strictPort \
-      > >(tee -a "$WEB_FOREGROUND_LOG_FILE") 2>&1
-  ) &
-  WEB_PID=$!
-
-  echo
-  info "eidolon-admin (foreground) — supervisord NOT touched (NATS / sub-projects not started)"
-  echo "  API: http://${API_HOST}:${API_PORT}/docs"
-  echo "  Web: http://127.0.0.1:${WEB_PORT}/"
-  echo "  API log: $API_FOREGROUND_LOG_FILE"
-  echo "  Web log: $WEB_FOREGROUND_LOG_FILE"
-  echo "  Use '$0 start' for the full stack (NATS, memory, hub, agent, channel, … + vite)."
-  echo "  Control-plane calls require separately running eidolond and authority services."
-  echo "  Ctrl+C to stop."
-  echo
-  wait "$API_PID" "$WEB_PID" || true
-}
-
 # --- dispatch ---------------------------------------------------------------
-
-# Start/status flags are parsed here and removed from $@ before the case match.
-ARGS=()
-for arg in "$@"; do
-  case "$arg" in
-    --force-cleanup)
-      export PREFLIGHT_CLEANUP=1
-      ;;
-    --strict|--strict-readiness)
-      export EIDOLON_READINESS_STRICT=1
-      ;;
-    --no-wait-ready|--no-readiness)
-      export EIDOLON_SKIP_READY_WAIT=1
-      ;;
-    --readiness)
-      export EIDOLON_STATUS_READINESS=1
-      ;;
-    *)
-      ARGS+=("$arg")
-      ;;
-  esac
-done
-set -- "${ARGS[@]}"
+#
+# One profile, the operations Ops calls, and help. Anything else is refused:
+# a command no caller uses is a second way in (Ops 总纲 §1.5).
 
 case "${1:-}" in
-  start)      do_start ;;
-  stop)       do_stop ;;
-  restart)    do_restart ;;
-  status)     do_status ;;
-  foreground) do_foreground ;;
-  "")         do_foreground ;;
-
   product-source)
     shift
     case "${1:-status}" in
@@ -1200,75 +698,24 @@ case "${1:-}" in
         shift
         do_product_source_commissioning_code "$@"
         ;;
-      owner-reset) do_product_source_owner_reset ;;
       web-start) do_product_source_web_start ;;
       web-stop) do_product_source_web_stop ;;
       web-restart) do_product_source_web_restart ;;
       web-status) do_product_source_web_status ;;
-      sv)
-        shift
-        do_product_source_sv "$@"
-        ;;
       *)
         error "unknown product-source command: ${1:-}"
-        error "usage: $0 product-source start|stop|restart|status|web-start|web-stop|web-restart|web-status|commissioning-code|owner-reset|sv [...]"
+        error "usage: $0 product-source start|stop|restart|status|commissioning-code|web-start|web-stop|web-restart|web-status"
         exit 1
         ;;
     esac
     ;;
 
-  # Targeted admin-web control (api now goes through supervisorctl).
-  start-web|web-start)   do_web_start ;;
-  stop-web|web-stop)     do_web_stop ;;
-  restart-web|web-restart) do_web_stop; sleep 1; do_web_start ;;
-  status-web|web-status) do_web_status ;;
-
-  # Compat: old "start-admin" used to mean "start api+web". api is supervised
-  # now, so map these to the web-only flow + a friendly hint.
-  start-admin)
-    warn "admin-api is now supervised; '$0 sv start admin:admin-api' restarts the api."
-    do_web_start
-    ;;
-  stop-admin)
-    warn "admin-api is now supervised; '$0 sv stop admin:admin-api' stops the api."
-    do_web_stop
-    ;;
-  restart-admin)
-    warn "admin-api is now supervised; restarting admin web (vite) only."
-    warn "  to restart the api: '$0 sv restart admin:admin-api'"
-    do_web_stop; sleep 1; do_web_start
-    ;;
-  status-admin)
-    do_web_status
-    echo
-    "${VENV}/bin/supervisorctl" -c "$SV_CONF" status admin:admin-api 2>/dev/null || warn "supervisord not running"
-    ;;
-
-  start-sv|sv-start)   do_sv_start ;;
-  stop-sv|sv-stop)     do_sv_stop ;;
-  status-sv|sv-status) do_sv_status ;;
-  sv)
-    shift
-    do_sv_passthrough "$@"
-    ;;
-
   -h|--help|help)
-    sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
     ;;
   *)
     error "unknown command: ${1:-}"
-    error ""
-    error "Lifecycle (full stack via supervisord):"
-    error "  $0 start [--force-cleanup]   cold start — ports must be free first"
-    error "  $0 stop                    stop vite + supervisord"
-    error "  $0 restart [--force-cleanup] stop then start (use if stack already running)"
-    error "  $0 status                    show vite + supervisorctl (no port check)"
-    error "  $0 foreground                admin-api + vite only (no NATS / sub-projects)"
-    error ""
-    error "Partial / passthrough:"
-    error "  $0 {start,stop,restart,status}-web"
-    error "  $0 {start,stop,status}-sv"
-    error "  $0 sv <args>                 supervisorctl passthrough"
+    error "this script is the internal adapter behind ./eidolon mac; run ./eidolon mac ... instead"
     exit 1
     ;;
 esac

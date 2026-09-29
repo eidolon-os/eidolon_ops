@@ -183,6 +183,30 @@ CATALOG: tuple[Operation, ...] = (
         ),
     ),
     Operation(
+        name="service-restart",
+        label="重启单个服务",
+        summary="请 eidolond 重启一个它管理的服务；这是单服务启停的唯一途径",
+        capability=Capability.SERVICE_RESTART,
+        group="lifecycle",
+        fields=(
+            Field(
+                name="service",
+                kind=Kind.STRING,
+                label="服务",
+                help="eidolond 的服务名，例如 channel、channel-provider、hub",
+                required=True,
+            ),
+            Field(name="dry_run", kind=Kind.BOOLEAN, label="仅演练"),
+        ),
+        plan=lambda host_id, params: plans.service_restart(
+            host_id, params["service"], dry_run=params["dry_run"]
+        ),
+        invoke=lambda controller, params: controller.service_restart(
+            params["service"], dry_run=params["dry_run"]
+        ),
+        applies=lambda params: not params["dry_run"],
+    ),
+    Operation(
         name="start",
         label="启动",
         summary="把产品作为一个边界动作启动",

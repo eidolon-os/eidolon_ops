@@ -387,3 +387,46 @@ def unix_http_json(path: Path, resource: str) -> dict[str, object] | None:
                 return document if isinstance(document, dict) else None
     except (OSError, ValueError, http.client.HTTPException):
         return None
+
+
+def unix_http_request(
+    path: Path,
+    method: str,
+    resource: str,
+    *,
+    body: Mapping[str, object] | None = None,
+    timeout: float = 5,
+) -> tuple[int, object]:
+    """One HTTP exchange over a Unix socket: the status and the decoded body.
+
+    Unlike ``unix_http_json`` a refusal is an answer, not an absence. A caller
+    asking a service to act has to tell "it said no, and why" from "nobody
+    answered", so every status comes back with whatever the service said, and
+    only a socket that could not be reached or spoke no HTTP raises.
+    """
+
+    encoded = b"" if body is None else json.dumps(body, separators=(",", ":")).encode()
+    head = [
+        f"{method} {resource} HTTP/1.1",
+        "Host: localhost",
+        "Connection: close",
+    ]
+    if body is not None:
+        head += ["Content-Type: application/json", f"Content-Length: {len(encoded)}"]
+    request = ("\r\n".join(head) + "\r\n\r\n").encode() + encoded
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.settimeout(timeout)
+            client.connect(str(path))
+            client.sendall(request)
+            with http.client.HTTPResponse(client) as response:
+                response.begin()
+                raw = response.read(1024 * 1024)
+                status = response.status
+    except (OSError, http.client.HTTPException) as exc:
+        raise TargetError(f"{path} did not answer: {type(exc).__name__}") from exc
+    try:
+        document: object = json.loads(raw) if raw else None
+    except ValueError:
+        document = raw.decode("utf-8", "replace")
+    return status, document

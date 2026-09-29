@@ -29,6 +29,7 @@ from . import (
     reset,
     runtime_release,
     secret_inputs,
+    services,
     staging,
 )
 from .primitives import TargetError, decode_payload
@@ -85,6 +86,7 @@ ACTIONS: dict[str, tuple[ModuleType, str]] = {
     "reset-host": (reset, "reset_host"),
     "rollback-plan": (lifecycle, "rollback_plan"),
     "logs": (lifecycle, "logs"),
+    "service-restart": (services, "restart"),
     "diagnose": (lifecycle, "diagnose"),
 }
 #: Lifecycle takes the action itself, because start, stop and restart differ

@@ -528,13 +528,22 @@ Owner 变更的权限边界；它的 state/runtime 目录均不与产品主进�
 ./eidolon help pi5 install              # 指定 Host、指定命令的完整参数帮助
 ./eidolon mac start|stop|restart|status
 ./eidolon pi5 start|stop|restart|status
+./eidolon mac service restart channel   # 单个服务：只经 eidolond（Mac 与 Pi 相同）
 ```
 
 `status` 默认展示 Host LAN IP、全部非 loopback IPv4、每个服务的监听地址/端口、服务状态和异常建议；自动化需要完整 Evidence 时使用
 `./eidolon HOST status --json`。
 
+**单个服务只有一条路**：`./eidolon HOST service restart SERVICE [--dry-run]`。它请该 Host 的 `eidolond`
+（服务 desired state 的唯一 writer）重启一个它管理的服务——Mac 上直接连本机的 `run/system.sock`，Pi 上由注入的
+host agent 在 Host 本机连接，不开新端口。`eidolond` 的拒绝（不认识的服务名、此 Host 上 `external`、迁移中、revision
+已变）原样报告为 `refused`，不重试。只有 restart：`eidolond` 管理的服务全部是必需服务，它拒绝禁用任何一个，所以
+enable/disable 不提供。不要再用 supervisorctl、systemctl 或 Admin 的进程页去单独启停服务——那是 `eidolond` 之外的
+第二个 writer（Ops 总纲 §1.5）。
+
 `deploy/dev/run_all.sh` 仍是 Mac supervisord 的内部生命周期适配器，Host profile 会调用它；它不是操作员
-入口，直接删除会破坏 Mac 生命周期。所有人工操作都从 `./eidolon` 进入。
+入口，直接删除会破坏 Mac 生命周期。所有人工操作都从 `./eidolon` 进入。它只接受 Ops 调用的
+`product-source <operation>`，其余命令一律拒绝，也不提供 supervisorctl 直通。
 
 每个操作先产出一份 `Plan`（`operation`/`steps`/`destructive`/`requires_flags`/`touches`），再返回
 `Evidence`：Host 报告原样保留在顶层，旁边多出 `plan`、`outcome` 与 `steps`。退出码取自 `Outcome` 枚举，
@@ -560,6 +569,7 @@ session：只能用一次，并把之前的窗口作废。它**不会自己过�
 ./eidolon HOST status|doctor
 ./eidolon HOST commissioning-code [--code DIGITS]
 ./eidolon HOST start|stop|restart [--dry-run]
+./eidolon HOST service restart SERVICE [--dry-run]
 ./eidolon HOST logs [--service SERVICE] [--lines N] [--since TEXT]
 
 # Mac implementation diagnostics (normal lifecycle uses top-level status/start/stop/restart)

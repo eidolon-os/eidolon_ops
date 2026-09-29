@@ -47,6 +47,7 @@ class SystemdSupervisor:
                 Capability.TRUST_HOST_DELIVERY,
                 Capability.SSH_CONFIG,
                 Capability.BRING_UP,
+                Capability.SERVICE_RESTART,
             }
         )
 
@@ -70,6 +71,11 @@ class SystemdSupervisor:
 
     def logs(self, *, service: str | None, lines: int, since: str | None) -> dict[str, object]:
         return self.release.logs(unit=unit_name(service), lines=lines, since=since)
+
+    def service_restart(
+        self, service: str, *, request_id: str, dry_run: bool
+    ) -> dict[str, object]:
+        return self.release.service_restart(service, request_id=request_id, dry_run=dry_run)
 
     def commissioning_code(self, *, setup_code: str | None = None) -> dict[str, object]:
         return self.release.commissioning_code(setup_code=setup_code)

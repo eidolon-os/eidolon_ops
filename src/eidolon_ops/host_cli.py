@@ -129,6 +129,9 @@ OPERATIONS: dict[str, Callable[[HostController, argparse.Namespace], object]] = 
     "logs": lambda controller, a: controller.logs(
         service=a.service, lines=a.lines, since=a.since
     ),
+    "service": lambda controller, a: controller.service_restart(
+        a.service_id, dry_run=a.dry_run
+    ),
 }
 
 
@@ -437,6 +440,16 @@ def _parser() -> argparse.ArgumentParser:
             command.add_argument("--force-cleanup", action="store_true")
             command.add_argument("--strict", action="store_true")
             command.add_argument("--no-wait-ready", action="store_true")
+    service = operations.add_parser(
+        "service",
+        help="restart one service through the Host's eidolond (the only per-service path)",
+    )
+    # One verb. eidolond also enables and disables, but every service it
+    # manages today is required and it refuses to disable one; a verb that is
+    # refused for every target is not offered (Ops 总纲 §1.5).
+    service.add_argument("service_action", choices=("restart",))
+    service.add_argument("service_id", metavar="SERVICE")
+    service.add_argument("--dry-run", action="store_true")
     logs = operations.add_parser("logs")
     logs.add_argument("--service")
     logs.add_argument("--lines", type=int, default=200)

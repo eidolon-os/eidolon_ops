@@ -1326,6 +1326,26 @@ class EidolonPiController:
             timeout=300,
         )
 
+    def service_restart(
+        self, service: str, *, request_id: str, dry_run: bool
+    ) -> dict[str, object]:
+        """Ask the Host's eidolond to restart one service, from inside the Host.
+
+        eidolond listens only on a Unix socket, so the request is made by the
+        injected host agent and nothing new is opened to the network.
+        """
+
+        self.preflight.validate_ssh_material()
+        if dry_run:
+            return {"status": "planned", "service_id": service, "executor": "eidolond"}
+        # Standard library only, like readiness-compatibility: it asks the
+        # running eidolond and needs nothing from the release interpreter.
+        return self.transport.run_agent(
+            "service-restart",
+            {"service_id": service, "request_id": request_id},
+            timeout=180,
+        )
+
     def commissioning_code(self, *, setup_code: str | None = None) -> dict[str, object]:
         """Mint the one-time Setup code a phone types to claim this Host.
 

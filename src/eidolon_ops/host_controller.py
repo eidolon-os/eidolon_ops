@@ -7,6 +7,7 @@ and the adapter answers from what it is composed of.
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Mapping
 from ipaddress import ip_address, ip_network
 from pathlib import Path
@@ -242,6 +243,34 @@ class HostController:
         if dry_run:
             return Evidence(plan=plan, outcome=Outcome.PLANNED, report=report)
         return self._applied(plan, report)
+
+    def service_restart(self, service: str, *, dry_run: bool = False) -> Evidence:
+        """Restart one service by asking the Host's eidolond (Ops 总纲 §1.5).
+
+        The whole-Host lifecycle above stays a boundary action; this is the one
+        way to touch a single service, and it has no executor of its own.
+        eidolond's refusal — a name it does not manage, a service it will not
+        touch now, a revision that moved — is reported as it said it and is
+        not retried: the operator asked for one action, not for supervision.
+        """
+
+        plan = plans.service_restart(self.profile.host_id, service, dry_run=dry_run)
+        self.adapter.require(Capability.SERVICE_RESTART)
+        report = self.adapter.supervisor.service_restart(
+            service, request_id=f"ops-{uuid.uuid4().hex}", dry_run=dry_run
+        )
+        if dry_run:
+            return Evidence(plan=plan, outcome=Outcome.PLANNED, report=report)
+        if report.get("status") == "restarted":
+            return self._applied(plan, report)
+        http_status = report.get("http_status")
+        refused = report.get("status") == "refused" and http_status in {404, 409, 422}
+        return Evidence(
+            plan=plan,
+            outcome=Outcome.REFUSED if refused else Outcome.FAILED,
+            steps=steps_from_phases(plan, report),
+            report=report,
+        )
 
     def commissioning_code(self, *, setup_code: str | None = None) -> Evidence:
         """Issue the Setup code a phone types, on whichever Host this profile is.
