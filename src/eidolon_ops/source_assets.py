@@ -344,6 +344,7 @@ livekit:
 #: Each managed service as Admin's catalog names it: id, label, supervisord
 #: group, programs, and the health surface it publishes.
 _MANAGED_SERVICES = (
+    ("nats", "NATS", "nats", ("nats-server",), "http://127.0.0.1:{nats_http}/varz"),
     ("admin", "Eidolon Admin", "admin", ("admin-api",), "http://127.0.0.1:{admin}/docs"),
     (
         "admin-web",
@@ -389,7 +390,6 @@ _MANAGED_SERVICES = (
     ("channel", "Eidolon Channel Worker", "channel", ("channel-worker",), None),
 )
 _EXTERNAL_SERVICES = (
-    ("nats", "NATS (external)", "http://127.0.0.1:{nats_http}/varz"),
     ("livekit", "LiveKit (external)", "http://127.0.0.1:{livekit}/"),
     ("client-web", "Eidolon Client Web (external)", f"http://127.0.0.1:{CLIENT_WEB_PORT}/"),
 )

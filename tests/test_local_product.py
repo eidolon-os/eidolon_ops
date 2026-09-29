@@ -269,7 +269,10 @@ def test_prepare_materializes_one_canonical_mac_product_contract(
     assert f"EIDOLON_APP_OWNER_DOMAIN_ID={product._owner_domain_id()}\n" in environment
     assert f"EIDOLON_APP_OWNER_DESCRIPTOR_URI={product._descriptor_uri()}\n" in environment
     assert "18084" not in environment
-    assert "NATS (external)" in (root / "settings/services.yaml").read_text(encoding="utf-8")
+    services = (root / "settings/services.yaml").read_text(encoding="utf-8")
+    # The broker is this profile's own program now, not a foundation it probes.
+    assert "NATS (external)" not in services
+    assert "      group: nats\n      programs:\n        - nats-server\n" in services
     assert "port: 8767" in (root / "settings/channel-provider.yaml").read_text(encoding="utf-8")
     hub_settings = (root / "settings/hub.yaml").read_text(encoding="utf-8")
     assert f"path: {profile.paths.state_root}/hub/eidolon-hub.sqlite3" in hub_settings

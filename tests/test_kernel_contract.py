@@ -34,7 +34,7 @@ KERNEL_ROOT = Path(__file__).resolve().parents[2] / "eidolon_kernel"
 #: somebody moves this line after reading the diff. Move it in the same commit
 #: that adapts ``hostagent/contract.py`` to whatever changed, and never to
 #: silence a failure without reading what moved.
-REVIEWED_KERNEL_CONTRACT_COMMIT = "568684caf49520097eacd36561ec7f38b4428018"
+REVIEWED_KERNEL_CONTRACT_COMMIT = "745aa12884b5dccad26252184e8fb90adac08bae"
 
 pytestmark = pytest.mark.contract
 

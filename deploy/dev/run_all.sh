@@ -934,7 +934,8 @@ do_product_source_port_audit() {
     EIDOLON_PRODUCT_MEMORY_DISCOVERY_PORT EIDOLON_PRODUCT_MEMORY_ADMIN_PORT \
     EIDOLON_PRODUCT_AGENT_HTTP_PORT EIDOLON_PRODUCT_AGENT_ADMIN_PORT \
     EIDOLON_PRODUCT_CHANNEL_PROVIDER_PORT EIDOLON_PRODUCT_CHANNEL_WORKER_PORT \
-    EIDOLON_PRODUCT_LIVEKIT_PORT EIDOLON_ADMIN_API_PORT
+    EIDOLON_PRODUCT_LIVEKIT_PORT EIDOLON_ADMIN_API_PORT \
+    EIDOLON_PRODUCT_NATS_PORT EIDOLON_PRODUCT_NATS_HTTP_PORT
   do
     port="${!name:-}"
     [[ -z "$port" ]] && continue
@@ -977,15 +978,11 @@ do_product_source_start() {
   ensure_product_source_deps
   header "declared ports are free"
   do_product_source_port_audit || return 1
-  header "external NATS gate"
-  if ! "${OPS_ROOT}/deploy/supervisor/wrappers/wait-tcp.sh" \
-    --host 127.0.0.1 --port 4222 --timeout 3 -- /usr/bin/true; then
-    error "no NATS is listening on 127.0.0.1:4222"
-    error "  This Host's foundation is external (see system-services.yaml:"
-    error "  nats has 'supervisord: external'), so Ops does not own the"
-    error "  process. Start one and retry:"
-    error "    nats-server -js -sd ${EIDOLON_STATE_ROOT}/nats/jetstream \\"
-    error "      --port 4222 --http_port 8222"
+  # NATS is this profile's own program (nats:nats-server), started by eidolond
+  # like every service it reconciles; a broker someone else started on 4222
+  # is caught by the port audit above instead of being adopted.
+  if [[ -z "$EIDOLON_NATS_SERVER" || ! -x "$EIDOLON_NATS_SERVER" ]]; then
+    error "nats-server is not on PATH"
     return 1
   fi
   if [[ -z "$EIDOLON_LIVEKIT_BIN" || ! -x "$EIDOLON_LIVEKIT_BIN" ]]; then
