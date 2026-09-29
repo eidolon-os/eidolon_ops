@@ -42,6 +42,7 @@ CAPABILITY_SOURCES: dict[str, tuple[str, ...]] = {
     "local_tts": ("eidolon_models",),
     "local_llm": ("eidolon_models",),
     "local_laya": ("eidolon_models",),
+    "local_laya_participation": ("eidolon_models",),
 }
 
 #: What a capability adds to the unit topology. This states the same thing each
@@ -53,6 +54,7 @@ CAPABILITY_UNITS: dict[str, tuple[str, ...]] = {
     "local_llm": ("eidolon-llm.service",),
     "local_tts": ("eidolon-tts.service",),
     "local_laya": ("eidolon-laya.service",),
+    "local_laya_participation": ("eidolon-laya-participation.service",),
 }
 #: Supplementary groups the service user needs for a capability's hardware.
 #:
@@ -67,6 +69,12 @@ CAPABILITY_UNITS: dict[str, tuple[str, ...]] = {
 #: in a group that can open display devices.
 CAPABILITY_SERVICE_GROUPS: dict[str, tuple[str, ...]] = {
     "local_tts": ("video",),
+    #: Every NPU user reaches the device the same way, so an NPU Host puts its
+    #: service account in `video` whichever NPU services it runs: both Laya
+    #: services load RKNN graphs on an rknpu2 Host, and on a fresh board with no
+    #: `local_tts` they would otherwise start, open nothing and answer 503. A
+    #: Host without an NPU runs Laya on ONNX and gets no display-device group.
+    "rknpu2": ("video",),
 }
 
 
@@ -698,10 +706,21 @@ def _require_declared_capability_for_overlay(
         key = (assignment.document, assignment.display)
         if key == ("agent.yaml", "participation.url") and isinstance(assignment.value, str):
             address = urlsplit(assignment.value)
-            if address.hostname in {"127.0.0.1", "localhost", "::1"} and address.port == PORTS["laya_api"]:
-                if "local_laya" not in capabilities:
+            local = address.hostname in {"127.0.0.1", "localhost", "::1"}
+            if local and address.port == PORTS["laya_api"]:
+                # The smart-home service answers its own task only; the role
+                # team's decisions are a separate service with its own model.
+                raise ConfigurationError(
+                    "participation.url points at the smart-home Laya service "
+                    f"({PORTS['laya_api']}); role-team decisions are served by "
+                    f"eidolon-laya-participation on {PORTS['laya_participation_api']} "
+                    "(capability local_laya_participation)"
+                )
+            if local and address.port == PORTS["laya_participation_api"]:
+                if "local_laya_participation" not in capabilities:
                     raise ConfigurationError(
-                        "participation.url points at local Laya without local_laya capability"
+                        "participation.url points at the local participation service "
+                        "without the local_laya_participation capability"
                     )
                 if (
                     address.scheme != "http"

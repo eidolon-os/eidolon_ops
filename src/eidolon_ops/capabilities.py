@@ -36,7 +36,12 @@ HOST_CAPABILITIES: frozenset[str] = frozenset(
         "local_tts",
         #: The conversational model runs on this Host instead of a provider.
         "local_llm",
+        #: The smart-home decision model (Laya System One) runs on this Host.
         "local_laya",
+        #: The companion / role-team participation model runs on this Host: a
+        #: service of its own beside the smart-home one — own unit, port, weights
+        #: and settings — so either can be run, updated or rolled back alone.
+        "local_laya_participation",
     }
 )
 

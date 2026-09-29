@@ -81,7 +81,7 @@ PRODUCT_SETTINGS_INPUTS = ("agent_settings", "channel_settings", "memory_setting
 
 
 def local_participation_model_required(overlay: tuple[OverlayAssignment, ...]) -> bool:
-    """The fixture tunnel is a bench endpoint; only local Laya needs a task gate."""
+    """The fixture tunnel is a bench endpoint; only the local participation service needs a task gate."""
 
     for assignment in overlay:
         if assignment.document != "agent.yaml" or assignment.display != "participation.url":
@@ -89,7 +89,7 @@ def local_participation_model_required(overlay: tuple[OverlayAssignment, ...]) -
         address = urlsplit(str(assignment.value))
         if (
             address.hostname in {"127.0.0.1", "localhost", "::1"}
-            and address.port == PORTS["laya_api"]
+            and address.port == PORTS["laya_participation_api"]
             and address.path == "/v1/participation/decide"
         ):
             return True
@@ -226,7 +226,7 @@ class HostLayer:
             "claim_window": self.config.host.claim_window,
             "port_registry": port_registry,
             "participation_model_required": participation_model_required,
-            "participation_model_port": PORTS["laya_api"],
+            "participation_model_port": PORTS["laya_participation_api"],
             # Where memory's supervisor answers. A backup asks it for a
             # snapshot of each space rather than copying a palace the agent
             # does not understand, and the injected agent carries no YAML

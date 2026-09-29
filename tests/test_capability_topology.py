@@ -554,27 +554,38 @@ def test_every_local_address_setting_names_a_capability_and_a_port_that_exist() 
         assert role in PORTS
 
 
-def test_local_participation_route_requires_laya_and_the_v2_path() -> None:
+def test_local_participation_route_requires_its_own_service_and_the_v2_path() -> None:
+    """Role-team decisions are a service of their own, not a route on the smart-home one."""
     from eidolon_ops.config import ConfigurationError, _require_declared_capability_for_overlay
     from eidolon_ops.settings_overlay import OverlayAssignment, parse_path
     from eidolon_ops.source_assets import PORTS
 
-    def route(path: str):
+    def route(path: str, role: str = "laya_participation_api"):
         return (OverlayAssignment(
             "agent.yaml", parse_path("participation.url", label="agent.yaml"),
-            f"http://127.0.0.1:{PORTS['laya_api']}{path}",
+            f"http://127.0.0.1:{PORTS[role]}{path}",
         ),)
 
-    with pytest.raises(ConfigurationError, match="local_laya"):
+    with pytest.raises(ConfigurationError, match="local_laya_participation"):
         _require_declared_capability_for_overlay(
-            route("/v1/participation/decide"), frozenset(),
+            route("/v1/participation/decide"), frozenset({"local_laya"}),
         )
     with pytest.raises(ConfigurationError, match="participation v2"):
         _require_declared_capability_for_overlay(
-            route("/v1/systemone"), frozenset({"local_laya"}),
+            route("/v1/systemone"), frozenset({"local_laya_participation"}),
+        )
+    # the smart-home service does not answer for the role team, whatever the Host declares
+    with pytest.raises(ConfigurationError, match="smart-home"):
+        _require_declared_capability_for_overlay(
+            route("/v1/participation/decide", "laya_api"),
+            frozenset({"local_laya", "local_laya_participation"}),
         )
     _require_declared_capability_for_overlay(
-        route("/v1/participation/decide"), frozenset({"local_laya"}),
+        route("/v1/participation/decide"), frozenset({"local_laya_participation"}),
+    )
+    # and neither needs the other
+    _require_declared_capability_for_overlay(
+        route("/v1/participation/decide"), frozenset({"rknpu2", "local_laya_participation"}),
     )
 
 
@@ -591,7 +602,7 @@ def test_only_local_model_route_enables_the_task_readiness_gate() -> None:
         "http://127.0.0.1:8772/v1/participation/decide",
     ))
     assert local_participation_model_required(route(
-        "http://127.0.0.1:8771/v1/participation/decide",
+        "http://127.0.0.1:8773/v1/participation/decide",
     ))
 
 

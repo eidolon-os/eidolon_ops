@@ -152,6 +152,12 @@ CAPABILITY_SYSTEMD_ASSETS: dict[str, tuple[SystemdAssetContract, ...]] = {
             "eidolon-laya.service", "eidolon_models",
         ),
     ),
+    "local_laya_participation": (
+        SystemdAssetContract(
+            "eidolon_models", "deploy/systemd/eidolon-laya-participation.service",
+            "eidolon-laya-participation.service", "eidolon_models",
+        ),
+    ),
     "local_asr": (
         SystemdAssetContract(
             "eidolon_models",

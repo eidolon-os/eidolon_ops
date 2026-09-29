@@ -44,7 +44,9 @@ PRODUCT_UNITS = (
 #: Every capability this agent was built to understand. Its own copy, because
 #: the agent is injected and imports nothing from the eidolon_ops package it
 #: came from; a test keeps it equal to eidolon_ops.capabilities.
-HOST_CAPABILITIES: frozenset[str] = frozenset({"rknpu2", "local_asr", "local_tts", "local_llm", "local_laya"})
+HOST_CAPABILITIES: frozenset[str] = frozenset(
+    {"rknpu2", "local_asr", "local_tts", "local_llm", "local_laya", "local_laya_participation"}
+)
 
 #: What a capability adds to that. The agent's own copy, deliberately: it runs
 #: on the Host and its job is to refuse a payload that does not match what it
@@ -55,6 +57,7 @@ CAPABILITY_UNITS: dict[str, tuple[str, ...]] = {
     "local_llm": ("eidolon-llm.service",),
     "local_tts": ("eidolon-tts.service",),
     "local_laya": ("eidolon-laya.service",),
+    "local_laya_participation": ("eidolon-laya-participation.service",),
 }
 #: Supplementary groups the service user needs for a capability's hardware.
 #:
@@ -69,6 +72,8 @@ CAPABILITY_UNITS: dict[str, tuple[str, ...]] = {
 #: in a group that can open display devices.
 CAPABILITY_SERVICE_GROUPS: dict[str, tuple[str, ...]] = {
     "local_tts": ("video",),
+    # Any NPU user: both Laya services load RKNN graphs on an rknpu2 Host.
+    "rknpu2": ("video",),
 }
 
 

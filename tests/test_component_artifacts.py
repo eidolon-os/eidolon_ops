@@ -523,11 +523,15 @@ def test_laya_only_retirement_selects_only_the_old_chat_model():
     result = transfer.retire_unselected_model_artifacts(
         "r1", {"retained_running_release_ids": []}
     )
-    assert result["artifacts"] == 1
-    assert [payload["destination"] for _action, payload in transfer.transport.calls] == [
-        "/var/lib/eidolon/models/qwen3-1.7b"
-    ]
-    assert transfer.transport.calls[0][1]["units"] == ["eidolon-llm.service"]
+    # A smart-home-only Host also retires the participation model it does not run: the two Laya
+    # services are selected by separate capabilities.
+    retired = {payload["destination"]: payload["units"] for _action, payload in transfer.transport.calls}
+    assert result["artifacts"] == 3
+    assert retired == {
+        "/var/lib/eidolon/models/qwen3-1.7b": ["eidolon-llm.service"],
+        "/var/lib/eidolon/models/laya-participation-p4-onnx-ae6718a4": ["eidolon-laya-participation.service"],
+        "/var/lib/eidolon/models/laya-participation-p4-rknn-ae6718a4": ["eidolon-laya-participation.service"],
+    }
     transfer.transport.calls.clear()
     assert transfer.retire_unselected_model_artifacts(
         "r1", {"retained_running_release_ids": ["old-release"]}

@@ -75,6 +75,9 @@ PORTS = {
     "tts_stream": 8770,
     # Local decision service for smart-home sessions on the Mac source Host.
     "laya_api": 8771,
+    # The role team's participation decisions: a separate service with its own
+    # model (eidolon-laya-participation). 8772 is the bench decision fixture's.
+    "laya_participation_api": 8773,
     "admin": 9000,
     "admin_web": 9001,
     "local_api": 9002,

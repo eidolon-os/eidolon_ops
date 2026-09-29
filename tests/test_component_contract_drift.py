@@ -359,6 +359,8 @@ def test_the_dev_port_registry_and_the_contracts_use_the_same_numbers(
         "tts_stream": 8770,
         # The source-run stack does not start the board's Laya model service.
         "laya_api": 8771,
+        # Nor the role team's participation service beside it.
+        "laya_participation_api": 8773,
     }
 
     for role, port in topology.port_roles.items():
