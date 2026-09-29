@@ -40,8 +40,6 @@ export EIDOLON_BOOTSTRAP_RUNTIME_DIR="$EIDOLON_BOOTSTRAP_RUNTIME_ROOT"
 export EIDOLON_PORTS_FILE="${EIDOLON_PORTS_FILE:-${EIDOLON_CONFIG_ROOT}/ports.yaml}"
 export EIDOLON_ADMIN_SERVICES_FILE="${EIDOLON_ADMIN_SERVICES_FILE:-${EIDOLON_ADMIN_ROOT}/config/services.yaml}"
 export EIDOLON_ADMIN_STATE_DIR="${EIDOLON_ADMIN_STATE_DIR:-${EIDOLON_STATE_ROOT}/admin}"
-export EIDOLON_ADMIN_SUPERVISOR_AVAILABLE_DIR="${EIDOLON_ADMIN_SUPERVISOR_AVAILABLE_DIR:-${OPS_ROOT}/deploy/supervisor/available}"
-export EIDOLON_ADMIN_SUPERVISOR_ENABLED_DIR="${EIDOLON_ADMIN_SUPERVISOR_ENABLED_DIR:-${EIDOLON_RUNTIME_ROOT}/supervisor/enabled}"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
 info()  { echo -e "${GREEN}[INFO]${NC} $*"; }
@@ -109,14 +107,13 @@ export EIDOLON_LIVEKIT_BIN="${EIDOLON_LIVEKIT_BIN:-$(command -v livekit-server |
 WEB_DIR="${EIDOLON_ADMIN_ROOT}/web"
 VITE_BIN_REL="node_modules/.bin/vite"
 
-SV_DEFAULT_CONF="${OPS_ROOT}/deploy/dev/supervisord.conf"
+# The one supervisord configuration; configure_supervisor_profile fills in
+# the socket, pid and include for the product-source profile.
 SV_PROFILE_CONF="${OPS_ROOT}/deploy/dev/supervisord.profile.conf"
-SV_CONF="$SV_DEFAULT_CONF"
+SV_CONF="$SV_PROFILE_CONF"
 SV_PID="${VAR_DIR}/supervisord.pid"
 SV_SOCK="${VAR_DIR}/supervisor.sock"
 SV_PROFILE=""
-SUPERVISOR_PROFILE_ENABLED_DIR=""
-PREFLIGHT_SERVICE_IDS=""
 
 # shellcheck source=../supervisor/wrappers/livekit-credentials.sh
 source "${OPS_ROOT}/deploy/supervisor/wrappers/livekit-credentials.sh"
@@ -161,15 +158,11 @@ configure_supervisor_profile() {
       SV_CONF="$SV_PROFILE_CONF"
       SV_PID="${VAR_DIR}/supervisord-${profile}.pid"
       SV_SOCK="${VAR_DIR}/supervisor-${profile}.sock"
-      SUPERVISOR_PROFILE_ENABLED_DIR="${OPS_ROOT}/deploy/supervisor"
-      PREFLIGHT_SERVICE_IDS="admin,eidolond,data,data-workspace,hub,kernel,nats,livekit,memory,agent,channel"
       export EIDOLON_SUPERVISOR_PROFILE="$profile"
       export EIDOLON_SUPERVISOR_PID="$SV_PID"
       export EIDOLON_SUPERVISOR_SOCKET="$SV_SOCK"
-      export EIDOLON_SUPERVISOR_ENABLED_DIR="$SUPERVISOR_PROFILE_ENABLED_DIR"
       export EIDOLON_SUPERVISOR_INCLUDE_GLOB="${OPS_ROOT}/deploy/supervisor/product-source.conf"
       export EIDOLON_ADMIN_SUPERVISOR_SOCKET="$SV_SOCK"
-      export EIDOLON_ADMIN_SUPERVISOR_ENABLED_DIR="$SUPERVISOR_PROFILE_ENABLED_DIR"
       export EIDOLON_SUPERVISOR_LOG_FILE="${LOG_DIR}/admin/supervisord-${profile}.log"
       export EIDOLON_SUPERVISOR_CHILDLOG_DIR="${LOG_DIR}/admin/childlogs"
       ;;
@@ -346,7 +339,6 @@ sv_alive() {
   sv_pid >/dev/null
 }
 
-# Reload deploy/supervisor/enabled/*.conf into a running supervisord.
 # Stop channel before LiveKit during stack shutdown so the worker does not log
 # ConnectionRefused while livekit-server is tearing down (supervisorctl
 # shutdown stops programs in parallel by default).
@@ -375,6 +367,7 @@ do_sv_stop_channel_first() {
   warn "channel-worker still ${state:-running} after 40s; proceeding with shutdown"
 }
 
+# Reload the product-source configuration into a running supervisord.
 do_sv_reread_update() {
   ensure_api_deps
   if ! sv_alive; then

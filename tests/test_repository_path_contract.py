@@ -53,13 +53,11 @@ def _files(root: Path, patterns: tuple[str, ...]) -> list[Path]:
 def test_ops_owns_mac_host_lifecycle_assets() -> None:
     required = (
         "deploy/dev/run_all.sh",
-        "deploy/dev/supervisord.conf",
         "deploy/dev/supervisord.profile.conf",
         # Templates Ops reads at run time live inside the package, so they are
         # found the same way from a checkout and from an installed wheel.
         "src/eidolon_ops/assets/livekit.yaml",
         "src/eidolon_ops/assets/ports.yaml",
-        "config/default-enabled.txt",
     )
     assert all((REPOSITORY / item).is_file() for item in required)
 

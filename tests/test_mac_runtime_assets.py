@@ -157,12 +157,17 @@ def test_with_env_redacts_sensitive_parent_mismatch(tmp_path: Path) -> None:
     assert secret_from_file not in result.stderr
 
 
-def test_supervisor_does_not_enable_livekit_dev_credentials() -> None:
-    config = (ROOT / "deploy/supervisor/available/livekit.conf").read_text(encoding="utf-8")
+def test_the_mac_adapter_renders_livekit_credentials_before_starting() -> None:
     run_all = (ROOT / "deploy/dev/run_all.sh").read_text(encoding="utf-8")
 
-    assert "--dev" not in config
     assert "eidolon_ensure_livekit_credentials" in run_all
+
+
+def test_the_mac_has_one_supervisord_topology() -> None:
+    """product-source.conf is the only program set; the old per-program dev set is gone."""
+
+    assert not (ROOT / "deploy/supervisor/available").exists()
+    assert not (ROOT / "deploy/dev/supervisord.conf").exists()
 
 
 def test_admin_admits_the_web_client_as_a_browser_origin() -> None:
