@@ -1,5 +1,37 @@
 # eidolon-ops
 
+## 检查开发仓库状态
+
+在本仓库运行以下脚本，可一次查看同级项目、`docs`、`vendor/client-sdk-esp32` 及其登记的
+worktree（包括主目录之外的 worktree）：
+
+```bash
+python3 scripts/repo_status.py
+python3 scripts/repo_status.py --details
+python3 scripts/repo_status.py --tag ed_v0.2.1
+```
+
+报告列出当前 HEAD 的分支和提交号、未提交文件数，以及 worktree 的提交是否已被本地 `main`
+包含。默认目录由脚本位置确定，与执行时的工作目录无关；可用 `--root /path/to/projects`
+指定另一组项目，或 `--root ../vendor/client-sdk-esp32 --base eidolon_dev` 检查采用不同主分支的仓库。
+`--tag` 比较的是提交，包括 annotated tag；即使 HEAD 与 tag 相同，也会单独报告未提交文件。
+
+扫描在每个仓库根目录停止，不深入项目内部的第三方依赖仓库，也跳过隐藏目录、构建缓存和
+符号链接。未合入数量按提交祖先关系计算；等价补丁仅供参考，不能证明 squash、rebase 或回退后的
+最终内容一致。失效 worktree 会保留历史比较，并明确标记无法读取工作区，不能视作干净。
+
+脚本只依赖 Python 标准库和 Git，不安装依赖、不联网、不 fetch，也不提交、切换分支或清理。
+所有远端同步情况不在本报告范围内。自动化可使用：
+
+```bash
+python3 scripts/repo_status.py --json --check > /tmp/eidolon-repo-status.json
+```
+
+正常输出返回 `0`；指定 `--check` 时，有未提交、未合入、主目录不在基线分支、tag 不匹配或失效
+worktree 返回 `1`；读取失败、缺少基线/tag、浅克隆等检查异常返回 `2`。状态变化期间建议重跑。
+
+## Host 操作入口
+
 仓库根目录的 `./eidolon` 是 Mac 开发 Host 与 Raspberry Pi 产品 Host 的统一操作入口。两端使用相同的
 路径角色、生命周期命令和诊断模型；区别只在 Host profile 与执行适配器（Mac 是本地 supervisord，Pi
 是远程 systemd）。脚本负责选择 Host 和展示该 Host 可用的命令，底层契约仍由 `eidolon-ops` CLI
