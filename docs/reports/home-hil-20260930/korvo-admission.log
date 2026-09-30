@@ -1,0 +1,12 @@
+[   8.69] I (8670) HubOnboarding: Accepted Owner directory owner=owner-f774cf8e1b667eb0ca7b revision=1
+[   9.32] I (9300) HubOnboarding: Canonical EnrollmentProposal recorded; awaiting Decision
+[   9.33] I (9300) HubConfigStore: Saved Hub config identity= status=pending-approval room= server=
+[  15.84] I (15820) HubOnboarding: Canonical ClaimGrant acknowledged and Claim activated
+[  16.51] I (16480) HubConfigStore: Saved Hub config identity=device-instance-46b2c13b3d522d60f42664697270a0cf82c328ef1d3fb829ad47fce8e86b7226 status=approved room=eidolon-device-ae94b8bc34c1b283d0e6bde0 server=ws://192.168.3.230:7880
+[  17.34] I (17300) EidolonVoice: [lifecycle] lk_event=Reconnecting room_kind=control event_gen=1 cur_gen=1 state=ConfigReady switching=0 failure=Other room=eidolon-device-ae94b8bc34c1b283d0e6bde0
+[  22.98] I (22940) EidolonVoice: [lifecycle] lk_event=Reconnecting room_kind=control event_gen=1 cur_gen=1 state=ConfigReady switching=0 failure=Other room=eidolon-device-ae94b8bc34c1b283d0e6bde0
+[  26.21] I (26130) EidolonVoice: [lifecycle] lk_event=Connected room_kind=control event_gen=1 cur_gen=1 state=ConfigReady switching=0 failure=None room=eidolon-device-ae94b8bc34c1b283d0e6bde0
+[  26.22] I (26180) EidolonVoice: [lifecycle] operational_ready=1 reason=channel_connected room_kind=control gen=1
+[  26.22] I (26190) Application: [EIDOLON_UI] queue operational_ready=1
+[  26.23] I (26200) EidolonUiPresenter: visible state=READY scene=7
+[  26.38] I (26360) HomePanel: [smarthome] snapshot revision=1 devices=18 areas=7 scenes=4
