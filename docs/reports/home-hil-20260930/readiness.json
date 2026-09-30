@@ -1,0 +1,441 @@
+{
+  "doctor": {
+    "active_targets": {
+      "eidolon_admin": "/opt/eidolon/releases/rk3588-home-hil-20260930-1/eidolon_admin",
+      "eidolon_agent": "/opt/eidolon/releases/rk3588-home-hil-20260930-1/eidolon_agent",
+      "eidolon_channel": "/opt/eidolon/releases/rk3588-home-hil-20260930-1/eidolon_channel",
+      "eidolon_data": "/opt/eidolon/releases/rk3588-home-hil-20260930-1/eidolon_data",
+      "eidolon_hub": "/opt/eidolon/releases/rk3588-home-hil-20260930-1/eidolon_hub",
+      "eidolon_kernel": "/opt/eidolon/releases/rk3588-home-hil-20260930-1/eidolon_kernel",
+      "eidolon_memory": "/opt/eidolon/releases/rk3588-home-hil-20260930-1/eidolon_memory",
+      "eidolon_models": "/opt/eidolon/releases/rk3588-home-hil-20260930-1/eidolon_models"
+    },
+    "readiness_checks": [
+      "eidolond",
+      "data",
+      "data-workspace",
+      "hub",
+      "kernel",
+      "admin",
+      "local-api",
+      "lifecycle-workflow",
+      "nats",
+      "livekit",
+      "memory-embedder",
+      "memory",
+      "agent",
+      "channel-provider",
+      "channel",
+      "laya",
+      "laya-participation"
+    ],
+    "release_id": "rk3588-home-hil-20260930-1",
+    "status": "healthy",
+    "units": [
+      "eidolon-bootstrapd.service",
+      "eidolon-unit-applier.socket",
+      "eidolond.service",
+      "eidolon-data.service",
+      "eidolon-data-workspace.service",
+      "eidolon-hub.service",
+      "eidolon-kernel.service",
+      "eidolon-local-api.service",
+      "eidolon-lifecycle-workflow.service",
+      "eidolon-admin.service",
+      "eidolon-nats.service",
+      "eidolon-livekit.service",
+      "eidolon-memory-embedder.service",
+      "eidolon-memory-supervisor.service",
+      "eidolon-memory-discovery.service",
+      "eidolon-agent.service",
+      "eidolon-channel-provider.service",
+      "eidolon-channel.service"
+    ]
+  },
+  "app_ready": {
+    "channel_worker": {
+      "agent_name": "eidolon",
+      "dispatch_identity": true,
+      "expected_agent_name": "eidolon",
+      "healthy": true,
+      "http_status": 200,
+      "livekit_link": {
+        "healthy": true,
+        "linked_processes": [
+          3201263
+        ],
+        "unit_processes": [
+          3201263,
+          3201700,
+          3201701,
+          3201961
+        ]
+      },
+      "worker_type": "JT_ROOM"
+    },
+    "checks": {
+      "backend_healthy": true,
+      "bootstrap_control_socket": true,
+      "bootstrap_preflight": true,
+      "channel_worker_dispatch_identity": true,
+      "channel_worker_healthy": true,
+      "channel_worker_livekit_link": true,
+      "claim_window_honored": true,
+      "device_removal_available": true,
+      "foundation_services": true,
+      "host_identity_material": true,
+      "host_setup_completable": true,
+      "hub_admits_devices": true,
+      "hub_descriptor_published": true,
+      "hub_lan_reachable": true,
+      "hub_mdns_service": true,
+      "hub_settings_bound": true,
+      "hub_tls_identity": true,
+      "lan_address_observed": true,
+      "lan_name_resolves": true,
+      "livekit_client_origin": true,
+      "livekit_lan_reachable": true,
+      "livekit_network_current": true,
+      "local_api_mdns_service": true,
+      "local_api_reachable": true,
+      "local_api_targets_hub": true,
+      "participation_model_ready": true
+    },
+    "files": {
+      "authority_signing_certificate": {
+        "healthy": true,
+        "mode": "0640",
+        "owner": "0:970",
+        "path": "/etc/eidolon/owner-domain/authority_signing_certificate.pem"
+      },
+      "commissioning_tls": {
+        "healthy": true,
+        "mode": "0640",
+        "owner": "994:973",
+        "path": "/var/lib/eidolon-bootstrap/commissioning_tls.pem"
+      },
+      "host_identity": {
+        "healthy": true,
+        "mode": "0600",
+        "owner": "994:973",
+        "path": "/var/lib/eidolon-bootstrap/host_identity.ed25519"
+      },
+      "hub_certificate": {
+        "healthy": true,
+        "mode": "0640",
+        "owner": "0:974",
+        "path": "/etc/eidolon/tls/hub.crt"
+      },
+      "hub_private_key": {
+        "healthy": true,
+        "mode": "0640",
+        "owner": "0:974",
+        "path": "/etc/eidolon/tls/hub.key"
+      },
+      "hub_settings": {
+        "healthy": true,
+        "mode": "0640",
+        "owner": "0:974",
+        "path": "/etc/eidolon/generated/hub.yaml"
+      },
+      "owner_descriptor": {
+        "healthy": true,
+        "mode": "0640",
+        "owner": "0:970",
+        "path": "/etc/eidolon/owner-domain/owner_domain_descriptor.json"
+      },
+      "owner_root_certificate": {
+        "healthy": true,
+        "mode": "0640",
+        "owner": "0:970",
+        "path": "/etc/eidolon/owner-domain/owner_domain_root_ca.pem"
+      }
+    },
+    "foundation": {
+      "NetworkManager.service": {
+        "ActiveState": "active",
+        "LoadState": "loaded",
+        "NRestarts": 0,
+        "SubState": "running"
+      },
+      "avahi-daemon.service": {
+        "ActiveState": "active",
+        "LoadState": "loaded",
+        "NRestarts": 0,
+        "SubState": "running"
+      },
+      "bluetooth.service": {
+        "ActiveState": "active",
+        "LoadState": "loaded",
+        "NRestarts": 0,
+        "SubState": "running"
+      }
+    },
+    "host_id": "ehost-f89c0ecca5d0070a7989",
+    "hub_health": {
+      "status": "ok"
+    },
+    "lan_ipv4": "192.168.3.230",
+    "livekit_service": {
+      "desired": {
+        "enabled": true,
+        "revision": 1,
+        "service_id": "livekit",
+        "updated_at": "2026-09-08T06:55:14.047159Z"
+      },
+      "detail": null,
+      "endpoints": [
+        {
+          "address": "ws://127.0.0.1:7880",
+          "contract": "livekit.protocol.v1",
+          "endpoint_id": "media.livekit",
+          "operation": "system.service-endpoint",
+          "protocol": "livekit",
+          "service_id": "livekit"
+        }
+      ],
+      "network_current": true,
+      "observed_at": "2026-09-30T06:12:40.790026Z",
+      "operation": "system.service-status",
+      "required": true,
+      "runtime_state": "ready",
+      "service_id": "livekit"
+    },
+    "local_api": {
+      "ble_service_uuid": "f6a147b7-abef-57c3-973f-e3a17c6ef0ab",
+      "bootstrap_status": "running",
+      "health_status": "ok",
+      "healthy": true,
+      "host_id": "ehost-f89c0ecca5d0070a7989",
+      "tls": "loopback self-check only; App pins the BLE-advertised TLS SPKI"
+    },
+    "mdns": {
+      "definition": true,
+      "hub": [
+        "=;wlan0;IPv4;owner-f774cf8e1b667eb0ca7b;_eidolon-owner._tcp;local;eidolon-hub-f89c0ecca5d0070a7989.local;192.168.3.230;9443;\"owner_domain_descriptor_uri=https://eidolon-hub-f89c0ecca5d0070a7989.local:9443/api/device-onboarding/v1/descriptor\" \"owner_domain_id=owner-f774cf8e1b667eb0ca7b\" \"txtvers=1\""
+      ],
+      "local_api": [
+        "=;wlan0;IPv6;Eidolon\\032Local\\032API;_eidolon-local-api._tcp;local;mansondeMacBook-Pro.local;192.168.3.182;9002;\"scheme=https\" \"contract=1\"",
+        "=;wlan0;IPv4;Eidolon\\032Local\\032API;_eidolon-local-api._tcp;local;mansondeMacBook-Pro.local;192.168.3.182;9002;\"scheme=https\" \"contract=1\"",
+        "=;wlan0;IPv4;Eidolon\\032Local\\032API\\032on\\032eidolon-opi5max;_eidolon-local-api._tcp;local;eidolon-opi5max.local;192.168.3.230;9002;\"scheme=https\" \"contract=1\"",
+        "=;enP3p49s0;IPv6;Eidolon\\032Local\\032API;_eidolon-local-api._tcp;local;mansondeMacBook-Pro.local;169.254.86.25;9002;\"scheme=https\" \"contract=1\"",
+        "=;enP3p49s0;IPv4;Eidolon\\032Local\\032API;_eidolon-local-api._tcp;local;mansondeMacBook-Pro.local;169.254.86.25;9002;\"scheme=https\" \"contract=1\"",
+        "=;enP3p49s0;IPv4;Eidolon\\032Local\\032API\\032on\\032eidolon-opi5max;_eidolon-local-api._tcp;local;eidolon-opi5max.local;169.254.192.66;9002;\"scheme=https\" \"contract=1\"",
+        "=;lo;IPv4;Eidolon\\032Local\\032API\\032on\\032eidolon-opi5max;_eidolon-local-api._tcp;local;eidolon-opi5max.local;127.0.0.1;9002;\"scheme=https\" \"contract=1\""
+      ]
+    },
+    "owner_domain_id": "owner-f774cf8e1b667eb0ca7b",
+    "participation_provider": {
+      "model_version": "ae6718a4",
+      "policy_version": "participation-laya-v1/ae6718a4/min0.95",
+      "schema_version": 2,
+      "status": "ready",
+      "task": "ip_team.participation"
+    },
+    "preflight": {
+      "checks": [
+        {
+          "blocking": true,
+          "detail": "aarch64",
+          "name": "architecture",
+          "ok": true
+        },
+        {
+          "blocking": true,
+          "detail": "Armbian_community 26.11.0-trunk.33 resolute resolute",
+          "name": "os-release",
+          "ok": true
+        },
+        {
+          "blocking": true,
+          "detail": "active",
+          "name": "service:NetworkManager.service",
+          "ok": true
+        },
+        {
+          "blocking": true,
+          "detail": "active",
+          "name": "service:bluetooth.service",
+          "ok": true
+        },
+        {
+          "blocking": true,
+          "detail": "nmcli tool, version 1.54.3",
+          "name": "networkmanager-cli",
+          "ok": true
+        },
+        {
+          "blocking": true,
+          "detail": "wlan0:wifi:connected",
+          "name": "networkmanager-wifi-device",
+          "ok": true
+        },
+        {
+          "blocking": true,
+          "detail": "bluetoothctl: 5.85",
+          "name": "bluez-cli",
+          "ok": true
+        },
+        {
+          "blocking": true,
+          "detail": "Controller 40:D9:5A:B0:4D:F5 eidolon-opi5max [default]",
+          "name": "bluez-controller",
+          "ok": true
+        },
+        {
+          "blocking": false,
+          "detail": "inactive",
+          "name": "legacy-network-service:hostapd.service",
+          "ok": true
+        },
+        {
+          "blocking": false,
+          "detail": "inactive",
+          "name": "legacy-network-service:dnsmasq.service",
+          "ok": true
+        }
+      ],
+      "ok": true
+    },
+    "resolution": [
+      "192.168.3.230"
+    ],
+    "scope": "Host-side commissioning readiness only. A real phone must still verify BLE, Host proof, TLS SPKI pinning, Controller claim, Wi-Fi checkpoint and Workspace setup.",
+    "setup": {
+      "healthy": true,
+      "operation_id": "12915368-5f85-5ff3-b206-2301fb3ceda0",
+      "state": "ready"
+    },
+    "status": "app_ready",
+    "units": {
+      "eidolon-admin.service": {
+        "ActiveState": "active",
+        "LoadState": "loaded",
+        "NRestarts": 0,
+        "SubState": "running"
+      },
+      "eidolon-agent.service": {
+        "ActiveState": "active",
+        "LoadState": "loaded",
+        "NRestarts": 0,
+        "SubState": "running"
+      },
+      "eidolon-bootstrapd.service": {
+        "ActiveState": "active",
+        "LoadState": "loaded",
+        "NRestarts": 0,
+        "SubState": "running"
+      },
+      "eidolon-channel-provider.service": {
+        "ActiveState": "active",
+        "LoadState": "loaded",
+        "NRestarts": 0,
+        "SubState": "running"
+      },
+      "eidolon-channel.service": {
+        "ActiveState": "active",
+        "LoadState": "loaded",
+        "NRestarts": 0,
+        "SubState": "running"
+      },
+      "eidolon-data-workspace.service": {
+        "ActiveState": "active",
+        "LoadState": "loaded",
+        "NRestarts": 0,
+        "SubState": "running"
+      },
+      "eidolon-data.service": {
+        "ActiveState": "active",
+        "LoadState": "loaded",
+        "NRestarts": 0,
+        "SubState": "running"
+      },
+      "eidolon-hub-ingress.service": {
+        "ActiveState": "active",
+        "LoadState": "loaded",
+        "NRestarts": 0,
+        "SubState": "running"
+      },
+      "eidolon-hub.service": {
+        "ActiveState": "active",
+        "LoadState": "loaded",
+        "NRestarts": 0,
+        "SubState": "running"
+      },
+      "eidolon-kernel.service": {
+        "ActiveState": "active",
+        "LoadState": "loaded",
+        "NRestarts": 0,
+        "SubState": "running"
+      },
+      "eidolon-lifecycle-workflow.service": {
+        "ActiveState": "active",
+        "LoadState": "loaded",
+        "NRestarts": 0,
+        "SubState": "running"
+      },
+      "eidolon-livekit.service": {
+        "ActiveState": "active",
+        "LoadState": "loaded",
+        "NRestarts": 0,
+        "SubState": "running"
+      },
+      "eidolon-local-api.service": {
+        "ActiveState": "active",
+        "LoadState": "loaded",
+        "NRestarts": 0,
+        "SubState": "running"
+      },
+      "eidolon-memory-discovery.service": {
+        "ActiveState": "active",
+        "LoadState": "loaded",
+        "NRestarts": 0,
+        "SubState": "running"
+      },
+      "eidolon-memory-embedder.service": {
+        "ActiveState": "active",
+        "LoadState": "loaded",
+        "NRestarts": 0,
+        "SubState": "running"
+      },
+      "eidolon-memory-supervisor.service": {
+        "ActiveState": "active",
+        "LoadState": "loaded",
+        "NRestarts": 0,
+        "SubState": "running"
+      },
+      "eidolon-nats.service": {
+        "ActiveState": "active",
+        "LoadState": "loaded",
+        "NRestarts": 0,
+        "SubState": "running"
+      },
+      "eidolon-unit-applier.service": {
+        "ActiveState": "active",
+        "LoadState": "loaded",
+        "NRestarts": 0,
+        "SubState": "running"
+      },
+      "eidolon-unit-applier.socket": {
+        "ActiveState": "active",
+        "LoadState": "loaded",
+        "SubState": "running"
+      },
+      "eidolond.service": {
+        "ActiveState": "active",
+        "LoadState": "loaded",
+        "NRestarts": 0,
+        "SubState": "running"
+      }
+    },
+    "waiting": {
+      "budget_seconds": 240,
+      "exhausted": false,
+      "spent_on": {
+        "channel_worker": 0.0,
+        "channel_worker_livekit_link": 16.5
+      },
+      "spent_seconds": 16.5
+    }
+  }
+}

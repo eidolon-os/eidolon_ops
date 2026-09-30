@@ -1,0 +1,25 @@
+home interpretation turn=home-hil-20260930-0 route=primary proposal={"intent":"control","target_status":"resolved","targets":["living.curtain"],"action":{"trait":"position","command":"open","slots":[]},"mention":null}
+home stage turn=home-hil-20260930-0 stage=understanding elapsed_ms=480.8
+home stage turn=home-hil-20260930-0 stage=execution elapsed_ms=39.3
+home turn=home-hil-20260930-0 session=home-hil-20260930-smoke elapsed_ms=575 result={"schema_version":1,"turn_id":"home-hil-20260930-0","utterance":"打开客厅窗帘","outcome":"executed","message":"已打开客厅窗帘","candidates":[],"command":null}
+home continuation turn=home-hil-20260930-1 question=follow model=7b695ba8 probability=0.9871
+home interpretation turn=home-hil-20260930-1 route=laya_continuation
+home stage turn=home-hil-20260930-1 stage=continuation elapsed_ms=290.4
+home stage turn=home-hil-20260930-1 stage=understanding elapsed_ms=290.9
+home stage turn=home-hil-20260930-1 stage=execution elapsed_ms=28.9
+home turn=home-hil-20260930-1 session=home-hil-20260930-smoke elapsed_ms=367 result={"schema_version":1,"turn_id":"home-hil-20260930-1","utterance":"关闭客厅窗帘","outcome":"executed","message":"已关闭客厅窗帘","candidates":[],"command":null}
+home continuation turn=home-hil-20260930-2 question=follow model=7b695ba8 probability=0.9907
+home interpretation turn=home-hil-20260930-2 route=laya_continuation
+home stage turn=home-hil-20260930-2 stage=continuation elapsed_ms=273.1
+home stage turn=home-hil-20260930-2 stage=understanding elapsed_ms=273.6
+home stage turn=home-hil-20260930-2 stage=execution elapsed_ms=46.7
+home turn=home-hil-20260930-2 session=home-hil-20260930-smoke elapsed_ms=378 result={"schema_version":1,"turn_id":"home-hil-20260930-2","utterance":"打开它","outcome":"executed","message":"已打开客厅窗帘","candidates":[],"command":null}
+home continuation turn=home-hil-20260930-3 question=follow model=7b695ba8 probability=0.9880
+home stage turn=home-hil-20260930-3 stage=continuation elapsed_ms=300.8
+home interpretation turn=home-hil-20260930-3 route=llm reason=continuation_not_accepted
+litellm_stream_first_chunk req=home-hil-20260930-3 model=openai/deepseek-v4-flash connect_ms=678 raw_ttft_ms=717 idle_ms=-1 choices=1
+litellm_timings req=home-hil-20260930-3 model=openai/deepseek-v4-flash connect_ms=678 ttft_ms=957 raw_ttft_ms=717 raw_chunks_before_effective=1 idle_ms=-1 kind=tool_call
+litellm_stream_summary req=home-hil-20260930-3 model=openai/deepseek-v4-flash outcome=completed connect_ms=678 raw_ttft_ms=717 tool_ready_ms=980 finish_ms=980 stream_end_ms=998 close_ms=0 tokens_in=4230 tokens_out=23 cached_tokens_in=0 configured_max_retries=2
+home fallback turn=home-hil-20260930-3 outcome=cancelled
+home stage turn=home-hil-20260930-3 stage=understanding elapsed_ms=1306.6
+home turn=home-hil-20260930-3 session=home-hil-20260930-smoke elapsed_ms=1343 result={"schema_version":1,"turn_id":"home-hil-20260930-3","utterance":"算了","outcome":"answered","message":"已取消，本次没有执行设备操作","candidates":[],"command":null}
