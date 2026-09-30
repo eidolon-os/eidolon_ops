@@ -1,0 +1,472 @@
+[
+  {
+    "t": "1790752377748919",
+    "unit": "eidolon-channel.service",
+    "msg": "2026-09-30 15:12:57,745 INFO eidolon.livekit.plugins.vad.firered VAD: end of speech"
+  },
+  {
+    "t": "1790752377949219",
+    "unit": "eidolon-channel.service",
+    "msg": "2026-09-30 15:12:57,932 INFO bailian.stt_stream [Bailian STT] FINAL_TRANSCRIPT text='关闭窗帘。' start=1.260s end=2.180s"
+  },
+  {
+    "t": "1790752378509533",
+    "unit": "eidolon-laya.service",
+    "msg": "2026-09-30 15:12:58,509 INFO eidolon_laya systemone q=3 skipped=0 tokens=463 forward=442ms total=444ms truncated=-"
+  },
+  {
+    "t": "1790752378512147",
+    "unit": "eidolon-agent.service",
+    "msg": "home interpretation turn=c926fe731a23461e route=primary proposal={\"intent\":\"control\",\"target_status\":\"resolved\",\"targets\":[\"living.curtain\"],\"action\":{\"trait\":\"position\",\"command\":\"close\",\"slots\":[]},\"mention\":null}"
+  },
+  {
+    "t": "1790752378512655",
+    "unit": "eidolon-agent.service",
+    "msg": "home stage turn=c926fe731a23461e stage=understanding elapsed_ms=454.4"
+  },
+  {
+    "t": "1790752378573554",
+    "unit": "eidolon-hub.service",
+    "msg": "INFO:     127.0.0.1:48700 - \"POST /api/smarthome/v1/execute HTTP/1.1\" 200 OK"
+  },
+  {
+    "t": "1790752378575228",
+    "unit": "eidolon-agent.service",
+    "msg": "home stage turn=c926fe731a23461e stage=execution elapsed_ms=26.5"
+  },
+  {
+    "t": "1790752378575907",
+    "unit": "eidolon-agent.service",
+    "msg": "home turn=c926fe731a23461e session=esp32-3b0f2d19-3e082a1c-00000001 elapsed_ms=559 result={\"schema_version\":1,\"turn_id\":\"c926fe731a23461e\",\"utterance\":\"关闭窗帘。\",\"outcome\":\"executed\",\"message\":\"已关闭客厅窗帘\",\"candidates\":[],\"command\":null}"
+  },
+  {
+    "t": "1790752378646982",
+    "unit": "eidolon-channel.service",
+    "msg": "2026-09-30 15:12:58,645 INFO eidolon.livekit.agent.smarthome smart-home turn=c926fe731a23461e outcome=executed delivered"
+  },
+  {
+    "t": "1790752384210415",
+    "unit": "eidolon-channel.service",
+    "msg": "2026-09-30 15:13:04,207 INFO eidolon.livekit.plugins.vad.firered VAD: end of speech"
+  },
+  {
+    "t": "1790752384436139",
+    "unit": "eidolon-channel.service",
+    "msg": "2026-09-30 15:13:04,432 INFO bailian.stt_stream [Bailian STT] FINAL_TRANSCRIPT text='打开窗帘。' start=7.760s end=8.680s"
+  },
+  {
+    "t": "1790752384752099",
+    "unit": "eidolon-laya.service",
+    "msg": "2026-09-30 15:13:04,751 INFO eidolon_laya systemone q=1 skipped=0 tokens=155 forward=270ms total=270ms truncated=-"
+  },
+  {
+    "t": "1790752384754143",
+    "unit": "eidolon-agent.service",
+    "msg": "home continuation turn=373ef81415064b72 question=follow model=7b695ba8 probability=0.9767"
+  },
+  {
+    "t": "1790752384754892",
+    "unit": "eidolon-agent.service",
+    "msg": "home interpretation turn=373ef81415064b72 route=laya_continuation"
+  },
+  {
+    "t": "1790752384755282",
+    "unit": "eidolon-agent.service",
+    "msg": "home stage turn=373ef81415064b72 stage=continuation elapsed_ms=277.1"
+  },
+  {
+    "t": "1790752384755635",
+    "unit": "eidolon-agent.service",
+    "msg": "home stage turn=373ef81415064b72 stage=understanding elapsed_ms=277.5"
+  },
+  {
+    "t": "1790752384822523",
+    "unit": "eidolon-hub.service",
+    "msg": "INFO:     127.0.0.1:35400 - \"POST /api/smarthome/v1/execute HTTP/1.1\" 200 OK"
+  },
+  {
+    "t": "1790752384828939",
+    "unit": "eidolon-agent.service",
+    "msg": "home stage turn=373ef81415064b72 stage=execution elapsed_ms=37.8"
+  },
+  {
+    "t": "1790752384830521",
+    "unit": "eidolon-agent.service",
+    "msg": "home turn=373ef81415064b72 session=esp32-3b0f2d19-3e082a1c-00000001 elapsed_ms=386 result={\"schema_version\":1,\"turn_id\":\"373ef81415064b72\",\"utterance\":\"打开窗帘。\",\"outcome\":\"executed\",\"message\":\"已打开客厅窗帘\",\"candidates\":[],\"command\":null}"
+  },
+  {
+    "t": "1790752384880247",
+    "unit": "eidolon-channel.service",
+    "msg": "2026-09-30 15:13:04,879 INFO eidolon.livekit.agent.smarthome smart-home turn=373ef81415064b72 outcome=executed delivered"
+  },
+  {
+    "t": "1790752388746488",
+    "unit": "eidolon-channel.service",
+    "msg": "2026-09-30 15:13:08,742 INFO eidolon.livekit.plugins.vad.firered VAD: end of speech"
+  },
+  {
+    "t": "1790752388952939",
+    "unit": "eidolon-channel.service",
+    "msg": "2026-09-30 15:13:08,951 INFO bailian.stt_stream [Bailian STT] FINAL_TRANSCRIPT text='关闭窗帘。' start=12.300s end=13.180s"
+  },
+  {
+    "t": "1790752389306234",
+    "unit": "eidolon-laya.service",
+    "msg": "2026-09-30 15:13:09,305 INFO eidolon_laya systemone q=1 skipped=0 tokens=155 forward=287ms total=287ms truncated=-"
+  },
+  {
+    "t": "1790752389308130",
+    "unit": "eidolon-agent.service",
+    "msg": "home continuation turn=883ab0a04e82499d question=follow model=7b695ba8 probability=0.9860"
+  },
+  {
+    "t": "1790752389308860",
+    "unit": "eidolon-agent.service",
+    "msg": "home interpretation turn=883ab0a04e82499d route=laya_continuation"
+  },
+  {
+    "t": "1790752389309241",
+    "unit": "eidolon-agent.service",
+    "msg": "home stage turn=883ab0a04e82499d stage=continuation elapsed_ms=293.4"
+  },
+  {
+    "t": "1790752389309546",
+    "unit": "eidolon-agent.service",
+    "msg": "home stage turn=883ab0a04e82499d stage=understanding elapsed_ms=293.8"
+  },
+  {
+    "t": "1790752389370928",
+    "unit": "eidolon-hub.service",
+    "msg": "INFO:     127.0.0.1:35400 - \"POST /api/smarthome/v1/execute HTTP/1.1\" 200 OK"
+  },
+  {
+    "t": "1790752389374518",
+    "unit": "eidolon-agent.service",
+    "msg": "home stage turn=883ab0a04e82499d stage=execution elapsed_ms=31.9"
+  },
+  {
+    "t": "1790752389375960",
+    "unit": "eidolon-agent.service",
+    "msg": "home turn=883ab0a04e82499d session=esp32-3b0f2d19-3e082a1c-00000001 elapsed_ms=419 result={\"schema_version\":1,\"turn_id\":\"883ab0a04e82499d\",\"utterance\":\"关闭窗帘。\",\"outcome\":\"executed\",\"message\":\"已关闭客厅窗帘\",\"candidates\":[],\"command\":null}"
+  },
+  {
+    "t": "1790752389422005",
+    "unit": "eidolon-channel.service",
+    "msg": "2026-09-30 15:13:09,421 INFO eidolon.livekit.agent.smarthome smart-home turn=883ab0a04e82499d outcome=executed delivered"
+  },
+  {
+    "t": "1790752391642607",
+    "unit": "eidolon-channel.service",
+    "msg": "2026-09-30 15:13:11,639 INFO eidolon.livekit.plugins.vad.firered VAD: end of speech"
+  },
+  {
+    "t": "1790752392270608",
+    "unit": "eidolon-channel.service",
+    "msg": "2026-09-30 15:13:12,267 INFO bailian.stt_stream [Bailian STT] FINAL_TRANSCRIPT text='打开它。' start=15.460s end=16.140s"
+  },
+  {
+    "t": "1790752392606364",
+    "unit": "eidolon-laya.service",
+    "msg": "2026-09-30 15:13:12,606 INFO eidolon_laya systemone q=1 skipped=0 tokens=154 forward=282ms total=283ms truncated=-"
+  },
+  {
+    "t": "1790752392612624",
+    "unit": "eidolon-agent.service",
+    "msg": "home continuation turn=06e1816cb9b24152 question=follow model=7b695ba8 probability=0.9900"
+  },
+  {
+    "t": "1790752392614021",
+    "unit": "eidolon-agent.service",
+    "msg": "home interpretation turn=06e1816cb9b24152 route=laya_continuation"
+  },
+  {
+    "t": "1790752392614874",
+    "unit": "eidolon-agent.service",
+    "msg": "home stage turn=06e1816cb9b24152 stage=continuation elapsed_ms=295.6"
+  },
+  {
+    "t": "1790752392615706",
+    "unit": "eidolon-agent.service",
+    "msg": "home stage turn=06e1816cb9b24152 stage=understanding elapsed_ms=296.5"
+  },
+  {
+    "t": "1790752392703565",
+    "unit": "eidolon-hub.service",
+    "msg": "INFO:     127.0.0.1:35400 - \"POST /api/smarthome/v1/execute HTTP/1.1\" 200 OK"
+  },
+  {
+    "t": "1790752392707131",
+    "unit": "eidolon-agent.service",
+    "msg": "home stage turn=06e1816cb9b24152 stage=execution elapsed_ms=46.9"
+  },
+  {
+    "t": "1790752392708518",
+    "unit": "eidolon-agent.service",
+    "msg": "home turn=06e1816cb9b24152 session=esp32-3b0f2d19-3e082a1c-00000001 elapsed_ms=425 result={\"schema_version\":1,\"turn_id\":\"06e1816cb9b24152\",\"utterance\":\"打开它。\",\"outcome\":\"executed\",\"message\":\"已打开客厅窗帘\",\"candidates\":[],\"command\":null}"
+  },
+  {
+    "t": "1790752392771881",
+    "unit": "eidolon-channel.service",
+    "msg": "2026-09-30 15:13:12,770 INFO eidolon.livekit.agent.smarthome smart-home turn=06e1816cb9b24152 outcome=executed delivered"
+  },
+  {
+    "t": "1790752395341976",
+    "unit": "eidolon-channel.service",
+    "msg": "2026-09-30 15:13:15,337 INFO eidolon.livekit.plugins.vad.firered VAD: end of speech"
+  },
+  {
+    "t": "1790752395647992",
+    "unit": "eidolon-channel.service",
+    "msg": "2026-09-30 15:13:15,643 INFO bailian.stt_stream [Bailian STT] FINAL_TRANSCRIPT text='关闭它。' start=19.240s end=19.880s"
+  },
+  {
+    "t": "1790752395970935",
+    "unit": "eidolon-laya.service",
+    "msg": "2026-09-30 15:13:15,970 INFO eidolon_laya systemone q=1 skipped=0 tokens=153 forward=268ms total=269ms truncated=-"
+  },
+  {
+    "t": "1790752395974723",
+    "unit": "eidolon-agent.service",
+    "msg": "home continuation turn=adf5c2f7f130417c question=follow model=7b695ba8 probability=0.9883"
+  },
+  {
+    "t": "1790752395976387",
+    "unit": "eidolon-agent.service",
+    "msg": "home interpretation turn=adf5c2f7f130417c route=laya_continuation"
+  },
+  {
+    "t": "1790752395977588",
+    "unit": "eidolon-agent.service",
+    "msg": "home stage turn=adf5c2f7f130417c stage=continuation elapsed_ms=280.2"
+  },
+  {
+    "t": "1790752395978683",
+    "unit": "eidolon-agent.service",
+    "msg": "home stage turn=adf5c2f7f130417c stage=understanding elapsed_ms=281.3"
+  },
+  {
+    "t": "1790752396038942",
+    "unit": "eidolon-hub.service",
+    "msg": "INFO:     127.0.0.1:35400 - \"POST /api/smarthome/v1/execute HTTP/1.1\" 200 OK"
+  },
+  {
+    "t": "1790752396040591",
+    "unit": "eidolon-agent.service",
+    "msg": "home stage turn=adf5c2f7f130417c stage=execution elapsed_ms=30.4"
+  },
+  {
+    "t": "1790752396041097",
+    "unit": "eidolon-agent.service",
+    "msg": "home turn=adf5c2f7f130417c session=esp32-3b0f2d19-3e082a1c-00000001 elapsed_ms=387 result={\"schema_version\":1,\"turn_id\":\"adf5c2f7f130417c\",\"utterance\":\"关闭它。\",\"outcome\":\"executed\",\"message\":\"已关闭客厅窗帘\",\"candidates\":[],\"command\":null}"
+  },
+  {
+    "t": "1790752396101344",
+    "unit": "eidolon-channel.service",
+    "msg": "2026-09-30 15:13:16,100 INFO eidolon.livekit.agent.smarthome smart-home turn=adf5c2f7f130417c outcome=executed delivered"
+  },
+  {
+    "t": "1790752402228836",
+    "unit": "eidolon-channel.service",
+    "msg": "2026-09-30 15:13:22,226 INFO eidolon.livekit.plugins.vad.firered VAD: end of speech"
+  },
+  {
+    "t": "1790752402460478",
+    "unit": "eidolon-channel.service",
+    "msg": "2026-09-30 15:13:22,456 INFO bailian.stt_stream [Bailian STT] FINAL_TRANSCRIPT text='打开电视。' start=25.920s end=26.830s"
+  },
+  {
+    "t": "1790752402808567",
+    "unit": "eidolon-laya.service",
+    "msg": "2026-09-30 15:13:22,808 INFO eidolon_laya systemone q=1 skipped=0 tokens=153 forward=289ms total=290ms truncated=-"
+  },
+  {
+    "t": "1790752402810380",
+    "unit": "eidolon-agent.service",
+    "msg": "home continuation turn=67d5550c47dd4f58 question=follow model=7b695ba8 probability=0.9689"
+  },
+  {
+    "t": "1790752402811358",
+    "unit": "eidolon-agent.service",
+    "msg": "home stage turn=67d5550c47dd4f58 stage=continuation elapsed_ms=297.1"
+  },
+  {
+    "t": "1790752402811358",
+    "unit": "eidolon-agent.service",
+    "msg": "home interpretation turn=67d5550c47dd4f58 route=llm reason=continuation_not_accepted"
+  },
+  {
+    "t": "1790752403064836",
+    "unit": "eidolon-agent.service",
+    "msg": "litellm_stream_first_chunk req=67d5550c47dd4f58 model=openai/deepseek-v4-flash connect_ms=250 raw_ttft_ms=252 idle_ms=2151740 choices=1"
+  },
+  {
+    "t": "1790752403696164",
+    "unit": "eidolon-agent.service",
+    "msg": "litellm_timings req=67d5550c47dd4f58 model=openai/deepseek-v4-flash connect_ms=250 ttft_ms=883 raw_ttft_ms=252 raw_chunks_before_effective=1 idle_ms=2151740 kind=tool_call"
+  },
+  {
+    "t": "1790752403906446",
+    "unit": "eidolon-agent.service",
+    "msg": "litellm_stream_summary req=67d5550c47dd4f58 model=openai/deepseek-v4-flash outcome=completed connect_ms=250 raw_ttft_ms=252 tool_ready_ms=1084 finish_ms=1084 stream_end_ms=1094 close_ms=0 tokens_in=4233 tokens_out=91 cached_tokens_in=2304 configured_max_retries=2"
+  },
+  {
+    "t": "1790752403908783",
+    "unit": "eidolon-agent.service",
+    "msg": "home fallback turn=67d5550c47dd4f58 outcome=proposed intent=control target_status=resolved targets=('living.tv',) action=('on_off', 'on')"
+  },
+  {
+    "t": "1790752403909586",
+    "unit": "eidolon-agent.service",
+    "msg": "home stage turn=67d5550c47dd4f58 stage=understanding elapsed_ms=1395.9"
+  },
+  {
+    "t": "1790752403974345",
+    "unit": "eidolon-hub.service",
+    "msg": "INFO:     127.0.0.1:33206 - \"POST /api/smarthome/v1/execute HTTP/1.1\" 200 OK"
+  },
+  {
+    "t": "1790752403977085",
+    "unit": "eidolon-agent.service",
+    "msg": "home stage turn=67d5550c47dd4f58 stage=execution elapsed_ms=39.3"
+  },
+  {
+    "t": "1790752403978673",
+    "unit": "eidolon-agent.service",
+    "msg": "home turn=67d5550c47dd4f58 session=esp32-3b0f2d19-3e082a1c-00000001 elapsed_ms=1508 result={\"schema_version\":1,\"turn_id\":\"67d5550c47dd4f58\",\"utterance\":\"打开电视。\",\"outcome\":\"executed\",\"message\":\"已打开电视\",\"candidates\":[],\"command\":null}"
+  },
+  {
+    "t": "1790752404065939",
+    "unit": "eidolon-channel.service",
+    "msg": "2026-09-30 15:13:24,065 INFO eidolon.livekit.agent.smarthome smart-home turn=67d5550c47dd4f58 outcome=executed delivered"
+  },
+  {
+    "t": "1790752407157876",
+    "unit": "eidolon-channel.service",
+    "msg": "2026-09-30 15:13:27,155 INFO eidolon.livekit.plugins.vad.firered VAD: end of speech"
+  },
+  {
+    "t": "1790752407430616",
+    "unit": "eidolon-channel.service",
+    "msg": "2026-09-30 15:13:27,425 INFO bailian.stt_stream [Bailian STT] FINAL_TRANSCRIPT text='关了它。' start=30.940s end=31.660s"
+  },
+  {
+    "t": "1790752407744322",
+    "unit": "eidolon-laya.service",
+    "msg": "2026-09-30 15:13:27,744 INFO eidolon_laya systemone q=1 skipped=0 tokens=187 forward=263ms total=266ms truncated=-"
+  },
+  {
+    "t": "1790752407746543",
+    "unit": "eidolon-agent.service",
+    "msg": "home continuation turn=6566dfef2c5243db question=follow model=7b695ba8 probability=0.9941"
+  },
+  {
+    "t": "1790752407747275",
+    "unit": "eidolon-agent.service",
+    "msg": "home interpretation turn=6566dfef2c5243db route=laya_continuation"
+  },
+  {
+    "t": "1790752407747702",
+    "unit": "eidolon-agent.service",
+    "msg": "home stage turn=6566dfef2c5243db stage=continuation elapsed_ms=272.8"
+  },
+  {
+    "t": "1790752407747984",
+    "unit": "eidolon-agent.service",
+    "msg": "home stage turn=6566dfef2c5243db stage=understanding elapsed_ms=273.1"
+  },
+  {
+    "t": "1790752407789584",
+    "unit": "eidolon-hub.service",
+    "msg": "INFO:     127.0.0.1:33206 - \"POST /api/smarthome/v1/execute HTTP/1.1\" 200 OK"
+  },
+  {
+    "t": "1790752407791111",
+    "unit": "eidolon-agent.service",
+    "msg": "home stage turn=6566dfef2c5243db stage=execution elapsed_ms=26.4"
+  },
+  {
+    "t": "1790752407791699",
+    "unit": "eidolon-agent.service",
+    "msg": "home turn=6566dfef2c5243db session=esp32-3b0f2d19-3e082a1c-00000001 elapsed_ms=356 result={\"schema_version\":1,\"turn_id\":\"6566dfef2c5243db\",\"utterance\":\"关了它。\",\"outcome\":\"executed\",\"message\":\"已关闭电视\",\"candidates\":[],\"command\":null}"
+  },
+  {
+    "t": "1790752407837231",
+    "unit": "eidolon-channel.service",
+    "msg": "2026-09-30 15:13:27,836 INFO eidolon.livekit.agent.smarthome smart-home turn=6566dfef2c5243db outcome=executed delivered"
+  },
+  {
+    "t": "1790752411349667",
+    "unit": "eidolon-channel.service",
+    "msg": "2026-09-30 15:13:31,346 INFO eidolon.livekit.plugins.vad.firered VAD: end of speech"
+  },
+  {
+    "t": "1790752411584762",
+    "unit": "eidolon-channel.service",
+    "msg": "2026-09-30 15:13:31,581 INFO bailian.stt_stream [Bailian STT] FINAL_TRANSCRIPT text='打开窗帘。' start=34.900s end=35.820s"
+  },
+  {
+    "t": "1790752411934067",
+    "unit": "eidolon-laya.service",
+    "msg": "2026-09-30 15:13:31,933 INFO eidolon_laya systemone q=1 skipped=0 tokens=188 forward=291ms total=294ms truncated=-"
+  },
+  {
+    "t": "1790752411937351",
+    "unit": "eidolon-agent.service",
+    "msg": "home continuation turn=e19f2d62aef44fc3 question=follow model=7b695ba8 probability=0.5858"
+  },
+  {
+    "t": "1790752411938247",
+    "unit": "eidolon-agent.service",
+    "msg": "home stage turn=e19f2d62aef44fc3 stage=continuation elapsed_ms=303.0"
+  },
+  {
+    "t": "1790752411939245",
+    "unit": "eidolon-agent.service",
+    "msg": "home interpretation turn=e19f2d62aef44fc3 route=llm reason=continuation_not_accepted"
+  },
+  {
+    "t": "1790752412122856",
+    "unit": "eidolon-agent.service",
+    "msg": "litellm_stream_first_chunk req=e19f2d62aef44fc3 model=openai/deepseek-v4-flash connect_ms=166 raw_ttft_ms=181 idle_ms=9128 choices=1"
+  },
+  {
+    "t": "1790752412969898",
+    "unit": "eidolon-agent.service",
+    "msg": "litellm_timings req=e19f2d62aef44fc3 model=openai/deepseek-v4-flash connect_ms=166 ttft_ms=1028 raw_ttft_ms=181 raw_chunks_before_effective=1 idle_ms=9128 kind=tool_call"
+  },
+  {
+    "t": "1790752413075150",
+    "unit": "eidolon-agent.service",
+    "msg": "litellm_stream_summary req=e19f2d62aef44fc3 model=openai/deepseek-v4-flash outcome=completed connect_ms=166 raw_ttft_ms=181 tool_ready_ms=1123 finish_ms=1123 stream_end_ms=1134 close_ms=0 tokens_in=4232 tokens_out=91 cached_tokens_in=2304 configured_max_retries=2"
+  },
+  {
+    "t": "1790752413077828",
+    "unit": "eidolon-agent.service",
+    "msg": "home fallback turn=e19f2d62aef44fc3 outcome=proposed intent=control target_status=resolved targets=('living.curtain',) action=('position', 'open')"
+  },
+  {
+    "t": "1790752413078951",
+    "unit": "eidolon-agent.service",
+    "msg": "home stage turn=e19f2d62aef44fc3 stage=understanding elapsed_ms=1443.7"
+  },
+  {
+    "t": "1790752413164553",
+    "unit": "eidolon-hub.service",
+    "msg": "INFO:     127.0.0.1:33206 - \"POST /api/smarthome/v1/execute HTTP/1.1\" 200 OK"
+  },
+  {
+    "t": "1790752413167299",
+    "unit": "eidolon-agent.service",
+    "msg": "home stage turn=e19f2d62aef44fc3 stage=execution elapsed_ms=47.9"
+  },
+  {
+    "t": "1790752413168002",
+    "unit": "eidolon-agent.service",
+    "msg": "home turn=e19f2d62aef44fc3 session=esp32-3b0f2d19-3e082a1c-00000001 elapsed_ms=1575 result={\"schema_version\":1,\"turn_id\":\"e19f2d62aef44fc3\",\"utterance\":\"打开窗帘。\",\"outcome\":\"executed\",\"message\":\"已打开客厅窗帘\",\"candidates\":[],\"command\":null}"
+  },
+  {
+    "t": "1790752413212076",
+    "unit": "eidolon-channel.service",
+    "msg": "2026-09-30 15:13:33,211 INFO eidolon.livekit.agent.smarthome smart-home turn=e19f2d62aef44fc3 outcome=executed delivered"
+  }
+]
