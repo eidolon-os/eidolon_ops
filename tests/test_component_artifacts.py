@@ -114,12 +114,12 @@ def test_laya_release_is_capability_selected_and_versioned() -> None:
     assert not any(item.artifact_id.startswith("laya-smart-home") for item in without)
     with_laya = _declared(frozenset({"local_laya"}))
     model = next(item for item in with_laya if item.artifact_id.startswith("laya-smart-home"))
-    assert model.install_root.name == "laya-smart-home-r14-onnx-45f3dedb"
+    assert model.install_root.name == "laya-smart-home-c4-onnx-7b695ba8"
     assert {item.path for item in model.files} >= {
         "manifest.json", "onnx/model.onnx", "onnx/model.onnx.data",
         "onnx/export.json", "torch/tokenizer/tokenizer.json",
     }
-    assert all(item.url.startswith("local-artifact://laya-r14-onnx/") for item in model.files)
+    assert all(item.url.startswith("local-artifact://laya-c4-onnx/") for item in model.files)
     unit = (_CHECKOUT_ROOT / "eidolon_models/deploy/systemd/eidolon-laya.service").read_text()
     launcher = (_CHECKOUT_ROOT / "eidolon_models/scripts/eidolon-laya").read_text()
     assert str(model.install_root) in launcher
