@@ -1,4 +1,4 @@
-"""The files a macOS source run needs, rendered from the pinned sources.
+"""The files a Unix source run needs, rendered from the pinned sources.
 
 Only the rendering lives here. What is rendered — which env files, which
 settings, which template placeholders — is the same set the product Host gets;
@@ -284,6 +284,7 @@ def profile_environment(
 ) -> str:
     values: dict[str, str] = {
         **profile.environment(),
+        "EIDOLON_HOST_CAPABILITIES": ",".join(sorted(config.capabilities)),
         "EIDOLON_PRODUCT_ENV_ROOT": str(profile.paths.config_root / "env"),
         "EIDOLON_PRODUCT_SETTINGS_ROOT": str(profile.paths.config_root / "settings"),
         "EIDOLON_LIVEKIT_TEMPLATE_CONFIG": str(profile.paths.config_root / "settings/livekit.yaml"),
@@ -323,7 +324,7 @@ def profile_environment(
     }
     if profile.external_livekit_config is not None:
         values["EIDOLON_LIVEKIT_GENERATED_CONFIG"] = str(profile.external_livekit_config)
-    return environment.serialize_ops(values)
+    return environment.serialize_ops(values, allow_empty=frozenset({"EIDOLON_HOST_CAPABILITIES"}))
 
 
 def admin_ports_yaml() -> str:

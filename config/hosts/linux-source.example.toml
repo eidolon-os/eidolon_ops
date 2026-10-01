@@ -1,8 +1,8 @@
 schema_version = 1
 
 [host]
-id = "mac-dev"
-platform = "macos"
+id = "linux-source"
+platform = "linux"
 
 [execution]
 transport = "local"
@@ -17,13 +17,13 @@ identity = "current-user"
 # repositories or the historical ~/eidolon namespace.
 install_root = "~/ai/eidolon"
 current_root = "~/ai/eidolon"
-config_root = "~/ai/eidolon/.eidolon/mac-product/config"
-state_root = "~/ai/eidolon/.eidolon/mac-product/state"
-runtime_root = "~/ai/eidolon/.eidolon/mac-product/run"
-log_root = "~/ai/eidolon/.eidolon/mac-product/logs"
-cache_root = "~/ai/eidolon/.eidolon/mac-product/cache"
-bootstrap_state_root = "~/ai/eidolon/.eidolon/mac-product/bootstrap/state"
-bootstrap_runtime_root = "~/ai/eidolon/.eidolon/mac-product/bootstrap/run"
+config_root = "~/ai/eidolon/.eidolon/source-host/config"
+state_root = "~/ai/eidolon/.eidolon/source-host/state"
+runtime_root = "~/ai/eidolon/.eidolon/source-host/run"
+log_root = "~/ai/eidolon/.eidolon/source-host/logs"
+cache_root = "~/ai/eidolon/.eidolon/source-host/cache"
+bootstrap_state_root = "~/ai/eidolon/.eidolon/source-host/bootstrap/state"
+bootstrap_runtime_root = "~/ai/eidolon/.eidolon/source-host/bootstrap/run"
 
 [adapter]
 lifecycle_script = "../../deploy/dev/run_all.sh"
@@ -31,7 +31,7 @@ operations_config = "../eidolon-pi.toml"
 # The operator supplies NATS and LiveKit binaries. This Host owns their lifecycle;
 # startup never installs dependencies or requests administrator access.
 foundation_mode = "external"
-external_livekit_config = "~/ai/eidolon/.eidolon/mac-product/run/livekit/livekit.generated.yaml"
+external_livekit_config = "~/ai/eidolon/.eidolon/source-host/run/livekit/livekit.generated.yaml"
 
 [app]
 # lan_ipv4 is optional. Leave it out and the Host reports the address it
@@ -53,14 +53,12 @@ allow_insecure_livekit = true
 # path = "/absolute/path/to/eidolon_admin-worktree"
 # revision = "0000000000000000000000000000000000000000"
 
-# This machine's settings beyond its operations config's. The Mac source run interprets home
-# commands with Laya (its own MPS service) and records every interpretation for evaluation.
-[[settings.overlay]]
-document = "agent.yaml"
-path = "smarthome.interpreter"
-value = "laya"
 
-[[settings.overlay]]
-document = "agent.yaml"
-path = "smarthome.interpretation_record_path"
-value = "$EIDOLON_STATE_ROOT/agent/smarthome/interpretation.jsonl"
+# Model placement is a Host capability, independent of OS and execution mode.
+[capabilities]
+provides = []
+
+# Replace with this Host's actual provider endpoints before starting.
+[model_endpoints]
+laya_smart_home = "https://smart-home-model.example.invalid"
+laya_participation = "https://models.example.invalid/v1/participation/decide"

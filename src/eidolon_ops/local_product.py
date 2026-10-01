@@ -1,4 +1,4 @@
-"""Materialize and attest the commit-pinned topology for a macOS source run."""
+"""Materialize and attest the commit-pinned topology for a Unix source run."""
 
 from __future__ import annotations
 
@@ -79,6 +79,7 @@ from eidolon_ops.readiness import (
 from eidolon_ops.source_resolution import SourceResolver
 from eidolon_ops.source_runtime import render_supervisor, source_services
 from eidolon_ops.source_schema import migrate_data_schema
+from eidolon_ops.source_state import prepare_logs
 
 
 class LocalProductSource:
@@ -113,12 +114,19 @@ class LocalProductSource:
 
     # -- materialization -----------------------------------------------------
 
-    def source_services(self):
-        services = []
+    def source_contracts(self):
+        contracts = []
         for component_id, source in self.config.sources.items():
             declaration = load_component_contract(source.path, component_id)
             if declaration is None:
                 raise OperationsError(f"source component has no operational contract: {component_id}")
+            contracts.append(declaration.select(self.config.capabilities))
+        return tuple(contracts)
+
+    def source_services(self):
+        services = []
+        for declaration in self.source_contracts():
+            source = self.config.sources[declaration.component_id]
             services.extend(source_services(declaration, self.profile, source.path))
         return tuple(services)
 
@@ -154,12 +162,16 @@ class LocalProductSource:
         for destination, content in expected.items():
             atomic_private_file(destination, content)
         services = self.source_services()
-        template = Path(__file__).parents[2] / "deploy/supervisor/product-source.conf"
+        template = self.profile.workspace_root / "deploy/supervisor/product-source.conf"
         operator = pwd.getpwuid(self.profile.path.stat().st_uid).pw_name
         atomic_private_file(
             paths.config_root / "supervisor.conf",
-            render_supervisor(template.read_text(), services, operator).encode(),
+            render_supervisor(
+                template.read_text(), services, operator,
+                platform=self.profile.platform, contracts=self.source_contracts(),
+            ).encode(),
         )
+        prepare_logs(self.profile, services)
         result = self.validate()
         return {
             **result,
@@ -202,14 +214,14 @@ class LocalProductSource:
         ]
         missing = [str(path) for path in required if not path.is_file() or path.is_symlink()]
         if missing:
-            raise OperationsError("Mac product-source inputs are missing: " + ", ".join(missing))
+            raise OperationsError("source Host inputs are missing: " + ", ".join(missing))
         unsafe = [str(path) for path in required if stat.S_IMODE(path.stat().st_mode) != 0o600]
         if unsafe:
             raise OperationsError(
-                "Mac product-source inputs have unsafe modes: " + ", ".join(unsafe)
+                "source Host inputs have unsafe modes: " + ", ".join(unsafe)
             )
         if self._host_identity_path().stat().st_size != 32:
-            raise OperationsError("Mac Host Identity must contain exactly 32 bytes")
+            raise OperationsError("source Host Identity must contain exactly 32 bytes")
         return {
             "status": "compatible",
             "profile": "product-source",
@@ -443,7 +455,7 @@ class LocalProductSource:
             or stat.S_IMODE(destination.stat().st_mode) != 0o600
             or destination.stat().st_size != 32
         ):
-            raise OperationsError("existing Mac Host Identity is unsafe or invalid")
+            raise OperationsError("existing source Host Identity is unsafe or invalid")
 
     def _rendered_environment(self, source_inputs: Path) -> dict[Path, bytes]:
         root = self.profile.paths.config_root
@@ -544,7 +556,7 @@ class LocalProductSource:
                 owner_domain_generation,
                 identity,
                 app.hub_https_port,
-                mdns_enabled=False,
+                mdns_enabled=True,
             ),
         ).encode("utf-8")
         rendered[root / "settings/channel-provider.yaml"] = source_assets.translate_fhs(
@@ -555,13 +567,7 @@ class LocalProductSource:
                 "config/channel-provider.yaml",
             ),
         ).encode("utf-8")
-        rendered[root / "settings/eidolond.yaml"] = source_assets.eidolond_settings(
-            self.profile,
-            socket_group=next(
-                (service.primary_group for service in self.source_services()
-                 if service.program == "lifecycle-workflow"), None
-            ),
-        ).encode("utf-8")
+        rendered[root / "settings/eidolond.yaml"] = source_assets.eidolond_settings(self.profile).encode("utf-8")
         rendered[root / "settings/ports.yaml"] = source_assets.admin_ports_yaml().encode("utf-8")
         rendered[root / "settings/services.yaml"] = source_assets.admin_services_yaml(self.source_services()).encode(
             "utf-8"
@@ -839,7 +845,7 @@ class LocalProductSource:
         if self.sources.revision(source_id) != revision:
             raise OperationsError(f"source revision drifted while reading {source_id}:{path}")
         return checked(
-            f"exact Mac product source file {source_id}:{path}",
+            f"exact product source file {source_id}:{path}",
             self.runner.run(
                 (
                     self.git,
@@ -856,7 +862,7 @@ class LocalProductSource:
 
     def _require_app_access(self) -> AppAccess:
         if self.profile.app is None:
-            raise OperationsError("Mac product-source profile requires an app access contract")
+            raise OperationsError("source Host profile requires an app access contract")
         return self.profile.app
 
     def _descriptor_uri(self) -> str:
@@ -885,10 +891,10 @@ class LocalProductSource:
                 or not path.is_file()
                 or stat.S_IMODE(path.stat().st_mode) != 0o600
             ):
-                raise OperationsError("Mac Host Identity is unsafe or missing")
+                raise OperationsError("source Host Identity is unsafe or missing")
             return derive_host_lan_identity(path.read_bytes())
         except (OSError, HostIdentityError) as exc:
-            raise OperationsError("Mac Host Identity cannot define its LAN identity") from exc
+            raise OperationsError("source Host Identity cannot define its LAN identity") from exc
 
     def _hub_certificate_path(self) -> Path:
         return self.profile.paths.config_root / "tls/hub.crt"
@@ -923,9 +929,9 @@ class LocalProductSource:
             value = json.loads(self._owner_descriptor_path().read_text(encoding="utf-8"))
             owner_domain_id = value["owner_domain_id"]
         except (OSError, KeyError, TypeError, ValueError) as exc:
-            raise OperationsError("Mac Owner Domain descriptor is unreadable") from exc
+            raise OperationsError("source Owner Domain descriptor is unreadable") from exc
         if not isinstance(owner_domain_id, str) or not owner_domain_id:
-            raise OperationsError("Mac Owner Domain descriptor has no Owner identity")
+            raise OperationsError("source Owner Domain descriptor has no Owner identity")
         return owner_domain_id
 
     def _owner_domain_generation(self) -> int:
@@ -933,9 +939,9 @@ class LocalProductSource:
             value = json.loads(self._owner_descriptor_path().read_text(encoding="utf-8"))
             generation = value["owner_domain_generation"]
         except (OSError, KeyError, TypeError, ValueError) as exc:
-            raise OperationsError("Mac Owner Domain generation is unreadable") from exc
+            raise OperationsError("source Owner Domain generation is unreadable") from exc
         if not isinstance(generation, int) or generation < 1:
-            raise OperationsError("Mac Owner Domain generation is invalid")
+            raise OperationsError("source Owner Domain generation is invalid")
         return generation
 
     def _ensure_owner_domain_assets(self) -> OwnerDomainAssets:
@@ -986,13 +992,13 @@ class LocalProductSource:
                 served_directory=served,
             )
         except OwnerDomainAssetError as exc:
-            raise OperationsError(f"Mac Owner Domain material is {exc}") from exc
+            raise OperationsError(f"source Owner Domain material is {exc}") from exc
 
     def _material_owner_domain_id(self) -> str:
         try:
             return ensure_owner_material(self._owner_material_root(), self._host_lan_identity())
         except OwnerDomainAssetError as exc:
-            raise OperationsError(f"Mac Owner Domain material is {exc}") from exc
+            raise OperationsError(f"source Owner Domain material is {exc}") from exc
 
     def _delivery_root(self) -> Path:
         """Where this machine's delivery binding lives: under the identity it placed.
@@ -1077,7 +1083,7 @@ class LocalProductSource:
                 anchor=self._authority_anchor_path(),
             )
         except TargetError as exc:
-            raise OperationsError(f"Mac Owner Authority lineage is unreadable: {exc}") from exc
+            raise OperationsError(f"source Owner Authority lineage is unreadable: {exc}") from exc
 
     def commit_owner_authority(self) -> dict[str, object]:
         """Record which machine this identity is on, once its Hub proves it established the Authority.
@@ -1137,7 +1143,7 @@ class LocalProductSource:
         dropped = issued.difference(targets)
         if dropped:
             raise OperationsError(
-                "Mac Owner Domain material is issued but never placed: "
+                "source Owner Domain material is issued but never placed: "
                 + ", ".join(sorted(dropped))
             )
 

@@ -104,7 +104,7 @@ def test_every_declared_driver_has_a_command_set() -> None:
     assert body is not None
     assert 'toml_host_value "$profile" driver' in body.group(1)
     arms = set(re.findall(r"^\s{4}([a-z-]+)\)", body.group(1), re.MULTILINE))
-    assert arms == {driver.value for driver in HostDriver}
+    assert arms == {driver.value for driver in HostDriver} | {"supervisord", "systemd"}
 
 
 def test_every_active_host_profile_can_be_driven() -> None:
@@ -162,6 +162,7 @@ def test_dispatch_adds_the_selected_profile_and_preserves_arguments(tmp_path: Pa
     assert result.returncode == 0
     assert captured.read_text(encoding="utf-8").splitlines() == [
         "run",
+        "--no-sync",
         "eidolon-ops",
         "--config",
         str(ROOT / "config/hosts/pi5.toml"),
@@ -191,6 +192,7 @@ def test_dispatch_reaches_a_second_product_board_by_its_short_name(tmp_path: Pat
     assert result.returncode == 0
     assert captured.read_text(encoding="utf-8").splitlines() == [
         "run",
+        "--no-sync",
         "eidolon-ops",
         "--config",
         str(ROOT / "config/hosts/rk3588.toml"),

@@ -50,6 +50,7 @@ class _FakeConfig:
 
     sources: Mapping[str, _FakeSource]
     install_files: Mapping[str, Path] = field(default_factory=dict)
+    capabilities: frozenset[str] = frozenset()
 
 
 def _product(tmp_path: Path, *, foundation_mode: str) -> LocalProductSource:
@@ -70,7 +71,7 @@ def _product(tmp_path: Path, *, foundation_mode: str) -> LocalProductSource:
             bootstrap_state_root=root / "bootstrap/state",
             bootstrap_runtime_root=root / "bootstrap/run",
         ),
-        lifecycle_script=tmp_path / "run_all.sh",
+        lifecycle_script=Path(__file__).parents[1] / "deploy/dev/run_all.sh",
         operations_config=tmp_path / "operations.toml",
         foundation_mode=cast(Any, foundation_mode),
         external_livekit_config=tmp_path / "livekit.yaml",
@@ -254,6 +255,7 @@ def test_prepare_materializes_one_canonical_mac_product_contract(
 
     runner = Runner()
     monkeypatch.setattr(LocalProductSource, "source_services", lambda self: ())
+    monkeypatch.setattr(LocalProductSource, "source_contracts", lambda self: ())
     profile.path.write_text("test profile")
     monkeypatch.setattr(
         local_product_module, "validate_install_input_contract", lambda *_a, **_k: None
@@ -278,7 +280,7 @@ def test_prepare_materializes_one_canonical_mac_product_contract(
     assert "port: 8767" in (root / "settings/channel-provider.yaml").read_text(encoding="utf-8")
     hub_settings = (root / "settings/hub.yaml").read_text(encoding="utf-8")
     assert f"path: {profile.paths.state_root}/hub/eidolon-hub.sqlite3" in hub_settings
-    assert "discovery:\n  mdns:\n    enabled: false\n" in hub_settings
+    assert "discovery:\n  mdns:\n    enabled: true\n" in hub_settings
     # The key pair travels install inputs -> env files -> the server Ops starts.
     # It used to be read back out of whatever LiveKit config happened to be on
     # disk, which made a clean Host unpreparable and let a months-old file decide

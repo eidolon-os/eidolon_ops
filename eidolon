@@ -27,12 +27,11 @@ die() {
   exit 2
 }
 
-toml_host_value() {
-  local profile="$1" key="$2"
-  awk -v wanted="$key" '
-    /^\[host\][[:space:]]*$/ { in_host=1; next }
-    /^\[/ { in_host=0 }
-    in_host && $0 ~ "^[[:space:]]*" wanted "[[:space:]]*=" {
+toml_value() {
+  local profile="$1" section="$2" key="$3"
+  awk -v section="$section" -v wanted="$key" '
+    /^\[/ { active=($0 ~ "^\\[" section "\\][[:space:]]*$"); next }
+    active && $0 ~ "^[[:space:]]*" wanted "[[:space:]]*=" {
       value=$0
       sub(/^[^=]*=[[:space:]]*/, "", value)
       sub(/[[:space:]]*#.*/, "", value)
@@ -42,6 +41,8 @@ toml_host_value() {
     }
   ' "$profile"
 }
+
+toml_host_value() { toml_value "$1" host "$2"; }
 
 profiles() {
   local profile
@@ -112,7 +113,14 @@ resolve_profile() {
 }
 
 commands_for_profile() {
-  local profile="$1" driver
+  local profile="$1" driver supervisor
+  supervisor="$(toml_value "$profile" execution supervisor)"
+  case "$supervisor" in
+    supervisord) printf '%s\n' "$LOCAL_SUPERVISORD_COMMANDS"; return ;;
+    systemd) printf '%s\n' "$SSH_SYSTEMD_COMMANDS"; return ;;
+    "") ;;
+    *) die "主机配置使用未知进程管理器：$supervisor" ;;
+  esac
   driver="$(toml_host_value "$profile" driver)"
   case "$driver" in
     local-supervisord) printf '%s\n' "$LOCAL_SUPERVISORD_COMMANDS" ;;
@@ -141,8 +149,8 @@ command_summary() {
     service) printf '经 eidolond 重启单个服务(唯一的单服务途径):service restart SERVICE' ;;
     logs) printf '读取全部日志或指定服务日志' ;;
     commissioning-code) printf '生成手机 Setup/Commissioning Code' ;;
-    debug) printf 'Mac source-run 的 prepare/validate/Web 诊断入口' ;;
-    provision) printf '检查或安装 Pi 基础系统依赖' ;;
+    debug) printf '源码 Host 的 prepare/validate/Web 诊断入口' ;;
+    provision) printf '按执行配置准备 Host 运行环境' ;;
     init-inputs) printf '首次生成产品私密输入和 Host Identity' ;;
     converge-inputs) printf '补齐新增凭据，不修改已有值' ;;
     repair-credentials) printf '把板上自相矛盾的共享凭据对齐回本机的值(板上一致则不动)' ;;
@@ -216,7 +224,7 @@ EOF
 }
 
 run_cli() {
-  [[ "$(id -u)" != "0" ]] || die "请以源码目录拥有者运行；必要的系统初始化和启动会单独请求管理员认证"
+  [[ "$(id -u)" != "0" ]] || die "请以普通运维用户运行；源码 Host 启动不需要管理员权限"
   command -v "$UV_BIN" >/dev/null 2>&1 || die "找不到 uv；请先安装 uv 或设置 EIDOLON_UV_BIN"
   cd "$ROOT"
   exec "$UV_BIN" run --no-sync eidolon-ops "$@"

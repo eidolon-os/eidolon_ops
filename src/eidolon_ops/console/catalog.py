@@ -571,7 +571,7 @@ CATALOG: tuple[Operation, ...] = (
     Operation(
         name="debug",
         label="源码运行诊断",
-        summary="macOS source-run 的实现级诊断，不是产品操作",
+        summary="Unix source-run 的实现级诊断，不是产品操作",
         capability=Capability.SOURCE_PROFILE,
         group="observe",
         fields=(

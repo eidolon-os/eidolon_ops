@@ -19,7 +19,7 @@ from eidolon_ops.config import ConfigurationError, load_config
 from eidolon_ops.errors import OperationsError
 from eidolon_ops.host import HostAdapter, build_adapter
 from eidolon_ops.model import Capability, Evidence, Outcome, Plan, steps_from_phases
-from eidolon_ops.paths import HostDriver, HostProfile, is_product_board
+from eidolon_ops.paths import HostProfile
 from eidolon_ops.process import ProcessError, ProcessRunner
 from eidolon_ops.progress import ProgressSink
 from eidolon_ops.source_assets import status_ports
@@ -70,9 +70,10 @@ class HostController:
             "host_id": self.profile.host_id,
             "platform": str(self.profile.platform),
             "driver": str(self.profile.driver),
+            "execution": self.profile.execution.describe(),
             "ports": status_ports(hub_https_port=app.hub_https_port if app else None),
         }
-        if app is not None and not is_product_board(self.profile.platform):
+        if app is not None and self.profile.source_run:
             context["network"] = self._local_status_network()
         report = {**report, **context}
         network = report.get("network")
@@ -109,7 +110,7 @@ class HostController:
         that shows too many.
         """
 
-        if self.profile.driver is HostDriver.LOCAL_SUPERVISORD:
+        if self.profile.source_run:
             declared = self.profile.management_networks
         else:
             declared = self._deployed_management_networks()
@@ -146,7 +147,7 @@ class HostController:
             return ()
 
     def _local_status_network(self) -> dict[str, object]:
-        """Current Mac addresses; status must survive a disconnected machine."""
+        """Current local addresses; status must survive a disconnected machine."""
 
         try:
             addresses = lan_observation.interface_addresses(self.runner)

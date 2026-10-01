@@ -169,7 +169,7 @@ def test_local_doctor_publishes_capabilities_and_bounded_logs(tmp_path: Path) ->
     doctor = controller.doctor()
     assert doctor.outcome is Outcome.OBSERVED
     adapter = doctor.report["adapter"]
-    assert adapter["platform_profile"] == "macos-dev"
+    assert adapter["platform_profile"] == "macos"
     assert adapter["transport"] == "local"
     assert adapter["supervisor"] == "supervisord"
     assert adapter["packages"] == "none"

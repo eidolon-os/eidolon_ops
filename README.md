@@ -564,15 +564,18 @@ Owner 变更的权限边界；它的 state/runtime 目录均不与产品主进�
 ```
 
 Mac 的控制服务从组件 `ops/component.toml` 及其服务资产生成到 Host 的 `supervisor.conf`；
-服务账号、环境、私有目录和依赖来自同一组件声明。Supervisor 只保留驱动专属的 worker 配置。
-所有入口由源码目录拥有者运行，例如 `./eidolon mac restart`，禁止整体 `sudo`。
+服务角色、环境、私有目录和依赖来自同一组件声明。Supervisor 只保留驱动专属的 worker 配置。
+Mac 源码 Host 的本地信任边界是源码目录拥有者：Supervisor 和所有服务都以该用户运行，
+peer credential 校验绑定这个真实 UID。Owner / Controller 授权和移除工作流仍是组件的同一实现。
+生产 Linux 的独立服务账号隔离由 systemd 保持；源码模式不声称提供进程之间的 UID 隔离。
+所有入口由源码目录拥有者运行，例如 `./eidolon mac restart`，禁止整体 `sudo`，没有管理员认证弹窗。
 依赖预先由普通用户安装（Ops 使用 `uv sync --frozen --extra dev`）；日常命令不会安装依赖。
-首次运行或服务身份声明变更后，执行 `./eidolon mac provision --apply`：它先停止 Host，再通过
-macOS 系统认证建立隔离账号和迁移组件声明的私有目录。这一步不安装软件、不重置 Host 身份。
-之后 `start` / `restart` 校验初始化结果，以普通用户生成配置及精确的文件访问权限，成功停止旧服务
-后执行数据库迁移；只在启动 supervisor 时请求管理员认证。普通 worker 的 UID 和 HOME 都属于
-源码目录拥有者。`status` 不建目录、不修权限、不改 PID 文件。`system.sock` 自身使用声明的组和
-0660 权限，不向 Host 运行目录添加继承读写 ACL。工具可通过原有 `EIDOLON_UV_BIN`、
+`start` / `restart` 自动准备当前用户拥有的组件目录；`provision --apply` 也可单独准备这些目录和配置。
+如果旧版本曾将私有目录转给系统账号，只在停机后复制完整文件字节（包括 SQLite WAL），校验摘要，
+保留原目录后切换至当前用户副本。迁移有中断恢复记录，不执行 chown，不创建或删除系统账号。
+日常启动不调用 sudo、osascript、dscl 或 ACL 命令。依赖和配置在停止旧服务前检查，停止成功后
+执行数据库迁移。服务的 UID 和 HOME 属于源码拥有者，`system.sock` 为该用户的 0600 socket。
+`status` 不建目录、不修权限、不改 PID 文件。工具可通过原有 `EIDOLON_UV_BIN`、
 `EIDOLON_NATS_SERVER`、`EIDOLON_LIVEKIT_BIN` 指定绝对路径。
 
 设备移除使用同一工作流、撤销授权代理及 Owner 授权规则；仅内核 peer credential 读取由
@@ -589,9 +592,40 @@ host agent 在 Host 本机连接，不开新端口。`eidolond` 的拒绝（不�
 enable/disable 不提供。不要再用 supervisorctl、systemctl 或 Admin 的进程页去单独启停服务——那是 `eidolond` 之外的
 第二个 writer（Ops 总纲 §1.5）。
 
-`deploy/dev/run_all.sh` 仍是 Mac supervisord 的内部生命周期适配器，Host profile 会调用它；它不是操作员
-入口，直接删除会破坏 Mac 生命周期。所有人工操作都从 `./eidolon` 进入。它只接受 Ops 调用的
+`deploy/dev/run_all.sh` 是 Unix 源码 Host 共用的 Supervisor 生命周期适配器，Host profile 会调用它；它不是操作员
+入口，Mac 与 Linux 源码 Host 均通过它管理生命周期。所有人工操作都从 `./eidolon` 进入。它只接受 Ops 调用的
 `product-source <operation>`，其余命令一律拒绝，也不提供 supervisorctl 直通。
+
+Host profile 用 `[host] platform` 描述操作系统或硬件，用独立的 `[execution]` 描述运行策略：
+
+```toml
+[execution]
+transport = "local"
+supervisor = "supervisord"
+packages = "none"
+identity = "current-user"
+```
+
+这是 Mac 和 Linux 共用的源码运行方式，使用同一份组件服务声明、路径转换、状态迁移、原生
+Unix peer 凭据、启动检查和 readiness。Linux 不再因为平台名称而被强制写入 `/etc`、`/var/lib`
+或使用独立服务账号。配置示例是 `config/hosts/linux-source.example.toml`；复制为本机 profile，
+填写已有的输入配置和真实模型服务地址，然后通过 `./eidolon <profile> provision --apply`、
+`./eidolon <profile> start` 操作。源码模式只准备运行输入，不安装系统包、不创建系统账号、不提权。
+Linux 本机需要已配置好的 Avahi、iproute2、getent、lsof，以及组件自身的普通用户运行依赖。
+
+已实现的另一种组合为 `transport=ssh`、`supervisor=systemd`、`packages=apt`、
+`identity=service-accounts`，沿用已安装 Linux Host 的发布事务和服务账号隔离。切换平台不会
+自动切换这项身份策略，也不会自动迁移线上 Host。其他组合会在读配置时明确拒绝，而不是
+静默忽略字段或启用 root Supervisor。旧的 `host.driver` 只作为兼容别名读取；与 `[execution]`
+同时声明时必须一致。`status.execution` 和 `doctor.adapter.execution` 报告实际策略。
+
+Hub 的 Owner 发现由组件自带的跨平台发布器负责，源码部署不再另起同名 `dns-sd` 发布进程。
+Local API 的发现保留系统设施适配：Mac 使用 `dns-sd`，Linux 使用 Avahi；这些依赖缺失时在停止
+现有 Host 之前报错。模型能力同时传递给 eidolond 和源码进程选择，未声明 `local_laya` 的 Host
+不会启动源码 Laya 进程。
+
+模型进程选择直接读取组件契约的 unit 声明，源码模板只引用 unit ID。选中一个尚无源码执行
+绑定的模型服务会在生成配置时拒绝，不能把缺少进程误报为一个可用的 Host。
 
 每个操作先产出一份 `Plan`（`operation`/`steps`/`destructive`/`requires_flags`/`touches`），再返回
 `Evidence`：Host 报告原样保留在顶层，旁边多出 `plan`、`outcome` 与 `steps`。退出码取自 `Outcome` 枚举，

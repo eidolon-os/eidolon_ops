@@ -10,7 +10,12 @@ schema_version = 1
 [host]
 id = "eidolon-opi5max"
 platform = "rk3588"
-driver = "ssh-systemd"
+
+[execution]
+transport = "ssh"
+supervisor = "systemd"
+packages = "apt"
+identity = "service-accounts"
 
 [paths]
 install_root = "/opt/eidolon"

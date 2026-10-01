@@ -28,7 +28,14 @@ from eidolon_ops.config import (
     settings_overlay_of,
 )
 from eidolon_ops.errors import OperationsError
+from eidolon_ops.execution import (
+    DRIVER_EXECUTIONS,
+    ExecutionIdentity,
+    HostExecution,
+    compatible_driver,
+)
 from eidolon_ops.operator_paths import expand_operator_path
+from eidolon_ops.ports import PackageManagerKind, SupervisorKind, TransportKind
 
 
 class HostProfileError(ValueError):
@@ -39,48 +46,22 @@ class HostPlatform(StrEnum):
     """The machine a Host profile describes."""
 
     MACOS = "macos"
+    LINUX = "linux"
     RASPBERRY_PI = "raspberry-pi"
     RK3588 = "rk3588"
 
 
 class HostDriver(StrEnum):
-    """How Ops reaches a Host and drives its services.
-
-    A closed enumeration rather than a string, because this value used to be
-    compared literally in nine places to decide what an operation was allowed
-    to do. What a Host can do is now derived from the adapter this selects.
-    """
+    """Compatibility aliases for implemented execution compositions."""
 
     LOCAL_SUPERVISORD = "local-supervisord"
     SSH_SYSTEMD = "ssh-systemd"
 
 
 _HOST_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
-#: Which driver each platform is reachable through. One entry per real Host;
-#: a pair that is not in this table is not a Host this tool has an adapter for.
-_PLATFORM_DRIVERS = {
-    HostPlatform.MACOS: HostDriver.LOCAL_SUPERVISORD,
-    HostPlatform.RASPBERRY_PI: HostDriver.SSH_SYSTEMD,
-    HostPlatform.RK3588: HostDriver.SSH_SYSTEMD,
-}
-
-
-def is_product_board(platform: HostPlatform) -> bool:
-    """Whether this is a box Ops installs onto, rather than an operator's own.
-
-    Read off the driver table rather than listed again: a platform Ops reaches
-    over SSH and drives with systemd is a product board, and that is the same
-    fact the table already states. The two path rules below used to name the
-    Raspberry Pi, which made every one of them a place a second board would
-    have to be remembered.
-    """
-
-    return _PLATFORM_DRIVERS[platform] is HostDriver.SSH_SYSTEMD
-
-
 _FOUNDATION_MODES = {"external"}
 _IPV4_LITERAL = re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}$")
-#: The product Host's layout, stated once. A Pi profile is required to be
+#: The installed release layout, stated once. A release profile is required to be
 #: exactly this (see :func:`_require_paths`), and a workstation profile is the
 #: same set of roles at different locations — which is why a template written
 #: for the product can be pointed at a source run by substituting these
@@ -254,6 +235,18 @@ class HostProfile:
     model_endpoints: Mapping[str, str] = field(default_factory=lambda: MappingProxyType({}))
     #: Settings this machine asks for beyond its operations config's, in its [[settings.overlay]].
     settings_overlay: tuple = ()
+    execution: HostExecution | None = None
+
+    def __post_init__(self) -> None:
+        execution = self.execution or DRIVER_EXECUTIONS[str(self.driver)]
+        if compatible_driver(execution) != str(self.driver):
+            raise HostProfileError("host.driver disagrees with execution")
+        object.__setattr__(self, "execution", execution)
+
+    @property
+    def source_run(self) -> bool:
+        assert self.execution is not None
+        return self.execution.source_run
 
     def environment(self) -> dict[str, str]:
         values = self.paths.environment()
@@ -262,6 +255,7 @@ class HostProfile:
                 "EIDOLON_HOST_ID": self.host_id,
                 "EIDOLON_HOST_PLATFORM": str(self.platform),
                 "EIDOLON_HOST_DRIVER": str(self.driver),
+                "EIDOLON_EXECUTION_IDENTITY": str(self.execution.identity),
             }
         )
         if self.foundation_mode is not None:
@@ -276,7 +270,7 @@ class HostProfile:
 
 
 def _profile_management_networks(
-    value: object, *, driver: HostDriver
+    value: object, *, execution: HostExecution
 ) -> tuple[str, ...]:
     """Which of this Host's links the operator keeps, when the Host is the workstation.
 
@@ -302,7 +296,7 @@ def _profile_management_networks(
 
     if value is None:
         return ()
-    if driver is not HostDriver.LOCAL_SUPERVISORD:
+    if not execution.source_run:
         raise HostProfileError(
             "host.management_networks belongs in this Host's operations config, which is "
             "where its environment is rendered from; a profile Ops deploys from renders "
@@ -333,34 +327,34 @@ def load_host_profile(path: Path) -> HostProfile:
         raise HostProfileError(f"host profile is unreadable: {resolved}") from exc
     allowed_root = {
         "schema_version", "host", "paths", "adapter", "app", "source_overrides", "capabilities",
-        "model_endpoints", "settings",
+        "model_endpoints", "settings", "execution",
     }
     if not {"schema_version", "host", "paths", "adapter"}.issubset(document) or not set(
         document
     ).issubset(allowed_root):
         raise HostProfileError(
             "host profile root must contain schema_version, host, paths and adapter, with only app, "
-            "source_overrides, capabilities, model_endpoints and settings optional"
+            "execution, source_overrides, capabilities, model_endpoints and settings optional"
         )
     if document["schema_version"] != 1:
         raise HostProfileError("host profile schema_version must be 1")
 
     host = _table(document["host"], "host")
-    if not {"id", "platform", "driver"}.issubset(host) or not set(host).issubset(
+    if not {"id", "platform"}.issubset(host) or not set(host).issubset(
         {"id", "platform", "driver", "management_networks"}
     ):
         raise HostProfileError(
-            "host must contain id, platform and driver, with only management_networks optional"
+            "host must contain id and platform, with only driver and management_networks optional"
         )
     host_id = _text(host["id"], "host.id")
     if _HOST_ID.fullmatch(host_id) is None:
         raise HostProfileError("host.id is invalid")
     platform = _member(HostPlatform, host["platform"], "host.platform")
-    driver = _member(HostDriver, host["driver"], "host.driver")
-    if _PLATFORM_DRIVERS[platform] is not driver:
-        raise HostProfileError("host platform and driver are incompatible")
+    execution, driver = _profile_execution(document.get("execution"), host.get("driver"))
+    if execution.supervisor is SupervisorKind.SYSTEMD and platform is HostPlatform.MACOS:
+        raise HostProfileError("execution.supervisor=systemd requires a Linux platform")
     management_networks = _profile_management_networks(
-        host.get("management_networks"), driver=driver
+        host.get("management_networks"), execution=execution
     )
 
     paths_wire = _table(document["paths"], "paths")
@@ -369,7 +363,7 @@ def load_host_profile(path: Path) -> HostProfile:
     paths = HostPaths(
         **{name: _absolute_path(paths_wire[name], f"paths.{name}", resolved.parent) for name in _PATH_FIELDS}
     )
-    _validate_paths(paths, platform=platform)
+    _validate_paths(paths, execution=execution)
 
     adapter = _table(document["adapter"], "adapter")
     base = resolved.parent
@@ -377,7 +371,7 @@ def load_host_profile(path: Path) -> HostProfile:
     operations_config: Path | None = None
     foundation_mode: Literal["external"] | None = None
     external_livekit_config: Path | None = None
-    if driver is HostDriver.LOCAL_SUPERVISORD:
+    if execution.source_run:
         if set(adapter) != {
             "lifecycle_script",
             "operations_config",
@@ -410,9 +404,9 @@ def load_host_profile(path: Path) -> HostProfile:
         )
 
     source_overrides = _source_overrides(document.get("source_overrides"), base=base)
-    if source_overrides and driver is not HostDriver.LOCAL_SUPERVISORD:
-        raise HostProfileError("source_overrides are available only for local-supervisord hosts")
-    app = _app_access(document.get("app"), platform=platform, base=base)
+    if source_overrides and not execution.source_run:
+        raise HostProfileError("source_overrides are available only for source-run hosts")
+    app = _app_access(document.get("app"), base=base)
     capabilities = _profile_capabilities(document.get("capabilities"))
     model_endpoints = _profile_model_endpoints(document.get("model_endpoints"))
     try:
@@ -436,6 +430,7 @@ def load_host_profile(path: Path) -> HostProfile:
         capabilities=capabilities,
         model_endpoints=model_endpoints,
         settings_overlay=settings_overlay,
+        execution=execution,
     )
 
 
@@ -485,20 +480,44 @@ def _profile_capabilities(value: object) -> frozenset[str] | None:
     return frozenset(names)
 
 
+def _profile_execution(value: object, driver_value: object) -> tuple[HostExecution, HostDriver]:
+    if value is None:
+        if driver_value is None:
+            raise HostProfileError("declare execution or the legacy host.driver")
+        driver = _member(HostDriver, driver_value, "host.driver")
+        return DRIVER_EXECUTIONS[str(driver)], driver
+    wire = _table(value, "execution")
+    if set(wire) != {"transport", "supervisor", "packages", "identity"}:
+        raise HostProfileError("execution must contain exactly transport, supervisor, packages and identity")
+    execution = HostExecution(
+        transport=_member(TransportKind, wire["transport"], "execution.transport"),
+        supervisor=_member(SupervisorKind, wire["supervisor"], "execution.supervisor"),
+        packages=_member(PackageManagerKind, wire["packages"], "execution.packages"),
+        identity=_member(ExecutionIdentity, wire["identity"], "execution.identity"),
+    )
+    try:
+        driver = HostDriver(compatible_driver(execution))
+    except ValueError as exc:
+        raise HostProfileError(str(exc)) from exc
+    if driver_value is not None and _member(HostDriver, driver_value, "host.driver") is not driver:
+        raise HostProfileError("host.driver disagrees with execution")
+    return execution, driver
+
+
 def merged_environment(profile: HostProfile) -> dict[str, str]:
     environment = os.environ.copy()
     environment.update(profile.environment())
-    if profile.driver is HostDriver.LOCAL_SUPERVISORD:
+    if profile.source_run:
         owner = profile.path.stat().st_uid if profile.path.exists() else os.getuid()
         environment["EIDOLON_SOURCE_OPERATOR"] = pwd.getpwuid(owner).pw_name
     return environment
 
 
-def _validate_paths(paths: HostPaths, *, platform: HostPlatform) -> None:
+def _validate_paths(paths: HostPaths, *, execution: HostExecution) -> None:
     if paths.current_root == paths.install_root:
-        if is_product_board(platform):
+        if not execution.source_run:
             raise HostProfileError(
-                "a product board's current_root must be a link below install_root"
+                "a release Host's current_root must be a link below install_root"
             )
     elif paths.install_root not in paths.current_root.parents:
         raise HostProfileError("current_root must equal or be below install_root")
@@ -516,10 +535,10 @@ def _validate_paths(paths: HostPaths, *, platform: HostPlatform) -> None:
         raise HostProfileError("Bootstrap state must remain a distinct ownership boundary")
     if paths.bootstrap_runtime_root == paths.runtime_root:
         raise HostProfileError("Bootstrap runtime must remain a distinct ownership boundary")
-    if is_product_board(platform):
+    if not execution.source_run:
         for name, value in PRODUCT_PATHS.items():
             if getattr(paths, name) != value:
-                raise HostProfileError(f"a product board's paths.{name} must be {value}")
+                raise HostProfileError(f"a release Host's paths.{name} must be {value}")
 
 
 def _table(value: object, label: str) -> dict[str, object]:
@@ -568,9 +587,7 @@ def _is_usable_setup_code(value: str) -> bool:
     return value not in {ascending, ascending[::-1]}
 
 
-def _app_access(
-    value: object | None, *, platform: HostPlatform, base: Path
-) -> AppAccess | None:
+def _app_access(value: object | None, *, base: Path) -> AppAccess | None:
     if value is None:
         return None
     document = _table(value, "app")

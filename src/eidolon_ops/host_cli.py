@@ -1,4 +1,4 @@
-"""Unified Eidolon host lifecycle CLI for macOS and Raspberry Pi."""
+"""Unified Eidolon Host lifecycle CLI for source and installed executions."""
 
 from __future__ import annotations
 
@@ -214,7 +214,7 @@ def _parser() -> argparse.ArgumentParser:
         prog="eidolon-ops",
         description="Manage an Eidolon host through one path and lifecycle contract.",
     )
-    parser.add_argument("--config", type=Path, required=True, help="Mac or Pi host profile")
+    parser.add_argument("--config", type=Path, required=True, help="Host execution profile")
     parser.add_argument(
         "--revision",
         action="append",
@@ -456,7 +456,7 @@ def _parser() -> argparse.ArgumentParser:
     logs.add_argument("--since")
     debug = operations.add_parser(
         "debug",
-        help="macOS product-source diagnostics; not a product operation",
+        help="source Host diagnostics; not a product operation",
     )
     debug.add_argument(
         "profile_operation",

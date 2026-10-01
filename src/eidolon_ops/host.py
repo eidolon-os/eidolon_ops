@@ -20,9 +20,9 @@ from eidolon_ops.adapters.systemd import SystemdSupervisor
 from eidolon_ops.config import load_config
 from eidolon_ops.controller import EidolonPiController
 from eidolon_ops.errors import OperationsError
+from eidolon_ops.execution import HostExecution
 from eidolon_ops.model import Capability
 from eidolon_ops.paths import (
-    HostDriver,
     HostPlatform,
     HostProfile,
     HostProfileError,
@@ -45,7 +45,8 @@ class PlatformProfile:
 #: One entry per real platform. A third board that is also Linux/systemd/apt
 #: belongs here as another row, not as another adapter.
 PLATFORM_PROFILES = {
-    HostPlatform.MACOS: PlatformProfile(id="macos-dev", platform=HostPlatform.MACOS),
+    HostPlatform.MACOS: PlatformProfile(id="macos", platform=HostPlatform.MACOS),
+    HostPlatform.LINUX: PlatformProfile(id="linux", platform=HostPlatform.LINUX),
     HostPlatform.RASPBERRY_PI: PlatformProfile(
         id="linux-debian13-arm64", platform=HostPlatform.RASPBERRY_PI
     ),
@@ -64,6 +65,7 @@ class HostAdapter:
     #: The release transaction executor, present only where releases are
     #: installed. One implementation, so a module rather than a port.
     release: EidolonPiController | None
+    execution: HostExecution
 
     @property
     def capabilities(self) -> frozenset[Capability]:
@@ -88,6 +90,7 @@ class HostAdapter:
             "transport": str(self.transport.kind),
             "supervisor": str(self.supervisor.kind),
             "packages": str(self.packages.kind),
+            "execution": self.execution.describe(),
             "capabilities": sorted(str(capability) for capability in self.capabilities),
         }
 
@@ -103,7 +106,7 @@ def build_adapter(
     """Assemble the adapter this profile describes."""
 
     platform = PLATFORM_PROFILES[profile.platform]
-    if profile.driver is HostDriver.LOCAL_SUPERVISORD:
+    if profile.source_run:
         return _source_adapter(profile, runner, platform, revision_overrides, progress)
     return _product_adapter(
         profile, runner, platform, revision_overrides, progress, allow_dirty=allow_dirty
@@ -134,6 +137,7 @@ def _source_adapter(
         supervisor=supervisor,
         packages=UnmanagedPackages(provisioner=supervisor.provision),
         release=None,
+        execution=profile.execution,
     )
 
 
@@ -170,6 +174,7 @@ def _product_adapter(
         supervisor=SystemdSupervisor(release),
         packages=AptPackages(release, config.foundation_profile),
         release=release,
+        execution=profile.execution,
     )
 
 
@@ -183,7 +188,7 @@ def _product_factory(
 
         config_path = profile.operations_config
         if config_path is None:
-            raise OperationsError("Mac product-source profile has no operations config")
+            raise OperationsError("source Host profile has no operations config")
         config = (
             load_config(
                 config_path,

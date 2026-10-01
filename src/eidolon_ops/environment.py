@@ -73,13 +73,14 @@ def replace(value: str, replacements: Mapping[str, str], *, label: str = "enviro
     return serialize(parsed)
 
 
-def serialize_ops(values: Mapping[str, str]) -> str:
+def serialize_ops(values: Mapping[str, str], *, allow_empty: frozenset[str] = frozenset()) -> str:
     """Serialize an Ops-generated file, refusing an unsafe name or value."""
 
     for name, value in values.items():
         if OPS_KEY.fullmatch(name) is None:
             raise EnvironmentFileError(f"unsafe generated profile key: {name}")
-        _require_safe(name, value, label="generated profile")
+        if value != "" or name not in allow_empty:
+            _require_safe(name, value, label="generated profile")
     return serialize(values)
 
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Eidolon macOS host adapter — the supervisord half of `./eidolon mac ...`.
+# Eidolon Unix source adapter — the supervisord half of `./eidolon <host> ...`.
 #
 # Not an operator entry point. `eidolon_ops/src/eidolon_ops/adapters/supervisord.py`
 # runs `run_all.sh product-source <operation>` and nothing else; every manual
@@ -134,7 +134,7 @@ configure_supervisor_profile() {
       local name value
       while IFS='=' read -r name value || [[ -n "$name" ]]; do
         [[ -z "$name" ]] && continue
-        if [[ ! "$name" =~ ^EIDOLON_[A-Z0-9_]+$ || -z "$value" ]]; then
+        if [[ ! "$name" =~ ^EIDOLON_[A-Z0-9_]+$ || ( -z "$value" && "$name" != "EIDOLON_HOST_CAPABILITIES" ) ]]; then
           error "unsafe product-source profile entry: $name"
           exit 1
         fi
@@ -259,6 +259,7 @@ do_sv_reread_update() {
 }
 
 do_sv_start() {
+  [[ "$(id -u)" != "0" ]] || { error "source supervisor must run as the workspace operator"; return 1; }
   require_control_runtime
   if sv_alive; then
     info "supervisord already running (PID $(sv_pid), socket $SV_SOCK)"
@@ -382,14 +383,17 @@ supervised_descendant() {
   return 1
 }
 
-do_product_source_start() {
+do_product_source_preflight() {
   configure_supervisor_profile product-source
   require_control_runtime
-  header "declared ports are free"
-  do_product_source_port_audit || return 1
-  # NATS is this profile's own program (nats:nats-server), started by eidolond
-  # like every service it reconciles; a broker someone else started on 4222
-  # is caught by the port audit above instead of being adopted.
+  if [[ "$EIDOLON_HOST_PLATFORM" == "macos" ]]; then
+    [[ -x /usr/bin/dns-sd ]] || { error "dns-sd is missing"; return 1; }
+  else
+    command -v avahi-publish-service >/dev/null || { error "avahi-publish-service is missing; source startup installs no system packages"; return 1; }
+    command -v ip >/dev/null || { error "iproute2 is missing"; return 1; }
+    command -v getent >/dev/null || { error "getent is missing"; return 1; }
+  fi
+  command -v lsof >/dev/null || { error "lsof is missing"; return 1; }
   if [[ -z "$EIDOLON_NATS_SERVER" || ! -x "$EIDOLON_NATS_SERVER" ]]; then
     error "nats-server is not on PATH"
     return 1
@@ -406,7 +410,13 @@ do_product_source_start() {
     error "generated LiveKit template is missing or unsafe: $EIDOLON_LIVEKIT_TEMPLATE_CONFIG"
     return 1
   fi
-  header "supervisord product-source (Mac source topology)"
+}
+
+do_product_source_start() {
+  do_product_source_preflight || return 1
+  header "declared ports are free"
+  do_product_source_port_audit || return 1
+  header "supervisord product-source (Unix source topology)"
   do_sv_start
   echo
   do_sv_status
@@ -512,7 +522,8 @@ case "${1:-}" in
   product-source)
     shift
     case "${1:-status}" in
-      prepare) configure_supervisor_profile product-source; require_control_runtime; prepare_directories ;;
+      prepare) do_product_source_preflight; prepare_directories ;;
+      preflight) do_product_source_preflight ;;
       start)   do_product_source_start ;;
       stop)    do_product_source_stop ;;
       restart) do_product_source_restart ;;

@@ -293,7 +293,7 @@ operations_config = "{operations}"
         ),
         encoding="utf-8",
     )
-    with pytest.raises(HostProfileError, match=r"product board's paths\.state_root"):
+    with pytest.raises(HostProfileError, match=r"release Host's paths\.state_root"):
         load_host_profile(profile_file)
 
 
@@ -301,11 +301,11 @@ operations_config = "{operations}"
     ("old", "new", "message"),
     [
         ('id = "mac-test"', 'id = "bad id"', "host.id"),
-        ('platform = "macos"', 'platform = "linux"', "host.platform"),
+        ('platform = "macos"', 'platform = "unknown"', "host.platform"),
         (
             'driver = "local-supervisord"',
             'driver = "ssh-systemd"',
-            "platform and driver",
+            "systemd requires a Linux platform",
         ),
     ],
 )
@@ -463,22 +463,6 @@ def test_a_host_may_leave_its_address_to_discovery(tmp_path: Path) -> None:
 
     assert profile.app is not None
     assert profile.app.lan_ipv4 is None
-
-
-def test_a_third_board_is_a_row_in_the_driver_table() -> None:
-    """Not a branch anywhere else.
-
-    Both path rules used to name the Raspberry Pi, which made each of them a
-    place a second board had to be remembered — and forgetting one would not
-    fail, it would let a board through with unreviewed paths.
-    """
-
-    from eidolon_ops.paths import _PLATFORM_DRIVERS, HostPlatform, is_product_board
-
-    assert set(_PLATFORM_DRIVERS) == set(HostPlatform)
-    assert is_product_board(HostPlatform.RK3588)
-    assert is_product_board(HostPlatform.RASPBERRY_PI)
-    assert not is_product_board(HostPlatform.MACOS)
 
 
 def test_every_platform_has_a_profile_to_be_built_from() -> None:

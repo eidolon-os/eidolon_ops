@@ -1,4 +1,4 @@
-"""Drive a macOS source run through its supervisord lifecycle script."""
+"""Drive a Unix source run through its supervisord lifecycle script."""
 
 from __future__ import annotations
 
@@ -14,13 +14,8 @@ from eidolon_ops.model import Capability
 from eidolon_ops.paths import HostProfile
 from eidolon_ops.ports import SupervisorKind
 from eidolon_ops.progress import Journal, ProgressSink
-from eidolon_ops.source_privileges import privileged_action
-from eidolon_ops.source_runtime import (
-    provision_source_files,
-    require_service_identities,
-    require_service_roots,
-    shutdown_timeout,
-)
+from eidolon_ops.source_runtime import shutdown_timeout
+from eidolon_ops.source_state import migration_pending, prepare_roots
 
 #: Every profile the lifecycle script is allowed to be asked about. One entry:
 #: the implementation-level profiles this replaced are gone, and a second one
@@ -34,7 +29,7 @@ _UNHEALTHY_MARKERS = (" FATAL ", " BACKOFF ", " EXITED ")
 
 
 class SupervisordSupervisor:
-    """The Mac adapter: one product topology, driven by one script."""
+    """The source adapter: one product topology, driven by one script."""
 
     kind = SupervisorKind.SUPERVISORD
 
@@ -205,19 +200,21 @@ class SupervisordSupervisor:
         services = product.source_services()
         report = {
             "status": "planned", "service_users": [s.user for s in services],
-            "note": "initializes declared identities and private roots after stopping the Host; installs no dependencies",
+            "note": "prepares operator-owned source roots and inputs; installs no dependencies and requests no administrator access",
         }
         if not apply:
             return report
         phases = Journal(self.progress)
+        phases.begin("initialize")
+        if migration_pending(services):
+            self._stop_host()
+        backups = prepare_roots(services, self.profile, migrate=True)
+        phases.append({"phase": "initialize", "result": {"backups": [str(p) for p in backups]}})
         phases.begin("prepare")
         product.prepare()
         self.transport.run((str(self.script()), PROFILE, "prepare"))
         phases.append({"phase": "prepare", "result": {"status": "prepared"}})
-        phases.begin("initialize")
-        result = privileged_action(self.profile, "provision", self.transport.runner)
-        phases.append({"phase": "initialize", "result": {"status": "initialized"}})
-        return {**report, "status": "initialized", "output": result.stdout.strip()}
+        return {**report, "status": "initialized", "backups": [str(p) for p in backups]}
 
     def profile_operation(
         self, operation: str, *, arguments: tuple[str, ...] = ()
@@ -251,18 +248,18 @@ class SupervisordSupervisor:
             return direct
         if operation in {"start", "restart"}:
             controls = product.source_services()
-            require_service_identities(
-                controls,
-                operator_uid=self.profile.path.stat().st_uid if self.profile.path.exists() else os.getuid(),
-            )
-            require_service_roots(controls)
+            if migration_pending(controls):
+                phases.begin("source state transfer")
+                self.transport.run((str(script), PROFILE, "preflight"))
+                self._stop_host()
+                backups = prepare_roots(controls, self.profile, migrate=True)
+                phases.append({"phase": "source state transfer", "result": {"backups": [str(p) for p in backups]}})
+            else:
+                prepare_roots(controls, self.profile)
         if operation in _PREPARING_OPERATIONS:
             phases.begin("prepare")
             phases.append({"phase": "prepare", "result": product.prepare()})
             self.transport.run((str(script), PROFILE, "prepare"))
-            if controls:
-                import pwd
-                provision_source_files(controls, self.profile, pwd.getpwuid(self.profile.path.stat().st_uid).pw_name)
             # Both database and ownership migrations require a quiescent Host.
             phases.begin("stop")
             self._stop_host()
@@ -271,9 +268,7 @@ class SupervisordSupervisor:
             phases.begin("smart-home state transfer")
             smarthome_state.transfer(self.profile.paths.state_root)
         phases.begin(operation)
-        result = privileged_action(self.profile, "start", self.transport.runner) if (
-            operation in _PREPARING_OPERATIONS and controls
-        ) else self._stop_host() if operation == "stop" else self.transport.run(
+        result = self._stop_host() if operation == "stop" else self.transport.run(
             (str(script), PROFILE, "start" if operation in _PREPARING_OPERATIONS else operation, *arguments),
             timeout=300,
             operation=f"local {PROFILE} {operation}",
@@ -289,7 +284,11 @@ class SupervisordSupervisor:
         if operation in _HEALTH_REPORTING_OPERATIONS:
             phases.begin("health")
             health = product.health(wait_seconds=120 if operation != "status" else 0)
-            unhealthy_process = any(marker in result.stdout for marker in _UNHEALTHY_MARKERS)
+            if operation in _PREPARING_OPERATIONS:
+                settled = self.transport.run((str(script), PROFILE, "status"))
+                response["startup_output"] = response["output"]
+                response["output"] = settled.stdout.strip()
+            unhealthy_process = any(marker in str(response["output"]) for marker in _UNHEALTHY_MARKERS)
             response["health"] = health
             response["status"] = (
                 "healthy" if health["status"] == "healthy" and not unhealthy_process else "degraded"

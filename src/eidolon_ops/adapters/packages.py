@@ -15,8 +15,8 @@ class UnmanagedPackages:
 
     kind = PackageManagerKind.NONE
     provision_steps = (
+        ("initialize", "prepare operator-owned source roots; preserve legacy data after stopping the Host"),
         ("prepare", "prepare source inputs as the workspace operator"),
-        ("initialize", "stop the Host and initialize declared service identities and private roots"),
     )
 
     def __init__(self, provisioner: Callable[..., dict[str, object]] | None = None):

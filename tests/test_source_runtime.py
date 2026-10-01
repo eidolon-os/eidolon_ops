@@ -22,12 +22,12 @@ def _services(tmp_path):
     )
 
 
-def test_every_control_service_is_generated_with_its_native_identity(tmp_path):
+def test_every_source_control_service_runs_as_the_operator_with_native_peer_auth(tmp_path):
     declaration, services = _services(tmp_path)
     parser = configparser.ConfigParser(interpolation=None)
     parser.read_string(
         render_supervisor(
-            (ROOT / "deploy/supervisor/product-source.conf").read_text(), services, "operator"
+            (ROOT / "deploy/supervisor/product-source.conf").read_text(), services, services[0].user
         )
     )
     assert {s.unit_id for s in services} == set(declaration.unit_ids)
@@ -48,7 +48,12 @@ def test_every_control_service_is_generated_with_its_native_identity(tmp_path):
         workflow.environment["EIDOLON_LIFECYCLE_REMOVAL_CAPABILITY_SOCKET"]
         == admin.environment["EIDOLON_ADMIN_REMOVAL_CAPABILITY_SOCKET"]
     )
-    assert parser["program:hub-api"]["user"] == "operator"
+    assert parser["program:hub-api"]["user"] == services[0].user
+    assert {s.declared_user for s in services} == {u["user"] for u in declaration.units}
+    assert local.environment["EIDOLON_BOOTSTRAP_MODE"] == "development"
+    assert workflow.environment["EIDOLON_LIFECYCLE_ALLOWED_LOCAL_API_USER"] == local.user
+    assert admin.environment["EIDOLON_ADMIN_REMOVAL_CAPABILITY_WORKFLOW_USER"] == workflow.user
+    assert parser["program:local-api"]["environment"].find('HOME="/var/empty"') == -1
     assert admin.environment["EIDOLON_PORTS_FILE"] == str(
         tmp_path / "product/config/settings/ports.yaml"
     )
@@ -80,14 +85,13 @@ def test_driver_template_cannot_redefine_a_component_process(tmp_path):
         render_supervisor("[program:bootstrapd]\ncommand=wrong\n", services, "operator")
 
 
-def test_unprivileged_provisioning_fails_before_any_host_mutation(tmp_path, monkeypatch):
+
+def test_source_composition_refuses_root(tmp_path, monkeypatch):
     from eidolon_ops import source_runtime
 
-    _, services = _services(tmp_path)
-    monkeypatch.setattr(source_runtime.os, "geteuid", lambda: 501)
-    with pytest.raises(OperationsError, match="administrator privileges"):
-        source_runtime.provision_source_identities(services)
-
+    monkeypatch.setattr(source_runtime.os, "geteuid", lambda: 0)
+    with pytest.raises(OperationsError, match="non-root workspace owner"):
+        _services(tmp_path)
 
 def test_component_private_roots_stay_inside_backup_and_reset_roles(tmp_path):
     from eidolon_ops.source_assets import translate_fhs
@@ -104,114 +108,43 @@ def test_component_private_roots_stay_inside_backup_and_reset_roles(tmp_path):
     )
 
 
-def test_filesystem_adapter_preserves_declared_owners_and_runtime_modes(tmp_path, monkeypatch):
-    import grp
-    import pwd
-    import subprocess
-    from types import SimpleNamespace
 
-    from eidolon_ops import source_runtime
+def test_source_roots_need_no_accounts_or_permission_commands(tmp_path, monkeypatch):
+    import os
+    import subprocess
+
+    from eidolon_ops.source_state import prepare_roots
 
     profile = _product(tmp_path, foundation_mode="external").profile
     declaration = load_component_contract(ADMIN, "eidolon_admin")
     services = source_services(declaration, profile, ADMIN)
-    for root in (
-        profile.paths.config_root,
-        profile.paths.state_root,
-        profile.paths.runtime_root,
-        profile.paths.log_root,
-        profile.paths.cache_root,
-    ):
-        root.mkdir(parents=True, exist_ok=True)
-    profile.paths.config_root.chmod(0o700)
-    inputs = profile.paths.config_root / "env"
-    inputs.mkdir()
-    for name in ("admin.env", "local-api.env", "bootstrap.env"):
-        (inputs / name).write_text("")
-    ports = profile.paths.config_root / "settings/ports.yaml"
-    ports.parent.mkdir()
-    ports.write_text("ports: {}\n")
-    ports.chmod(0o600)
-    owners = {
-        user: index + 1000 for index, user in enumerate(("operator", *(s.user for s in services)))
-    }
-    owners["operator"] = source_runtime.os.getuid()
-    monkeypatch.setattr(source_runtime.os, "geteuid", lambda: 0)
-    monkeypatch.setattr(
-        pwd, "getpwnam", lambda name: SimpleNamespace(pw_uid=owners[name], pw_gid=3000)
-    )
-    monkeypatch.setattr(grp, "getgrnam", lambda name: SimpleNamespace(gr_gid=3000))
-    monkeypatch.setattr(source_runtime.os, "getgrouplist", lambda name, gid: [gid])
-    ownership = []
-    grants = []
-    monkeypatch.setattr(
-        source_runtime.os, "chown", lambda path, uid, gid: ownership.append((path, uid))
-    )
-    monkeypatch.setattr(subprocess, "run", lambda args, **kwargs: grants.append(args))
-    for path in inputs.iterdir():
-        path.chmod(0o600)
-    source_runtime.provision_source_files(services, profile, "operator", initialize=True)
-    workflow = next(s for s in services if s.unit_id == "eidolon-lifecycle-workflow")
-    for path in workflow.runtime_paths:
-        assert path.stat().st_mode & 0o777 == 0o750
-        assert (path, owners[workflow.user]) in ownership
-    # Local API may read its own input; it receives no read grant on Admin's issuer input.
-    assert any(
-        str(inputs / "local-api.env") == args[-1]
-        and "user:eidolon-local-api allow read" in args[-2]
-        for args in grants
-    )
-    assert not any(
-        str(inputs / "admin.env") == args[-1] and "user:eidolon-local-api allow read" in args[-2]
-        for args in grants
-    )
-    assert any(str(ports) == args[-1] and "user:eidolon allow read" in args[-2]
-               for args in grants)
-    search_grants = [args for args in grants if args[-2].endswith(" allow search")]
-    assert search_grants
-    assert all(not Path(args[-1]).stat().st_mode & 0o001 for args in search_grants)
-    # Protected public system ancestors need no ACL mutation; private config
-    # ancestors still receive the narrow traversal permission.
-    assert not any(args[-1] == "/Users" for args in search_grants)
-    assert any(args[-1] == str(profile.paths.config_root) for args in search_grants)
-    # A normal input refresh never transfers ownership of existing state.
-    before = list(ownership)
-    source_runtime.provision_source_files(
-        tuple(replace(s, state_paths=(), runtime_paths=()) for s in services), profile, "operator"
-    )
-    assert ownership == before
-    # macOS ls can expose UUID principals rather than account names. Existing
-    # equivalent grants must not grow on every normal input refresh.
-    refresh_grants = []
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("source roots must use no subprocess"))
+    monkeypatch.setattr(os, "chown", lambda *a, **k: pytest.fail("source roots must never chown"))
+    assert prepare_roots(services, profile) == []
+    assert prepare_roots(services, profile) == []
+    for service in services:
+        assert service.user != service.declared_user
+        assert all(path.stat().st_uid == os.getuid() for path in (*service.state_paths, *service.runtime_paths))
 
-    def existing_acl(args, **kwargs):
-        if args[0] == "/usr/bin/dsmemberutil":
-            return SimpleNamespace(stdout=f"UUID-{args[-1]}\n")
-        if args[0] == "/bin/ls":
-            return SimpleNamespace(stdout="\n".join(
-                f" {index}: UUID-{s.user} allow search,read,readattr,readextattr,readsecurity"
-                for index, s in enumerate(services)
-            ))
-        refresh_grants.append(args)
-        return SimpleNamespace(stdout="")
 
-    monkeypatch.setattr(subprocess, "run", existing_acl)
-    source_runtime.provision_source_files(
-        tuple(replace(s, state_paths=(), runtime_paths=()) for s in services), profile, "operator"
-    )
-    assert refresh_grants == []
-    # Paths merely mentioned by an input cannot authorize unrelated private files.
-    outside = tmp_path / "unrelated-private"
-    outside.write_text("private")
-    outside.chmod(0o600)
-    escaped = replace(services[0], environment={**services[0].environment,
-                       "EIDOLON_UNDECLARED_INPUT": str(outside)})
-    before_grants = len(grants)
-    with pytest.raises(OperationsError, match="outside declared Host roots"):
-        source_runtime.provision_source_files((escaped,), profile, "operator", initialize=True)
-    assert ownership == before
-    assert len(grants) == before_grants
+def test_source_root_rejects_symlinks_and_unrelated_paths_before_mutation(tmp_path):
+    from eidolon_ops.source_state import prepare_roots
 
+    profile = _product(tmp_path, foundation_mode="external").profile
+    declaration = load_component_contract(ADMIN, "eidolon_admin")
+    services = source_services(declaration, profile, ADMIN)
+    outside = tmp_path / "unrelated"
+    outside.mkdir()
+    escaped = replace(services[0], state_paths=(outside,))
+    with pytest.raises(OperationsError, match="outside declared Host paths"):
+        prepare_roots((escaped,), profile)
+    linked = profile.paths.state_root / "linked"
+    linked.parent.mkdir(parents=True)
+    linked.symlink_to(outside, target_is_directory=True)
+    escaped = replace(services[0], state_paths=(linked,))
+    with pytest.raises(OperationsError, match="symlink"):
+        prepare_roots((escaped,), profile)
+    assert list(outside.iterdir()) == []
 
 def test_shutdown_budget_covers_supervisors_ordered_group_timeouts(tmp_path):
     from eidolon_ops.source_runtime import shutdown_timeout

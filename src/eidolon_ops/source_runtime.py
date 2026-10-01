@@ -8,11 +8,11 @@ control plane. Components that opt into source bindings must bind every unit.
 from __future__ import annotations
 
 import configparser
+import grp
 import io
 import os
 import pwd
 import shlex
-import stat
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -20,7 +20,7 @@ from eidolon_ops import source_assets
 from eidolon_ops.component_contract import ComponentContract
 from eidolon_ops.errors import OperationsError
 from eidolon_ops.hostagent.contract import HOST_ENV_PATH, HOST_ENV_VALUE
-from eidolon_ops.paths import HostProfile
+from eidolon_ops.paths import HostPlatform, HostProfile
 
 
 @dataclass(frozen=True)
@@ -37,6 +37,15 @@ class SourceService:
     state_paths: tuple[Path, ...]
     runtime_paths: tuple[Path, ...]
     primary_group: str
+    declared_user: str
+
+
+def source_operator(profile: HostProfile):
+    """A source checkout has the operator's UID as its local trust boundary."""
+    uid = profile.path.stat().st_uid if profile.path.exists() else os.getuid()
+    if uid == 0 or os.geteuid() != uid:
+        raise OperationsError("source Host must run as its non-root workspace owner")
+    return pwd.getpwuid(uid)
 
 
 def service_values(text: str) -> dict[str, list[str]]:
@@ -60,6 +69,8 @@ def source_services(
 ) -> tuple[SourceService, ...]:
     if not any("supervisord" in unit for unit in contract.units):
         return ()
+    operator = source_operator(profile)
+    declared_accounts = {unit["user"] for unit in contract.units}
     result = []
     for unit in contract.units:
         binding = unit.get("supervisord")
@@ -81,6 +92,8 @@ def source_services(
             raise OperationsError(f"{asset}: service identity disagrees with component contract")
 
         def translate(value: str) -> str:
+            if value in declared_accounts:
+                return operator.pw_name
             value = source_assets.translate_fhs(profile, value)
             # Components run out of their selected worktrees, including overrides.
             value = value.replace(
@@ -135,7 +148,7 @@ def source_services(
                 unit_id=unit["id"],
                 program=binding["program"],
                 group=binding["group"],
-                user=user,
+                user=operator.pw_name,
                 requires=tuple(unit.get("requires", ())),
                 command=command,
                 directory=root,
@@ -143,16 +156,47 @@ def source_services(
                 auxiliary_programs=tuple(binding.get("auxiliary_programs", [])),
                 state_paths=paths("StateDirectory", "/var/lib"),
                 runtime_paths=paths("RuntimeDirectory", "/run"),
-                primary_group=values.get("Group", [user])[-1],
+                primary_group=grp.getgrgid(operator.pw_gid).gr_name,
+                declared_user=user,
             )
         )
     return tuple(result)
 
 
-def render_supervisor(template: str, services: tuple[SourceService, ...], operator: str) -> str:
+def render_supervisor(
+    template: str, services: tuple[SourceService, ...], operator: str,
+    *, platform: HostPlatform = HostPlatform.MACOS,
+    contracts: tuple[ComponentContract, ...] | None = None,
+) -> str:
     """Combine driver-specific workers with contract-derived control services."""
     parser = configparser.ConfigParser(interpolation=None, strict=True)
     parser.read_string(template)
+    selected = {
+        unit["id"]: unit for contract in contracts or () for unit in contract.units
+    }
+    bound_units = set()
+    for section in list(parser.sections()):
+        if not section.startswith("source-program:"):
+            continue
+        program = section.removeprefix("source-program:")
+        unit = parser[section]["unit"]
+        group = parser[section]["group"]
+        if f"program:{program}" not in parser or f"group:{group}" not in parser:
+            raise OperationsError(f"source template has an incomplete unit binding: {unit}")
+        bound_units.add(unit)
+        if contracts is not None and unit not in selected:
+            parser.remove_section(f"program:{program}")
+            parser.remove_section(f"group:{group}")
+        parser.remove_section(section)
+    for unit in selected.values():
+        if unit.get("requires_capability") and not unit.get("supervisord") and unit["id"] not in bound_units:
+            raise OperationsError(f"source Host lacks an execution binding for selected unit: {unit['id']}")
+    if "program:local-api-mdns" in parser:
+        parser["program:local-api-mdns"]["command"] = (
+            '/usr/bin/dns-sd -R "Eidolon Local API" _eidolon-local-api._tcp local 9002 contract=1 scheme=https'
+            if platform is HostPlatform.MACOS else
+            'avahi-publish-service "Eidolon Local API" _eidolon-local-api._tcp 9002 contract=1 scheme=https'
+        )
     try:
         operator_home = pwd.getpwnam(operator).pw_dir
     except KeyError:
@@ -209,7 +253,7 @@ def render_supervisor(template: str, services: tuple[SourceService, ...], operat
         programs.add(service.program)
         groups.add(service.group)
         env = {
-            "PYTHONUNBUFFERED": "1", "HOME": "/var/empty",
+            "PYTHONUNBUFFERED": "1", "HOME": operator_home,
             "USER": service.user, "LOGNAME": service.user, **service.environment,
         }
         assignments = ",".join(
@@ -237,98 +281,6 @@ programs={",".join((service.program, *service.auxiliary_programs))}
     return "\n".join(blocks)
 
 
-def require_service_identities(
-    services: tuple[SourceService, ...], operator_uid: int | None = None
-) -> None:
-    """Do not silently collapse isolated workload identities to the operator."""
-    uids = {}
-    for service in services:
-        try:
-            uid = pwd.getpwnam(service.user).pw_uid
-        except KeyError as exc:
-            raise OperationsError(
-                f"source Host service account is missing: {service.user}; provision the component's isolated identities before starting"
-            ) from exc
-        if (
-            uid == (os.getuid() if operator_uid is None else operator_uid)
-            or uid == 0
-            or uid in uids
-        ):
-            raise OperationsError(f"source Host service identity is not isolated: {service.user}")
-        uids[uid] = service.user
-
-
-def provision_source_identities(
-    services: tuple[SourceService, ...], operator_uid: int | None = None
-) -> None:
-    """Darwin's account adapter for the same component-owned identity contract.
-
-    Explicit initialization calls this after stopping the Host.
-    Linux already provisions these identities through hostagent.identities.
-    """
-    import grp
-    import subprocess
-    import sys
-
-    if not services:
-        return
-    if os.geteuid() != 0:
-        raise OperationsError(
-            "source identity initialization requires administrator privileges through the helper; run provision --apply as the workspace operator"
-        )
-    if sys.platform != "darwin":
-        raise OperationsError("source identity provisioning requires the Darwin host adapter")
-
-    def run(*args):
-        subprocess.run(args, check=True, capture_output=True, text=True)
-
-    for service in services:
-        groups = {service.user, service.primary_group}
-        values = service_values(
-            (service.directory / "deploy/systemd" / f"{service.unit_id}.service").read_text()
-        )
-        groups.update(
-            name for entry in values.get("SupplementaryGroups", ()) for name in entry.split()
-        )
-        for name in sorted(groups):
-            try:
-                grp.getgrnam(name)
-            except KeyError:
-                used = {g.gr_gid for g in grp.getgrall()}
-                gid = next(n for n in range(1000, 60000) if n not in used)
-                run("/usr/bin/dscl", ".", "-create", f"/Groups/{name}")
-                run("/usr/bin/dscl", ".", "-create", f"/Groups/{name}", "PrimaryGroupID", str(gid))
-        try:
-            pwd.getpwnam(service.user)
-        except KeyError:
-            used = {u.pw_uid for u in pwd.getpwall()}
-            uid = next(n for n in range(1000, 60000) if n not in used)
-            record = f"/Users/{service.user}"
-            run("/usr/bin/dscl", ".", "-create", record)
-            for key, value in {
-                "UniqueID": str(uid),
-                "PrimaryGroupID": str(grp.getgrnam(service.primary_group).gr_gid),
-                "UserShell": "/usr/bin/false",
-                "NFSHomeDirectory": "/var/empty",
-                "IsHidden": "1",
-                "Password": "*",
-            }.items():
-                run("/usr/bin/dscl", ".", "-create", record, key, value)
-        account = pwd.getpwnam(service.user)
-        if account.pw_gid != grp.getgrnam(service.primary_group).gr_gid:
-            raise OperationsError(
-                f"existing source service account has unexpected primary group: {service.user}"
-            )
-        for name in sorted(groups):
-            if grp.getgrnam(name).gr_gid not in os.getgrouplist(service.user, account.pw_gid):
-                run("/usr/sbin/dseditgroup", "-o", "edit", "-a", service.user, "-t", "user", name)
-    if operator_uid is not None:
-        operator = pwd.getpwuid(operator_uid)
-        for group in {s.primary_group for s in services if s.program == "lifecycle-workflow"}:
-            if grp.getgrnam(group).gr_gid not in os.getgrouplist(operator.pw_name, operator.pw_gid):
-                run("/usr/sbin/dseditgroup", "-o", "edit", "-a", operator.pw_name, "-t", "user", group)
-    require_service_identities(services, operator_uid)
-
 
 def service_directories(service: SourceService):
     values = service_values(
@@ -341,19 +293,6 @@ def service_directories(service: SourceService):
           for path in service.runtime_paths),
     )
 
-
-def require_service_roots(services: tuple[SourceService, ...]) -> None:
-    import grp
-    for service in services:
-        uid = pwd.getpwnam(service.user).pw_uid
-        gid = grp.getgrnam(service.primary_group).gr_gid
-        for path, mode in service_directories(service):
-            if (not path.is_dir() or path.is_symlink() or
-                (path.stat().st_uid, path.stat().st_gid, stat.S_IMODE(path.stat().st_mode))
-                != (uid, gid, mode)):
-                raise OperationsError(f"source service root needs explicit provision --apply: {path}")
-
-
 def shutdown_timeout(profile: HostProfile) -> int:
     """Allow Supervisor's ordered group shutdown to honor every stop timeout."""
     path = profile.paths.config_root / "supervisor.conf"
@@ -365,127 +304,3 @@ def shutdown_timeout(profile: HostProfile) -> int:
         parser[section].getint("stopwaitsecs", fallback=10) + 5
         for section in parser.sections() if section.startswith("program:")
     )
-
-
-def provision_source_files(
-    services: tuple[SourceService, ...], profile: HostProfile, operator: str,
-    *, initialize: bool = False,
-) -> None:
-    """Initialize declared private roots, or authorize freshly rendered inputs.
-
-    Recursive ownership transfer belongs only to explicit provisioning while
-    the Host is stopped. Normal starts validate those roots and grant access
-    only to this generation of component inputs. No parent-wide socket ACLs.
-    """
-    import grp
-    import re
-    import subprocess
-
-    if initialize and os.geteuid() != 0:
-        raise OperationsError("source filesystem provisioning requires administrator privileges")
-    operator_account = pwd.getpwnam(operator)
-    managed = (
-        profile.paths.config_root, profile.paths.state_root, profile.paths.runtime_root,
-        profile.paths.bootstrap_state_root, profile.paths.bootstrap_runtime_root,
-    )
-
-    def checked_path(path: Path, roots=managed):
-        if not any(path == root or path.is_relative_to(root) for root in roots):
-            raise OperationsError(f"source permission target is outside declared Host roots: {path}")
-        if any(parent.is_symlink() for parent in (path, *path.parents)):
-            raise OperationsError(f"source permission target contains a symlink: {path}")
-
-    principal_ids: dict[str, set[str]] = {}
-
-    def grant(path: Path, user: str, rights: str):
-        if user not in principal_ids:
-            result = subprocess.run(
-                ("/usr/bin/dsmemberutil", "getuuid", "-U", user),
-                check=True, capture_output=True, text=True,
-            )
-            principal_ids[user] = {user, getattr(result, "stdout", "").strip()}
-        existing = subprocess.run(
-            ("/bin/ls", "-lde", str(path)), check=True, capture_output=True, text=True,
-        )
-        required = set(rights.split(","))
-        for line in getattr(existing, "stdout", "").splitlines():
-            match = re.search(r"\d+: (?:user:)?(\S+) allow (.+)$", line.strip())
-            if match and match[1] in principal_ids[user] and required <= set(match[2].split(",")):
-                return
-        subprocess.run(
-            ("/bin/chmod", "+a", f"user:{user} allow {rights}", str(path)),
-            check=True, capture_output=True, text=True,
-        )
-
-    def traverse(path: Path, user: str):
-        account = pwd.getpwnam(user)
-        groups = set(os.getgrouplist(user, account.pw_gid))
-        for parent in reversed(path.parents):
-            details = parent.stat()
-            if (details.st_mode & stat.S_IXOTH
-                or (details.st_uid == account.pw_uid and details.st_mode & stat.S_IXUSR)
-                or (details.st_gid in groups and details.st_mode & stat.S_IXGRP)):
-                continue
-            # Private system directories are never changed to accommodate a source run.
-            if details.st_uid != operator_account.pw_uid:
-                raise OperationsError(f"source service cannot traverse a non-operator directory: {parent}")
-            grant(parent, user, "search")
-
-    plans = []
-    for service in services:
-        account = pwd.getpwnam(service.user)
-        gid = grp.getgrnam(service.primary_group).gr_gid
-        asset = service.directory / "deploy/systemd" / f"{service.unit_id}.service"
-        values = service_values(asset.read_text())
-        directories = service_directories(service)
-        files = {
-            profile.paths.config_root / "env" / Path(entry.removeprefix("-")).name
-            for entry in values.get("EnvironmentFile", [])
-            if Path(entry.removeprefix("-")).name != "host.env"
-        }
-        from eidolon_ops import environment
-        inputs = dict(service.environment)
-        for path in files:
-            checked_path(path)
-            inputs.update(environment.parse(path.read_text(), label="source input", key=environment.SERVICE_KEY))
-        files.update(Path(value) for value in inputs.values()
-                     if value.startswith("/") and Path(value).is_file())
-        for path, mode in directories:
-            checked_path(path)
-            if path in (profile.paths.state_root, profile.paths.runtime_root, profile.paths.config_root):
-                raise OperationsError(f"service cannot own a shared Host root: {path}")
-            if initialize:
-                for child in path.rglob("*"):
-                    checked_path(child)
-            elif not path.is_dir() or (path.stat().st_uid, path.stat().st_gid,
-                stat.S_IMODE(path.stat().st_mode)) != (account.pw_uid, gid, mode):
-                raise OperationsError(f"source service root needs explicit provision --apply: {path}")
-        for path in files:
-            checked_path(path)
-        plans.append((service, account, gid, directories, files))
-
-    for service, account, gid, directories, files in plans:
-        if initialize:
-            for path, mode in directories:
-                path.mkdir(parents=True, exist_ok=True)
-                path.chmod(mode)
-                # Existing data is transferred once; future files inherit maintenance access.
-                for child in (path, *path.rglob("*")):
-                    checked_path(child)
-                    details = child.stat()
-                    if (details.st_uid, details.st_gid) != (account.pw_uid, gid):
-                        os.chown(child, account.pw_uid, gid)
-                    grant(child, operator,
-                          "read,write,append,readattr,writeattr,readextattr,writeextattr,readsecurity,delete"
-                          if not child.is_dir() else
-                          "list,search,add_file,add_subdirectory,delete_child,readattr,writeattr,readsecurity,file_inherit,directory_inherit")
-                traverse(path, service.user)
-        traverse(service.directory, service.user)
-        for path in files:
-            traverse(path, service.user)
-            details = path.stat()
-            groups = set(os.getgrouplist(service.user, account.pw_gid))
-            if not (details.st_mode & stat.S_IROTH
-                    or (details.st_uid == account.pw_uid and details.st_mode & stat.S_IRUSR)
-                    or (details.st_gid in groups and details.st_mode & stat.S_IRGRP)):
-                grant(path, service.user, "read,readattr,readextattr,readsecurity")
