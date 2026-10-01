@@ -77,6 +77,7 @@ class PackageManager(Protocol):
     """Whatever installs the non-Eidolon foundation the release assumes."""
 
     kind: PackageManagerKind
+    provision_steps: tuple[tuple[str, str], ...]
 
     @property
     def capabilities(self) -> frozenset[Capability]: ...

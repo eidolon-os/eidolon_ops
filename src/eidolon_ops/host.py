@@ -132,7 +132,7 @@ def _source_adapter(
         platform=platform,
         transport=transport,
         supervisor=supervisor,
-        packages=UnmanagedPackages(),
+        packages=UnmanagedPackages(provisioner=supervisor.provision),
         release=None,
     )
 

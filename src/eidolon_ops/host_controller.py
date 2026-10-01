@@ -357,9 +357,10 @@ class HostController:
         return self._planned_or_applied(plan, report, applied=apply)
 
     def provision(self, *, apply: bool) -> Evidence:
-        plan = plans.provision(self.profile.host_id, apply=apply)
-        release = self.adapter.require_release(Capability.PROVISION)
-        report = release.provision(apply=apply)
+        self.adapter.require(Capability.PROVISION)
+        plan = plans.provision(self.profile.host_id, apply=apply,
+                               steps=self.adapter.packages.provision_steps)
+        report = self.adapter.packages.provision(apply=apply)
         return self._planned_or_applied(plan, report, applied=apply)
 
     def initialize_inputs(self, *, new_identity: bool = False) -> Evidence:

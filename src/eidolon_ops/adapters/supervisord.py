@@ -14,12 +14,19 @@ from eidolon_ops.model import Capability
 from eidolon_ops.paths import HostProfile
 from eidolon_ops.ports import SupervisorKind
 from eidolon_ops.progress import Journal, ProgressSink
+from eidolon_ops.source_privileges import privileged_action
+from eidolon_ops.source_runtime import (
+    provision_source_files,
+    require_service_identities,
+    require_service_roots,
+    shutdown_timeout,
+)
 
 #: Every profile the lifecycle script is allowed to be asked about. One entry:
 #: the implementation-level profiles this replaced are gone, and a second one
 #: would be a second product topology on the same machine.
 PROFILE = "product-source"
-_PREPARING_OPERATIONS = frozenset({"start", "restart", "web-start", "web-restart"})
+_PREPARING_OPERATIONS = frozenset({"start", "restart"})
 _HEALTH_REPORTING_OPERATIONS = frozenset({"start", "restart", "status"})
 #: supervisord prints a per-program table; these mark a program that is not
 #: running even though the group command itself returned success.
@@ -97,11 +104,7 @@ class SupervisordSupervisor:
             return plan
         phases = Journal(self.progress)
         phases.begin("stop")
-        stopped = self.transport.run(
-            (str(self.script()), PROFILE, "stop"),
-            timeout=300,
-            operation=f"local {PROFILE} stop",
-        )
+        stopped = self._stop_host()
         phases.append({"phase": "stop", "result": {"output": stopped.stdout.strip()}})
         phases.begin("remove")
         removed = product.reset(wipe_authority_data=wipe_authority_data, apply=True)
@@ -134,11 +137,7 @@ class SupervisordSupervisor:
 
         def quiesce() -> dict[str, object]:
             phases.begin("quiesce")
-            stopped = self.transport.run(
-                (str(self.script()), PROFILE, "stop"),
-                timeout=300,
-                operation=f"local {PROFILE} stop",
-            )
+            stopped = self._stop_host()
             result = {"output": stopped.stdout.strip()}
             phases.append({"phase": "quiesce", "result": result})
             return result
@@ -201,6 +200,25 @@ class SupervisordSupervisor:
         arguments = () if setup_code is None else ("--code", setup_code)
         return self.profile_operation("commissioning-code", arguments=arguments)
 
+    def provision(self, *, apply: bool) -> dict[str, object]:
+        product = self._product()
+        services = product.source_services()
+        report = {
+            "status": "planned", "service_users": [s.user for s in services],
+            "note": "initializes declared identities and private roots after stopping the Host; installs no dependencies",
+        }
+        if not apply:
+            return report
+        phases = Journal(self.progress)
+        phases.begin("prepare")
+        product.prepare()
+        self.transport.run((str(self.script()), PROFILE, "prepare"))
+        phases.append({"phase": "prepare", "result": {"status": "prepared"}})
+        phases.begin("initialize")
+        result = privileged_action(self.profile, "provision", self.transport.runner)
+        phases.append({"phase": "initialize", "result": {"status": "initialized"}})
+        return {**report, "status": "initialized", "output": result.stdout.strip()}
+
     def profile_operation(
         self, operation: str, *, arguments: tuple[str, ...] = ()
     ) -> dict[str, object]:
@@ -232,28 +250,31 @@ class SupervisordSupervisor:
             phases.append({"phase": operation, "result": direct})
             return direct
         if operation in {"start", "restart"}:
-            from eidolon_ops.source_runtime import provision_source_identities
-
-            # Check privilege/identity before changing inputs or stopping a
-            # working Host. An unprivileged source run must never turn these
-            # distinct workloads back into the operator's own processes.
-            provision_source_identities(
-                product.source_services(),
+            controls = product.source_services()
+            require_service_identities(
+                controls,
                 operator_uid=self.profile.path.stat().st_uid if self.profile.path.exists() else os.getuid(),
             )
+            require_service_roots(controls)
         if operation in _PREPARING_OPERATIONS:
             phases.begin("prepare")
             phases.append({"phase": "prepare", "result": product.prepare()})
+            self.transport.run((str(script), PROFILE, "prepare"))
+            if controls:
+                import pwd
+                provision_source_files(controls, self.profile, pwd.getpwuid(self.profile.path.stat().st_uid).pw_name)
+            # Both database and ownership migrations require a quiescent Host.
+            phases.begin("stop")
+            self._stop_host()
+            product.migrate()
         if operation in {"start", "restart"} and smarthome_state.pending(self.profile.paths.state_root):
             phases.begin("smart-home state transfer")
-            self.transport.run(
-                (str(script), PROFILE, "stop"), timeout=300,
-                operation="stop Host before smart-home state transfer",
-            )
             smarthome_state.transfer(self.profile.paths.state_root)
         phases.begin(operation)
-        result = self.transport.run(
-            (str(script), PROFILE, operation, *arguments),
+        result = privileged_action(self.profile, "start", self.transport.runner) if (
+            operation in _PREPARING_OPERATIONS and controls
+        ) else self._stop_host() if operation == "stop" else self.transport.run(
+            (str(script), PROFILE, "start" if operation in _PREPARING_OPERATIONS else operation, *arguments),
             timeout=300,
             operation=f"local {PROFILE} {operation}",
         )
@@ -280,6 +301,14 @@ class SupervisordSupervisor:
             response["authority"] = authority
             phases.append({"phase": "authority", "result": authority})
         return response
+
+    def _stop_host(self):
+        seconds = shutdown_timeout(self.profile)
+        self.transport.env["EIDOLON_SUPERVISOR_SHUTDOWN_SECONDS"] = str(seconds)
+        return self.transport.run(
+            (str(self.script()), PROFILE, "stop"), timeout=seconds + 120,
+            operation=f"local {PROFILE} stop",
+        )
 
     def script(self) -> Path:
         script = self.profile.lifecycle_script

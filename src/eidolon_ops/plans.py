@@ -58,16 +58,19 @@ def doctor(host_id: str) -> Plan:
     )
 
 
-def provision(host_id: str, *, apply: bool) -> Plan:
+PROVISION_STEPS = (
+    ("python_probe", "detect a usable Python on the Host"),
+    ("python_bootstrap", "bootstrap Python where it is missing"),
+    ("doctor", "compare the Host against the pinned foundation"),
+    ("install", "install the pinned packages and artifacts"),
+)
+
+
+def provision(host_id: str, *, apply: bool, steps=PROVISION_STEPS) -> Plan:
     return Plan(
         operation="provision",
         host_id=host_id,
-        steps=_steps(
-            ("python_probe", "detect a usable Python on the Host"),
-            ("python_bootstrap", "bootstrap Python where it is missing"),
-            ("doctor", "compare the Host against the pinned foundation"),
-            ("install", "install the pinned packages and artifacts"),
-        ),
+        steps=_steps(*steps),
         requires_flags=frozenset({"--apply"} if apply else set()),
         touches=frozenset({ActionKind.CONFIG}),
     )

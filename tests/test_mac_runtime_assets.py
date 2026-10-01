@@ -157,10 +157,24 @@ def test_with_env_redacts_sensitive_parent_mismatch(tmp_path: Path) -> None:
     assert secret_from_file not in result.stderr
 
 
-def test_the_mac_adapter_renders_livekit_credentials_before_starting() -> None:
-    run_all = (ROOT / "deploy/dev/run_all.sh").read_text(encoding="utf-8")
-
-    assert "eidolon_ensure_livekit_credentials" in run_all
+def test_source_status_leaves_the_filesystem_unchanged(tmp_path):
+    config = tmp_path / "config"
+    config.mkdir()
+    (config / "product-source.env").write_text(f"EIDOLON_SOURCE_ADMIN={tmp_path}/admin\n")
+    env = _clean_environment(
+        EIDOLON_CONFIG_ROOT=str(config), EIDOLON_STATE_ROOT=str(tmp_path / "state"),
+        EIDOLON_RUNTIME_ROOT=str(tmp_path / "run"), EIDOLON_LOG_ROOT=str(tmp_path / "logs"),
+        EIDOLON_CACHE_ROOT=str(tmp_path / "cache"),
+        EIDOLON_BOOTSTRAP_STATE_ROOT=str(tmp_path / "bootstrap-state"),
+        EIDOLON_BOOTSTRAP_RUNTIME_ROOT=str(tmp_path / "bootstrap-run"),
+    )
+    before = {p: (p.stat().st_mode, p.stat().st_mtime_ns) for p in tmp_path.rglob("*")}
+    result = subprocess.run(
+        (str(ROOT / "deploy/dev/run_all.sh"), "product-source", "status"),
+        env=env, capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert before == {p: (p.stat().st_mode, p.stat().st_mtime_ns) for p in tmp_path.rglob("*")}
 
 
 def test_the_mac_has_one_supervisord_topology() -> None:

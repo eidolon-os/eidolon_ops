@@ -291,6 +291,8 @@ def test_prepare_materializes_one_canonical_mac_product_contract(
     )
     identity = profile.paths.bootstrap_state_root / "host_identity.ed25519"
     assert identity.read_bytes() == b"i" * 32
+    assert not any(call[0] == str(alembic) for call in runner.calls)
+    product.migrate()
     assert any(call[0] == str(alembic) for call in runner.calls)
 
     (inputs / "host_identity.ed25519").write_bytes(b"n" * 32)
@@ -334,6 +336,7 @@ def test_owner_domain_private_material_fails_closed_for_partial_files(tmp_path: 
 
 def test_product_health_uses_canonical_endpoints(monkeypatch, tmp_path: Path) -> None:
     product = _product(tmp_path, foundation_mode="external")
+    monkeypatch.setattr(product, "source_services", lambda: ())
     urls: list[str] = []
 
     def healthy(url: str) -> dict[str, object]:
@@ -357,6 +360,25 @@ def test_product_health_uses_canonical_endpoints(monkeypatch, tmp_path: Path) ->
     assert not {18019, 18020, 18084, 18767, 19000}.intersection(
         {urlsplit(url).port for url in urls}
     )
+
+
+def test_control_sockets_are_required_even_when_all_http_services_are_healthy(monkeypatch, tmp_path):
+    product = _product(tmp_path, foundation_mode="external")
+    workflow = product.profile.paths.runtime_root / "lifecycle/workflow.sock"
+    broker = product.profile.paths.runtime_root / "removal-capability/broker.sock"
+    monkeypatch.setattr(product, "source_services", lambda: (
+        SimpleNamespace(environment={"WORKFLOW_SOCKET": str(workflow), "BROKER_SOCKET": str(broker)}),
+    ))
+    monkeypatch.setattr(probes, "http_health", lambda _url: {"healthy": True})
+    monkeypatch.setattr(probes, "unix_http_health", lambda _path: {"healthy": True})
+    assert product.health()["status"] == "degraded"
+    # A leftover ordinary file at the expected socket path is insufficient.
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text("stale")
+    monkeypatch.setattr(Path, "is_socket", lambda path: path == broker)
+    assert product.health()["status"] == "degraded"
+    monkeypatch.setattr(Path, "is_socket", lambda path: path in {workflow, broker})
+    assert product.health()["status"] == "healthy"
 
 
 def test_app_ready_requires_device_reachable_contract(monkeypatch, tmp_path: Path) -> None:

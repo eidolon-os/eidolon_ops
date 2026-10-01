@@ -19,7 +19,7 @@ ALL_COMMANDS="abandon app-ready pending trust-host-key ssh-config trust-host-del
 # The platform arms this replaces were the one place left that enumerated
 # boards by name: rk3588 shipped a driver these sets already covered and was
 # still unreachable through this script, because nobody added its name.
-LOCAL_SUPERVISORD_COMMANDS="status doctor app-ready start stop restart logs commissioning-code reset kernel-schema-reset debug service"
+LOCAL_SUPERVISORD_COMMANDS="status doctor app-ready provision start stop restart logs commissioning-code reset kernel-schema-reset debug service"
 SSH_SYSTEMD_COMMANDS="abandon status pending trust-host-key ssh-config trust-host-delivery bring-up doctor app-ready start stop restart logs commissioning-code provision init-inputs converge-inputs repair-credentials backup restore install controller-reset authority-backup authority-restore reset kernel-schema-reset deploy update rollback diagnose service"
 
 die() {
@@ -216,9 +216,10 @@ EOF
 }
 
 run_cli() {
+  [[ "$(id -u)" != "0" ]] || die "请以源码目录拥有者运行；必要的系统初始化和启动会单独请求管理员认证"
   command -v "$UV_BIN" >/dev/null 2>&1 || die "找不到 uv；请先安装 uv 或设置 EIDOLON_UV_BIN"
   cd "$ROOT"
-  exec "$UV_BIN" run eidolon-ops "$@"
+  exec "$UV_BIN" run --no-sync eidolon-ops "$@"
 }
 
 GLOBAL_ARGS=()

@@ -242,7 +242,7 @@ def memory_supervisor_block() -> str:
     return f"\n\n{_MEMORY_SUPERVISOR_ANCHOR}\n  admin_http_port: {PORTS['memory_admin']}\n"
 
 
-def eidolond_settings(profile: HostProfile) -> str:
+def eidolond_settings(profile: HostProfile, *, socket_group: str | None = None) -> str:
     paths = profile.paths
     # The workspace this profile drives, which is a fact the profile carries.
     # It was read off this module's own __file__ before, which happened to
@@ -265,7 +265,8 @@ interface:
   host: 127.0.0.1
   port: {PORTS["eidolond"]}
   uds: {paths.runtime_root / "system.sock"}
-  uds_mode: "0600"
+  uds_mode: "{'0660' if socket_group else '0600'}"
+{f'  uds_group: {socket_group}' if socket_group else ''}
 """
 
 

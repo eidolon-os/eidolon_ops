@@ -21,6 +21,8 @@ def migrate_data_schema(
     config: OperationsConfig,
     runner: ProcessRunner,
 ) -> None:
+    if os.geteuid() == 0:
+        raise OperationsError("source migrations must run as the workspace operator")
     source = config.sources["eidolon_data"].path
     alembic = source / ".venv/bin/alembic"
     if not os.access(alembic, os.X_OK):
@@ -41,6 +43,5 @@ def migrate_data_schema(
             cwd=source,
             env=values,
             timeout=120,
-            **({"user": profile.path.stat().st_uid, "group": profile.path.stat().st_gid} if os.geteuid() == 0 else {}),
         ),
     )

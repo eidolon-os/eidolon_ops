@@ -90,18 +90,19 @@ def test_home_state_transfer_is_between_successful_stop_and_start(tmp_path, stop
     runner = Runner(ProcessResult(0 if stop_succeeds else 1, "", "stop failed"))
     controller = HostController(profile, runner)
     _with_product(controller, SimpleNamespace(
-        source_services=lambda: (), prepare=lambda: {}, health=lambda **kwargs: {"status": "healthy"},
+        source_services=lambda: (), prepare=lambda: {}, migrate=lambda: None,
+        health=lambda **kwargs: {"status": "healthy"},
         commit_owner_authority=lambda: {},
     ))
     target = profile.paths.state_root / "hub/smarthome.sqlite3"
     if stop_succeeds:
         controller.lifecycle("start")
-        assert [call[0][-1] for call in runner.calls] == ["stop", "start"]
+        assert [call[0][-1] for call in runner.calls] == ["prepare", "stop", "start"]
         assert target.is_file()
     else:
         with pytest.raises(ProcessError):
             controller.lifecycle("start")
-        assert [call[0][-1] for call in runner.calls] == ["stop"]
+        assert [call[0][-1] for call in runner.calls] == ["prepare"]
         assert not target.exists()
 
 
@@ -114,6 +115,7 @@ def test_local_lifecycle_uses_canonical_product_source_profile(tmp_path: Path) -
     product = SimpleNamespace(
         source_services=lambda: (),
         prepare=lambda: prepared.append(True) or {"status": "prepared"},
+        migrate=lambda: None,
         health=lambda **_kwargs: {"status": "healthy"},
         # An operation that starts this Host's Hub also records the one-shot
         # Owner Authority capability Hub just used; the adapter owes the
@@ -230,8 +232,34 @@ def test_local_controller_rejects_missing_script_and_unavailable_capability(
         controller.status()
     with pytest.raises(OperationsError, match="unsupported"):
         controller.lifecycle("deploy")
-    with pytest.raises(OperationsError, match="provision is not available"):
+    with pytest.raises(OperationsError, match="no operations config"):
         controller.provision(apply=False)
+
+
+@pytest.mark.parametrize("stop_succeeds", [True, False])
+def test_source_migrations_require_a_successful_stop(tmp_path, stop_succeeds):
+    events = []
+
+    class OrderedRunner(Runner):
+        def run(self, command, **kwargs):
+            events.append(command[-1])
+            if command[-1] == "stop" and not stop_succeeds:
+                return ProcessResult(1, "", "refused shutdown")
+            return super().run(command, **kwargs)
+
+    controller = HostController(_profile(tmp_path), OrderedRunner())
+    _with_product(controller, SimpleNamespace(
+        source_services=lambda: (), prepare=lambda: {},
+        migrate=lambda: events.append("migration"),
+        health=lambda **kwargs: {"status": "healthy"}, commit_owner_authority=lambda: {},
+    ))
+    if stop_succeeds:
+        controller.lifecycle("restart")
+        assert events == ["prepare", "stop", "migration", "start"]
+    else:
+        with pytest.raises(ProcessError):
+            controller.lifecycle("restart")
+        assert events == ["prepare", "stop"]
 
 
 def test_pi_adapter_delegates_every_remote_capability(monkeypatch, tmp_path: Path) -> None:

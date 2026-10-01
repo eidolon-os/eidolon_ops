@@ -77,7 +77,7 @@ from eidolon_ops.readiness import (
     setup_readiness_evidence,
 )
 from eidolon_ops.source_resolution import SourceResolver
-from eidolon_ops.source_runtime import provision_source_files, render_supervisor, source_services
+from eidolon_ops.source_runtime import render_supervisor, source_services
 from eidolon_ops.source_schema import migrate_data_schema
 
 
@@ -123,6 +123,8 @@ class LocalProductSource:
         return tuple(services)
 
     def prepare(self) -> dict[str, object]:
+        if os.geteuid() == 0:
+            raise OperationsError("source preparation must run as the workspace operator")
         self._validate_exact_worktrees()
         try:
             # ``refresh_derived`` because this Host tracks its checkouts' HEAD:
@@ -158,9 +160,6 @@ class LocalProductSource:
             paths.config_root / "supervisor.conf",
             render_supervisor(template.read_text(), services, operator).encode(),
         )
-        if os.geteuid() == 0:
-            provision_source_files(services, self.profile, operator)
-        migrate_data_schema(self.profile, self.config, self.runner)
         result = self.validate()
         return {
             **result,
@@ -173,6 +172,10 @@ class LocalProductSource:
                 else {}
             ),
         }
+
+    def migrate(self) -> None:
+        """Called by the lifecycle adapter only after a successful Host stop."""
+        migrate_data_schema(self.profile, self.config, self.runner)
 
     def validate(self) -> dict[str, object]:
         self._validate_exact_worktrees()
@@ -553,7 +556,11 @@ class LocalProductSource:
             ),
         ).encode("utf-8")
         rendered[root / "settings/eidolond.yaml"] = source_assets.eidolond_settings(
-            self.profile
+            self.profile,
+            socket_group=next(
+                (service.primary_group for service in self.source_services()
+                 if service.program == "lifecycle-workflow"), None
+            ),
         ).encode("utf-8")
         rendered[root / "settings/ports.yaml"] = source_assets.admin_ports_yaml().encode("utf-8")
         rendered[root / "settings/services.yaml"] = source_assets.admin_services_yaml(self.source_services()).encode(
@@ -583,12 +590,22 @@ class LocalProductSource:
             "channel-provider": f"http://127.0.0.1:{ports['channel_provider']}/health",
         }
         socket_path = self.profile.paths.runtime_root / "system.sock"
+        control_sockets = {
+            Path(value)
+            for service in self.source_services()
+            for value in service.environment.values()
+            if value.startswith("/") and value.endswith(".sock")
+        }
 
         def observe() -> dict[str, object]:
             checks: dict[str, object] = {
                 name: probes.http_health(url) for name, url in endpoints.items()
             }
             checks["eidolond"] = probes.unix_http_health(socket_path)
+            for path in sorted(control_sockets):
+                checks[f"socket:{path.relative_to(self.profile.paths.runtime_root)}"] = {
+                    "healthy": path.is_socket(),
+                }
             return {"healthy": all(bool(item["healthy"]) for item in checks.values()), **checks}
 
         report = probes.settle(

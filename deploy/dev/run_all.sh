@@ -10,7 +10,7 @@
 #   ./eidolon mac debug web-start|web-stop|...  the admin web (vite) program
 #
 # What this script does that supervisord cannot do for itself: first-run
-# bootstrap (venv + uv install, pnpm install, log dirs), render and start the
+# validate the prepared runtime, create operator-owned log dirs, start the
 # product-source supervisord, and stop it cleanly (Channel first, so the worker
 # does not log LiveKit refusing it on the way down).
 #
@@ -37,7 +37,6 @@ export EIDOLON_BOOTSTRAP_STATE_ROOT="${EIDOLON_BOOTSTRAP_STATE_ROOT:-${HOME}/eid
 export EIDOLON_BOOTSTRAP_RUNTIME_ROOT="${EIDOLON_BOOTSTRAP_RUNTIME_ROOT:-${EIDOLON_RUNTIME_ROOT}/bootstrap}"
 export EIDOLON_BOOTSTRAP_STATE_DIR="$EIDOLON_BOOTSTRAP_STATE_ROOT"
 export EIDOLON_BOOTSTRAP_RUNTIME_DIR="$EIDOLON_BOOTSTRAP_RUNTIME_ROOT"
-export EIDOLON_PORTS_FILE="${EIDOLON_PORTS_FILE:-${EIDOLON_CONFIG_ROOT}/ports.yaml}"
 export EIDOLON_ADMIN_SERVICES_FILE="${EIDOLON_ADMIN_SERVICES_FILE:-${EIDOLON_ADMIN_ROOT}/config/services.yaml}"
 export EIDOLON_ADMIN_STATE_DIR="${EIDOLON_ADMIN_STATE_DIR:-${EIDOLON_STATE_ROOT}/admin}"
 
@@ -66,11 +65,10 @@ RUN_DIR="$EIDOLON_RUNTIME_ROOT"
 # create everything our own configs reference so the user never sees a phantom
 # "no such file" on first start.
 LOG_PROJECTS=(admin audit nats livekit memory data hub kernel agent channel laya client-web mementos admin/esp32-tools/jobs)
+prepare_directories() {
+  [[ "$(id -u)" != "0" ]] || { error "prepare must run as the workspace operator"; return 1; }
 operator_directories() {
   mkdir -p "$@"
-  if [[ "$(id -u)" == "0" && -n "${EIDOLON_SOURCE_OPERATOR:-}" ]]; then
-    chown "$EIDOLON_SOURCE_OPERATOR" "$@"
-  fi
 }
 for _p in "${LOG_PROJECTS[@]}"; do
   operator_directories "${LOG_DIR}/${_p}"
@@ -91,20 +89,11 @@ operator_directories \
   "${EIDOLON_CACHE_ROOT}/debug/agent" \
   "${EIDOLON_CACHE_ROOT}/debug/channel" \
   "${EIDOLON_CACHE_ROOT}"
-# Private workload directories keep component-owned identities. They were
-# already provisioned by Ops before the supervisor adapter is reached.
-mkdir -p "${EIDOLON_STATE_ROOT}/admin" "${EIDOLON_BOOTSTRAP_STATE_ROOT}" "${EIDOLON_BOOTSTRAP_RUNTIME_ROOT}"
 chmod 0700 "$VAR_DIR"
+}
 
 # Vite dev server pid/log — admin-api's pid is owned by supervisord now.
-WEB_PID_FILE="${RUN_DIR}/eidolon-admin-gateway-web.pid"
-LEGACY_WEB_PID_FILE="${RUN_DIR}/eidolon-admin-web.pid"
-WEB_LOG_FILE="${LOG_DIR}/admin/gateway-web.log"
-API_FOREGROUND_LOG_FILE="${LOG_DIR}/admin/gateway-api.foreground.log"
-WEB_FOREGROUND_LOG_FILE="${LOG_DIR}/admin/gateway-web.foreground.log"
 
-API_HOST="${EIDOLON_ADMIN_API_HOST:-127.0.0.1}"
-API_PORT="${EIDOLON_ADMIN_API_PORT:-9000}"
 WEB_PORT="${EIDOLON_ADMIN_WEB_PORT:-9001}"
 
 VENV="${OPS_ROOT}/.venv"
@@ -122,8 +111,6 @@ SV_PID="${VAR_DIR}/supervisord.pid"
 SV_SOCK="${VAR_DIR}/supervisor.sock"
 SV_PROFILE=""
 
-# shellcheck source=../supervisor/wrappers/livekit-credentials.sh
-source "${OPS_ROOT}/deploy/supervisor/wrappers/livekit-credentials.sh"
 
 configure_supervisor_profile() {
   local profile=$1
@@ -158,8 +145,6 @@ configure_supervisor_profile() {
       unset LIVEKIT_API_KEY LIVEKIT_API_SECRET
       EIDOLON_ADMIN_ROOT="$EIDOLON_SOURCE_ADMIN"
       WEB_DIR="${EIDOLON_ADMIN_ROOT}/web"
-      API_HOST="${EIDOLON_ADMIN_API_HOST:-127.0.0.1}"
-      API_PORT="${EIDOLON_ADMIN_API_PORT:-9000}"
       WEB_PORT="${EIDOLON_ADMIN_WEB_PORT:-9001}"
       SV_PROFILE="$profile"
       SV_CONF="$SV_PROFILE_CONF"
@@ -182,132 +167,21 @@ configure_supervisor_profile() {
 
 # --- Deps -------------------------------------------------------------------
 
-ensure_api_deps() {
-  if [[ "$SV_PROFILE" == "product-source" ]]; then
-    ensure_product_source_deps
-    return 0
-  fi
-  if [[ -z "$EIDOLON_NATS_SERVER" ]]; then
-    error "nats-server is not on PATH"
-    exit 1
-  fi
-  if [[ ! -x "${VENV}/bin/uvicorn" || ! -x "${VENV}/bin/supervisord" ]]; then
-    info "first run — creating the Ops control venv"
-    python3 -m venv "$VENV"
-    "${VENV}/bin/pip" install -q --upgrade pip
-    "${VENV}/bin/pip" install -q -e "${OPS_ROOT}[dev]" -e "${EIDOLON_ADMIN_ROOT}[dev]"
-  fi
-}
-
-ensure_product_source_deps() {
+require_control_runtime() {
   if [[ ! -x "${VENV}/bin/supervisord" || ! -x "${VENV}/bin/supervisorctl" ]]; then
-    info "syncing the locked Ops product-source control runtime"
-    uv sync --frozen --extra dev
+    error "Ops runtime is missing; prepare it as the workspace operator with uv sync --frozen --extra dev"
+    return 1
   fi
 }
 
-ensure_web_deps() {
+require_web_runtime() {
   if [[ ! -x "${WEB_DIR}/${VITE_BIN_REL}" ]]; then
-    if command -v pnpm >/dev/null 2>&1; then
-      info "first run — pnpm install"
-      (cd "$WEB_DIR" && pnpm install)
-    elif command -v npm >/dev/null 2>&1; then
-      info "first run — npm install"
-      (cd "$WEB_DIR" && npm install)
-    else
-      error "neither pnpm nor npm on PATH"
-      exit 1
-    fi
+    error "Web dependencies are missing; install them as the workspace operator in $WEB_DIR"
+    return 1
   fi
 }
-
-# --- process tree helpers --------------------------------------------------
-#
-# Why we need these: supervisord starts each child program with its own
-# session (setsid), which means every child becomes a process-group leader
-# independent of supervisord's group. So ``kill -<supervisord_pgid>`` only
-# reaches supervisord itself — its children survive as orphans (PPID=1).
-#
-# The fix is to walk the PPID tree explicitly: enumerate descendants via
-# pgrep -P, then signal each. This is the only way to guarantee that when
-# we SIGKILL supervisord (because graceful shutdown timed out), we don't
-# leave subprocesses hanging on to ports.
-
-# Print all descendants of $1 (recursive) as ``pid|comm`` lines, where
-# ``comm`` is the command name at snapshot time. Empty if no children.
-#
-# We snapshot the command name now so ``kill_tree`` can re-check it
-# before signaling: a PID we collected at t=0 may have died and been
-# reused by the kernel for a wholly unrelated process by t=signal.
-# Without this guard we'd SIGKILL random innocents whenever shutdown
-# stretched long enough for PID reuse (more common on busy macOS).
-collect_descendants() {
-  local parent=$1
-  local children child comm
-  children=$(pgrep -P "$parent" 2>/dev/null || true)
-  for child in $children; do
-    comm=$(ps -o comm= -p "$child" 2>/dev/null | tr -d '[:space:]')
-    [[ -z "$comm" ]] && continue  # PID died between pgrep and ps; skip
-    echo "${child}|${comm}"
-    collect_descendants "$child"
-  done
-}
-
-# Signal the entire tree rooted at $1 with signal $2 (e.g. "-TERM" or "-KILL").
-#
-# Order: parent first (stops supervisord's autorestart from racing us by
-# respawning a child mid-shutdown), then descendants. Each kill is
-# best-effort — already-dead PIDs return non-zero, which is fine.
-#
-# Each descendant is verified against its snapshotted comm: if the PID
-# has been reused (different comm) we skip it. This is best-effort
-# protection — comm match doesn't prove identity (two processes with
-# the same name still alias) but it eliminates the common case where
-# the PID has been recycled into something unrelated (a shell, sshd).
-kill_tree() {
-  local root=$1 signal=$2 entry pid snap_comm cur_comm
-  kill "$signal" "$root" 2>/dev/null || true
-  while IFS= read -r entry; do
-    [[ -z "$entry" ]] && continue
-    pid="${entry%%|*}"
-    snap_comm="${entry#*|}"
-    cur_comm=$(ps -o comm= -p "$pid" 2>/dev/null | tr -d '[:space:]')
-    if [[ -z "$cur_comm" ]]; then
-      continue  # already gone, fine
-    fi
-    if [[ "$cur_comm" != "$snap_comm" ]]; then
-      warn "kill_tree: skip PID $pid — comm changed ($snap_comm → $cur_comm), likely PID reuse"
-      continue
-    fi
-    kill "$signal" "$pid" 2>/dev/null || true
-  done < <(collect_descendants "$root")
-}
-
-# --- vite dev server --------------------------------------------------------
 
 # --- supervisord ------------------------------------------------------------
-
-# Print the PID when var/supervisord.pid points at a live supervisord process.
-#
-# The PID-existence check alone isn't enough: PIDs get recycled by the
-# kernel. If our last supervisord crashed without removing its pid file,
-# and the kernel later reassigned that PID to (say) the shell ``sleep``
-# in run_all.sh, ``kill -0`` succeeds and we'd incorrectly skip startup.
-# Verifying the process is really a supervisord invocation closes that
-# hole.
-#
-# We grep ``ps -o args=`` rather than ``-o comm=`` because on macOS
-# ``comm`` returns the executable basename (``python3``) and supervisord
-# is launched as a script. The full args contain
-# ``.../bin/supervisord -c ...`` which we can match unambiguously.
-sv_pid_from_file() {
-  [[ -f "$SV_PID" ]] || return 1
-  local pid; pid=$(cat "$SV_PID" 2>/dev/null)
-  [[ -n "$pid" ]] || return 1
-  kill -0 "$pid" 2>/dev/null || return 1
-  ps -o args= -p "$pid" 2>/dev/null | grep -q "bin/supervisord" || return 1
-  echo "$pid"
-}
 
 sv_ctl_ready() {
   [[ -S "$SV_SOCK" ]] && "${VENV}/bin/supervisorctl" -c "$SV_CONF" version >/dev/null 2>&1
@@ -319,27 +193,11 @@ sv_pid_from_ctl() {
   local pid
   pid="$("${VENV}/bin/supervisorctl" -c "$SV_CONF" pid 2>/dev/null || true)"
   [[ "$pid" =~ ^[0-9]+$ ]] || return 1
-  kill -0 "$pid" 2>/dev/null || return 1
-  echo "$pid"
-}
-
-# Repair var/supervisord.pid from the socket when the daemon is alive but the
-# pidfile is missing or stale. This is the important split-brain guard: a live
-# supervisord keeps auto-restarting children, so treating "no pidfile" as "not
-# running" makes restart collide with its own managed processes.
-sv_repair_pidfile_from_ctl() {
-  local pid file_pid
-  pid="$(sv_pid_from_ctl)" || return 1
-  file_pid="$(cat "$SV_PID" 2>/dev/null || true)"
-  if [[ "$file_pid" != "$pid" ]]; then
-    warn "supervisord socket is live (PID $pid) but pidfile is stale/missing; repairing $SV_PID" >&2
-    echo "$pid" >"$SV_PID"
-  fi
   echo "$pid"
 }
 
 sv_pid() {
-  sv_pid_from_file || sv_repair_pidfile_from_ctl
+  sv_pid_from_ctl
 }
 
 sv_alive() {
@@ -376,7 +234,7 @@ do_sv_stop_channel_first() {
 
 # Reload the product-source configuration into a running supervisord.
 do_sv_reread_update() {
-  ensure_api_deps
+  require_control_runtime
   if ! sv_alive; then
     return 0
   fi
@@ -389,7 +247,7 @@ do_sv_reread_update() {
     warn "supervisorctl not ready on $SV_SOCK — skip reread/update"
     return 1
   fi
-  info "supervisord reread + update (reload enabled/*.conf)"
+  info "supervisord reread + update (reload generated supervisor.conf)"
   if ! "${VENV}/bin/supervisorctl" -c "$SV_CONF" reread; then
     error "supervisorctl reread failed; restart is required before this configuration is active"
     return 1
@@ -401,10 +259,7 @@ do_sv_reread_update() {
 }
 
 do_sv_start() {
-  ensure_api_deps
-  if [[ "$SV_PROFILE" != "product-source" ]]; then
-    eidolon_ensure_livekit_credentials
-  fi
+  require_control_runtime
   if sv_alive; then
     info "supervisord already running (PID $(sv_pid), socket $SV_SOCK)"
     info "  config reload only — use '$0 status' to inspect; '$0 restart' for full stop+start"
@@ -413,11 +268,9 @@ do_sv_start() {
     fi
     return 0
   fi
-  # If a stale socket lingers from a crashed daemon, supervisord will refuse
-  # to start.
   if [[ -S "$SV_SOCK" ]] && ! sv_ctl_ready; then
-    info "cleaning stale socket $SV_SOCK"
-    rm -f "$SV_SOCK"
+    error "supervisor socket is unavailable; refusing to replace an unverified listener: $SV_SOCK"
+    return 1
   fi
   info "starting supervisord (conf $SV_CONF)"
   "${VENV}/bin/supervisord" -c "$SV_CONF"
@@ -434,58 +287,27 @@ do_sv_start() {
 }
 
 do_sv_stop() {
-  if ! sv_alive; then
+  local pid
+  if ! pid="$(sv_pid_from_ctl)"; then
+    if [[ -S "$SV_SOCK" ]]; then
+      error "supervisor socket is unavailable; refusing to infer process ownership from a pidfile"
+      return 1
+    fi
     info "supervisord not running"
-    rm -f "$SV_PID" 2>/dev/null || true
     return 0
   fi
-  local sv_pid; sv_pid="$(sv_pid)"
-
-  # Step 1: stop channel while LiveKit is still up (avoids reconnect errors in logs).
+  local birth current
+  birth="$(ps -o lstart= -p "$pid" 2>/dev/null || true)"
   do_sv_stop_channel_first
-
-  # Step 2: ask supervisord to gracefully shut down the rest of the program tree.
-  #
-  # It will send SIGTERM to each program and wait up to that program's
-  # ``stopwaitsecs`` before SIGKILL-ing. Remaining programs shut down in parallel;
-  # wall time is bounded by the max ``stopwaitsecs`` plus supervisord overhead.
-  info "supervisord shutdown (stops admin-api and all enabled supervised programs)"
-  "${VENV}/bin/supervisorctl" -c "$SV_CONF" shutdown 2>/dev/null \
-    || warn "supervisorctl shutdown rpc failed (continuing with patient wait)"
-
-  # Step 3: patient wait. 60s = max(stopwaitsecs)=40 + 20s buffer for
-  # supervisord's own teardown. Previously this was 20s, which routinely
-  # truncated channel-worker's graceful exit and forced step 3.
-  local wait_seconds=60
-  local checks=$((wait_seconds * 2))
-  for _ in $(seq 1 $checks); do sv_alive || break; sleep 0.5; done
-
-  if ! sv_alive; then
-    rm -f "$SV_PID" 2>/dev/null || true
-    return 0
-  fi
-
-  # Step 4: escalation. Graceful shutdown didn't complete in time. This
-  # is where the old code SIGKILL'd just supervisord — and every child
-  # immediately became a PPID=1 orphan because supervisord uses setsid
-  # to isolate each child into its own session, so signaling supervisord
-  # alone doesn't reach its descendants.
-  #
-  # ``kill_tree`` walks the PPID hierarchy explicitly and signals every
-  # descendant individually, eliminating the orphan window. We do this
-  # in two stages: TERM first (some children may still react), then KILL
-  # if anyone survives.
-  warn "supervisord didn't exit within ${wait_seconds}s — escalating to TERM-tree"
-  kill_tree "$sv_pid" "-TERM"
-  for _ in $(seq 1 30); do sv_alive || break; sleep 0.5; done
-
-  if sv_alive; then
-    warn "still alive after TERM-tree (15s); SIGKILL whole tree"
-    kill_tree "$sv_pid" "-KILL"
-    sleep 1
-  fi
-
-  rm -f "$SV_PID" 2>/dev/null || true
+  info "supervisord shutdown (its own process-group policy stops all children)"
+  "${VENV}/bin/supervisorctl" -c "$SV_CONF" shutdown || return 1
+  for _ in $(seq 1 "$(( ${EIDOLON_SUPERVISOR_SHUTDOWN_SECONDS:-300} * 2 ))"); do
+    current="$(ps -o lstart= -p "$pid" 2>/dev/null || true)"
+    [[ -z "$current" || "$current" != "$birth" ]] && return 0
+    sleep 0.5
+  done
+  error "supervisord shutdown did not complete; refusing an unverified force-kill"
+  return 1
 }
 
 do_sv_status() {
@@ -550,7 +372,7 @@ do_product_source_port_audit() {
 # the pidfile path, so the running supervisord's pid is read out of it.
 supervised_descendant() {
   local pid="$1" guard=0 supervisor
-  supervisor="$(cat "${SV_PID:-/nonexistent}" 2>/dev/null | tr -d ' ')"
+  supervisor="$(sv_pid_from_ctl || true)"
   [[ -z "$supervisor" ]] && return 1
   while [[ -n "$pid" && "$pid" != "1" && $guard -lt 20 ]]; do
     [[ "$pid" == "$supervisor" ]] && return 0
@@ -562,7 +384,7 @@ supervised_descendant() {
 
 do_product_source_start() {
   configure_supervisor_profile product-source
-  ensure_product_source_deps
+  require_control_runtime
   header "declared ports are free"
   do_product_source_port_audit || return 1
   # NATS is this profile's own program (nats:nats-server), started by eidolond
@@ -609,7 +431,7 @@ do_product_source_status() {
 
 do_product_source_commissioning_code() {
   configure_supervisor_profile product-source
-  ensure_product_source_deps
+  require_control_runtime
   local ttl=600
   local code=""
   while [[ $# -gt 0 ]]; do
@@ -641,9 +463,9 @@ do_product_source_commissioning_code() {
 
 do_product_source_web_start() {
   configure_supervisor_profile product-source
-  ensure_product_source_deps
-  ensure_web_deps
-  do_sv_start
+  require_control_runtime
+  require_web_runtime
+  sv_alive || { error "start the whole Host before starting Admin Web"; return 1; }
   local state
   state="$("${VENV}/bin/supervisorctl" -c "$SV_CONF" status admin-web 2>/dev/null || true)"
   if [[ "$state" == *" RUNNING "* ]]; then
@@ -656,7 +478,7 @@ do_product_source_web_start() {
 
 do_product_source_web_stop() {
   configure_supervisor_profile product-source
-  ensure_product_source_deps
+  require_control_runtime
   local state
   state="$("${VENV}/bin/supervisorctl" -c "$SV_CONF" status admin-web 2>/dev/null || true)"
   if [[ "$state" == *" STOPPED "* || -z "$state" ]]; then
@@ -668,16 +490,16 @@ do_product_source_web_stop() {
 
 do_product_source_web_restart() {
   configure_supervisor_profile product-source
-  ensure_product_source_deps
-  ensure_web_deps
-  do_sv_start
+  require_control_runtime
+  require_web_runtime
+  sv_alive || { error "start the whole Host before starting Admin Web"; return 1; }
   "${VENV}/bin/supervisorctl" -c "$SV_CONF" restart admin-web
   info "Admin Web / http://127.0.0.1:${WEB_PORT}/"
 }
 
 do_product_source_web_status() {
   configure_supervisor_profile product-source
-  ensure_product_source_deps
+  require_control_runtime
   "${VENV}/bin/supervisorctl" -c "$SV_CONF" status admin-web || true
 }
 
@@ -690,6 +512,7 @@ case "${1:-}" in
   product-source)
     shift
     case "${1:-status}" in
+      prepare) configure_supervisor_profile product-source; require_control_runtime; prepare_directories ;;
       start)   do_product_source_start ;;
       stop)    do_product_source_stop ;;
       restart) do_product_source_restart ;;

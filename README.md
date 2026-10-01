@@ -565,12 +565,15 @@ Owner 变更的权限边界；它的 state/runtime 目录均不与产品主进�
 
 Mac 的控制服务从组件 `ops/component.toml` 及其服务资产生成到 Host 的 `supervisor.conf`；
 服务账号、环境、私有目录和依赖来自同一组件声明。Supervisor 只保留驱动专属的 worker 配置。
-`start` / `restart` 需要管理员权限来建立隔离账号并启动 supervisor；普通 worker 仍以配置拥有者运行。
-初始化会先检查权限，缺失时在改输入或停现有服务之前失败。`status`、`app-ready`、日志和单个服务
-请求仍可由配置拥有者执行。启动时使用正常入口，例如 `sudo ./eidolon mac restart`，并确保该管理员
-执行环境能找到已安装的 `uv`、`nats-server` 和 `livekit-server`（也可通过原有 `EIDOLON_UV_BIN`、
-`EIDOLON_NATS_SERVER`、`EIDOLON_LIVEKIT_BIN` 指定其绝对路径）。提升权限不会把 `~` 路径改到 root
-的 home，主机身份和状态继续使用配置拥有者的目录。
+所有入口由源码目录拥有者运行，例如 `./eidolon mac restart`，禁止整体 `sudo`。
+依赖预先由普通用户安装（Ops 使用 `uv sync --frozen --extra dev`）；日常命令不会安装依赖。
+首次运行或服务身份声明变更后，执行 `./eidolon mac provision --apply`：它先停止 Host，再通过
+macOS 系统认证建立隔离账号和迁移组件声明的私有目录。这一步不安装软件、不重置 Host 身份。
+之后 `start` / `restart` 校验初始化结果，以普通用户生成配置及精确的文件访问权限，成功停止旧服务
+后执行数据库迁移；只在启动 supervisor 时请求管理员认证。普通 worker 的 UID 和 HOME 都属于
+源码目录拥有者。`status` 不建目录、不修权限、不改 PID 文件。`system.sock` 自身使用声明的组和
+0660 权限，不向 Host 运行目录添加继承读写 ACL。工具可通过原有 `EIDOLON_UV_BIN`、
+`EIDOLON_NATS_SERVER`、`EIDOLON_LIVEKIT_BIN` 指定绝对路径。
 
 设备移除使用同一工作流、撤销授权代理及 Owner 授权规则；仅内核 peer credential 读取由
 Linux `SO_PEERCRED` 或 Darwin `getpeereid` / `LOCAL_PEERPID` 实现。两端 `app-ready` 均要求工作流

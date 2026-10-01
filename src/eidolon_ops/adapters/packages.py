@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
+from eidolon_ops import plans
 from eidolon_ops.controller import EidolonPiController
 from eidolon_ops.model import Capability
 from eidolon_ops.ports import PackageManagerKind
@@ -11,13 +14,22 @@ class UnmanagedPackages:
     """A workstation. Its packages belong to whoever set the machine up."""
 
     kind = PackageManagerKind.NONE
+    provision_steps = (
+        ("prepare", "prepare source inputs as the workspace operator"),
+        ("initialize", "stop the Host and initialize declared service identities and private roots"),
+    )
+
+    def __init__(self, provisioner: Callable[..., dict[str, object]] | None = None):
+        self._provisioner = provisioner
 
     @property
     def capabilities(self) -> frozenset[Capability]:
-        return frozenset()
+        return frozenset({Capability.PROVISION}) if self._provisioner else frozenset()
 
     def provision(self, *, apply: bool) -> dict[str, object]:
-        raise NotImplementedError("this Host has no package manager capability")
+        if self._provisioner is None:
+            raise NotImplementedError("this Host has no provisioning capability")
+        return self._provisioner(apply=apply)
 
     def doctor(self) -> dict[str, object]:
         return {
@@ -30,6 +42,7 @@ class AptPackages:
     """A product board, whose pinned foundation Ops installs and proves."""
 
     kind = PackageManagerKind.APT
+    provision_steps = plans.PROVISION_STEPS
 
     def __init__(self, release: EidolonPiController, profile_id: str) -> None:
         self.release = release

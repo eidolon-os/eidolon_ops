@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import subprocess
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -36,8 +35,6 @@ class ProcessRunner(Protocol):
         cwd: Path | None = None,
         env: Mapping[str, str] | None = None,
         timeout: float = 120,
-        user: int | None = None,
-        group: int | None = None,
     ) -> ProcessResult: ...
 
 
@@ -50,15 +47,7 @@ class SubprocessRunner:
         cwd: Path | None = None,
         env: Mapping[str, str] | None = None,
         timeout: float = 120,
-        user: int | None = None,
-        group: int | None = None,
     ) -> ProcessResult:
-        if os.geteuid() == 0 and Path(command[0]).name == "git" and "-C" in command:
-            # The privileged Host adapter reads the explicitly selected source
-            # repositories. Keep Git's ownership protection elsewhere; neither
-            # write root's global config nor allow a wildcard directory.
-            repository = Path(command[command.index("-C") + 1]).resolve()
-            command = (command[0], "-c", f"safe.directory={repository}", *command[1:])
         try:
             result = subprocess.run(
                 tuple(command),
@@ -68,9 +57,6 @@ class SubprocessRunner:
                 check=False,
                 capture_output=True,
                 timeout=timeout,
-                user=user,
-                group=group,
-                extra_groups=[] if user is not None else None,
             )
         except (OSError, subprocess.SubprocessError) as exc:
             raise ProcessError(
