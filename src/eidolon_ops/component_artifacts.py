@@ -17,7 +17,9 @@ from __future__ import annotations
 
 import hashlib
 import shutil
+import subprocess
 import tempfile
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -131,7 +133,14 @@ def workstation_artifact_root(toolchain_root: Path, artifact: CarriedArtifact) -
     return toolchain_root / "models" / host_artifact_root(artifact).name
 
 
-def ensure_workstation_artifact(toolchain_root: Path, artifact: CarriedArtifact) -> Path:
+#: Where a ``repo://`` file is read from: the declaring component's checkout and the commit this
+#: release pins, by component id.
+Repositories = Mapping[str, tuple[Path, str]]
+
+
+def ensure_workstation_artifact(
+    toolchain_root: Path, artifact: CarriedArtifact, *, repositories: Repositories | None = None,
+) -> Path:
     """Return the pinned files on this workstation, fetching them if absent.
 
     The record and every file must match the pinned manifest. A matching
@@ -148,7 +157,10 @@ def ensure_workstation_artifact(toolchain_root: Path, artifact: CarriedArtifact)
                 and _digest_of(root / item.path) == item.sha256 for item in artifact.files)
     ):
         return root
-    return _materialize(root, artifact, toolchain_root.parent / "artifact-sources")
+    return _materialize(
+        root, artifact, toolchain_root.parent / "artifact-sources",
+        repository=(repositories or {}).get(artifact.component_id),
+    )
 
 
 def _recorded_digest(root: Path) -> str:
@@ -156,13 +168,19 @@ def _recorded_digest(root: Path) -> str:
     return record.read_text(encoding="utf-8").strip() if record.is_file() else ""
 
 
-def _materialize(root: Path, artifact: CarriedArtifact, local_sources: Path) -> Path:
+def _materialize(
+    root: Path,
+    artifact: CarriedArtifact,
+    local_sources: Path,
+    *,
+    repository: tuple[Path, str] | None = None,
+) -> Path:
     with tempfile.TemporaryDirectory(prefix="eidolon-artifact-") as scratch:
         staged = Path(scratch)
         for item in artifact.files:
             destination = staged / item.path
             destination.parent.mkdir(parents=True, exist_ok=True)
-            _download(item.url, destination, local_sources=local_sources)
+            _download(item.url, destination, local_sources=local_sources, repository=repository)
             actual = _digest_of(destination)
             if actual != item.sha256:
                 raise OperationsError(
@@ -177,8 +195,39 @@ def _materialize(root: Path, artifact: CarriedArtifact, local_sources: Path) -> 
     return root
 
 
-def _download(url: str, destination: Path, *, local_sources: Path) -> None:
+def _download(
+    url: str,
+    destination: Path,
+    *,
+    local_sources: Path,
+    repository: tuple[Path, str] | None = None,
+) -> None:
     parsed = urlsplit(url)
+    if parsed.scheme == "repo":
+        # A file of the declaring component's own repository at the commit this release pins: an
+        # LFS object every operator's checkout can produce (git lfs smudges it, fetching it from the
+        # remote when this checkout has not), where a local-artifact lives on one workstation only.
+        relative = (parsed.netloc + parsed.path).strip("/")
+        if (
+            not relative or parsed.query or parsed.fragment
+            or any(part in {"", ".", ".."} for part in relative.split("/"))
+        ):
+            raise OperationsError(f"invalid repository artifact URL: {url}")
+        if repository is None:
+            raise OperationsError(f"no pinned repository to read {url} from")
+        checkout, revision = repository
+        with destination.open("wb") as handle:
+            completed = subprocess.run(
+                ("git", "-C", str(checkout), "-c", "filter.lfs.required=true",
+                 "cat-file", "--filters", f"{revision}:{relative}"),
+                stdout=handle, stderr=subprocess.PIPE, check=False,
+            )
+        if completed.returncode != 0:
+            raise OperationsError(
+                f"could not read {relative} at {revision[:12]} from {checkout}: "
+                + completed.stderr.decode("utf-8", "replace").strip()
+            )
+        return
     if parsed.scheme == "local-artifact":
         # A private checkpoint has no public hub URL. The operator stages its
         # frozen bytes beside the durable toolchain; the declaration still pins

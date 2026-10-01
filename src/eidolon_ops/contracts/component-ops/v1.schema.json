@@ -450,7 +450,7 @@
                 "url": {
                   "description": "Where the pinned bytes come from. Required beside the digest: a hash with no source is a promise nothing can keep, and an operator on a board would be left to find the file by hand. Fetched on the workstation and carried over the same transport a release uses, never by the Host -- a Host may have no route to a model hub, and this is exactly the case the declaration exists to avoid.",
                   "type": "string",
-                  "pattern": "^(https://|local-artifact://)[^\\u0000]+$"
+                  "pattern": "^(https://|local-artifact://|repo://)[^\\u0000]+$"
                 }
               }
             }

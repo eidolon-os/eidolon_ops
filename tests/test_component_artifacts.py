@@ -113,19 +113,77 @@ def test_laya_release_is_capability_selected_and_versioned() -> None:
     without = _declared(frozenset())
     assert not any(item.artifact_id.startswith("laya-smart-home") for item in without)
     with_laya = _declared(frozenset({"local_laya"}))
-    model = next(item for item in with_laya if item.artifact_id.startswith("laya-smart-home"))
-    assert model.install_root.name == "laya-smart-home-c4-onnx-7b695ba8"
+    laya = [item for item in with_laya if item.artifact_id.startswith("laya-smart-home")]
+    # One format: the NPU graphs. A Host without rknpu2 runs no Laya, so nothing CPU-side is pinned.
+    assert [item.install_root.name for item in laya] == ["laya-smart-home-c4-rknn-7b695ba8"]
+    (model,) = laya
     assert {item.path for item in model.files} >= {
-        "manifest.json", "onnx/model.onnx", "onnx/model.onnx.data",
-        "onnx/export.json", "torch/tokenizer/tokenizer.json",
+        "manifest.json", "librknnrt.so", "npu/hidden_l512.rknn", "npu/tok_emb_fp16.npy",
+        "torch/tokenizer/tokenizer.json",
     }
-    assert all(item.url.startswith("local-artifact://laya-c4-onnx/") for item in model.files)
+    # Read from the component's own repository at the pinned commit (LFS objects), not one
+    # workstation's private directory.
+    assert all(item.url.startswith("repo://") for item in model.files)
+    services = (_CHECKOUT_ROOT / "eidolon_models/laya/deploy/services.toml").read_text()
     unit = (_CHECKOUT_ROOT / "eidolon_models/deploy/systemd/eidolon-laya.service").read_text()
-    launcher = (_CHECKOUT_ROOT / "eidolon_models/scripts/eidolon-laya").read_text()
-    assert str(model.install_root) in launcher
-    assert "EIDOLON_HOST_CAPABILITIES" in launcher
-    assert "EIDOLON_LAYA_BACKEND=onnx" not in unit
-    assert "train/runs" not in unit
+    assert f'model_dir = "{model.install_root}"' in services
+    assert "EIDOLON_LAYA" not in unit and "train/runs" not in unit
+
+
+def _commit(repository: Path, name: str, payload: bytes) -> str:
+    def git(*args: str) -> str:
+        return subprocess.run(("git", "-C", str(repository), *args), check=True,
+                              capture_output=True, text=True).stdout.strip()
+
+    repository.mkdir(parents=True, exist_ok=True)
+    git("init", "-q")
+    target = repository / name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(payload)
+    git("add", name)
+    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "pin")
+    return git("rev-parse", "HEAD")
+
+
+def test_a_repository_artifact_is_read_at_the_pinned_commit(tmp_path: Path) -> None:
+    repository = tmp_path / "eidolon_models"
+    pinned = b"c4 graph"
+    revision = _commit(repository, "laya/models/m/npu/hidden_l128.rknn", pinned)
+    # The checkout moving on after the pin must not change what the release carries.
+    (repository / "laya/models/m/npu/hidden_l128.rknn").write_bytes(b"edited, uncommitted")
+    artifact = CarriedArtifact(
+        "eidolon_models", "laya-m", "model", contract.HOST_MODEL_ROOT / "laya-m",
+        (CarriedFile("npu/hidden_l128.rknn", hashlib.sha256(pinned).hexdigest(),
+                     "repo://laya/models/m/npu/hidden_l128.rknn"),),
+    )
+    held = ensure_workstation_artifact(
+        tmp_path / "toolchain", artifact, repositories={"eidolon_models": (repository, revision)}
+    )
+    assert (held / "npu/hidden_l128.rknn").read_bytes() == pinned
+
+
+@pytest.mark.parametrize(
+    ("url", "repositories", "message"),
+    [
+        ("repo://laya/../secrets", True, "invalid repository artifact URL"),
+        ("repo://laya/models/absent.rknn", True, "could not read"),
+        ("repo://laya/models/m/npu/hidden_l128.rknn", False, "no pinned repository"),
+    ],
+)
+def test_a_repository_artifact_is_refused_when_it_cannot_be_the_pin(
+    tmp_path: Path, url: str, repositories: bool, message: str
+) -> None:
+    repository = tmp_path / "eidolon_models"
+    revision = _commit(repository, "laya/models/m/npu/hidden_l128.rknn", b"x")
+    artifact = CarriedArtifact(
+        "eidolon_models", "laya-m", "model", contract.HOST_MODEL_ROOT / "laya-m",
+        (CarriedFile("npu/hidden_l128.rknn", hashlib.sha256(b"x").hexdigest(), url),),
+    )
+    with pytest.raises(OperationsError, match=message):
+        ensure_workstation_artifact(
+            tmp_path / "toolchain", artifact,
+            repositories={"eidolon_models": (repository, revision)} if repositories else None,
+        )
 
 
 def test_local_artifact_carries_exact_bytes_and_refuses_source_drift(tmp_path: Path) -> None:
@@ -170,7 +228,7 @@ def test_every_pinned_file_names_an_immutable_source(
     assert declared
     for artifact in declared:
         for item in artifact.files:
-            assert item.url.startswith(("https://", "local-artifact://")), item
+            assert item.url.startswith(("https://", "local-artifact://", "repo://")), item
             assert "/resolve/main/" not in item.url, item
             assert "/refs/heads/" not in item.url, item
 
@@ -203,7 +261,7 @@ def test_the_set_digest_changes_when_any_file_does() -> None:
 def offline(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     fetched: list[str] = []
 
-    def _download(url: str, destination: Path, *, local_sources: Path) -> None:
+    def _download(url: str, destination: Path, *, local_sources: Path, **_: object) -> None:
         fetched.append(url)
         payload = _WEIGHTS if url.endswith(".onnx") else _TOKENIZER
         destination.write_bytes(payload)
@@ -251,7 +309,7 @@ def test_a_damaged_cached_file_is_refetched_despite_its_matching_record(tmp_path
 def test_files_that_do_not_match_the_pin_are_refused(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def _tampered(url: str, destination: Path, *, local_sources: Path) -> None:
+    def _tampered(url: str, destination: Path, *, local_sources: Path, **_: object) -> None:
         destination.write_bytes(b"something else")
 
     monkeypatch.setattr(component_artifacts, "_download", _tampered)
@@ -526,10 +584,9 @@ def test_laya_only_retirement_selects_only_the_old_chat_model():
     # A smart-home-only Host also retires the participation model it does not run: the two Laya
     # services are selected by separate capabilities.
     retired = {payload["destination"]: payload["units"] for _action, payload in transfer.transport.calls}
-    assert result["artifacts"] == 3
+    assert result["artifacts"] == 2
     assert retired == {
         "/var/lib/eidolon/models/qwen3-1.7b": ["eidolon-llm.service"],
-        "/var/lib/eidolon/models/laya-participation-p4-onnx-ae6718a4": ["eidolon-laya-participation.service"],
         "/var/lib/eidolon/models/laya-participation-p4-rknn-ae6718a4": ["eidolon-laya-participation.service"],
     }
     transfer.transport.calls.clear()

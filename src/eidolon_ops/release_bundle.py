@@ -205,8 +205,18 @@ class BundleTransfer:
         )
         artifacts = carried_artifacts(topology)
         for artifact in artifacts:
-            ensure_workstation_artifact(self.config.workspace.toolchain_root, artifact)
+            ensure_workstation_artifact(
+                self.config.workspace.toolchain_root, artifact, repositories=self._repositories()
+            )
         return {"status": "prepared", "bundle": result, "models": len(artifacts)}
+
+    def _repositories(self) -> dict[str, tuple[Path, str]]:
+        """Each pinned source's checkout and commit, where its ``repo://`` artifacts are read."""
+
+        return {
+            source_id: (source.path, self.sources.revision(source_id))
+            for source_id, source in self.config.sources.items()
+        }
 
     def prepare(
         self,
@@ -386,7 +396,7 @@ class BundleTransfer:
                 carried.append({"artifact": artifact.artifact_id, "status": "already_held"})
                 continue
             source = ensure_workstation_artifact(
-                self.config.workspace.toolchain_root, artifact
+                self.config.workspace.toolchain_root, artifact, repositories=self._repositories()
             )
             staging = f"/var/tmp/eidolon-artifact-{expected[:12]}"
             self.transport.run(("rm", "-rf", staging))
