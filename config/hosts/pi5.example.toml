@@ -46,3 +46,9 @@ allow_insecure_livekit = true
 # not installed here. Leave this out to run what the operations config allows.
 [capabilities]
 provides = []
+
+# Where this board's callers reach the models it does not run. Placeholder until the remote
+# service exists: nothing on this board answers it, so IP-team decisions are unavailable and
+# the Agent ends the round. Point it at the remote (https) when there is one.
+[model_endpoints]
+laya_participation = "http://127.0.0.1:8773/v1/participation/decide"

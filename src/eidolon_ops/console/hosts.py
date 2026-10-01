@@ -151,7 +151,12 @@ class HostRegistry:
         if config_path is None:
             return {"service": []}
         try:
-            return {"service": list(load_config(config_path, capabilities=profile.capabilities).units)}
+            config = load_config(
+                config_path,
+                capabilities=profile.capabilities,
+                model_endpoints=profile.model_endpoints,
+            )
+            return {"service": list(config.units)}
         except _LOAD_ERRORS:
             return {"service": []}
 
@@ -169,7 +174,11 @@ class HostRegistry:
         config_path = profile.operations_config
         if config_path is not None:
             try:
-                root = load_config(config_path, capabilities=profile.capabilities).workspace.bundle_root.parent
+                root = load_config(
+                    config_path,
+                    capabilities=profile.capabilities,
+                    model_endpoints=profile.model_endpoints,
+                ).workspace.bundle_root.parent
             except _LOAD_ERRORS:
                 root = None
         if root is None:

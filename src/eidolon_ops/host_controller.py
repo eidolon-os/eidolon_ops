@@ -136,7 +136,10 @@ class HostController:
         if path is None:
             return ()
         try:
-            return load_config(path, capabilities=self.profile.capabilities).host.management_networks
+            return load_config(
+                path, capabilities=self.profile.capabilities,
+                model_endpoints=self.profile.model_endpoints,
+            ).host.management_networks
         except (OSError, ConfigurationError, OperationsError):
             return ()
 

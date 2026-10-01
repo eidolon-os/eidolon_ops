@@ -245,6 +245,8 @@ class HostProfile:
     #: Which model services this machine runs, when it says so itself (see
     #: ``_profile_capabilities``). None keeps the operations config's declaration.
     capabilities: frozenset[str] | None = None
+    #: The remote endpoint of each model task this machine does not run itself, by task name.
+    model_endpoints: Mapping[str, str] = field(default_factory=lambda: MappingProxyType({}))
 
     def environment(self) -> dict[str, str]:
         values = self.paths.environment()
@@ -324,13 +326,14 @@ def load_host_profile(path: Path) -> HostProfile:
         raise HostProfileError(f"host profile is unreadable: {resolved}") from exc
     allowed_root = {
         "schema_version", "host", "paths", "adapter", "app", "source_overrides", "capabilities",
+        "model_endpoints",
     }
     if not {"schema_version", "host", "paths", "adapter"}.issubset(document) or not set(
         document
     ).issubset(allowed_root):
         raise HostProfileError(
             "host profile root must contain schema_version, host, paths and adapter, with only app, "
-            "source_overrides and capabilities optional"
+            "source_overrides, capabilities and model_endpoints optional"
         )
     if document["schema_version"] != 1:
         raise HostProfileError("host profile schema_version must be 1")
@@ -404,6 +407,7 @@ def load_host_profile(path: Path) -> HostProfile:
         raise HostProfileError("source_overrides are available only for local-supervisord hosts")
     app = _app_access(document.get("app"), platform=platform, base=base)
     capabilities = _profile_capabilities(document.get("capabilities"))
+    model_endpoints = _profile_model_endpoints(document.get("model_endpoints"))
     return HostProfile(
         path=resolved,
         host_id=host_id,
@@ -418,7 +422,24 @@ def load_host_profile(path: Path) -> HostProfile:
         app=app,
         source_overrides=source_overrides,
         capabilities=capabilities,
+        model_endpoints=model_endpoints,
     )
+
+
+def _profile_model_endpoints(value: object) -> Mapping[str, str]:
+    """Read ``[model_endpoints]``: where this machine's callers reach a model it does not run.
+
+    Only the shape is read here; which tasks exist and what an endpoint may be is the operations
+    config's to say (``config.MODEL_ENDPOINTS``), checked when the two are put together.
+    """
+
+    if value is None:
+        return MappingProxyType({})
+    table = _table(value, "model_endpoints")
+    return MappingProxyType({
+        _text(task, "model_endpoints key"): _text(url, f"model_endpoints.{task}")
+        for task, url in table.items()
+    })
 
 
 def _profile_capabilities(value: object) -> frozenset[str] | None:

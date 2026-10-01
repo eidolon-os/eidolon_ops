@@ -97,7 +97,7 @@ def test_home_state_transfer_is_between_successful_stop_and_start(tmp_path, stop
     target = profile.paths.state_root / "hub/smarthome.sqlite3"
     if stop_succeeds:
         controller.lifecycle("start")
-        assert [call[0][-1] for call in runner.calls] == ["prepare", "stop", "start"]
+        assert [call[0][-1] for call in runner.calls] == ["prepare", "stop", "start", "status"]
         assert target.is_file()
     else:
         with pytest.raises(ProcessError):
@@ -148,7 +148,7 @@ def test_local_lifecycle_uses_canonical_product_source_profile(tmp_path: Path) -
     assert started["authority"] == {"status": "authority_bootstrap_consumed"}
     assert prepared == [True]
     assert committed == [True]
-    assert runner.calls[-1][0][-2:] == ("product-source", "start")
+    assert runner.calls[-1][0][-2:] == ("product-source", "status")
     with pytest.raises(OperationsError, match="legacy Mac lifecycle flags"):
         controller.lifecycle("start", force_cleanup=True, strict=True, wait_ready=False)
     profile_result = controller.local_profile("product-source", "web-status")
@@ -255,11 +255,29 @@ def test_source_migrations_require_a_successful_stop(tmp_path, stop_succeeds):
     ))
     if stop_succeeds:
         controller.lifecycle("restart")
-        assert events == ["prepare", "stop", "migration", "start"]
+        assert events == ["prepare", "stop", "migration", "start", "status"]
     else:
         with pytest.raises(ProcessError):
             controller.lifecycle("restart")
         assert events == ["prepare", "stop"]
+
+
+def test_startup_backoff_does_not_override_the_settled_healthy_state(tmp_path):
+    class SettledRunner(Runner):
+        def run(self, command, **kwargs):
+            self.calls.append((tuple(command), kwargs.get("cwd"), kwargs.get("env")))
+            output = "workflow BACKOFF waiting for Admin" if command[-1] == "start" else "workflow RUNNING"
+            return ProcessResult(0, output, "")
+
+    controller = HostController(_profile(tmp_path), SettledRunner())
+    _with_product(controller, SimpleNamespace(
+        source_services=lambda: (), prepare=lambda: {}, migrate=lambda: None,
+        health=lambda **kwargs: {"status": "healthy"}, commit_owner_authority=lambda: {},
+    ))
+    result = controller.lifecycle("restart").report
+    assert result["status"] == "healthy"
+    assert "BACKOFF" in result["startup_output"]
+    assert "RUNNING" in result["output"]
 
 
 def test_pi_adapter_delegates_every_remote_capability(monkeypatch, tmp_path: Path) -> None:
@@ -343,7 +361,7 @@ def test_pi_adapter_delegates_every_remote_capability(monkeypatch, tmp_path: Pat
         def logs(self, **kwargs):
             return self._result("logs", kwargs)
 
-    monkeypatch.setattr(host_module, "load_config", lambda _path, capabilities=None: Config())
+    monkeypatch.setattr(host_module, "load_config", lambda _path, **_selection: Config())
     monkeypatch.setattr(host_module, "EidolonPiController", Pi)
     monkeypatch.setattr(
         host_module, "SSHTransport", lambda host, runner: SimpleNamespace(kind="ssh")

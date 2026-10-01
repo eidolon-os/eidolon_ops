@@ -7,7 +7,7 @@ import re
 import stat
 import tomllib
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import MappingProxyType
 from urllib.parse import urlsplit
@@ -311,6 +311,8 @@ class OperationsConfig:
     #: What this machine can do that another cannot. A component entry asking
     #: for something absent here is not installed on this Host.
     capabilities: frozenset[str] = frozenset()
+    #: Each model task's address for this Host's callers ("" = none), see ``MODEL_ENDPOINTS``.
+    model_endpoints: Mapping[str, str] = field(default_factory=lambda: MappingProxyType({}))
 
     def with_revision_overrides(self, values: tuple[str, ...]) -> OperationsConfig:
         sources = dict(self.sources)
@@ -346,13 +348,18 @@ def validate_release_id(value: str) -> str:
     return value
 
 
-def load_config(path: Path, *, capabilities: frozenset[str] | None = None) -> OperationsConfig:
+def load_config(
+    path: Path,
+    *,
+    capabilities: frozenset[str] | None = None,
+    model_endpoints: Mapping[str, str] | None = None,
+) -> OperationsConfig:
     """Read an operations config, for the Host that will use it.
 
     ``capabilities`` is what a Host profile says this machine runs (``paths._profile_capabilities``).
     The document is first held to its own declaration, which is the most a Host of this product may
     run; the Host's set, which may only narrow it, then decides what is pinned, installed and
-    checked.
+    checked. ``model_endpoints`` is where the Host's callers reach the models it does not run.
     """
     host_capabilities = capabilities
     resolved = path.expanduser().resolve()
@@ -561,6 +568,9 @@ def load_config(path: Path, *, capabilities: frozenset[str] | None = None) -> Op
 
     settings_overlay = _settings_overlay(document.get("settings"))
     _require_declared_capability_for_overlay(settings_overlay, capabilities)
+    endpoints, endpoint_assignments = _model_endpoint_assignments(
+        model_endpoints or {}, capabilities, settings_overlay
+    )
 
     return OperationsConfig(
         path=resolved,
@@ -590,8 +600,9 @@ def load_config(path: Path, *, capabilities: frozenset[str] | None = None) -> Op
         units=units,
         data=data,
         install_files=MappingProxyType(install_files),
-        settings_overlay=settings_overlay,
+        settings_overlay=settings_overlay + endpoint_assignments,
         capabilities=capabilities,
+        model_endpoints=MappingProxyType(endpoints),
     )
 
 
@@ -689,6 +700,39 @@ CAPABILITY_VALUED_SETTINGS: dict[tuple[str, str], str] = {
     ("channel.yaml", "providers.tts_provider"): "tts",
 }
 
+@dataclass(frozen=True, slots=True)
+class ModelEndpoint:
+    """One model task whose caller is told only where the model answers."""
+
+    #: A Host that declares this runs the service, and its callers use it on loopback.
+    capability: str
+    #: Where the caller reads its endpoint: a settings document and a path into it.
+    document: str
+    path: str
+    #: The local service's port role (``source_assets.PORTS``) and the route the caller names.
+    port_role: str
+    route: str
+
+
+#: Model tasks the caller reaches by one address and nothing else, so it never knows whether the
+#: model runs on this Host or elsewhere. A Host that runs the service gets its loopback address at
+#: the registered port; one that does not gets the remote endpoint its profile names in
+#: ``[model_endpoints]``, or none, which the caller treats as having no such model. The address is
+#: written here and only here: an explicit overlay of the same setting is refused.
+#:
+#: The smart-home task joins this table when the Agent reads its Laya endpoint from agent.yaml
+#: (``smarthome.laya.url``) instead of the process environment.
+MODEL_ENDPOINTS: dict[str, ModelEndpoint] = {
+    "laya_participation": ModelEndpoint(
+        capability="local_laya_participation",
+        document="agent.yaml",
+        path="participation.url",
+        port_role="laya_participation_api",
+        route="/v1/participation/decide",
+    ),
+}
+
+
 #: Settings whose value is an address on this Host, and what has to be true for
 #: it to be one: the capability whose service listens there, and the port role
 #: that service serves.
@@ -701,6 +745,75 @@ CAPABILITY_VALUED_SETTINGS: dict[tuple[str, str], str] = {
 CAPABILITY_LOCAL_ADDRESS_SETTINGS: dict[tuple[str, str], tuple[str, str]] = {
     ("agent.yaml", "llm.models[0].api_base"): ("local_llm", "llm_api"),
 }
+
+
+def _model_endpoint_assignments(
+    remote: Mapping[str, str],
+    capabilities: frozenset[str],
+    overlay: tuple[OverlayAssignment, ...],
+) -> tuple[dict[str, str], tuple[OverlayAssignment, ...]]:
+    """Each model task's address for this Host, and the settings assignments that give it.
+
+    A remote endpoint is the same service reached from here: https anywhere, or a loopback address
+    at that service's own port (a forwarder, or a placeholder while no remote exists yet — nothing
+    on a Host without the service answers it, and the caller treats the model as unavailable).
+    """
+
+    from eidolon_ops.source_assets import PORTS
+
+    unknown = set(remote) - set(MODEL_ENDPOINTS)
+    if unknown:
+        raise ConfigurationError(
+            "model_endpoints names unknown model tasks: " + ", ".join(sorted(unknown))
+            + "; known: " + ", ".join(sorted(MODEL_ENDPOINTS))
+        )
+    owned = {(item.document, item.path): task for task, item in MODEL_ENDPOINTS.items()}
+    for assignment in overlay:
+        task = owned.get((assignment.document, assignment.display))
+        if task is not None:
+            raise ConfigurationError(
+                f"settings.overlay sets {assignment.document}:{assignment.display}, which is the "
+                f"{task} endpoint: it follows from capabilities and the Host's model_endpoints"
+            )
+    addresses: dict[str, str] = {}
+    assignments: list[OverlayAssignment] = []
+    for task, item in MODEL_ENDPOINTS.items():
+        port = PORTS[item.port_role]
+        if item.capability in capabilities:
+            if task in remote:
+                raise ConfigurationError(
+                    f"model_endpoints.{task}: this Host runs it ({item.capability}); "
+                    "its callers use the local service"
+                )
+            address = f"http://127.0.0.1:{port}{item.route}"
+        elif task in remote:
+            address = remote[task]
+            parsed = urlsplit(address)
+            loopback = parsed.hostname in {"127.0.0.1", "localhost", "::1"}
+            if (
+                parsed.scheme not in {"http", "https"} or not parsed.hostname
+                or parsed.username or parsed.password or parsed.query or parsed.fragment
+                or parsed.path != item.route
+            ):
+                raise ConfigurationError(
+                    f"model_endpoints.{task} must be an absolute URL ending in {item.route!r}"
+                )
+            if loopback and parsed.port != port:
+                raise ConfigurationError(
+                    f"model_endpoints.{task} on loopback must use the service's port {port}"
+                )
+            if not loopback and parsed.scheme != "https":
+                raise ConfigurationError(f"model_endpoints.{task} outside this Host must be https")
+        else:
+            # No model here and none named: the caller keeps its own default, which for every
+            # task in the table is the empty endpoint it reads as "no such model".
+            addresses[task] = ""
+            continue
+        addresses[task] = address
+        assignments.append(
+            OverlayAssignment(item.document, parse_path(item.path, label=item.document), address)
+        )
+    return addresses, tuple(assignments)
 
 
 def _require_declared_capability_for_overlay(
