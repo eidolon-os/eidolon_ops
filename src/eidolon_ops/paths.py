@@ -20,7 +20,9 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Literal
 
+from eidolon_ops.capabilities import require_known_capability
 from eidolon_ops.config import SOURCE_IDS, SourceConfig
+from eidolon_ops.errors import OperationsError
 from eidolon_ops.operator_paths import expand_operator_path
 
 
@@ -240,6 +242,9 @@ class HostProfile:
     source_overrides: Mapping[str, SourceConfig] = field(
         default_factory=lambda: MappingProxyType({})
     )
+    #: Which model services this machine runs, when it says so itself (see
+    #: ``_profile_capabilities``). None keeps the operations config's declaration.
+    capabilities: frozenset[str] | None = None
 
     def environment(self) -> dict[str, str]:
         values = self.paths.environment()
@@ -317,13 +322,15 @@ def load_host_profile(path: Path) -> HostProfile:
         document = tomllib.loads(resolved.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
         raise HostProfileError(f"host profile is unreadable: {resolved}") from exc
-    allowed_root = {"schema_version", "host", "paths", "adapter", "app", "source_overrides"}
+    allowed_root = {
+        "schema_version", "host", "paths", "adapter", "app", "source_overrides", "capabilities",
+    }
     if not {"schema_version", "host", "paths", "adapter"}.issubset(document) or not set(
         document
     ).issubset(allowed_root):
         raise HostProfileError(
-            "host profile root must contain schema_version, host, paths and adapter, with only app "
-            "and source_overrides optional"
+            "host profile root must contain schema_version, host, paths and adapter, with only app, "
+            "source_overrides and capabilities optional"
         )
     if document["schema_version"] != 1:
         raise HostProfileError("host profile schema_version must be 1")
@@ -396,6 +403,7 @@ def load_host_profile(path: Path) -> HostProfile:
     if source_overrides and driver is not HostDriver.LOCAL_SUPERVISORD:
         raise HostProfileError("source_overrides are available only for local-supervisord hosts")
     app = _app_access(document.get("app"), platform=platform, base=base)
+    capabilities = _profile_capabilities(document.get("capabilities"))
     return HostProfile(
         path=resolved,
         host_id=host_id,
@@ -409,7 +417,38 @@ def load_host_profile(path: Path) -> HostProfile:
         external_livekit_config=external_livekit_config,
         app=app,
         source_overrides=source_overrides,
+        capabilities=capabilities,
     )
+
+
+def _profile_capabilities(value: object) -> frozenset[str] | None:
+    """Read this machine's ``[capabilities] provides``; absent means "as the operations config says".
+
+    Several Hosts share one operations config (the Pi product serves the Pi 5 boards and the Mac
+    source run), but which model services run is a property of the machine: a Pi 5 has no NPU and
+    runs none, the Mac runs Laya on its GPU. The operations config states the most a Host of that
+    product may run; a profile names what this one actually does, and may only narrow it.
+    """
+
+    if value is None:
+        return None
+    table = _table(value, "capabilities")
+    if set(table) != {"provides"}:
+        raise HostProfileError("capabilities must contain exactly provides")
+    provided = table["provides"]
+    if not isinstance(provided, list):
+        raise HostProfileError("capabilities.provides must be an array of strings")
+    names: set[str] = set()
+    for position, entry in enumerate(provided):
+        label = f"capabilities.provides[{position}]"
+        name = _text(entry, label)
+        if name in names:
+            raise HostProfileError(f"{label} repeats {name!r}")
+        try:
+            names.add(require_known_capability(name, label=label))
+        except OperationsError as exc:
+            raise HostProfileError(str(exc)) from exc
+    return frozenset(names)
 
 
 def merged_environment(profile: HostProfile) -> dict[str, str]:

@@ -22,3 +22,8 @@ operations_config = "../eidolon-pi.toml"
 [app]
 hub_https_port = 9443
 allow_insecure_livekit = true
+
+# This board has no NPU and runs no local model: its Laya calls go to wherever the
+# model endpoints say (none yet), and the Laya unit and weights are not installed.
+[capabilities]
+provides = []

@@ -343,7 +343,7 @@ def test_pi_adapter_delegates_every_remote_capability(monkeypatch, tmp_path: Pat
         def logs(self, **kwargs):
             return self._result("logs", kwargs)
 
-    monkeypatch.setattr(host_module, "load_config", lambda _path: Config())
+    monkeypatch.setattr(host_module, "load_config", lambda _path, capabilities=None: Config())
     monkeypatch.setattr(host_module, "EidolonPiController", Pi)
     monkeypatch.setattr(
         host_module, "SSHTransport", lambda host, runner: SimpleNamespace(kind="ssh")

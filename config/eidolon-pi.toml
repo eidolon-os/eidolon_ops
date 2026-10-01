@@ -114,7 +114,9 @@ units = [
   "eidolon-laya.service",
 ]
 
-# Model services are selected per Host. This Pi runs only Laya locally.
+# The most a Host of this product may run locally. The Mac source run inherits it (Laya on
+# its GPU); the Pi 5 profiles narrow it to nothing (config/hosts/pi5*.toml), so a board
+# without an NPU neither installs the Laya unit nor carries its weights.
 [capabilities]
 provides = ["local_laya"]
 

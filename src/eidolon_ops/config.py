@@ -346,7 +346,15 @@ def validate_release_id(value: str) -> str:
     return value
 
 
-def load_config(path: Path) -> OperationsConfig:
+def load_config(path: Path, *, capabilities: frozenset[str] | None = None) -> OperationsConfig:
+    """Read an operations config, for the Host that will use it.
+
+    ``capabilities`` is what a Host profile says this machine runs (``paths._profile_capabilities``).
+    The document is first held to its own declaration, which is the most a Host of this product may
+    run; the Host's set, which may only narrow it, then decides what is pinned, installed and
+    checked.
+    """
+    host_capabilities = capabilities
     resolved = path.expanduser().resolve()
     try:
         document = tomllib.loads(resolved.read_text(encoding="utf-8"))
@@ -539,6 +547,17 @@ def load_config(path: Path) -> OperationsConfig:
             install_files[name] = _local_path(files_wire[name], base, f"install.files.{name}")
         if len(set(install_files.values())) != len(install_files):
             raise ConfigurationError("install.files paths must be unique per security scope")
+
+    if host_capabilities is not None:
+        beyond = host_capabilities - capabilities
+        if beyond:
+            raise ConfigurationError(
+                "the Host profile declares capabilities its operations config does not review: "
+                + ", ".join(sorted(beyond))
+            )
+        capabilities = host_capabilities
+        sources = {key: value for key, value in sources.items() if key in expected_sources(capabilities)}
+        units = expected_units(capabilities)
 
     settings_overlay = _settings_overlay(document.get("settings"))
     _require_declared_capability_for_overlay(settings_overlay, capabilities)

@@ -149,7 +149,9 @@ def _product_adapter(
     config_path = profile.operations_config
     if config_path is None:
         raise OperationsError("Pi host profile does not reference an operations config")
-    config = load_config(config_path).with_revision_overrides(revision_overrides)
+    config = load_config(config_path, capabilities=profile.capabilities).with_revision_overrides(
+        revision_overrides
+    )
     transport = SSHTransport(config.host, runner)
     release = EidolonPiController(
         config,
@@ -180,7 +182,7 @@ def _product_factory(
         if config_path is None:
             raise OperationsError("Mac product-source profile has no operations config")
         config = (
-            load_config(config_path)
+            load_config(config_path, capabilities=profile.capabilities)
             .with_source_overrides(profile.source_overrides)
             .with_revision_overrides(revision_overrides)
         )

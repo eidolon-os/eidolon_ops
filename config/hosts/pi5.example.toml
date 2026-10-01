@@ -41,3 +41,8 @@ allow_insecure_livekit = true
 # 只写路径，值放到运维自己的输入目录（`.eidolon-ops/` 一直是 gitignore 的），
 # 和这台主机安装时用的其他每一个 secret 在一起。
 # setup_code_file = "../../.eidolon-ops/pi5/inputs/factory_setup_code"
+
+# A Pi 5 has no NPU and runs no local model, so the Laya unit and its weights are
+# not installed here. Leave this out to run what the operations config allows.
+[capabilities]
+provides = []
