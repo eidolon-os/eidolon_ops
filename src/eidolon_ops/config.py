@@ -353,13 +353,15 @@ def load_config(
     *,
     capabilities: frozenset[str] | None = None,
     model_endpoints: Mapping[str, str] | None = None,
+    settings_overlay: tuple[OverlayAssignment, ...] = (),
 ) -> OperationsConfig:
     """Read an operations config, for the Host that will use it.
 
     ``capabilities`` is what a Host profile says this machine runs (``paths._profile_capabilities``).
     The document is first held to its own declaration, which is the most a Host of this product may
     run; the Host's set, which may only narrow it, then decides what is pinned, installed and
-    checked. ``model_endpoints`` is where the Host's callers reach the models it does not run.
+    checked. ``model_endpoints`` is where the Host's callers reach the models it does not run, and
+    ``settings_overlay`` the settings this one machine asks for beyond its product's.
     """
     host_capabilities = capabilities
     resolved = path.expanduser().resolve()
@@ -566,7 +568,17 @@ def load_config(
         sources = {key: value for key, value in sources.items() if key in expected_sources(capabilities)}
         units = expected_units(capabilities)
 
-    settings_overlay = _settings_overlay(document.get("settings"))
+    host_overlay = settings_overlay
+    settings_overlay = settings_overlay_of(document.get("settings"))
+    shared = {(a.document, a.display) for a in settings_overlay} & {
+        (a.document, a.display) for a in host_overlay
+    }
+    if shared:
+        raise ConfigurationError(
+            "set by both the operations config and the Host profile: "
+            + ", ".join(f"{document}:{path}" for document, path in sorted(shared))
+        )
+    settings_overlay = settings_overlay + tuple(host_overlay)
     _require_declared_capability_for_overlay(settings_overlay, capabilities)
     endpoints, endpoint_assignments = _model_endpoint_assignments(
         model_endpoints or {}, capabilities, settings_overlay
@@ -719,10 +731,14 @@ class ModelEndpoint:
 #: the registered port; one that does not gets the remote endpoint its profile names in
 #: ``[model_endpoints]``, or none, which the caller treats as having no such model. The address is
 #: written here and only here: an explicit overlay of the same setting is refused.
-#:
-#: The smart-home task joins this table when the Agent reads its Laya endpoint from agent.yaml
-#: (``smarthome.laya.url``) instead of the process environment.
 MODEL_ENDPOINTS: dict[str, ModelEndpoint] = {
+    "laya_smart_home": ModelEndpoint(
+        capability="local_laya",
+        document="agent.yaml",
+        path="smarthome.laya.url",
+        port_role="laya_api",
+        route="",
+    ),
     "laya_participation": ModelEndpoint(
         capability="local_laya_participation",
         document="agent.yaml",
@@ -896,7 +912,7 @@ def _require_declared_capability_for_overlay(
         )
 
 
-def _settings_overlay(value: object) -> tuple[OverlayAssignment, ...]:
+def settings_overlay_of(value: object) -> tuple[OverlayAssignment, ...]:
     """Read ``[[settings.overlay]]``, the per-Host settings this Host asks for.
 
     Each entry states a document, a path into it, and the scalar to put there.

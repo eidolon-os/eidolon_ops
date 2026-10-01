@@ -47,3 +47,15 @@ allow_insecure_livekit = true
 # [source_overrides.eidolon_admin]
 # path = "/absolute/path/to/eidolon_admin-worktree"
 # revision = "0000000000000000000000000000000000000000"
+
+# This machine's settings beyond its operations config's. The Mac source run interprets home
+# commands with Laya (its own MPS service) and records every interpretation for evaluation.
+[[settings.overlay]]
+document = "agent.yaml"
+path = "smarthome.interpreter"
+value = "laya"
+
+[[settings.overlay]]
+document = "agent.yaml"
+path = "smarthome.interpretation_record_path"
+value = "$EIDOLON_STATE_ROOT/agent/smarthome/interpretation.jsonl"

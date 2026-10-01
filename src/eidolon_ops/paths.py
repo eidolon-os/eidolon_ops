@@ -21,7 +21,12 @@ from types import MappingProxyType
 from typing import Any, Literal
 
 from eidolon_ops.capabilities import require_known_capability
-from eidolon_ops.config import SOURCE_IDS, SourceConfig
+from eidolon_ops.config import (
+    SOURCE_IDS,
+    ConfigurationError,
+    SourceConfig,
+    settings_overlay_of,
+)
 from eidolon_ops.errors import OperationsError
 from eidolon_ops.operator_paths import expand_operator_path
 
@@ -247,6 +252,8 @@ class HostProfile:
     capabilities: frozenset[str] | None = None
     #: The remote endpoint of each model task this machine does not run itself, by task name.
     model_endpoints: Mapping[str, str] = field(default_factory=lambda: MappingProxyType({}))
+    #: Settings this machine asks for beyond its operations config's, in its [[settings.overlay]].
+    settings_overlay: tuple = ()
 
     def environment(self) -> dict[str, str]:
         values = self.paths.environment()
@@ -326,14 +333,14 @@ def load_host_profile(path: Path) -> HostProfile:
         raise HostProfileError(f"host profile is unreadable: {resolved}") from exc
     allowed_root = {
         "schema_version", "host", "paths", "adapter", "app", "source_overrides", "capabilities",
-        "model_endpoints",
+        "model_endpoints", "settings",
     }
     if not {"schema_version", "host", "paths", "adapter"}.issubset(document) or not set(
         document
     ).issubset(allowed_root):
         raise HostProfileError(
             "host profile root must contain schema_version, host, paths and adapter, with only app, "
-            "source_overrides, capabilities and model_endpoints optional"
+            "source_overrides, capabilities, model_endpoints and settings optional"
         )
     if document["schema_version"] != 1:
         raise HostProfileError("host profile schema_version must be 1")
@@ -408,6 +415,11 @@ def load_host_profile(path: Path) -> HostProfile:
     app = _app_access(document.get("app"), platform=platform, base=base)
     capabilities = _profile_capabilities(document.get("capabilities"))
     model_endpoints = _profile_model_endpoints(document.get("model_endpoints"))
+    try:
+        # The same shape as the operations config's [[settings.overlay]], checked the same way.
+        settings_overlay = settings_overlay_of(document.get("settings"))
+    except ConfigurationError as exc:
+        raise HostProfileError(str(exc)) from exc
     return HostProfile(
         path=resolved,
         host_id=host_id,
@@ -423,6 +435,7 @@ def load_host_profile(path: Path) -> HostProfile:
         source_overrides=source_overrides,
         capabilities=capabilities,
         model_endpoints=model_endpoints,
+        settings_overlay=settings_overlay,
     )
 
 

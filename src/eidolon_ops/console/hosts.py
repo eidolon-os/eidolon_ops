@@ -155,6 +155,7 @@ class HostRegistry:
                 config_path,
                 capabilities=profile.capabilities,
                 model_endpoints=profile.model_endpoints,
+                settings_overlay=profile.settings_overlay,
             )
             return {"service": list(config.units)}
         except _LOAD_ERRORS:
@@ -178,6 +179,7 @@ class HostRegistry:
                     config_path,
                     capabilities=profile.capabilities,
                     model_endpoints=profile.model_endpoints,
+                    settings_overlay=profile.settings_overlay,
                 ).workspace.bundle_root.parent
             except _LOAD_ERRORS:
                 root = None

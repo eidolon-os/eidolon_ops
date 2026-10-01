@@ -137,8 +137,10 @@ class HostController:
             return ()
         try:
             return load_config(
-                path, capabilities=self.profile.capabilities,
+                path,
+                capabilities=self.profile.capabilities,
                 model_endpoints=self.profile.model_endpoints,
+                settings_overlay=self.profile.settings_overlay,
             ).host.management_networks
         except (OSError, ConfigurationError, OperationsError):
             return ()

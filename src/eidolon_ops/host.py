@@ -153,6 +153,7 @@ def _product_adapter(
         config_path,
         capabilities=profile.capabilities,
         model_endpoints=profile.model_endpoints,
+        settings_overlay=profile.settings_overlay,
     ).with_revision_overrides(revision_overrides)
     transport = SSHTransport(config.host, runner)
     release = EidolonPiController(
@@ -188,6 +189,7 @@ def _product_factory(
                 config_path,
                 capabilities=profile.capabilities,
                 model_endpoints=profile.model_endpoints,
+                settings_overlay=profile.settings_overlay,
             )
             .with_source_overrides(profile.source_overrides)
             .with_revision_overrides(revision_overrides)

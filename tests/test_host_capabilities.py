@@ -110,7 +110,7 @@ def _participation_url(config) -> list[str]:
 
 def test_a_host_that_runs_the_model_calls_it_locally(config_path: Path) -> None:
     config = load_config(_with_participation(config_path))
-    assert config.model_endpoints == {"laya_participation": _LOCAL}
+    assert config.model_endpoints == {"laya_smart_home": "", "laya_participation": _LOCAL}
     assert _participation_url(config) == [_LOCAL]
     with pytest.raises(ConfigurationError, match="runs it"):
         load_config(_with_participation(config_path),
@@ -120,7 +120,7 @@ def test_a_host_that_runs_the_model_calls_it_locally(config_path: Path) -> None:
 def test_a_host_that_does_not_is_told_the_remote_or_nothing(config_path: Path) -> None:
     product = _with_participation(config_path)
     nothing = load_config(product, capabilities=frozenset())
-    assert nothing.model_endpoints == {"laya_participation": ""}
+    assert nothing.model_endpoints == {"laya_smart_home": "", "laya_participation": ""}
     assert _participation_url(nothing) == []  # the Agent's own default, "", disables teams
     remote = "https://laya.example/v1/participation/decide"
     config = load_config(product, capabilities=frozenset(), model_endpoints={"laya_participation": remote})
@@ -128,7 +128,7 @@ def test_a_host_that_does_not_is_told_the_remote_or_nothing(config_path: Path) -
     # A loopback placeholder (or forwarder) is the same service at its own port.
     assert load_config(product, capabilities=frozenset(),
                        model_endpoints={"laya_participation": _LOCAL}).model_endpoints == {
-        "laya_participation": _LOCAL}
+        "laya_smart_home": "", "laya_participation": _LOCAL}
 
 
 @pytest.mark.parametrize(
@@ -159,11 +159,50 @@ def test_unknown_tasks_and_hand_written_endpoints_are_refused(config_path: Path)
         load_config(product)
 
 
-def test_the_repository_hosts_reach_participation_where_they_should() -> None:
-    expected = {"rk3588": _LOCAL, "mac": "", "pi5": _LOCAL, "pi5-device-management-hil": _LOCAL}
-    for name, url in expected.items():
-        profile = load_host_profile(_HOSTS / f"{name}.toml")
-        config = load_config(profile.operations_config, capabilities=profile.capabilities,
-                             model_endpoints=profile.model_endpoints)
-        assert config.model_endpoints == {"laya_participation": url}, name
+_HOME = "http://127.0.0.1:8771"
+
+
+def _repository_host(name: str):
+    profile = load_host_profile(_HOSTS / f"{name}.toml")
+    return load_config(profile.operations_config, capabilities=profile.capabilities,
+                       model_endpoints=profile.model_endpoints,
+                       settings_overlay=profile.settings_overlay)
+
+
+def test_the_repository_hosts_reach_their_models_where_they_should() -> None:
+    expected = {
+        "rk3588": {"laya_smart_home": _HOME, "laya_participation": _LOCAL},
+        "mac": {"laya_smart_home": _HOME, "laya_participation": ""},
+        "pi5": {"laya_smart_home": _HOME, "laya_participation": _LOCAL},  # placeholders
+        "pi5-device-management-hil": {"laya_smart_home": _HOME, "laya_participation": _LOCAL},
+    }
+    for name, endpoints in expected.items():
+        config = _repository_host(name)
+        assert config.model_endpoints == endpoints, name
         assert ("local_laya_participation" in config.capabilities) == (name == "rk3588"), name
+
+
+def test_only_the_mac_interprets_home_commands_with_laya_and_records_them() -> None:
+    def smarthome(name: str) -> dict[str, str]:
+        return {item.display: item.value for item in _repository_host(name).settings_overlay
+                if item.display.startswith("smarthome.") and item.display != "smarthome.laya.url"}
+
+    assert smarthome("mac") == {
+        "smarthome.interpreter": "laya",
+        "smarthome.interpretation_record_path": "$EIDOLON_STATE_ROOT/agent/smarthome/interpretation.jsonl",
+    }
+    for name in ("rk3588", "pi5", "pi5-device-management-hil"):
+        assert smarthome(name) == {}, name  # the Agent's default: rules, nothing recorded
+
+
+def test_a_setting_is_written_by_the_product_or_the_host_not_both(config_path: Path) -> None:
+    from eidolon_ops.config import settings_overlay_of
+
+    product = _with_laya(config_path)
+    product.write_text(product.read_text(encoding="utf-8") + (
+        '\n[[settings.overlay]]\ndocument = "agent.yaml"\npath = "smarthome.interpreter"\nvalue = "rules"\n'
+    ), encoding="utf-8")
+    host = settings_overlay_of({"overlay": [
+        {"document": "agent.yaml", "path": "smarthome.interpreter", "value": "laya"}]})
+    with pytest.raises(ConfigurationError, match="both the operations config and the Host profile"):
+        load_config(product, settings_overlay=host)

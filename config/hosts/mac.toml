@@ -40,3 +40,16 @@ allow_insecure_livekit = true
 # overrides that used to be here pointed two of them at prepared copies
 # under /private/tmp that macOS had already deleted, and pinned Admin to a
 # commit its worktree no longer held.
+
+# The Mac source run interprets home commands with Laya (its own MPS service; the address
+# follows from local_laya) and records every interpretation for offline evaluation. A product
+# Host does neither unless its own configuration says so.
+[[settings.overlay]]
+document = "agent.yaml"
+path = "smarthome.interpreter"
+value = "laya"
+
+[[settings.overlay]]
+document = "agent.yaml"
+path = "smarthome.interpretation_record_path"
+value = "$EIDOLON_STATE_ROOT/agent/smarthome/interpretation.jsonl"
