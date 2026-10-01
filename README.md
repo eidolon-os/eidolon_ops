@@ -563,6 +563,19 @@ Owner 变更的权限边界；它的 state/runtime 目录均不与产品主进�
 ./eidolon mac service restart channel   # 单个服务：只经 eidolond（Mac 与 Pi 相同）
 ```
 
+Mac 的控制服务从组件 `ops/component.toml` 及其服务资产生成到 Host 的 `supervisor.conf`；
+服务账号、环境、私有目录和依赖来自同一组件声明。Supervisor 只保留驱动专属的 worker 配置。
+`start` / `restart` 需要管理员权限来建立隔离账号并启动 supervisor；普通 worker 仍以配置拥有者运行。
+初始化会先检查权限，缺失时在改输入或停现有服务之前失败。`status`、`app-ready`、日志和单个服务
+请求仍可由配置拥有者执行。启动时使用正常入口，例如 `sudo ./eidolon mac restart`，并确保该管理员
+执行环境能找到已安装的 `uv`、`nats-server` 和 `livekit-server`（也可通过原有 `EIDOLON_UV_BIN`、
+`EIDOLON_NATS_SERVER`、`EIDOLON_LIVEKIT_BIN` 指定其绝对路径）。提升权限不会把 `~` 路径改到 root
+的 home，主机身份和状态继续使用配置拥有者的目录。
+
+设备移除使用同一工作流、撤销授权代理及 Owner 授权规则；仅内核 peer credential 读取由
+Linux `SO_PEERCRED` 或 Darwin `getpeereid` / `LOCAL_PEERPID` 实现。两端 `app-ready` 均要求工作流
+和授权代理的 socket 存在。组件增加未绑定的控制服务、遗漏依赖或产生依赖环，会拒绝生成源码部署。
+
 `status` 默认展示 Host LAN IP、全部非 loopback IPv4、每个服务的监听地址/端口、服务状态和异常建议；自动化需要完整 Evidence 时使用
 `./eidolon HOST status --json`。
 

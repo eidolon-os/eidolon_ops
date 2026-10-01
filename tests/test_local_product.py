@@ -253,6 +253,8 @@ def test_prepare_materializes_one_canonical_mac_product_contract(
             return ProcessResult(0, "", "")
 
     runner = Runner()
+    monkeypatch.setattr(LocalProductSource, "source_services", lambda self: ())
+    profile.path.write_text("test profile")
     monkeypatch.setattr(
         local_product_module, "validate_install_input_contract", lambda *_a, **_k: None
     )
@@ -438,9 +440,15 @@ def test_app_ready_requires_device_reachable_contract(monkeypatch, tmp_path: Pat
         },
     )
 
+    monkeypatch.setattr(Path, "is_socket", lambda self: True)
     result = product.app_ready()
 
     assert result["status"] == "app_ready"
+    monkeypatch.setattr(Path, "is_socket", lambda self: not str(self).endswith("broker.sock"))
+    unavailable = product.app_ready()
+    assert unavailable["status"] == "degraded"
+    assert unavailable["checks"]["device_removal_available"] is False
+    monkeypatch.setattr(Path, "is_socket", lambda self: True)
     assert all(result["checks"].values())
     assert result["setup"]["state"] == "ready"
     # A running old daemon (or an old manifest) cannot assert this new fact.

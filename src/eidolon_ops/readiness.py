@@ -249,8 +249,7 @@ READINESS_CONTRACT: tuple[ReadinessCheck, ...] = (
         ReadinessFact.HUB_ADMITS_DEVICES,
         "the Hub can verify a device's commissioning proof, so a device can be added",
     ),
-    _only(
-        HostKind.PRODUCT,
+    _both(
         ReadinessFact.DEVICE_REMOVAL_AVAILABLE,
         "the lifecycle workflow is listening, so a device can be removed",
     ),

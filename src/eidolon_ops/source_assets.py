@@ -8,6 +8,7 @@ both of those are data in this module rather than branches in the caller.
 
 from __future__ import annotations
 
+import pwd
 import re
 from pathlib import Path
 
@@ -193,7 +194,22 @@ def translate_fhs(profile: HostProfile, value: str) -> str:
         replacements.append((str(product_path), host_path))
         replacements.append((f"${_ENVIRONMENT_NAMES[role]}", host_path))
     for old, new in replacements:
-        value = value.replace(old, new)
+        if old.startswith("$"):
+            value = value.replace(old, new)
+        else:
+            # A root is a whole path component. /run/eidolon-lifecycle is
+            # another component's runtime, not a suffix on /run/eidolon.
+            value = re.sub(re.escape(old) + r"(?=/|$|[\s\"':,\]}])", lambda _match, new=new: new, value)
+    # Component-owned private FHS roots use the same durability roles. Keep
+    # them inside the Host's roots so reset and backup include their state.
+    for role in ("state_root", "runtime_root"):
+        product = str(PRODUCT_PATHS[role])
+        host = getattr(paths, role)
+        value = re.sub(
+            re.escape(product) + r"-([a-z][a-z0-9-]*)",
+            lambda match, host=host: str(host / match.group(1)),
+            value,
+        )
     return translate_ports(value)
 
 
@@ -295,6 +311,7 @@ def profile_environment(
         "EIDOLON_APP_HUB_HTTPS_PORT": str(hub_https_port),
         "EIDOLON_APP_HUB_TLS_CERTIFICATE": str(hub_certificate),
         "EIDOLON_APP_HUB_TLS_PRIVATE_KEY": str(hub_private_key),
+        "EIDOLON_SOURCE_OPERATOR": pwd.getpwuid(profile.path.stat().st_uid).pw_name,
         "EIDOLON_SOURCE_KERNEL": str(config.sources["eidolon_kernel"].path),
         "EIDOLON_SOURCE_DATA": str(config.sources["eidolon_data"].path),
         "EIDOLON_SOURCE_HUB": str(config.sources["eidolon_hub"].path),
@@ -348,7 +365,6 @@ livekit:
 #: group, programs, and the health surface it publishes.
 _MANAGED_SERVICES = (
     ("nats", "NATS", "nats", ("nats-server",), "http://127.0.0.1:{nats_http}/varz"),
-    ("admin", "Eidolon Admin", "admin", ("admin-api",), "http://127.0.0.1:{admin}/docs"),
     (
         "admin-web",
         "Eidolon Admin Web",
@@ -356,8 +372,6 @@ _MANAGED_SERVICES = (
         ("admin-web",),
         "http://127.0.0.1:{admin_web}/",
     ),
-    ("bootstrap", "Eidolon Bootstrap", "bootstrap", ("bootstrapd",), None),
-    ("local-api", "Eidolon Local API", "local-api", ("local-api",), None),
     ("eidolond", "Eidolon System Manager", "eidolond", ("eidolond",), None),
     (
         "data",
@@ -398,7 +412,7 @@ _EXTERNAL_SERVICES = (
 )
 
 
-def admin_services_yaml() -> str:
+def admin_services_yaml(control_services=()) -> str:
     # The browser origins Admin admits. Admin's own registry allow-lists the
     # web client too; this generated copy listed only the operator console, so
     # on a source run every request the web client made was refused by the
@@ -415,7 +429,11 @@ def admin_services_yaml() -> str:
         f"    - http://localhost:{CLIENT_WEB_PORT}",
         "services:",
     ]
-    for service_id, name, group, programs, health in _MANAGED_SERVICES:
+    services = (*_MANAGED_SERVICES, *(
+        (service.group, service.unit_id, service.group, (service.program,), None)
+        for service in control_services
+    ))
+    for service_id, name, group, programs, health in services:
         lines.extend(_service_header(service_id, name))
         if health is not None:
             lines.append(f"    health: {health.format(**PORTS)}")

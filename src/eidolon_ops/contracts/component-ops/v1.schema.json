@@ -111,6 +111,41 @@
             "description": "A Host capability this must find present, from the closed set eidolon_ops.capabilities defines. Omitted means every Host gets it. Named as a capability and never as a platform so that a component states what it needs and a Host states what it has, and neither has to know the other. The set is closed because an unknown name is provided by no Host, which would drop this entry everywhere without saying so.",
             "type": "string",
             "pattern": "^[a-z][a-z0-9_]{1,31}$"
+          },
+          "supervisord": {
+            "description": "Source-host process binding. Shared executable, credentials, environment and directories are read from the component-owned service asset.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "program",
+              "group"
+            ],
+            "properties": {
+              "program": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,63}$"
+              },
+              "group": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,63}$"
+              },
+              "auxiliary_programs": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                }
+              },
+              "environment": {
+                "type": "object",
+                "propertyNames": {
+                  "pattern": "^[A-Z][A-Z0-9_]+$"
+                },
+                "additionalProperties": {
+                  "type": "string"
+                }
+              }
+            }
           }
         }
       }

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import pwd
 import shutil
 import stat
 from collections.abc import Callable, Mapping, Sequence
@@ -15,6 +16,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives.asymmetric import ec
 
 from eidolon_ops import environment, lan_observation, probes, source_assets
+from eidolon_ops.component_contract import load_component_contract
 from eidolon_ops.config import OperationsConfig
 from eidolon_ops.environment import EnvironmentFileError
 from eidolon_ops.errors import InstallInputError, OperationsError
@@ -75,6 +77,7 @@ from eidolon_ops.readiness import (
     setup_readiness_evidence,
 )
 from eidolon_ops.source_resolution import SourceResolver
+from eidolon_ops.source_runtime import provision_source_files, render_supervisor, source_services
 from eidolon_ops.source_schema import migrate_data_schema
 
 
@@ -110,6 +113,15 @@ class LocalProductSource:
 
     # -- materialization -----------------------------------------------------
 
+    def source_services(self):
+        services = []
+        for component_id, source in self.config.sources.items():
+            declaration = load_component_contract(source.path, component_id)
+            if declaration is None:
+                raise OperationsError(f"source component has no operational contract: {component_id}")
+            services.extend(source_services(declaration, self.profile, source.path))
+        return tuple(services)
+
     def prepare(self) -> dict[str, object]:
         self._validate_exact_worktrees()
         try:
@@ -139,6 +151,15 @@ class LocalProductSource:
         }
         for destination, content in expected.items():
             atomic_private_file(destination, content)
+        services = self.source_services()
+        template = Path(__file__).parents[2] / "deploy/supervisor/product-source.conf"
+        operator = pwd.getpwuid(self.profile.path.stat().st_uid).pw_name
+        atomic_private_file(
+            paths.config_root / "supervisor.conf",
+            render_supervisor(template.read_text(), services, operator).encode(),
+        )
+        if os.geteuid() == 0:
+            provision_source_files(services, self.profile, operator)
         migrate_data_schema(self.profile, self.config, self.runner)
         result = self.validate()
         return {
@@ -167,6 +188,7 @@ class LocalProductSource:
             root / "settings/services.yaml",
             root / "settings/livekit.yaml",
             root / "product-source.env",
+            root / "supervisor.conf",
             self._host_identity_path(),
             self._hub_certificate_path(),
             self._hub_private_key_path(),
@@ -189,7 +211,7 @@ class LocalProductSource:
             "status": "compatible",
             "profile": "product-source",
             "generated_root": str(root),
-            "services": 15,
+            "services": len(source_assets._MANAGED_SERVICES) + len(self.source_services()),
             "redaction": "generated credentials are not returned",
         }
 
@@ -534,7 +556,7 @@ class LocalProductSource:
             self.profile
         ).encode("utf-8")
         rendered[root / "settings/ports.yaml"] = source_assets.admin_ports_yaml().encode("utf-8")
-        rendered[root / "settings/services.yaml"] = source_assets.admin_services_yaml().encode(
+        rendered[root / "settings/services.yaml"] = source_assets.admin_services_yaml(self.source_services()).encode(
             "utf-8"
         )
         livekit_template = source_assets.ASSETS / "livekit.yaml"
@@ -720,6 +742,11 @@ class LocalProductSource:
                 channel["dispatch_identity"]
             ),
             str(ReadinessFact.CLAIM_WINDOW_HONORED): self._claim_window_honored(),
+            str(ReadinessFact.DEVICE_REMOVAL_AVAILABLE): Path(source_assets.translate_fhs(
+                self.profile, "/run/eidolon-lifecycle/workflow.sock"
+            )).is_socket() and Path(source_assets.translate_fhs(
+                self.profile, "/run/eidolon-removal-capability/broker.sock"
+            )).is_socket(),
         }
         healthy = is_ready(HostKind.SOURCE, checks)
         return {

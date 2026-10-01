@@ -41,5 +41,6 @@ def migrate_data_schema(
             cwd=source,
             env=values,
             timeout=120,
+            **({"user": profile.path.stat().st_uid, "group": profile.path.stat().st_gid} if os.geteuid() == 0 else {}),
         ),
     )

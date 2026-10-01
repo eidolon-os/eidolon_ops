@@ -90,7 +90,7 @@ def test_home_state_transfer_is_between_successful_stop_and_start(tmp_path, stop
     runner = Runner(ProcessResult(0 if stop_succeeds else 1, "", "stop failed"))
     controller = HostController(profile, runner)
     _with_product(controller, SimpleNamespace(
-        prepare=lambda: {}, health=lambda **kwargs: {"status": "healthy"},
+        source_services=lambda: (), prepare=lambda: {}, health=lambda **kwargs: {"status": "healthy"},
         commit_owner_authority=lambda: {},
     ))
     target = profile.paths.state_root / "hub/smarthome.sqlite3"
@@ -112,6 +112,7 @@ def test_local_lifecycle_uses_canonical_product_source_profile(tmp_path: Path) -
     prepared: list[bool] = []
     committed: list[bool] = []
     product = SimpleNamespace(
+        source_services=lambda: (),
         prepare=lambda: prepared.append(True) or {"status": "prepared"},
         health=lambda **_kwargs: {"status": "healthy"},
         # An operation that starts this Host's Hub also records the one-shot

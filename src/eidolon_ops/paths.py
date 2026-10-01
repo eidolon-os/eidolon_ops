@@ -9,6 +9,7 @@ derive product state from ``HOME``.
 from __future__ import annotations
 
 import os
+import pwd
 import re
 import tomllib
 from collections.abc import Mapping
@@ -20,6 +21,7 @@ from types import MappingProxyType
 from typing import Any, Literal
 
 from eidolon_ops.config import SOURCE_IDS, SourceConfig
+from eidolon_ops.operator_paths import expand_operator_path
 
 
 class HostProfileError(ValueError):
@@ -348,7 +350,7 @@ def load_host_profile(path: Path) -> HostProfile:
     if set(paths_wire) != set(_PATH_FIELDS):
         raise HostProfileError(f"paths must contain exactly {', '.join(_PATH_FIELDS)}")
     paths = HostPaths(
-        **{name: _absolute_path(paths_wire[name], f"paths.{name}") for name in _PATH_FIELDS}
+        **{name: _absolute_path(paths_wire[name], f"paths.{name}", resolved.parent) for name in _PATH_FIELDS}
     )
     _validate_paths(paths, platform=platform)
 
@@ -413,6 +415,9 @@ def load_host_profile(path: Path) -> HostProfile:
 def merged_environment(profile: HostProfile) -> dict[str, str]:
     environment = os.environ.copy()
     environment.update(profile.environment())
+    if profile.driver is HostDriver.LOCAL_SUPERVISORD:
+        owner = profile.path.stat().st_uid if profile.path.exists() else os.getuid()
+        environment["EIDOLON_SOURCE_OPERATOR"] = pwd.getpwuid(owner).pw_name
     return environment
 
 
@@ -590,8 +595,8 @@ def _source_overrides(value: object | None, *, base: Path) -> Mapping[str, Sourc
     return MappingProxyType(overrides)
 
 
-def _absolute_path(value: object, label: str) -> Path:
-    path = Path(_text(value, label)).expanduser()
+def _absolute_path(value: object, label: str, base: Path) -> Path:
+    path = expand_operator_path(_text(value, label), base)
     if not path.is_absolute() or ".." in path.parts:
         raise HostProfileError(f"{label} must be a safe absolute path")
     # Host paths can describe a remote machine.  Normalize lexically without
@@ -600,7 +605,7 @@ def _absolute_path(value: object, label: str) -> Path:
 
 
 def _local_path(value: object, base: Path, label: str) -> Path:
-    path = Path(_text(value, label)).expanduser()
+    path = expand_operator_path(_text(value, label), base)
     if not path.is_absolute():
         path = base / path
     return path.resolve(strict=False)

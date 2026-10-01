@@ -231,6 +231,16 @@ class SupervisordSupervisor:
             direct = product.prepare() if operation == "prepare" else product.validate()
             phases.append({"phase": operation, "result": direct})
             return direct
+        if operation in {"start", "restart"}:
+            from eidolon_ops.source_runtime import provision_source_identities
+
+            # Check privilege/identity before changing inputs or stopping a
+            # working Host. An unprivileged source run must never turn these
+            # distinct workloads back into the operator's own processes.
+            provision_source_identities(
+                product.source_services(),
+                operator_uid=self.profile.path.stat().st_uid if self.profile.path.exists() else os.getuid(),
+            )
         if operation in _PREPARING_OPERATIONS:
             phases.begin("prepare")
             phases.append({"phase": "prepare", "result": product.prepare()})

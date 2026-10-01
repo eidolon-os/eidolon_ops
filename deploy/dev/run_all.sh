@@ -66,16 +66,21 @@ RUN_DIR="$EIDOLON_RUNTIME_ROOT"
 # create everything our own configs reference so the user never sees a phantom
 # "no such file" on first start.
 LOG_PROJECTS=(admin audit nats livekit memory data hub kernel agent channel laya client-web mementos admin/esp32-tools/jobs)
+operator_directories() {
+  mkdir -p "$@"
+  if [[ "$(id -u)" == "0" && -n "${EIDOLON_SOURCE_OPERATOR:-}" ]]; then
+    chown "$EIDOLON_SOURCE_OPERATOR" "$@"
+  fi
+}
 for _p in "${LOG_PROJECTS[@]}"; do
-  mkdir -p "${LOG_DIR}/${_p}"
+  operator_directories "${LOG_DIR}/${_p}"
 done
-mkdir -p \
+operator_directories \
   "$VAR_DIR" \
   "$RUN_DIR" \
   "${LOG_DIR}/admin/childlogs" \
   "${LOG_DIR}/ops/childlogs" \
   "${EIDOLON_STATE_ROOT}/audit" \
-  "${EIDOLON_STATE_ROOT}/admin" \
   "${EIDOLON_STATE_ROOT}/agent" \
   "${EIDOLON_STATE_ROOT}/memory/mempalaces-v3.8" \
   "${EIDOLON_STATE_ROOT}/nats/jetstream" \
@@ -85,9 +90,11 @@ mkdir -p \
   "${EIDOLON_RUNTIME_ROOT}/memory" \
   "${EIDOLON_CACHE_ROOT}/debug/agent" \
   "${EIDOLON_CACHE_ROOT}/debug/channel" \
-  "${EIDOLON_CACHE_ROOT}" \
-  "${EIDOLON_BOOTSTRAP_STATE_ROOT}" \
-  "${EIDOLON_BOOTSTRAP_RUNTIME_ROOT}"
+  "${EIDOLON_CACHE_ROOT}"
+# Private workload directories keep component-owned identities. They were
+# already provisioned by Ops before the supervisor adapter is reached.
+mkdir -p "${EIDOLON_STATE_ROOT}/admin" "${EIDOLON_BOOTSTRAP_STATE_ROOT}" "${EIDOLON_BOOTSTRAP_RUNTIME_ROOT}"
+chmod 0700 "$VAR_DIR"
 
 # Vite dev server pid/log — admin-api's pid is owned by supervisord now.
 WEB_PID_FILE="${RUN_DIR}/eidolon-admin-gateway-web.pid"
@@ -161,7 +168,7 @@ configure_supervisor_profile() {
       export EIDOLON_SUPERVISOR_PROFILE="$profile"
       export EIDOLON_SUPERVISOR_PID="$SV_PID"
       export EIDOLON_SUPERVISOR_SOCKET="$SV_SOCK"
-      export EIDOLON_SUPERVISOR_INCLUDE_GLOB="${OPS_ROOT}/deploy/supervisor/product-source.conf"
+      export EIDOLON_SUPERVISOR_INCLUDE_GLOB="${EIDOLON_CONFIG_ROOT}/supervisor.conf"
       export EIDOLON_ADMIN_SUPERVISOR_SOCKET="$SV_SOCK"
       export EIDOLON_SUPERVISOR_LOG_FILE="${LOG_DIR}/admin/supervisord-${profile}.log"
       export EIDOLON_SUPERVISOR_CHILDLOG_DIR="${LOG_DIR}/admin/childlogs"

@@ -132,6 +132,7 @@ BOOTSTRAP_SOCKET = Path("/run/eidolon-bootstrap/control.sock")
 #: revoke a device by itself. The separation is real, which is why a workflow
 #: that is not listening takes the capability out of the product entirely.
 LIFECYCLE_WORKFLOW_SOCKET = Path("/run/eidolon-lifecycle/workflow.sock")
+REMOVAL_CAPABILITY_SOCKET = Path("/run/eidolon-removal-capability/broker.sock")
 
 MDNS_DEFINITION = Path("/etc/avahi/services/eidolon-local-api.service")
 
@@ -590,7 +591,7 @@ def app_ready(payload: Mapping[str, object]) -> dict[str, object]:
             and isinstance(hub_descriptor.get("directory_revision"), int)
         ),
         "hub_admits_devices": (hub_ready or {}).get("status") == "ready",
-        "device_removal_available": LIFECYCLE_WORKFLOW_SOCKET.is_socket(),
+        "device_removal_available": LIFECYCLE_WORKFLOW_SOCKET.is_socket() and REMOVAL_CAPABILITY_SOCKET.is_socket(),
         # The name, port and descriptor URI must be right on every record —
         # those are one fact published many times. The address only has to be
         # one this Host owns, for the reason `lan_name_resolves` gives above.

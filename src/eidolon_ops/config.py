@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 from eidolon_ops.capabilities import HOST_CAPABILITIES, require_known_capability
 from eidolon_ops.errors import OperationsError
 from eidolon_ops.foundation import FOUNDATION_PROFILES
+from eidolon_ops.operator_paths import expand_operator_path
 from eidolon_ops.settings_overlay import (
     OverlayAssignment,
     SettingsOverlayError,
@@ -877,7 +878,7 @@ def _durable_local_path(value: object, base: Path, label: str) -> Path:
 
 def _local_path(value: object, base: Path, label: str) -> Path:
     text = _string(value, label)
-    path = Path(text).expanduser()
+    path = expand_operator_path(text, base)
     if not path.is_absolute():
         path = base / path
     return path.resolve()

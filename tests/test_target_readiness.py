@@ -109,6 +109,7 @@ def lifecycle_workflow_socket(monkeypatch):
         listener = socket.socket(socket.AF_UNIX)
         listener.bind(str(path))
         monkeypatch.setattr(probe, "LIFECYCLE_WORKFLOW_SOCKET", path)
+        monkeypatch.setattr(probe, "REMOVAL_CAPABILITY_SOCKET", path)
         yield path
         listener.close()
 

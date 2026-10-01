@@ -212,7 +212,14 @@ def pinned_system_services(kernel_contract) -> dict[str, str | None]:
 def _product_source_profile() -> tuple[dict[str, set[str]], dict[str, bool]]:
     parser = configparser.ConfigParser(interpolation=None, strict=False)
     parser.optionxform = str
-    parser.read(Path(__file__).resolve().parents[1] / "deploy/supervisor/product-source.conf")
+    root = Path(__file__).resolve().parents[1]
+    from eidolon_ops.component_contract import load_component_contract
+    from eidolon_ops.paths import load_host_profile
+    from eidolon_ops.source_runtime import render_supervisor, source_services
+    admin = root.parent / "eidolon_admin"
+    profile = load_host_profile(root / "config/hosts/mac.toml")
+    services = source_services(load_component_contract(admin, "eidolon_admin"), profile, admin)
+    parser.read_string(render_supervisor((root / "deploy/supervisor/product-source.conf").read_text(), services, "operator"))
     groups = {
         section.split(":", 1)[1]: {
             name.strip() for name in parser[section]["programs"].split(",") if name.strip()
@@ -294,4 +301,5 @@ def test_programs_outside_the_service_manifest_are_named_rather_than_assumed(
         "laya",
         "local-api",
         "local-api-mdns",
+        "lifecycle-workflow",
     }
