@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import secrets
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -82,6 +83,10 @@ def initialize_install_inputs(
     hub_jwt_secret = secrets.token_urlsafe(48)
     hub_provider_token = secrets.token_urlsafe(32)
     smarthome_token = secrets.token_urlsafe(32)
+    # Hub encrypts Provider account credentials (a smart-home platform's app
+    # secret, a Home Assistant token) at rest with this key. Hub's alone: no
+    # other component reads the vault, so nothing shares it.
+    hub_vault_key = mint_vault_key()
     pairing_token = secrets.token_urlsafe(48)
     memory_token = secrets.token_urlsafe(32)
     # Two credentials for the two Owner-facing authority surfaces that grew one.
@@ -118,6 +123,7 @@ def initialize_install_inputs(
             "EIDOLON_HUB_DEVICE_REGISTRY_READER_TOKEN": hub_reader_token,
             "EIDOLON_HUB_CHANNEL_PROVIDER_TOKEN": hub_provider_token,
             "EIDOLON_HUB_SMARTHOME_TOKEN": smarthome_token,
+            "EIDOLON_HUB_VAULT_KEY": hub_vault_key,
             "EIDOLON_DATA_WORKSPACE_AUTHORITY_TOKEN": workspace_token,
         },
         "kernel.env": {
@@ -239,6 +245,19 @@ SHARED_CREDENTIALS: tuple[tuple[str, str, str, str, str], ...] = (
     ("channel.env", "LIVEKIT_API_SECRET", "livekit.env", "LIVEKIT_API_SECRET", "Channel/LiveKit secret"),
 )
 
+def mint_vault_key() -> str:
+    """32 random bytes, base64: the shape Hub's credential vault requires."""
+    return base64.b64encode(secrets.token_bytes(32)).decode()
+
+
+def _mint_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+#: Keys whose value has a required shape; everything else is a URL-safe token.
+MINTERS: dict[str, Callable[[], str]] = {"EIDOLON_HUB_VAULT_KEY": mint_vault_key}
+
+
 @dataclass(frozen=True, slots=True)
 class EnvFileKeys:
     """What one generated environment file holds, and who writes each key.
@@ -309,6 +328,7 @@ DECLARED_ENV_KEYS: dict[str, EnvFileKeys] = {
             "EIDOLON_HUB_SMARTHOME_WORKSPACE_URL",
             "EIDOLON_DATA_WORKSPACE_AUTHORITY_TOKEN",
             "EIDOLON_HUB_SMARTHOME_TOKEN",
+            "EIDOLON_HUB_VAULT_KEY",
             "EIDOLON_HUB_MANAGEMENT_JWT_SECRET",
             "EIDOLON_HUB_DEVICE_REGISTRY_READER_TOKEN",
             "EIDOLON_HUB_CHANNEL_PROVIDER_TOKEN",
@@ -623,7 +643,7 @@ def add_missing_install_credentials(
                 if len(existing) > 1:
                     raise InstallInputError("existing shared credential values disagree")
                 value = next(iter(existing)) if existing else minted.setdefault(
-                    min(group), secrets.token_urlsafe(32))
+                    min(group), MINTERS.get(key, _mint_token)())
             envs[name][key] = value
             added.setdefault(name, []).append(key)
 

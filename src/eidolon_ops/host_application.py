@@ -252,6 +252,7 @@ class HostApplicationMaterializer:
             owner_domain_generation,
             identity,
             self.app.hub_https_port,
+            overlay=self.config.settings_overlay,
         )
 
     def _ingress_service(self) -> str:

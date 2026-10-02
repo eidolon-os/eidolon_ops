@@ -51,6 +51,7 @@ class _FakeConfig:
     sources: Mapping[str, _FakeSource]
     install_files: Mapping[str, Path] = field(default_factory=dict)
     capabilities: frozenset[str] = frozenset()
+    settings_overlay: tuple = ()
 
 
 def _product(tmp_path: Path, *, foundation_mode: str) -> LocalProductSource:

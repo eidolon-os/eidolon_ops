@@ -557,6 +557,7 @@ class LocalProductSource:
                 identity,
                 app.hub_https_port,
                 mdns_enabled=True,
+                overlay=self.config.settings_overlay,
             ),
         ).encode("utf-8")
         rendered[root / "settings/channel-provider.yaml"] = source_assets.translate_fhs(

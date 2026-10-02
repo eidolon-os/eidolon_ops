@@ -58,3 +58,12 @@ value = "laya"
 document = "agent.yaml"
 path = "smarthome.interpretation_record_path"
 value = "$EIDOLON_STATE_ROOT/agent/smarthome/interpretation.jsonl"
+
+# The Mac source run also assembles the 周边好生活 adapter beside the virtual
+# home, for the demo against its cloud mock (or the platform's test environment
+# once it exists). Credentials never live here: the phone binds the account and
+# Hub keeps them in its vault (EIDOLON_HUB_VAULT_KEY in hub.env).
+[[settings.overlay]]
+document = "hub.yaml"
+path = "smarthome.providers"
+value = "virtual,zhoubian"

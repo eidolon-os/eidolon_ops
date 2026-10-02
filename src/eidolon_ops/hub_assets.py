@@ -11,10 +11,11 @@ the same answer and reading it from two places is how the last drift started.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
 from eidolon_ops.host_identity import HostLanIdentity
+from eidolon_ops.settings_overlay import OverlayAssignment, SettingsOverlayError, apply_overlay
 
 #: The placeholders a component template carries and Ops instantiates. They are
 #: matched exactly once each: a template that stops containing them has changed
@@ -33,6 +34,8 @@ _DESCRIPTOR_URI_PLACEHOLDER = (
 #: the settings Hub's suite exercised were not the settings a Host started with.
 #: The two had already drifted.
 HUB_SETTINGS_TEMPLATE = ("eidolon_hub", "config/settings.yaml")
+#: The document name a Host's settings overlay uses to address Hub's settings.
+HUB_SETTINGS_DOCUMENT = "hub.yaml"
 
 class HubAssetError(ValueError):
     """Hub TLS material or rendered Hub settings are unsafe or drifted."""
@@ -100,8 +103,15 @@ def render_hub_settings(
     port: int,
     *,
     mdns_enabled: bool = True,
+    overlay: Sequence[OverlayAssignment] = (),
 ) -> str:
-    """Bind stable Owner identity and the current Host candidate URI."""
+    """Bind stable Owner identity and the current Host candidate URI.
+
+    ``overlay`` is the Host's own ``[[settings.overlay]]`` list; only the
+    assignments that name ``hub.yaml`` apply here, the same way the Agent's and
+    Channel's documents take theirs in ``product_settings``. Which smart-home
+    Provider adapters a Host assembles (``smarthome.providers``) is set this way.
+    """
 
     rendered = _replace_once(
         template,
@@ -130,6 +140,13 @@ def render_hub_settings(
             "discovery:\n  mdns:\n    enabled: false",
             "Hub mDNS publisher",
         )
+    for assignment in overlay:
+        if assignment.document != HUB_SETTINGS_DOCUMENT:
+            continue
+        try:
+            rendered = apply_overlay(rendered, assignment)
+        except SettingsOverlayError as exc:
+            raise HubAssetError(f"pinned Hub settings template drifted: {exc}") from exc
     return rendered
 
 

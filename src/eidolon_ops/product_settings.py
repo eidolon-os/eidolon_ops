@@ -63,6 +63,10 @@ def product_settings(
     for document, path, value in PRODUCT_OVERLAY:
         documents[document] = _assign(documents[document], document, path, value)
     for assignment in config.settings_overlay:
+        if assignment.document == "hub.yaml":
+            # Hub's settings are rendered from Hub's own template by hub_assets,
+            # which applies these assignments itself.
+            continue
         if assignment.document not in documents:
             raise InstallInputError(
                 f"settings overlay names an unrendered document: {assignment.document}"
