@@ -182,7 +182,10 @@ def test_the_repository_hosts_reach_their_models_where_they_should() -> None:
         assert ("local_laya_participation" in config.capabilities) == (name == "rk3588"), name
 
 
-def test_only_the_mac_interprets_home_commands_with_laya_and_records_them() -> None:
+def test_each_host_keeps_its_own_home_interpretation() -> None:
+    # The choice moved from each Host's agent environment into its profile, unchanged: the Mac
+    # source run uses Laya and records it; opi5max has used Laya with c4 continuations since
+    # 2026-09-30 (three EIDOLON_SMARTHOME_* lines in its agent.env); the Pis use the rules.
     def smarthome(name: str) -> dict[str, str]:
         return {item.display: item.value for item in _repository_host(name).settings_overlay
                 if item.display.startswith("smarthome.") and item.display != "smarthome.laya.url"}
@@ -191,7 +194,11 @@ def test_only_the_mac_interprets_home_commands_with_laya_and_records_them() -> N
         "smarthome.interpreter": "laya",
         "smarthome.interpretation_record_path": "$EIDOLON_STATE_ROOT/agent/smarthome/interpretation.jsonl",
     }
-    for name in ("rk3588", "pi5", "pi5-device-management-hil"):
+    assert smarthome("rk3588") == {
+        "smarthome.interpreter": "laya",
+        "smarthome.laya.continuation": "true",
+    }
+    for name in ("pi5", "pi5-device-management-hil"):
         assert smarthome(name) == {}, name  # the Agent's default: rules, nothing recorded
 
 

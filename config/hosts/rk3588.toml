@@ -53,3 +53,18 @@ allow_insecure_livekit = true
 # 的）。新 checkout 上这个文件不存在，install 会明确报出来——和另外 14 个
 # install 输入的行为一致。
 setup_code_file = "../../.eidolon-ops/opi5max/inputs/factory_setup_code"
+
+# This board interprets home commands with Laya — its own NPU service (the address follows from
+# local_laya) — and follows multi-turn continuations with the same model (c4; the revision the Agent
+# accepts is pinned in its code). Since 2026-09-30 this was three EIDOLON_SMARTHOME_* lines in the
+# board's agent.env; the Agent no longer reads them, so the choice lives here. Without these two
+# entries the Agent falls back to its rules.
+[[settings.overlay]]
+document = "agent.yaml"
+path = "smarthome.interpreter"
+value = "laya"
+
+[[settings.overlay]]
+document = "agent.yaml"
+path = "smarthome.laya.continuation"
+value = "true"
