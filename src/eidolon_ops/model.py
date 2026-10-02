@@ -101,6 +101,8 @@ class Capability(StrEnum):
     ROLLBACK = "rollback"
     BACKUP = "backup"
     RESTORE = "restore"
+    AUTHORITY_BACKUP = "authority-backup"
+    AUTHORITY_RESTORE = "authority-restore"
     RESET = "reset"
     CONTROLLER_RESET = "controller-reset"
     #: Set aside a Kernel authority this Host's own Kernel refuses to open.

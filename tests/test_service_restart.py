@@ -249,10 +249,12 @@ def test_the_console_offers_the_same_operation() -> None:
 
 
 def test_the_entry_script_offers_it_on_both_hosts() -> None:
-    script = (ROOT / "eidolon").read_text(encoding="utf-8")
-    for name in ("LOCAL_SUPERVISORD_COMMANDS", "SSH_SYSTEMD_COMMANDS", "ALL_COMMANDS"):
-        line = next(line for line in script.splitlines() if line.startswith(f"{name}="))
-        assert " service" in line.split("=", 1)[1] or line.endswith('service"')
+    for host in ("mac", "pi5"):
+        result = subprocess.run((str(ROOT / "eidolon"), "commands", host),
+                                text=True, capture_output=True, check=False)
+        assert result.returncode == 0
+        assert any(line.split()[0] == "service" for line in result.stdout.splitlines()
+                   if line.startswith("  "))
 
 
 def test_only_restart_is_offered() -> None:

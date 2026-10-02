@@ -2159,7 +2159,7 @@ class EidolonPiController:
         release_id = self._active_release("release_id")
         result = self.transport.run_agent(
             "backup",
-            {**self.host_layer.target_payload(), "release_id": release_id},
+            {**self.host_layer.state_payload(), "release_id": release_id},
             timeout=900,
         )
         destination = output / f"{release_id}-{result['host_id']}"
@@ -2176,6 +2176,7 @@ class EidolonPiController:
         """Put a backup back, after proving it belongs to this Host."""
 
         self.preflight.validate_ssh_material()
+        state_payload = self.host_layer.state_payload()
         manifest_path = source / "backup.json"
         if not manifest_path.is_file():
             raise OperationsError(f"backup manifest is missing: {manifest_path}")
@@ -2198,16 +2199,14 @@ class EidolonPiController:
                 "next": "rerun with --apply; the product stops while its authorities are replaced",
             }
         remote = f"/var/tmp/eidolon-backup-{release_id}"
-        self.transport.run(
-            ("/bin/rm", "-rf", remote),
-            sudo=True,
-            operation="previous backup staging removal",
-        )
+        staged = self.transport.run_agent("prepare-restore-stage", {**state_payload, "release_id": release_id})
+        if staged.get("status") != "prepared" or staged.get("directory") != remote:
+            raise OperationsError("backup restore staging was not prepared")
         self.transport.upload(source, remote, recursive=True)
         return self.transport.run_agent(
             "restore",
             {
-                **self.host_layer.target_payload(),
+                **state_payload,
                 "release_id": release_id,
                 "manifest": manifest,
             },

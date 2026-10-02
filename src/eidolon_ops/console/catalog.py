@@ -443,7 +443,7 @@ CATALOG: tuple[Operation, ...] = (
         name="authority-backup",
         label="备份 Owner Authority",
         summary="封存 Owner root、完整 Hub 状态与同代 lineage 供显式恢复",
-        capability=Capability.BACKUP,
+        capability=Capability.AUTHORITY_BACKUP,
         group="authority",
         fields=(
             Field(
@@ -461,7 +461,7 @@ CATALOG: tuple[Operation, ...] = (
         name="authority-restore",
         label="恢复 Owner Authority",
         summary="从完整备份恢复同一 generation；不会 Reset、commission 或重新 Claim",
-        capability=Capability.RESTORE,
+        capability=Capability.AUTHORITY_RESTORE,
         group="authority",
         fields=(
             Field(

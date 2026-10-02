@@ -16,9 +16,8 @@ sentence a backup tells itself.
 
 Two operational facts shape the code:
 
-- **The supervisor writes as its own account.** Root creates the directory and
-  hands it to that account first; otherwise the snapshot fails on a permission
-  the operator would then have to diagnose from inside another process's log.
+- **The supervisor writes as its own account.** The execution adapter prepares
+  access for that account; a source Host uses the operator account throughout.
 - **A restore reads it the same way**, so an uploaded backup is handed over
   before it is asked for, and taken back afterwards. The operator keeps the
   copy; the service only ever borrows it.
@@ -29,11 +28,11 @@ from __future__ import annotations
 import json
 import urllib.error
 import urllib.request
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from . import contract, primitives
+from . import primitives
 from .primitives import TargetError
 
 #: Where the spaces sit inside a backup directory, beside the authority copies.
@@ -72,7 +71,7 @@ def _request(base_url: str, path: str, *, method: str, body: Mapping[str, object
     if urlsplit(request.full_url).hostname not in {"127.0.0.1", "localhost", "::1"}:
         raise TargetError(f"memory admin API must be on this Host: {base_url}")
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with primitives.direct_http_opener().open(request, timeout=timeout) as response:
             return json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", "replace").strip()
@@ -89,29 +88,38 @@ def realm_ids(base_url: str) -> list[str]:
     method, path = LIST_ACTION.split(" ", 1)
     listed = _request(base_url, path, method=method, body=None,
                       timeout=_TIMEOUT_LIST_SECONDS)
+    listed = listed.get("realms") if isinstance(listed, dict) else None
     if not isinstance(listed, list):
-        raise TargetError("memory did not answer with a list of realms")
+        raise TargetError("memory did not answer with its realms document")
     identifiers: list[str] = []
     for entry in listed:
         spec = entry.get("spec") if isinstance(entry, dict) else None
         realm = (spec or {}).get("memory_realm_id") if isinstance(spec, dict) else None
-        if not isinstance(realm, str) or not realm:
-            raise TargetError("memory listed a realm without an id")
+        if not isinstance(realm, str) or not realm or realm in identifiers:
+            raise TargetError("memory listed a realm without a unique id")
+        _directory_name(realm)
         identifiers.append(realm)
     return identifiers
 
 
-def capture(base_url: str, destination: Path) -> list[dict[str, object]]:
+def capture(
+    base_url: str, destination: Path, *,
+    service_account: tuple[str, str] = SERVICE_ACCOUNT,
+    own: Callable[[Path, str, str], None] | None = None,
+    hand_to_operator: Callable[[Path], None] | None = None,
+) -> list[dict[str, object]]:
     """Snapshot every space into ``destination``, and check what came back.
 
     Raises rather than returning a partial set: a backup that carries three of
     four spaces is one an operator would restore believing it whole.
     """
 
+    own = own or primitives.chown_path
+    hand_to_operator = hand_to_operator or primitives.give_to_invoking_operator
     root = Path(destination)
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
     # The supervisor writes these, not this agent.
-    primitives.chown_path(root, *SERVICE_ACCOUNT)
+    own(root, *service_account)
     captured: list[dict[str, object]] = []
     for realm in realm_ids(base_url):
         target = root / _directory_name(realm)
@@ -139,11 +147,16 @@ def capture(base_url: str, destination: Path) -> list[dict[str, object]]:
                 "bytes": sum(int(entry.get("bytes", 0)) for entry in manifest["entries"]),
             }
         )
-    _hand_to_operator(root)
+    _hand_to_operator(root, hand_to_operator)
     return captured
 
 
-def put_back(base_url: str, source: Path, spaces: list[Mapping[str, object]]) -> list[dict]:
+def put_back(
+    base_url: str, source: Path, spaces: list[Mapping[str, object]], *,
+    service_account: tuple[str, str] = SERVICE_ACCOUNT,
+    own: Callable[[Path, str, str], None] | None = None,
+    hand_to_operator: Callable[[Path], None] | None = None,
+) -> list[dict]:
     """Ask memory to become each copy again, one space at a time.
 
     Ordered after the product is running because only a live supervisor can take
@@ -152,9 +165,12 @@ def put_back(base_url: str, source: Path, spaces: list[Mapping[str, object]]) ->
     match its digest) are memory's to make, and it makes them before it writes.
     """
 
+    own = own or primitives.chown_path
+    hand_to_operator = hand_to_operator or primitives.give_to_invoking_operator
     root = Path(source)
     restored: list[dict] = []
     for space in spaces:
+        verify_backup(root, space)
         realm = space.get("memory_space_id")
         directory = space.get("directory")
         if not isinstance(realm, str) or not isinstance(directory, str):
@@ -162,7 +178,7 @@ def put_back(base_url: str, source: Path, spaces: list[Mapping[str, object]]) ->
         copy = root / Path(directory).name
         if copy.parent != root or not copy.is_dir():
             raise TargetError(f"backup is missing the copy of {realm}")
-        _hand_to_service(copy)
+        _hand_to_service(copy, service_account, own)
         try:
             method, path = RESTORE_ACTION.split(" ", 1)
             answer = _request(
@@ -174,7 +190,7 @@ def put_back(base_url: str, source: Path, spaces: list[Mapping[str, object]]) ->
             )
         finally:
             # The operator keeps their backup; the service only borrowed it.
-            _hand_to_operator(copy)
+            _hand_to_operator(copy, hand_to_operator)
         if not isinstance(answer, dict):
             raise TargetError(f"memory answered the restore of {realm} with a non-object")
         restored.append(
@@ -205,10 +221,30 @@ def _verify(directory: Path, manifest: Mapping[str, object], *, realm: str) -> N
         if not isinstance(relative, str) or relative.startswith("/") or ".." in relative:
             raise TargetError(f"snapshot of {realm} names a file outside itself: {relative}")
         path = directory / relative
-        if not path.is_file():
+        if not path.is_file() or any(part.is_symlink() for part in (path, *path.parents)):
             raise TargetError(f"snapshot of {realm} is missing {relative}")
         if primitives.file_sha256(path) != entry.get("sha256"):
             raise TargetError(f"snapshot of {realm} does not match its digest: {relative}")
+
+
+def verify_backup(root: Path, space: Mapping[str, object]) -> None:
+    """Validate a travelling memory package before the Host is quiesced."""
+    if not isinstance(space, Mapping):
+        raise TargetError("backup memory space is malformed")
+    realm = space.get("memory_space_id")
+    if not isinstance(realm, str) or space.get("directory") != f"{SPACES_DIRECTORY}/{_directory_name(realm)}":
+        raise TargetError("backup memory space directory is unsafe")
+    directory = root / realm
+    manifest_path = directory / "manifest.json"
+    if any(path.is_symlink() for path in (directory, manifest_path, *directory.parents)):
+        raise TargetError("backup memory space is unsafe")
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise TargetError("backup memory manifest is missing or invalid") from exc
+    if not isinstance(manifest, dict) or manifest.get("memory_space_id") != realm:
+        raise TargetError("backup memory manifest names a different realm")
+    _verify(directory, manifest, realm=realm)
 
 
 def _directory_name(realm: str) -> str:
@@ -223,21 +259,21 @@ def _directory_name(realm: str) -> str:
     return realm
 
 
-def _hand_to_service(path: Path) -> None:
+def _hand_to_service(path: Path, account, own) -> None:
     for child in _tree(path):
-        primitives.chown_path(child, *SERVICE_ACCOUNT)
+        own(child, *account)
 
 
-def _hand_to_operator(path: Path) -> None:
+def _hand_to_operator(path: Path, hand_to_operator) -> None:
     for child in _tree(path):
-        primitives.give_to_invoking_operator(child)
+        hand_to_operator(child)
 
 
 def _tree(path: Path) -> list[Path]:
     return [path, *(child for child in Path(path).rglob("*"))]
 
 
-def unavailable(reason: str) -> dict[str, object]:
+def unavailable(reason: str, path: Path) -> dict[str, object]:
     """The entry a backup adds to ``not_covered`` when memory could not answer.
 
     A Host whose memory service is down still has authorities worth copying, and
@@ -249,6 +285,6 @@ def unavailable(reason: str) -> dict[str, object]:
 
     return {
         "state": "memory",
-        "path": str(contract.MEMORY_STATE_ROOT),
+        "path": str(path),
         "reason": reason,
     }

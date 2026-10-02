@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from enum import StrEnum
+from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from eidolon_ops.model import Capability
@@ -73,6 +74,15 @@ class Supervisor(Protocol):
 
 
 @runtime_checkable
+class StateOperations(Protocol):
+    """Component state operations, independent of release installation."""
+
+    def backup(self, *, output: Path) -> dict[str, object]: ...
+
+    def restore(self, *, source: Path, apply: bool) -> dict[str, object]: ...
+
+
+@runtime_checkable
 class PackageManager(Protocol):
     """Whatever installs the non-Eidolon foundation the release assumes."""
 
@@ -90,6 +100,7 @@ class PackageManager(Protocol):
 __all__ = [
     "PackageManager",
     "PackageManagerKind",
+    "StateOperations",
     "Supervisor",
     "SupervisorKind",
     "Transport",

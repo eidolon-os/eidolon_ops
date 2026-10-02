@@ -377,59 +377,6 @@ FIXED_DATA = {
     "deployment_evidence": Path("/var/lib/eidolon/deployments"),
 }
 
-#: Every authority a backup copies, and the identity that owns it back.
-#:
-#: A built-in table because no component declares its own operational facts
-#: yet; when they do, this is the first thing that should come from them
-#: rather than from here. Each of these is SQLite, which can be snapshotted
-#: consistently while the service that owns it keeps running.
-BACKED_UP_AUTHORITIES = {
-    "system": (Path("/var/lib/eidolon/eidolon-system.sqlite3"), "eidolon", "eidolon"),
-    "eidolond": (Path("/var/lib/eidolon/eidolond.sqlite3"), "eidolon", "eidolon"),
-    "kernel": (Path("/var/lib/eidolon/eidolon-kernel.sqlite3"), "eidolon", "eidolon"),
-    "hub": (Path("/var/lib/eidolon/hub/eidolon-hub.sqlite3"), "eidolon", "eidolon"),
-    "agent": (Path("/var/lib/eidolon/agent/eidolon-agent.sqlite3"), "eidolon", "eidolon"),
-    "channel": (Path("/var/lib/eidolon/channel/provider.sqlite3"), "eidolon", "eidolon"),
-    "bootstrap": (
-        Path("/var/lib/eidolon-bootstrap/bootstrap.sqlite3"),
-        "eidolon-bootstrap",
-        "eidolon-bootstrap",
-    ),
-    "lifecycle": (
-        Path("/var/lib/eidolon-lifecycle/lifecycle-workflows.sqlite3"),
-        "eidolon-lifecycle",
-        "eidolon-lifecycle",
-    ),
-}
-
-#: Where memory keeps its spaces. Not in ``UNCOVERED_STATE`` any more: memory
-#: declares a snapshot of its own now, and the backup asks it for one rather
-#: than copying a palace this agent does not understand. The path is still named
-#: here because a backup that could not reach the supervisor says which state it
-#: went without.
-MEMORY_STATE_ROOT = Path("/var/lib/eidolon/memory")
-
-#: State a backup does not carry, named rather than quietly omitted. Each of
-#: these needs its owning component to say how it is copied and how that copy
-#: is checked; guessing at a JetStream directory or a media store would produce
-#: a backup that restores into something subtly wrong, which is worse than one
-#: that says what it left out. Memory was the first entry and is now the proof
-#: that the fix is a declaration by the owning component, not an exception here.
-UNCOVERED_STATE = {
-    "nats": (
-        Path("/var/lib/eidolon/nats/jetstream"),
-        "JetStream stores are not a file copy while the server is running",
-    ),
-    "objects": (
-        Path("/var/lib/eidolon/objects"),
-        "normalized media is large and has no declared snapshot",
-    ),
-    "voiceprints": (
-        Path("/var/lib/eidolon/voiceprints"),
-        "voiceprint material has no declared snapshot",
-    ),
-}
-
 #: Paths a release used to install and no longer does. They are named rather
 #: than forgotten: a Host installed before the change still carries them, so
 #: something has to be responsible for taking them away.

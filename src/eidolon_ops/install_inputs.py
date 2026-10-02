@@ -468,8 +468,8 @@ def declared_credential_classes() -> list[dict[str, object]]:
     a different way.
 
     So the unit is the credential: the connected component of the pair graph,
-    every slot that must hold one value. Thirteen of them today, from seventeen
-    pairs.
+    every slot that must hold one value. The partition follows the declarations
+    as relationships are added; no fixed number of classes is assumed.
 
     Derived here rather than on the Host, like every other declaration in the
     payload, and ordered so two runs produce the same document.

@@ -464,23 +464,23 @@ class HostController:
 
     def backup(self, *, output: Path) -> Evidence:
         plan = plans.backup(self.profile.host_id)
-        release = self.adapter.require_release(Capability.BACKUP)
-        return self._applied(plan, release.backup(output=output))
+        state = self.adapter.require_state(Capability.BACKUP)
+        return self._applied(plan, state.backup(output=output))
 
     def restore(self, *, source: Path, apply: bool) -> Evidence:
         plan = plans.restore(self.profile.host_id, apply=apply)
-        release = self.adapter.require_release(Capability.RESTORE)
-        report = release.restore(source=source, apply=apply)
+        state = self.adapter.require_state(Capability.RESTORE)
+        report = state.restore(source=source, apply=apply)
         return self._planned_or_applied(plan, report, applied=apply)
 
     def authority_backup(self, *, output: Path) -> Evidence:
         plan = plans.authority_backup(self.profile.host_id)
-        release = self.adapter.require_release(Capability.BACKUP)
+        release = self.adapter.require_release(Capability.AUTHORITY_BACKUP)
         return self._applied(plan, release.authority_backup(output=output))
 
     def authority_restore(self, *, source: Path, apply: bool) -> Evidence:
         plan = plans.authority_restore(self.profile.host_id, apply=apply)
-        release = self.adapter.require_release(Capability.RESTORE)
+        release = self.adapter.require_release(Capability.AUTHORITY_RESTORE)
         report = release.authority_restore(source=source, apply=apply)
         return self._planned_or_applied(plan, report, applied=apply)
 

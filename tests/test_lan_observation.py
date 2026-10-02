@@ -1,7 +1,9 @@
 import json
 
+import pytest
+
 from eidolon_ops import lan_observation
-from eidolon_ops.process import ProcessResult
+from eidolon_ops.process import ProcessError, ProcessResult
 
 
 class LinuxNetwork:
@@ -40,3 +42,17 @@ def test_linux_does_not_guess_between_multiple_default_interfaces(monkeypatch):
     monkeypatch.setattr(lan_observation.platform, "system", lambda: "Linux")
     runner = LinuxNetwork(routes=[{"dev": "wlan0"}, {"dev": "usb0"}])
     assert lan_observation.observed_lan_address(runner, {"192.168.1.37", "10.42.0.2"}) == ""
+
+
+@pytest.mark.parametrize("system", ["Linux", "Darwin"])
+@pytest.mark.parametrize("failure", ["timeout", "exit"])
+def test_resolver_failure_is_a_failed_fact_on_every_platform(monkeypatch, system, failure):
+    monkeypatch.setattr(lan_observation.platform, "system", lambda: system)
+
+    class Unavailable:
+        def run(self, command, **kwargs):
+            if failure == "timeout":
+                raise ProcessError("resolver timed out", ProcessResult(127, "", ""))
+            return ProcessResult(1, "ip_address: 192.168.1.37\n192.168.1.37 STREAM\n", "failed")
+
+    assert not lan_observation.name_resolves_to(Unavailable(), "host.local", "192.168.1.37")

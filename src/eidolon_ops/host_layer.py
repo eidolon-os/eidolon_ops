@@ -265,6 +265,14 @@ class HostLayer:
                 raise OperationsError(str(exc)) from exc
         return payload
 
+    def state_payload(self) -> dict[str, object]:
+        """Resolve the selected revision's state before asking a Host to copy it."""
+        topology = read_component_contracts(
+            {source_id: source.path for source_id, source in self.config.sources.items()},
+            self.config.capabilities, read_contract=self._read_component_contract,
+        )
+        return {**self.target_payload(), "authority_inventory": topology.authority_payload()}
+
     def public_contract(self) -> dict[str, object]:
         owner = None
         if self._deployment_identity is not None:

@@ -19,6 +19,7 @@ import ssl
 import stat
 import subprocess
 import time
+import urllib.request
 import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
@@ -28,6 +29,13 @@ from pathlib import Path
 
 class TargetError(RuntimeError):
     """A target invariant or fixed operation failed closed."""
+
+def direct_http_opener(*, context: ssl.SSLContext | None = None) -> urllib.request.OpenerDirector:
+    """Host control traffic goes directly to its endpoint, never a user proxy."""
+    handlers: list[urllib.request.BaseHandler] = [urllib.request.ProxyHandler({})]
+    if context is not None:
+        handlers.append(urllib.request.HTTPSHandler(context=context))
+    return urllib.request.build_opener(*handlers)
 
 def run(
     command: Sequence[str],

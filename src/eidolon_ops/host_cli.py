@@ -13,7 +13,7 @@ from eidolon_ops.environment import EnvironmentFileError
 from eidolon_ops.errors import OperationsError
 from eidolon_ops.host_controller import HostController
 from eidolon_ops.hub_assets import HubAssetError
-from eidolon_ops.model import Outcome
+from eidolon_ops.model import Capability, Outcome
 from eidolon_ops.paths import HostProfileError, load_host_profile
 from eidolon_ops.process import ProcessError, SubprocessRunner
 from eidolon_ops.readiness import ReadinessError
@@ -143,9 +143,34 @@ def _dispatch(controller: HostController, arguments: argparse.Namespace) -> obje
     return handler(controller, arguments)
 
 
+def operation_capability(name: str) -> Capability:
+    """Most verbs name their capability; aliases share the operation they call."""
+    aliases = {"start": Capability.LIFECYCLE, "stop": Capability.LIFECYCLE,
+               "restart": Capability.LIFECYCLE, "pending": Capability.DEPLOY,
+               "update": Capability.DEPLOY, "abandon": Capability.DEPLOY,
+               "debug": Capability.SOURCE_PROFILE, "service": Capability.SERVICE_RESTART}
+    return aliases[name] if name in aliases else Capability(name)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _parser()
     arguments = parser.parse_args(argv)
+    if arguments.all_commands:
+        print(" ".join(OPERATIONS))
+        return 0
+    if arguments.config is None:
+        parser.error("--config is required")
+    if arguments.available_commands:
+        try:
+            controller = HostController(load_host_profile(arguments.config), SubprocessRunner())
+            print(" ".join(name for name in OPERATIONS
+                           if operation_capability(name) in controller.adapter.capabilities))
+            return 0
+        except (ConfigurationError, HostProfileError, OperationsError, OSError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+    if arguments.operation is None:
+        parser.error("an operation is required")
     # Two operations have a human view. Both keep JSON as the machine default;
     # the repository's own entry point is the one that asks for the table.
     human = getattr(arguments, "human", False)
@@ -214,7 +239,9 @@ def _parser() -> argparse.ArgumentParser:
         prog="eidolon-ops",
         description="Manage an Eidolon host through one path and lifecycle contract.",
     )
-    parser.add_argument("--config", type=Path, required=True, help="Host execution profile")
+    parser.add_argument("--config", type=Path, help="Host execution profile")
+    parser.add_argument("--all-commands", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--available-commands", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument(
         "--revision",
         action="append",
@@ -234,7 +261,7 @@ def _parser() -> argparse.ArgumentParser:
             "dirty state is recorded in the Host's release evidence"
         ),
     )
-    operations = parser.add_subparsers(dest="operation", required=True)
+    operations = parser.add_subparsers(dest="operation", required=False)
     status = operations.add_parser("status")
     status_format = status.add_mutually_exclusive_group()
     status_format.add_argument(

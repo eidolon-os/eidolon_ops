@@ -15,6 +15,7 @@ from pathlib import Path
 
 from eidolon_ops.adapters.local_transport import LocalTransport
 from eidolon_ops.adapters.packages import AptPackages, UnmanagedPackages
+from eidolon_ops.adapters.source_state import SourceStateOperations
 from eidolon_ops.adapters.supervisord import SupervisordSupervisor
 from eidolon_ops.adapters.systemd import SystemdSupervisor
 from eidolon_ops.config import load_config
@@ -28,7 +29,7 @@ from eidolon_ops.paths import (
     HostProfileError,
     merged_environment,
 )
-from eidolon_ops.ports import PackageManager, Supervisor, Transport
+from eidolon_ops.ports import PackageManager, StateOperations, Supervisor, Transport
 from eidolon_ops.process import ProcessRunner
 from eidolon_ops.progress import ProgressSink
 from eidolon_ops.transport import SSHTransport
@@ -66,10 +67,12 @@ class HostAdapter:
     #: installed. One implementation, so a module rather than a port.
     release: EidolonPiController | None
     execution: HostExecution
+    state: StateOperations | None = None
 
     @property
     def capabilities(self) -> frozenset[Capability]:
-        return self.supervisor.capabilities | self.packages.capabilities
+        state = frozenset({Capability.BACKUP, Capability.RESTORE}) if self.state else frozenset()
+        return self.supervisor.capabilities | self.packages.capabilities | state
 
     def require(self, capability: Capability) -> None:
         if capability not in self.capabilities:
@@ -83,6 +86,12 @@ class HostAdapter:
         if self.release is None:
             raise OperationsError(f"{capability} has no release executor on this Host")
         return self.release
+
+    def require_state(self, capability: Capability) -> StateOperations:
+        self.require(capability)
+        if self.state is None:
+            raise OperationsError(f"{capability} has no state executor on this Host")
+        return self.state
 
     def describe(self) -> dict[str, object]:
         return {
@@ -138,6 +147,7 @@ def _source_adapter(
         packages=UnmanagedPackages(provisioner=supervisor.provision),
         release=None,
         execution=profile.execution,
+        state=SourceStateOperations(profile, supervisor),
     )
 
 
@@ -175,6 +185,7 @@ def _product_adapter(
         packages=AptPackages(release, config.foundation_profile),
         release=release,
         execution=profile.execution,
+        state=release,
     )
 
 

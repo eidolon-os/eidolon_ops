@@ -28,6 +28,7 @@ Two rules keep this from becoming a second bureaucracy beside the first:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import tomllib
 from collections.abc import Callable
@@ -309,6 +310,35 @@ class ContractTopology:
                 f"contract, and these have not: {missing}. A component that "
                 f"published nothing is not a component with nothing to declare."
             )
+
+    def authority_payload(
+        self, *, map_path: Callable[[Path], Path] = lambda path: path,
+        identity: tuple[str, str] | None = None,
+    ) -> list[dict[str, object]]:
+        """The selected components' state, sent to either execution adapter.
+
+        IDs use the component's canonical path, so translating a Host's roots
+        never changes which authority a backup carries. Physical paths and
+        identities come from the execution policy, never from a backup manifest.
+        """
+        self.requires_every_component("backup and restore")
+        if not self.contracts:
+            raise OperationsError("backup and restore require component operations contracts")
+        return [
+            {
+                "id": state.component_id + "-" + hashlib.sha256(str(state.path).encode()).hexdigest()[:16],
+                "component": state.component_id,
+                "declared_path": str(state.path),
+                "path": str(map_path(state.path)),
+                "owner": identity[0] if identity else state.owner,
+                "group": identity[1] if identity else state.group,
+                "backup": state.backup,
+                "reason": state.uncovered_reason,
+                "snapshot_action": state.snapshot_action,
+                "restore_action": state.restore_action,
+            }
+            for state in sorted(self.authority, key=lambda state: (state.component_id, str(state.path)))
+        ]
 
 
 @lru_cache(maxsize=1)

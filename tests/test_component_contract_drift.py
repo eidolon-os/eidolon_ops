@@ -5,12 +5,14 @@ over. The contracts are the authority now. These tests are what makes that
 claim checkable rather than aspirational: each one asserts that a built-in
 table and the eight contracts still describe the same Host.
 
-The tables are deliberately still here rather than deleted outright. A release
+The remaining tables are deliberately still here rather than deleted outright. A release
 pins exact commits, so Ops has to be able to operate a source tree from before
 the contracts existed; and until every one of these passes on every release
 we care about, deleting the tables would trade a duplicate for a blind spot.
 What has already been removed is the duplication Ops had with *itself* — the
-install-name map that existed identically in two of its own modules.
+install-name map that existed identically in two of its own modules. The backup
+and uncovered-state tables are removed too: their checks now verify that the
+selected component inventory reaches the shared state executor without loss.
 
 Known, deliberate differences between the two are named in each test rather
 than smoothed over. A difference nobody wrote down is drift; a difference with
@@ -31,8 +33,8 @@ from eidolon_ops.config import (
     INSTALL_FILE_NAMES,
     PRODUCT_UNITS,
 )
+from eidolon_ops.hostagent import authorities, memory_realms
 from eidolon_ops.hostagent import contract as host_contract
-from eidolon_ops.hostagent import memory_realms
 from eidolon_ops.hub_assets import HUB_SETTINGS_TEMPLATE
 from eidolon_ops.private_inputs import INSTALL_DESTINATION_NAMES
 from eidolon_ops.release_matrix import HUB_SETTINGS_DESTINATION, SYSTEMD_ASSET_CONTRACTS
@@ -174,28 +176,23 @@ def test_the_backed_up_authorities_are_the_ones_components_named(topology) -> No
         for state in topology.authority
         if state.backup == "sqlite-online"
     }
-    built_in = {
-        path: (owner, group) for path, owner, group in host_contract.BACKED_UP_AUTHORITIES.values()
-    }
-
-    assert declared == built_in
+    received = authorities.inventory({"authority_inventory": topology.authority_payload()})
+    executed = {entry["path"]: (entry["owner"], entry["group"])
+                for entry in received.values() if entry["backup"] == "sqlite-online"}
+    assert declared == executed
+    assert Path("/var/lib/eidolon/hub/smarthome.sqlite3") in executed
+    assert not hasattr(host_contract, "BACKED_UP_AUTHORITIES")
 
 
 def test_what_the_backup_leaves_out_is_still_what_it_leaves_out(topology) -> None:
-    uncovered = {state.path for state in topology.authority if not state.is_covered}
-    built_in = {path for path, _reason in host_contract.UNCOVERED_STATE.values()}
-
-    # Nothing in the old table is unaccounted for now: JetStream was the last
-    # entry that belonged to no component, and the platform declares it.
-    assert built_in - uncovered == set()
-    # Two things the contracts say that the old table did not. Deployment
-    # evidence was only ever in FIXED_DATA_PATHS, which says where a thing is
-    # and nothing about whether a backup carries it; LiveKit's session state
-    # was in no table at all.
-    assert uncovered - built_in == {
-        Path("/var/lib/eidolon/deployments"),
-        Path("/var/lib/eidolon/livekit"),
-    }
+    received = authorities.inventory({"authority_inventory": topology.authority_payload()})
+    uncovered = {entry["path"]: entry["reason"]
+                 for entry in received.values() if entry["backup"] == "none"}
+    assert uncovered == {state.path: state.uncovered_reason for state in topology.authority
+                         if not state.is_covered}
+    assert Path("/var/lib/eidolon/deployments") in uncovered
+    assert Path("/var/lib/eidolon/livekit") in uncovered
+    assert not hasattr(host_contract, "UNCOVERED_STATE")
 
 
 def test_state_a_component_copies_itself_is_asked_for_at_the_route_it_declared(

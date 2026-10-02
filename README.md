@@ -37,6 +37,36 @@ worktree 返回 `1`；读取失败、缺少基线/tag、浅克隆等检查异常
 是远程 systemd）。脚本负责选择 Host 和展示该 Host 可用的命令，底层契约仍由 `eidolon-ops` CLI
 唯一实现；实现级诊断收敛在 `debug` 之下。
 
+### 状态操作与发布操作分离
+
+Mac 与 Linux 的源码 Host 共用 `StateOperations` 和 Host agent 的状态执行器；安装型 Linux Host
+通过 SSH 调用同一执行器。备份内容只来自本次选中组件的 `ops/component.toml`，不再维护第二份
+数据库或排除清单。组件新增 SQLite 权威库会自动进入备份，包括 Hub 的 `smarthome.sqlite3`；
+缺失组件声明、重复路径或尚无执行绑定的备份方式会拒绝操作。
+
+源码 Host 的路径由同一 FHS 翻译规则映射到 profile 根目录，文件始终属于当前操作者。
+安装型 Host 的服务停启和归属设置由执行绑定提供；状态算法不判断操作系统。Memory 的快照
+继续调用它自己的管理 API，并记录无法覆盖的内容，既不复制运行中的宫殿目录，也不宣称是整机备份。
+Host 控制接口统一直连，不受工作站环境变量或 macOS 系统代理影响；Memory Realm 列表按组件
+现行的 `realms` 文档解析，快照和恢复沿用组件自己的 API 与文件摘要验证。
+
+```bash
+./eidolon mac backup --output /absolute/private/backups
+./eidolon mac restore --source /absolute/private/backups/source-...-ehost-...
+# 预检通过后，显式恢复会停止服务、替换状态并重新启动。
+./eidolon mac restore --source /absolute/private/backups/source-...-ehost-... --apply
+```
+
+恢复前校验 Host 身份、全部数据库覆盖、摘要、SQLite 完整性、Memory 文件及目标路径；无效包不会
+触发停机。停机后再次验证包，复制时再次核对摘要。写入异常会放回此前的数据库和 sidecar 并启动
+服务，停机中途失败也会尝试恢复服务；执行环境预检失败则不触发停启。成功后的原文件保留供审查。
+源码运行不会请求 sudo、创建系统账号、增加 ACL 或执行 chown。
+备份不包含 Host identity、离线 Owner 私钥等未由组件声明的材料；跨 Owner 世代的授权恢复继续使用
+安装型 Host 的显式 `authority-backup/authority-restore` 包流程，不能以普通组件数据恢复替代。
+
+入口脚本从 Python CLI 查询真实 adapter capability，不再复制源码和安装型主机的命令清单。
+CLI 与 console 分别区分组件数据备份和离线 Owner 授权包能力，避免展示没有执行器的命令。
+
 ## 运维权威的三层分工
 
 Ops 是唯一入口，不是唯一实现。三层各自拥有不可替代的事实，越界即是重复实现：

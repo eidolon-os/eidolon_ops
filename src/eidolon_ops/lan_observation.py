@@ -13,7 +13,7 @@ import json
 import platform
 import re
 
-from eidolon_ops.process import ProcessRunner
+from eidolon_ops.process import ProcessError, ProcessRunner
 
 _INET = re.compile(r"\binet\s+(\d+\.\d+\.\d+\.\d+)\b")
 _DSCACHE_ADDRESS = re.compile(r"\bip_address:\s*(\d+\.\d+\.\d+\.\d+)\b")
@@ -83,8 +83,14 @@ def name_resolves_to(runner: ProcessRunner, hostname: str, address: str) -> bool
 
     if not address:
         return False
-    if platform.system() == "Linux":
-        result = runner.run(("getent", "ahostsv4", hostname), timeout=10)
+    command = (("getent", "ahostsv4", hostname) if platform.system() == "Linux" else
+               ("dscacheutil", "-q", "host", "-a", "name", hostname))
+    try:
+        result = runner.run(command, timeout=10)
+    except (ProcessError, OSError):
+        return False
+    if result.returncode != 0:
+        return False
+    if command[0] == "getent":
         return address in {line.split()[0] for line in result.stdout.splitlines() if line.strip()}
-    result = runner.run(("dscacheutil", "-q", "host", "-a", "name", hostname), timeout=10)
     return address in _DSCACHE_ADDRESS.findall(result.stdout)

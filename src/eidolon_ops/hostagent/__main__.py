@@ -68,6 +68,7 @@ ACTIONS: dict[str, tuple[ModuleType, str]] = {
     "deployment-identity": (deployment_identity, "observe"),
     "backup": (authorities, "backup"),
     "restore": (authorities, "restore"),
+    "prepare-restore-stage": (authorities, "prepare_restore_stage"),
     "authority-lineage": (authority_state, "authority_lineage"),
     "install-context": (authority_state, "install_context"),
     "authority-backup": (authority_restore, "backup"),

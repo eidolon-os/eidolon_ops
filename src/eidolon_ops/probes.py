@@ -18,6 +18,8 @@ import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 
+from eidolon_ops.hostagent.primitives import direct_http_opener
+
 _HTTP_TIMEOUT = 1.5
 _STATUS_LINE = re.compile(rb"HTTP/\d(?:\.\d)? (\d{3})(?: |\r)")
 
@@ -26,10 +28,7 @@ def http_health(url: str) -> dict[str, object]:
     """Whether an HTTP(S) endpoint answers 200 right now."""
 
     context = ssl._create_unverified_context() if url.startswith("https://") else None
-    handlers: list[urllib.request.BaseHandler] = [urllib.request.ProxyHandler({})]
-    if context is not None:
-        handlers.append(urllib.request.HTTPSHandler(context=context))
-    opener = urllib.request.build_opener(*handlers)
+    opener = direct_http_opener(context=context)
     try:
         with opener.open(url, timeout=_HTTP_TIMEOUT) as response:
             status = response.status
@@ -42,10 +41,7 @@ def http_json(url: str) -> dict[str, object] | None:
     """The JSON body of a 200 answer, or nothing at all."""
 
     context = ssl._create_unverified_context() if url.startswith("https://") else None
-    handlers: list[urllib.request.BaseHandler] = [urllib.request.ProxyHandler({})]
-    if context is not None:
-        handlers.append(urllib.request.HTTPSHandler(context=context))
-    opener = urllib.request.build_opener(*handlers)
+    opener = direct_http_opener(context=context)
     try:
         with opener.open(url, timeout=_HTTP_TIMEOUT) as response:
             if response.status != 200:

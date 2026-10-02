@@ -39,6 +39,8 @@ class SystemdSupervisor:
                 Capability.ROLLBACK,
                 Capability.BACKUP,
                 Capability.RESTORE,
+                Capability.AUTHORITY_BACKUP,
+                Capability.AUTHORITY_RESTORE,
                 Capability.RESET,
                 Capability.CONTROLLER_RESET,
                 Capability.KERNEL_SCHEMA_RESET,

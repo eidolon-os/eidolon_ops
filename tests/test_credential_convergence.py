@@ -352,10 +352,6 @@ def test_the_relationships_travel_rather_than_being_known_on_the_host() -> None:
     ] == [tuple(pair) for pair in SHARED_CREDENTIALS]
     # And it survives the wire: the agent refuses a shape it did not expect.
     assert contract.declared_credential_relationships({"credential_relationships": wire})
-    # Every relationship the product declares, not only the ones that prompted
-    # this: eight involve channel.env, and a Host can hold any of the twenty wrongly.
-    channel = [e for e in wire if "channel.env" in {e["left_file"], e["right_file"]}]
-    assert len(channel) == 8 and len(wire) == 20
 
 
 def test_a_host_holding_two_different_values_is_named(tmp_path) -> None:
@@ -736,13 +732,13 @@ def test_a_missing_key_is_convergence_s_job_not_this_one(tmp_path) -> None:
 
 
 def test_the_classes_travel_and_the_agent_refuses_a_shape_it_cannot_place() -> None:
-    """Seventeen pairs, thirteen credentials, and one slot in exactly one of them."""
+    """Every declared edge is in exactly one complete connected credential class."""
 
     wire = declared_credential_classes()
     parsed = contract.declared_credential_classes({"credential_classes": wire})
-    assert len(parsed) == 13
-    assert max(len(slots) for slots in parsed) == 5
-    assert sum(len(slots) for slots in parsed) == len({s for c in parsed for s in c})
+    edges = [((left_file, left_key), (right_file, right_key))
+             for left_file, left_key, right_file, right_key, _ in SHARED_CREDENTIALS]
+    _assert_connected_classes(parsed, edges)
 
     with pytest.raises(TargetError, match="at least two slots"):
         contract.declared_credential_classes(
@@ -946,3 +942,43 @@ def test_a_payload_from_before_this_existed_still_converges(tmp_path) -> None:
 
     assert report["added_files"] == []
     assert report["missing_files"] == []
+
+
+
+def _assert_connected_classes(classes, edges):
+    slots = {slot for edge in edges for slot in edge}
+    assert {slot for group in classes for slot in group} == slots
+    assert sum(len(group) for group in classes) == len(slots)
+    for left, right in edges:
+        assert any(left in group and right in group for group in classes)
+    for group in classes:
+        # Each class is one connected component, not two unrelated secrets
+        # accidentally merged into one value during repair.
+        reached = {group[0]}
+        while True:
+            extended = reached | {right for left, right in edges if left in reached}
+            extended |= {left for left, right in edges if right in reached}
+            if extended == reached:
+                break
+            reached = extended
+        assert reached == set(group)
+
+
+@pytest.mark.parametrize("bridge", [False, True])
+def test_new_relationships_cycles_and_bridges_preserve_the_complete_partition(monkeypatch, bridge):
+    from eidolon_ops import install_inputs
+
+    pairs = [
+        ("data.env", "A", "admin.env", "B", "ab"),
+        ("admin.env", "B", "hub.env", "C", "bc"),
+        ("hub.env", "C", "data.env", "A", "cycle"),
+        ("agent.env", "D", "channel.env", "E", "de"),
+    ]
+    if bridge:
+        pairs.append(("hub.env", "C", "agent.env", "D", "bridge"))
+    monkeypatch.setattr(install_inputs, "SHARED_CREDENTIALS", tuple(pairs))
+    wire = install_inputs.declared_credential_relationships()
+    assert contract.declared_credential_relationships({"credential_relationships": wire}) == tuple(pairs)
+    parsed = contract.declared_credential_classes({"credential_classes": install_inputs.declared_credential_classes()})
+    _assert_connected_classes(parsed, [((lf, lk), (rf, rk)) for lf, lk, rf, rk, _ in pairs])
+    assert len(parsed) == (1 if bridge else 2)

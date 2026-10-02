@@ -11,16 +11,6 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROFILES_DIR="${EIDOLON_HOSTS_DIR:-${ROOT}/config/hosts}"
 UV_BIN="${EIDOLON_UV_BIN:-uv}"
 
-ALL_COMMANDS="abandon app-ready pending trust-host-key ssh-config trust-host-delivery bring-up authority-backup authority-restore backup commissioning-code controller-reset converge-inputs repair-credentials debug deploy diagnose doctor init-inputs install kernel-schema-reset logs provision reset restart restore rollback start status stop update service"
-# Keyed on the Host's driver, not on its platform. What a Host can be asked to
-# do is decided by the adapter its driver selects — adapters/supervisord.py and
-# adapters/systemd.py each declare one capability set — so two boards Ops
-# reaches the same way have the same commands, and a board is not a case here.
-# The platform arms this replaces were the one place left that enumerated
-# boards by name: rk3588 shipped a driver these sets already covered and was
-# still unreachable through this script, because nobody added its name.
-LOCAL_SUPERVISORD_COMMANDS="status doctor app-ready provision start stop restart logs commissioning-code reset kernel-schema-reset debug service"
-SSH_SYSTEMD_COMMANDS="abandon status pending trust-host-key ssh-config trust-host-delivery bring-up doctor app-ready start stop restart logs commissioning-code provision init-inputs converge-inputs repair-credentials backup restore install controller-reset authority-backup authority-restore reset kernel-schema-reset deploy update rollback diagnose service"
 
 die() {
   printf '错误：%s\n' "$*" >&2
@@ -112,21 +102,14 @@ resolve_profile() {
   return 2
 }
 
+cli_metadata() {
+  local python="$ROOT/.venv/bin/python"
+  [[ -x "$python" ]] || die "Ops runtime is missing; prepare it with uv sync --frozen --extra dev"
+  "$python" -m eidolon_ops.host_cli "$@"
+}
+
 commands_for_profile() {
-  local profile="$1" driver supervisor
-  supervisor="$(toml_value "$profile" execution supervisor)"
-  case "$supervisor" in
-    supervisord) printf '%s\n' "$LOCAL_SUPERVISORD_COMMANDS"; return ;;
-    systemd) printf '%s\n' "$SSH_SYSTEMD_COMMANDS"; return ;;
-    "") ;;
-    *) die "主机配置使用未知进程管理器：$supervisor" ;;
-  esac
-  driver="$(toml_host_value "$profile" driver)"
-  case "$driver" in
-    local-supervisord) printf '%s\n' "$LOCAL_SUPERVISORD_COMMANDS" ;;
-    ssh-systemd) printf '%s\n' "$SSH_SYSTEMD_COMMANDS" ;;
-    *) die "主机配置 $(profile_alias "$profile") 使用未知驱动：${driver:--}" ;;
-  esac
+  cli_metadata --config "$1" --available-commands
 }
 
 contains_word() {
@@ -278,7 +261,7 @@ case "${1:-}" in
     fi
     command_name="$3"
     commands="$(commands_for_profile "$profile")"
-    if ! contains_word "$ALL_COMMANDS" "$command_name"; then
+    if ! contains_word "$(cli_metadata --all-commands)" "$command_name"; then
       printf '错误：未知命令 “%s”。\n' "$command_name" >&2
       print_commands "$profile" >&2
       exit 2
@@ -314,7 +297,7 @@ if [[ "$command_name" == "help" ]]; then
   set -- --help
 fi
 
-if ! contains_word "$ALL_COMMANDS" "$command_name"; then
+if ! contains_word "$(cli_metadata --all-commands)" "$command_name"; then
   printf '错误：未知命令 “%s”。\n' "$command_name" >&2
   print_commands "$profile" >&2
   exit 2

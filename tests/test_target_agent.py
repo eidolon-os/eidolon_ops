@@ -2147,7 +2147,13 @@ def _authority_fixture(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(contract, "VAR_TMP", tmp_path / "var-tmp")
     (tmp_path / "var-tmp").mkdir(parents=True)
     table = {}
-    for name in contract.BACKED_UP_AUTHORITIES:
+    from test_component_contract_drift import _read
+
+    declared = _read(frozenset()).authority_payload()
+    for entry in declared:
+        if entry["backup"] != "sqlite-online":
+            continue
+        name = entry["id"]
         database = tmp_path / "authorities" / f"{name}.sqlite3"
         database.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(database)
@@ -2156,7 +2162,11 @@ def _authority_fixture(tmp_path: Path, monkeypatch):
         connection.commit()
         connection.close()
         table[name] = (database, "root", "root")
-    monkeypatch.setattr(contract, "BACKED_UP_AUTHORITIES", table)
+        from test_state_operations import _hub_lineage
+
+        _hub_lineage(database, entry)
+        entry.update({"path": str(database), "owner": "root", "group": "root"})
+    monkeypatch.setitem(BACKUP_PAYLOAD, "authority_inventory", declared)
     monkeypatch.setattr(primitives, "chown_path", lambda *_a: None)
     monkeypatch.setattr(
         primitives, "checked", lambda *_a, **_k: subprocess.CompletedProcess((), 0, "", "")
@@ -2194,7 +2204,8 @@ class _FakeMemory:
         if self.refuse is not None:
             raise TargetError(self.refuse)
         if path == "/api/admin/realms":
-            return [{"spec": {"memory_realm_id": realm}} for realm in self.realms]
+            return {"realms": [{"spec": {"memory_realm_id": realm}} for realm in self.realms],
+                    "memory_available": True}
         parts = path.strip("/").split("/")
         realm = parts[3]
         if parts[-1] == "snapshot":
@@ -2251,7 +2262,7 @@ def test_a_backup_covers_every_authority_and_names_what_it_cannot(tmp_path, monk
 
     assert result["status"] == "captured"
     assert {entry["authority"] for entry in result["authorities"]} == set(table)
-    assert {entry["state"] for entry in result["not_covered"]} == set(contract.UNCOVERED_STATE)
+    assert {entry["state"] for entry in result["not_covered"]} == {entry["id"] for entry in BACKUP_PAYLOAD["authority_inventory"] if entry["backup"] == "none"}
     for entry in result["not_covered"]:
         assert entry["reason"]
     assert "not a point-in-time image" in result["consistency"]
@@ -2277,7 +2288,7 @@ def test_a_backup_round_trips_through_a_restore(tmp_path, monkeypatch) -> None:
         connection.commit()
         connection.close()
 
-    result = authorities.restore({**payload, "manifest": manifest})
+    result = authorities.restore({**payload, "manifest": manifest}, directory=Path(manifest["directory"]))
 
     assert result["status"] == "restored"
     # The product is running again; an operator should not have to know which
@@ -2364,7 +2375,7 @@ def test_a_host_whose_memory_cannot_answer_still_gets_a_backup_that_says_so(
     assert result["memory_spaces"] == []
     uncovered = {entry["state"]: entry for entry in result["not_covered"]}
     assert "not answering" in uncovered["memory"]["reason"]
-    assert uncovered["memory"]["path"] == str(contract.MEMORY_STATE_ROOT)
+    assert uncovered["memory"]["path"] == next(entry["path"] for entry in BACKUP_PAYLOAD["authority_inventory"] if entry["component"] == "eidolon_memory")
 
 
 def test_a_backup_that_was_not_told_where_memory_is_refuses(tmp_path, monkeypatch) -> None:
@@ -2378,7 +2389,7 @@ def test_a_backup_that_was_not_told_where_memory_is_refuses(tmp_path, monkeypatc
     _memory_fixture(monkeypatch)
 
     with pytest.raises(TargetError, match="memory admin URL"):
-        authorities.backup({"units": list(contract.PRODUCT_UNITS), "release_id": "r1"})
+        authorities.backup({key: value for key, value in BACKUP_PAYLOAD.items() if key != "memory_admin_url"})
 
 
 def test_memory_spaces_go_back_only_once_the_product_is_running(tmp_path, monkeypatch) -> None:
@@ -2404,7 +2415,7 @@ def test_memory_spaces_go_back_only_once_the_product_is_running(tmp_path, monkey
 
     monkeypatch.setattr(memory_realms, "put_back", _watched)
 
-    result = authorities.restore({**BACKUP_PAYLOAD, "manifest": manifest})
+    result = authorities.restore({**BACKUP_PAYLOAD, "manifest": manifest}, directory=Path(manifest["directory"]))
 
     assert order == ["started", "memory"]
     assert [realm for realm, _source in memory.restored] == ["r_owner_one"]
@@ -2429,7 +2440,7 @@ def test_a_backup_taken_before_memory_declared_a_snapshot_is_still_restorable(
     manifest = authorities.backup(BACKUP_PAYLOAD)
     del manifest["memory_spaces"]
 
-    result = authorities.restore({**BACKUP_PAYLOAD, "manifest": manifest})
+    result = authorities.restore({**BACKUP_PAYLOAD, "manifest": manifest}, directory=Path(manifest["directory"]))
 
     assert result["status"] == "restored"
     assert "no memory spaces" in str(result["memory_spaces"])
@@ -2446,7 +2457,7 @@ def test_a_backup_from_another_host_is_refused(tmp_path, monkeypatch) -> None:
     manifest["host_id"] = "ehost-ffffffffffffffffffff"
 
     with pytest.raises(TargetError, match="different Host"):
-        authorities.restore({**payload, "manifest": manifest})
+        authorities.restore({**payload, "manifest": manifest}, directory=Path(manifest["directory"]))
 
 
 def test_a_backup_that_no_longer_matches_its_digest_is_refused(tmp_path, monkeypatch) -> None:
@@ -2458,7 +2469,7 @@ def test_a_backup_that_no_longer_matches_its_digest_is_refused(tmp_path, monkeyp
     tampered.write_bytes(tampered.read_bytes() + b"\x00")
 
     with pytest.raises(TargetError, match="does not match its digest"):
-        authorities.restore({**payload, "manifest": manifest})
+        authorities.restore({**payload, "manifest": manifest}, directory=Path(manifest["directory"]))
 
 
 def test_a_backup_missing_an_authority_is_refused(tmp_path, monkeypatch) -> None:
@@ -2472,7 +2483,7 @@ def test_a_backup_missing_an_authority_is_refused(tmp_path, monkeypatch) -> None
     manifest["authorities"] = manifest["authorities"][:-1]
 
     with pytest.raises(TargetError, match="every authority"):
-        authorities.restore({**payload, "manifest": manifest})
+        authorities.restore({**payload, "manifest": manifest}, directory=Path(manifest["directory"]))
 
 
 def test_a_plaintext_livekit_origin_may_name_the_host_it_belongs_to(monkeypatch) -> None:

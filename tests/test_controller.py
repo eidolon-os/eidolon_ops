@@ -509,6 +509,7 @@ class FakeTransport:
                 "not_covered": [{"state": "memory", "path": "/var/lib/eidolon/memory"}],
             },
             "restore": {"status": "restored", "restored": ["system"]},
+            "prepare-restore-stage": {"status": "prepared", "directory": "/var/tmp/eidolon-backup-r1"},
             "authority-restore-stage-reset": {
                 "status": "authority_restore_stage_ready",
                 "directory": "/var/tmp/eidolon-authority-restore-r1",
@@ -2285,6 +2286,7 @@ def test_a_backup_is_taken_on_the_host_and_brought_here(setup_controller, tmp_pa
     """Left on the Host it would be lost with the Host."""
 
     controller, _runner, transport = setup_controller
+    controller.host_layer._read_component_contract = _current_component_contract
     output = tmp_path / "backups"
 
     result = controller.backup(output=output)
@@ -2304,6 +2306,7 @@ def test_a_restore_names_what_it_will_replace_before_it_replaces_it(
     setup_controller, tmp_path: Path
 ) -> None:
     controller, _runner, transport = setup_controller
+    controller.host_layer._read_component_contract = _current_component_contract
     source = tmp_path / "backup"
     source.mkdir()
     with pytest.raises(OperationsError, match="manifest is missing"):
@@ -2331,7 +2334,7 @@ def test_a_restore_names_what_it_will_replace_before_it_replaces_it(
     applied = controller.restore(source=source, apply=True)
     assert applied["status"] == "restored"
     assert (source, "/var/tmp/eidolon-backup-r1", True) in transport.uploads
-    assert any("eidolon-backup-r1" in " ".join(call[0]) for call in transport.remote_calls)
+    assert any(action == "prepare-restore-stage" for action, *_ in transport.agent_calls)
 
 
 def test_which_setup_code_gets_named(setup_controller) -> None:
@@ -3429,3 +3432,9 @@ def test_the_host_layer_refresh_takes_its_staged_private_keys_back(config):
     controller.host_layer.refresh("20260917-release-1")
 
     assert _staged_then_cleaned(transport, "20260917-release-1")
+
+
+
+def _current_component_contract(component_id):
+    path = Path(__file__).resolve().parents[2] / component_id / "ops/component.toml"
+    return path.read_text() if path.is_file() else None

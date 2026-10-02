@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import re
 import subprocess
 from pathlib import Path
 
@@ -49,10 +48,16 @@ def test_operator_script_is_executable_and_lists_real_hosts() -> None:
 
 
 def test_operator_script_covers_every_cli_command() -> None:
+    from unittest.mock import patch
+
+    from eidolon_ops.host_cli import main
+
+    with patch("builtins.print") as output:
+        assert main(["--all-commands"]) == 0
+    assert set(output.call_args.args[0].split()) == set(OPERATIONS)
     text = SCRIPT.read_text(encoding="utf-8")
-    match = re.search(r'^ALL_COMMANDS="([^"]+)"$', text, re.MULTILINE)
-    assert match is not None
-    assert set(match.group(1).split()) == set(OPERATIONS)
+    assert "LOCAL_SUPERVISORD_COMMANDS" not in text
+    assert "SSH_SYSTEMD_COMMANDS" not in text
 
 
 def test_help_is_host_specific() -> None:
@@ -88,23 +93,24 @@ def test_a_second_product_board_gets_the_same_commands_as_the_first() -> None:
 
 
 def test_every_declared_driver_has_a_command_set() -> None:
-    """A driver the CLI knows and this script does not is a Host nobody can drive.
+    from eidolon_ops.host import build_adapter
+    from eidolon_ops.host_cli import operation_capability
+    from eidolon_ops.paths import load_host_profile
+    from eidolon_ops.process import SubprocessRunner
 
-    Asserted against the enum rather than a list written here, so the next
-    driver is a failing test in this file rather than a runtime error on the
-    day someone reaches for the board.
-    """
-
-    text = SCRIPT.read_text(encoding="utf-8")
-    body = re.search(
-        r"^commands_for_profile\(\) \{\n(.*?)^\}$",
-        text,
-        re.MULTILINE | re.DOTALL,
-    )
-    assert body is not None
-    assert 'toml_host_value "$profile" driver' in body.group(1)
-    arms = set(re.findall(r"^\s{4}([a-z-]+)\)", body.group(1), re.MULTILINE))
-    assert arms == {driver.value for driver in HostDriver} | {"supervisord", "systemd"}
+    represented = set()
+    for path in (ROOT / "config/hosts").glob("*.toml"):
+        if path.name.endswith(".example.toml"):
+            continue
+        profile = load_host_profile(path)
+        represented.add(profile.driver)
+        capabilities = build_adapter(profile, SubprocessRunner()).capabilities
+        expected = {name for name in OPERATIONS if operation_capability(name) in capabilities}
+        result = run("commands", str(path))
+        assert result.returncode == 0
+        offered = {line.split()[0] for line in result.stdout.splitlines() if line.startswith("  ")}
+        assert offered == expected
+    assert represented == set(HostDriver)
 
 
 def test_every_active_host_profile_can_be_driven() -> None:
