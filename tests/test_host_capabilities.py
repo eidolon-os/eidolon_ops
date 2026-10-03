@@ -194,7 +194,7 @@ def test_each_host_keeps_its_own_home_interpretation() -> None:
         "smarthome.interpreter": "laya",
         "smarthome.interpretation_record_path": "$EIDOLON_STATE_ROOT/agent/smarthome/interpretation.jsonl",
         # hub.yaml: the Mac assembles the 周边好生活 adapter for the demo.
-        "smarthome.providers": "virtual,zhoubian",
+        "smarthome.providers": "virtual,zhoubian,homeassistant",
     }
     assert smarthome("rk3588") == {
         "smarthome.interpreter": "laya",
