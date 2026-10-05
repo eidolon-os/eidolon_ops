@@ -38,6 +38,8 @@ foundation_mode = "external"
 external_livekit_config = "~/ai/eidolon/.eidolon/mac-product/run/livekit/livekit.generated.yaml"
 
 [app]
+# Local development input; retained across starts and delivered to bootstrapd.
+setup_code_file = "../../.eidolon-ops/mac/inputs/factory_setup_code"
 hub_https_port = 8443
 allow_insecure_livekit = true
 # No source_overrides. This Host runs the same worktrees the release matrix

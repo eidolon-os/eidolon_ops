@@ -442,7 +442,7 @@ do_product_source_status() {
 do_product_source_commissioning_code() {
   configure_supervisor_profile product-source
   require_control_runtime
-  local ttl=600
+  local ttl=""
   local code=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -456,19 +456,23 @@ do_product_source_commissioning_code() {
         ;;
     esac
   done
-  if [[ ! "$ttl" =~ ^[0-9]+$ || "$ttl" -lt 60 || "$ttl" -gt 86400 ]]; then
+  if [[ -n "$ttl" ]] && [[ ! "$ttl" =~ ^[0-9]+$ || "$ttl" -lt 60 || "$ttl" -gt 86400 ]]; then
     error "commissioning code TTL must be between 60 and 86400 seconds"
     return 2
   fi
-  local -a code_argument=()
+  # Keep the argument array nonempty for macOS Bash 3.2 with nounset.
+  # Claim windows have no clock (ADR-0007); only forward an explicit legacy TTL.
+  local -a code_argument=(commissioning-code)
+  if [[ -n "$ttl" ]]; then
+    code_argument+=(--ttl "$ttl")
+  fi
   if [[ -n "$code" ]]; then
-    code_argument=(--code "$code")
+    code_argument+=(--code "$code")
   fi
   "${OPS_ROOT}/deploy/supervisor/wrappers/with-env.sh" \
     "$EIDOLON_SOURCE_ADMIN" \
     "${EIDOLON_PRODUCT_ENV_ROOT}/bootstrap.env" \
-    -- "$EIDOLON_SOURCE_ADMIN/.venv/bin/eidolon-bootstrapctl" commissioning-code \
-       --ttl "$ttl" "${code_argument[@]}"
+    -- "$EIDOLON_SOURCE_ADMIN/.venv/bin/eidolon-bootstrapctl" "${code_argument[@]}"
 }
 
 do_product_source_web_start() {

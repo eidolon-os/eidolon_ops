@@ -154,6 +154,7 @@ class LocalProductSource:
         source_inputs = next(iter(self.config.install_files.values())).parent
         self._adopt_host_identity(source_inputs)
         self._ensure_owner_domain_assets()
+        self._prepare_factory_setup_code()
 
         expected = {
             **self._rendered_environment(source_inputs),
@@ -457,6 +458,14 @@ class LocalProductSource:
         ):
             raise OperationsError("existing source Host Identity is unsafe or invalid")
 
+    def _prepare_factory_setup_code(self) -> None:
+        code = self._require_app_access().factory_setup_code()
+        if code is not None:
+            atomic_private_file(
+                self.profile.paths.bootstrap_state_root / "factory_setup_code",
+                (code + "\n").encode("utf-8"),
+            )
+
     def _rendered_environment(self, source_inputs: Path) -> dict[Path, bytes]:
         root = self.profile.paths.config_root
         app = self._require_app_access()
@@ -474,6 +483,14 @@ class LocalProductSource:
             # back out of the file Ops just wrote would be a cycle, and it made
             # the whole profile depend on that file already existing — which on a
             # clean Host it does not.
+            if name == "bootstrap.env":
+                # Product Hosts receive this Host policy through host.env.
+                # Source services consume their generated per-service env.
+                value = environment.merge(
+                    value,
+                    {contract.CLAIM_WINDOW_VARIABLE: self.config.host.claim_window},
+                    label="generated environment",
+                )
             if name == "local-api.env":
                 value = environment.merge(
                     value,

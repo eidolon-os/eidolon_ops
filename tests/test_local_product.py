@@ -5,7 +5,7 @@ import sqlite3
 import ssl
 import stat
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from ipaddress import IPv4Address
 from pathlib import Path
 from types import SimpleNamespace
@@ -52,6 +52,7 @@ class _FakeConfig:
     install_files: Mapping[str, Path] = field(default_factory=dict)
     capabilities: frozenset[str] = frozenset()
     settings_overlay: tuple = ()
+    host: Any = field(default_factory=lambda: SimpleNamespace(claim_window="always_open"))
 
 
 def _product(tmp_path: Path, *, foundation_mode: str) -> LocalProductSource:
@@ -286,6 +287,7 @@ def test_prepare_materializes_one_canonical_mac_product_contract(
     # It used to be read back out of whatever LiveKit config happened to be on
     # disk, which made a clean Host unpreparable and let a months-old file decide
     # what Channel and Hub authenticated with.
+    assert "EIDOLON_BOOTSTRAP_CLAIM_WINDOW=always_open" in (root / "env/bootstrap.env").read_text()
     channel_env = (root / "env/channel.env").read_text(encoding="utf-8")
     assert channel_env.count("LIVEKIT_API_KEY=sealed-key") == 1
     assert "shared-key" not in channel_env
@@ -1238,3 +1240,20 @@ def test_accidentally_lost_source_authority_never_rebuilds(tmp_path):
     with pytest.raises(OperationsError, match="AUTHORITY_LOST"):
         product._ensure_hub_tls_identity()
     assert {p.name: p.read_bytes() for p in root.iterdir()} == before
+
+
+def test_source_factory_code_is_persistent_and_refreshable(tmp_path):
+    product = _product(tmp_path, foundation_mode="external")
+    code = tmp_path / "factory-code"
+    code.write_text("99999990\n")
+    product.profile = replace(
+        product.profile, app=replace(product.profile.app, setup_code_file=code)
+    )
+    for _ in range(2):
+        product._prepare_factory_setup_code()
+        delivered = product.profile.paths.bootstrap_state_root / "factory_setup_code"
+        assert delivered.read_text() == "99999990\n"
+        assert stat.S_IMODE(delivered.stat().st_mode) == 0o600
+    code.write_text("48213097\n")
+    product._prepare_factory_setup_code()
+    assert delivered.read_text() == "48213097\n"

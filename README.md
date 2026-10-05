@@ -663,16 +663,21 @@ Local API 的发现保留系统设施适配：Mac 使用 `dns-sd`，Linux 使用
 退出非零。`doctor` 会列出该 Host 的 capability 集合（由 platform + transport/supervisor/packages 三个
 port 的组合推导），所以“这台 Host 能做什么”是问出来的，不是从源码里读出来的。
 
-`commissioning-code` 可以**指名**要签的码，而不是让 Host 自己抽：命令行 `--code`，或者在 profile 里
-写 `app.setup_code`（`pi5.toml` 现在钉的是 `99999990`）。钉住的只有取值——Host 照样开一个普通
-session：只能用一次，并把之前的窗口作废。它**不会自己过期**：认领窗口在 ADR-0007 之后没有时钟，
-关掉它的只有“被消费”和“被下一次签发顶掉”。所以这条命令不收时限——`--ttl-seconds` 已经删掉了，
-因为 **ops 不提供 Host 不会执行的输入**，这是“ops 不编造 Host 没报的事实”的另一半。Evidence 里的
-`expires_at` 恒为 `null`，那就是“这个窗口没有时钟”本身，不是取不到值。错码也不再吊销窗口（对一个
-无期限的行，那等于开箱即砖），只把 `failed_attempts` 加一留作证据。它买到的是
-**不用再查码**：命令变成一条不必读输出的命令，手机上敲的永远是同一串数字。Host 仍然是权威，会拒绝
-一个它自己不会抽出来的码（八位数字、不能全同、不能是顺子或倒顺子），profile 解析时也先按同一条规则
-挡一遍，好让错误出现在写下这个值的地方而不是三跳之外。
+开发台架 Mac、Pi5、RK3588 使用固定 Setup code `99999990`。各 Host profile 通过
+`app.setup_code_file` 引用本机忽略跟踪的输入文件；执行配置声明 `host.claim_window = "always_open"`。
+源码 Host 在 prepare 时将码持久化到 bootstrap state，并将策略写入生成的 bootstrap 环境；
+产品 Host 通过安装/输入收敛交付码，通过 Host 配置交付策略。修改工作站配置不代表离线板子已经更新，
+仍需检查目标上的 `app-ready` 和实际发现/认领结果。
+
+常开策略下，新 Mobile 扫描到开放接入的 Host 后输入 `99999990`，获得独立身份和 `HOST_ADMIN` 权限，
+已有管理者的权限保留。一次认领消费当前 session 后，Host 自动以同一个码重开窗口；重启后也会恢复。
+已加入的 Mobile 保存自己的凭据，无需重复输入码。日常新增 Mobile 不需要重刷固件、重装 APK，
+也不需要每次手动运行 `commissioning-code`。手机与 Host 仍需具备可用的发现和网络通信路径。
+
+`commissioning-code` 是手动签发/替换窗口的运维入口，可用 `--code` 指名取值；不传时使用 profile
+配置的码（未配置才随机生成）。每个 session 只能消费一次，但不会按时间过期；常开策略会在消费后
+自动开下一个 session。`expires_at` 为 `null`。错码只增加失败计数，不吊销窗口。
+未声明常开策略的 Host 仍按原有按需接入规则运行。
 
 这条路径上**没有任何 mode 判断**，这是有意的：出厂 Host 将来要把印在盒子上的码写进自己，那正是同一个
 动作。参见 `eidolon_admin` 的 ADR-0006，以及收窄它的 ADR-0007。
