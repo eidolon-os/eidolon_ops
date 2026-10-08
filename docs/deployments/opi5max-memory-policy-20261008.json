@@ -1,0 +1,85 @@
+{
+  "release_id": "rk3588-memory-policy-20261008-2",
+  "status": "activated",
+  "link": {
+    "endpoint": "169.254.192.66 (wired via en7)",
+    "hostname": "eidolon-opi5max.local",
+    "status": "wired"
+  },
+  "activation": {
+    "status": "activated",
+    "cutover_mode": "forward-only",
+    "persistent_state_mutated": true,
+    "transaction_id": "9d55eb2b41424e31b4a73ce09fbaaa58"
+  },
+  "running_release_status": "converged",
+  "doctor_status": "healthy",
+  "app_ready_status": "app_ready",
+  "app_ready_checks": {
+    "backend_healthy": true,
+    "bootstrap_control_socket": true,
+    "bootstrap_preflight": true,
+    "channel_worker_dispatch_identity": true,
+    "channel_worker_healthy": true,
+    "channel_worker_livekit_link": true,
+    "claim_window_honored": true,
+    "device_removal_available": true,
+    "foundation_services": true,
+    "host_identity_material": true,
+    "host_setup_completable": true,
+    "hub_admits_devices": true,
+    "hub_descriptor_published": true,
+    "hub_lan_reachable": true,
+    "hub_mdns_service": true,
+    "hub_settings_bound": true,
+    "hub_tls_identity": true,
+    "lan_address_observed": true,
+    "lan_name_resolves": true,
+    "livekit_client_origin": true,
+    "livekit_lan_reachable": true,
+    "livekit_network_current": true,
+    "local_api_mdns_service": true,
+    "local_api_reachable": true,
+    "local_api_targets_hub": true,
+    "participation_model_ready": true
+  },
+  "memory_probe": {
+    "protocol": "atomic-claims-v2",
+    "extractor_version": "llm:73ceb36e927aea14",
+    "installed_module": "/opt/eidolon/current/eidolon_memory/.venv/lib/python3.13/site-packages/eidolon/memory/application/steward/llm.py",
+    "entry_count": 1,
+    "nodes": 2,
+    "edges": 1,
+    "write_to_visible_ms": 15547,
+    "duplicate_safe": true,
+    "audience_isolated": true,
+    "status": "passed"
+  },
+  "owner_surface": {
+    "status": "passed",
+    "owner_views": [
+      {
+        "library": {
+          "entry_count": 11,
+          "withheld_count": 0,
+          "truncated": false,
+          "audience_scope": "owner"
+        },
+        "graph": {
+          "truncated": false,
+          "nodes": 6,
+          "edges": 5
+        }
+      }
+    ]
+  },
+  "preserved_counts": {
+    "companions": 3,
+    "memory_projections": 11,
+    "canonical_assertions": 11,
+    "graph_statements": 5,
+    "extraction_decisions": 164
+  },
+  "data_schema": "0005_conversation_preferences",
+  "backup_memory_sha256": "8d5b4e424147c23bc4cbf1aa400713f24bcbc5c22299d3dd303f68da8bd54016"
+}
