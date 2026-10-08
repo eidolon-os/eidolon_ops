@@ -1,0 +1,177 @@
+{
+  "mount": [
+    {
+      "device_id": "device-instance-d694b066b052cec0b813a2b699af99780c55b29796a9b6ce9fabe22299a2b795",
+      "owner_id": "owner_129153685f855ff3b2062301fb3ceda0",
+      "active": 1,
+      "updated_at": "2026-10-02T13:30:00.641813Z"
+    }
+  ],
+  "assignment": [
+    {
+      "device_id": "device-instance-d694b066b052cec0b813a2b699af99780c55b29796a9b6ce9fabe22299a2b795",
+      "endpoint_id": "body",
+      "owner_id": "owner_129153685f855ff3b2062301fb3ceda0",
+      "companion_id": "c_129153685f855ff3b2062301fb3ceda0",
+      "mode": "default",
+      "selection_provenance": "user_selected",
+      "updated_at": "2026-10-02T13:30:33.649597Z"
+    }
+  ],
+  "companion": [
+    {
+      "companion_id": "c_129153685f855ff3b2062301fb3ceda0",
+      "owner_id": "owner_129153685f855ff3b2062301fb3ceda0",
+      "kind": "conversational",
+      "lifecycle_state": "active"
+    }
+  ],
+  "registry": [
+    {
+      "owner_id": "owner_129153685f855ff3b2062301fb3ceda0",
+      "device_id": "living.speaker",
+      "name": "智能音箱",
+      "device_type": "media",
+      "provider": "virtual",
+      "provider_ref": null
+    },
+    {
+      "owner_id": "owner_129153685f855ff3b2062301fb3ceda0",
+      "device_id": "living.tv",
+      "name": "电视",
+      "device_type": "media",
+      "provider": "virtual",
+      "provider_ref": null
+    }
+  ],
+  "runtime_session": [],
+  "companion_turn_rows": [],
+  "recent_channel_files": [
+    {
+      "path": "/var/log/eidolon/channel/livekit-agent-2026-10-02.log",
+      "bytes": 198987
+    },
+    {
+      "path": "/var/log/eidolon/channel/turn-timeline.jsonl",
+      "bytes": 12233230
+    },
+    {
+      "path": "/var/log/eidolon/channel/traces/2026-10-02/owner_129153685f855ff3b2062301fb3ceda0__c_129153685f855ff3b2062301fb3ceda0__esp32-0c73b338-79c8ecaa-00000001.ndjson",
+      "bytes": 35762
+    },
+    {
+      "path": "/var/log/eidolon/channel/traces/2026-10-02/owner_129153685f855ff3b2062301fb3ceda0__cp_f21b3bcd913a59889be69b34a75c20ce__esp32-e968e8c2-4ac45967-00000001.ndjson",
+      "bytes": 47952
+    }
+  ],
+  "asr_lines": [
+    "2026-10-02 21:30:54,706 INFO bailian.stt_stream [Bailian STT] INTERIM_TRANSCRIPT text='打开'",
+    "2026-10-02 21:30:54,976 INFO bailian.stt_stream [Bailian STT] INTERIM_TRANSCRIPT text='打开电'",
+    "2026-10-02 21:30:55,297 INFO bailian.stt_stream [Bailian STT] PREFLIGHT_TRANSCRIPT text='打开电'",
+    "2026-10-02 21:30:55,683 INFO bailian.stt_stream [Bailian STT] INTERIM_TRANSCRIPT text='打开电视'",
+    "2026-10-02 21:30:55,911 INFO bailian.stt_stream [Bailian STT] FINAL_TRANSCRIPT text='打开电视。' start=1.200s end=2.260s",
+    "2026-10-02 21:30:58,437 INFO bailian.stt_stream [Bailian STT] INTERIM_TRANSCRIPT text='调'",
+    "2026-10-02 21:30:58,644 INFO bailian.stt_stream [Bailian STT] INTERIM_TRANSCRIPT text='调大'",
+    "2026-10-02 21:30:58,966 INFO bailian.stt_stream [Bailian STT] PREFLIGHT_TRANSCRIPT text='调大'",
+    "2026-10-02 21:30:59,345 INFO bailian.stt_stream [Bailian STT] INTERIM_TRANSCRIPT text='调大音量百'",
+    "2026-10-02 21:30:59,666 INFO bailian.stt_stream [Bailian STT] PREFLIGHT_TRANSCRIPT text='调大音量百'",
+    "2026-10-02 21:31:00,205 INFO bailian.stt_stream [Bailian STT] INTERIM_TRANSCRIPT text='调大音量20'",
+    "2026-10-02 21:31:00,526 INFO bailian.stt_stream [Bailian STT] PREFLIGHT_TRANSCRIPT text='调大音量20'",
+    "2026-10-02 21:31:00,589 INFO bailian.stt_stream [Bailian STT] FINAL_TRANSCRIPT text='调大音量20%。' start=4.900s end=6.780s",
+    "2026-10-02 21:31:03,576 INFO bailian.stt_stream [Bailian STT] INTERIM_TRANSCRIPT text='挂'",
+    "2026-10-02 21:31:03,786 INFO bailian.stt_stream [Bailian STT] INTERIM_TRANSCRIPT text='关了它'",
+    "2026-10-02 21:31:04,107 INFO bailian.stt_stream [Bailian STT] PREFLIGHT_TRANSCRIPT text='关了它'",
+    "2026-10-02 21:31:04,313 INFO bailian.stt_stream [Bailian STT] FINAL_TRANSCRIPT text='关了它。' start=10.000s end=10.560s",
+    "2026-10-02 21:31:07,578 INFO bailian.stt_stream [Bailian STT] INTERIM_TRANSCRIPT text='Can you'",
+    "2026-10-02 21:31:07,777 INFO bailian.stt_stream [Bailian STT] INTERIM_TRANSCRIPT text='开音箱'",
+    "2026-10-02 21:31:08,098 INFO bailian.stt_stream [Bailian STT] PREFLIGHT_TRANSCRIPT text='开音箱'",
+    "2026-10-02 21:31:08,626 INFO bailian.stt_stream [Bailian STT] FINAL_TRANSCRIPT text='开音箱。' start=13.980s end=14.780s",
+    "2026-10-02 21:31:12,078 INFO bailian.stt_stream [Bailian STT] INTERIM_TRANSCRIPT text='然'",
+    "2026-10-02 21:31:12,367 INFO bailian.stt_stream [Bailian STT] INTERIM_TRANSCRIPT text='关了它'",
+    "2026-10-02 21:31:12,688 INFO bailian.stt_stream [Bailian STT] PREFLIGHT_TRANSCRIPT text='关了它'",
+    "2026-10-02 21:31:13,007 INFO bailian.stt_stream [Bailian STT] FINAL_TRANSCRIPT text='关了它。' start=18.620s end=19.140s"
+  ],
+  "release_keys": [
+    "affected_units",
+    "capabilities",
+    "components",
+    "cutover_mode",
+    "database_migrations",
+    "readiness_checks",
+    "release_id",
+    "required_secrets",
+    "schema_version",
+    "support_sources",
+    "system_assets",
+    "target"
+  ],
+  "release_descriptor_sha256": "5e2591b08bbe22805adb4ea2bbe0fcc97bb919d2894665bf4e3c2f61ae42a354",
+  "release_id": "rk3588-redeploy-20261002-1",
+  "components": [
+    {
+      "component_id": "eidolon_kernel",
+      "release_path": "/opt/eidolon/releases/rk3588-redeploy-20261002-1/eidolon_kernel",
+      "revision": "3ba9616d604109cdd3089c583697bf7825dc40a6",
+      "source_tree_sha256": "831a98fa46399fbba8c301f5d4a3667253a6e6fbe1d378b8fb3443f4cda15196"
+    },
+    {
+      "component_id": "eidolon_data",
+      "release_path": "/opt/eidolon/releases/rk3588-redeploy-20261002-1/eidolon_data",
+      "revision": "8a873297e60c8e34984ebd08254d0e4d371daacc",
+      "source_tree_sha256": "c04946d9c972e3191387b9e94b05ac98443cde029dbe1a53807370f0f3aed525"
+    },
+    {
+      "component_id": "eidolon_hub",
+      "release_path": "/opt/eidolon/releases/rk3588-redeploy-20261002-1/eidolon_hub",
+      "revision": "18be4d78b2fe10b34c58c91383cb7b2efc0d4908",
+      "source_tree_sha256": "c857ccae918c4f860d32b723b088f8b37edf6bdd309aa41991494387f4204aee"
+    },
+    {
+      "component_id": "eidolon_admin",
+      "release_path": "/opt/eidolon/releases/rk3588-redeploy-20261002-1/eidolon_admin",
+      "revision": "c4c4f2ea3ab4ad825d8bcd46f38469fcc88fae15",
+      "source_tree_sha256": "2c1c224622f29087eacf68c339223756d3d9dffe579a0ba32edab79753a40313"
+    },
+    {
+      "component_id": "eidolon_agent",
+      "release_path": "/opt/eidolon/releases/rk3588-redeploy-20261002-1/eidolon_agent",
+      "revision": "c22ddd1ef4ad2d32ff48a8a9e4583d0f6e2c86d4",
+      "source_tree_sha256": "3b1f524c3cae852d1c43aa73abf7d7a68fbcdc0dd06bede98ccba6695fb1b02d"
+    },
+    {
+      "component_id": "eidolon_channel",
+      "release_path": "/opt/eidolon/releases/rk3588-redeploy-20261002-1/eidolon_channel",
+      "revision": "e68c152adde2c1bf374047996de3678f62338963",
+      "source_tree_sha256": "777bd418194ad9df833ce25d646770bbaa20f7732f4d452bbcde49a00acbbb4c"
+    },
+    {
+      "component_id": "eidolon_memory",
+      "release_path": "/opt/eidolon/releases/rk3588-redeploy-20261002-1/eidolon_memory",
+      "revision": "7ff584581268206d9664e4b79c357ca7fc8bca6f",
+      "source_tree_sha256": "bc5c20c4ee3c4d168ba4442190ececb929272b313b07552df551236ef9bbcde5"
+    },
+    {
+      "component_id": "eidolon_models",
+      "release_path": "/opt/eidolon/releases/rk3588-redeploy-20261002-1/eidolon_models",
+      "revision": "646cbc2222f6d8e43b91625628480774aab5806c",
+      "source_tree_sha256": "8803160d2ff94c90a7008fb2c0dc2fc399488cdc450dcf069cedb994c7a6e769"
+    }
+  ],
+  "smarthome_config": {
+    "interpreter": "laya",
+    "hub_url": "http://127.0.0.1:8082",
+    "laya": {
+      "url": "http://127.0.0.1:8771",
+      "min_confidence": 0.8,
+      "continuation": true
+    },
+    "interpretation_record_path": ""
+  },
+  "laya_readyz": {
+    "status": "ready",
+    "backend": "rknn"
+  },
+  "laya_startup": [
+    "2026-10-02 21:02:32,615 INFO eidolon_laya loaded laya-smart-home@7b695ba8 backend=rknn in 3.8s ({'backend': 'rknn', 'device': 'rk3588-npu', 'precision': {'weights': 'float16', 'compute': 'float16'}, 'buckets': [128, 256, 384, 512], 'placement': {'1': [128, 256, 384, 512], '2': [128, 256]}, 'weight_copies': 4, 'cpu_blas': ['libscipy_openblas64_-f552eb69.so:scipy_openblas_set_num_threads64_(1)'], 'max_len': 512, 'head_max_len': 512})"
+  ]
+}

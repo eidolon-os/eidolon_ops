@@ -1,0 +1,126 @@
+{
+  "device": {
+    "device_id": "homeassistant:acc_ha_bench.climate.hvac",
+    "name": "书房空调",
+    "aliases": [],
+    "type": "climate",
+    "area_id": null,
+    "provider": "homeassistant:acc_ha_bench",
+    "provider_ref": "climate.hvac",
+    "traits": [
+      "on_off",
+      "thermostat"
+    ],
+    "limits": {
+      "target_c": [
+        7.0,
+        35.0
+      ],
+      "modes": [
+        "heat",
+        "cool",
+        "auto",
+        "dry",
+        "fan"
+      ]
+    },
+    "source": "imported",
+    "overrides": [
+      "name"
+    ],
+    "synced_at_ms": 1791038944553,
+    "orphaned": false
+  },
+  "samples": [
+    {
+      "request_id": "bench:547ec0a97e35",
+      "verb": "on",
+      "status": "succeeded",
+      "round_trip_ms": 41.4,
+      "hub_admit_ms": 38,
+      "provider_ms": 1,
+      "complete_ms": 39
+    },
+    {
+      "request_id": "bench:89d51b194ded",
+      "verb": "off",
+      "status": "succeeded",
+      "round_trip_ms": 43.7,
+      "hub_admit_ms": 41,
+      "provider_ms": 2,
+      "complete_ms": 43
+    },
+    {
+      "request_id": "bench:e591ab71be83",
+      "verb": "on",
+      "status": "succeeded",
+      "round_trip_ms": 80.9,
+      "hub_admit_ms": 44,
+      "provider_ms": 1,
+      "complete_ms": 45
+    },
+    {
+      "request_id": "bench:d5f37c0ef52c",
+      "verb": "off",
+      "status": "succeeded",
+      "round_trip_ms": 83.5,
+      "hub_admit_ms": 43,
+      "provider_ms": 2,
+      "complete_ms": 45
+    },
+    {
+      "request_id": "bench:332a10817371",
+      "verb": "on",
+      "status": "succeeded",
+      "round_trip_ms": 81.5,
+      "hub_admit_ms": 39,
+      "provider_ms": 2,
+      "complete_ms": 41
+    },
+    {
+      "request_id": "bench:f9280d22cdbc",
+      "verb": "off",
+      "status": "succeeded",
+      "round_trip_ms": 82.1,
+      "hub_admit_ms": 42,
+      "provider_ms": 2,
+      "complete_ms": 44
+    },
+    {
+      "request_id": "bench:c65f32839361",
+      "verb": "on",
+      "status": "succeeded",
+      "round_trip_ms": 77.8,
+      "hub_admit_ms": 38,
+      "provider_ms": 2,
+      "complete_ms": 40
+    },
+    {
+      "request_id": "bench:542a88bbb2ff",
+      "verb": "off",
+      "status": "succeeded",
+      "round_trip_ms": 83.0,
+      "hub_admit_ms": 40,
+      "provider_ms": 4,
+      "complete_ms": 44
+    },
+    {
+      "request_id": "bench:c0ce3e57331f",
+      "verb": "on",
+      "status": "succeeded",
+      "round_trip_ms": 73.8,
+      "hub_admit_ms": 36,
+      "provider_ms": 2,
+      "complete_ms": 38
+    },
+    {
+      "request_id": "bench:6378f7d98923",
+      "verb": "off",
+      "status": "succeeded",
+      "round_trip_ms": 73.6,
+      "hub_admit_ms": 37,
+      "provider_ms": 2,
+      "complete_ms": 39
+    }
+  ]
+}

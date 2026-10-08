@@ -1,0 +1,204 @@
+{
+  "device": {
+    "device_id": "homeassistant:acc_ha_bench.light.kitchen_lights",
+    "name": "厨房灯",
+    "aliases": [],
+    "type": "light",
+    "area_id": null,
+    "provider": "homeassistant:acc_ha_bench",
+    "provider_ref": "light.kitchen_lights",
+    "traits": [
+      "on_off",
+      "level"
+    ],
+    "limits": null,
+    "source": "imported",
+    "overrides": [
+      "name"
+    ],
+    "synced_at_ms": 1791038944553,
+    "orphaned": false
+  },
+  "samples": [
+    {
+      "request_id": "bench:9f1d53b94a92",
+      "verb": "on",
+      "status": "succeeded",
+      "round_trip_ms": 4.8,
+      "hub_admit_ms": 1,
+      "provider_ms": 2,
+      "complete_ms": 3
+    },
+    {
+      "request_id": "bench:b4a4f8d03bb2",
+      "verb": "off",
+      "status": "succeeded",
+      "round_trip_ms": 4.4,
+      "hub_admit_ms": 1,
+      "provider_ms": 2,
+      "complete_ms": 3
+    },
+    {
+      "request_id": "bench:33fa2ff74786",
+      "verb": "on",
+      "status": "succeeded",
+      "round_trip_ms": 4.3,
+      "hub_admit_ms": 0,
+      "provider_ms": 2,
+      "complete_ms": 2
+    },
+    {
+      "request_id": "bench:261b92f6b659",
+      "verb": "off",
+      "status": "succeeded",
+      "round_trip_ms": 4.2,
+      "hub_admit_ms": 1,
+      "provider_ms": 2,
+      "complete_ms": 3
+    },
+    {
+      "request_id": "bench:7ec8e97bdd66",
+      "verb": "on",
+      "status": "succeeded",
+      "round_trip_ms": 5.2,
+      "hub_admit_ms": 1,
+      "provider_ms": 3,
+      "complete_ms": 4
+    },
+    {
+      "request_id": "bench:0234af7a9967",
+      "verb": "off",
+      "status": "succeeded",
+      "round_trip_ms": 4.1,
+      "hub_admit_ms": 1,
+      "provider_ms": 2,
+      "complete_ms": 3
+    },
+    {
+      "request_id": "bench:9712233775e3",
+      "verb": "on",
+      "status": "succeeded",
+      "round_trip_ms": 4.2,
+      "hub_admit_ms": 1,
+      "provider_ms": 2,
+      "complete_ms": 3
+    },
+    {
+      "request_id": "bench:40bca79744f9",
+      "verb": "off",
+      "status": "succeeded",
+      "round_trip_ms": 6.2,
+      "hub_admit_ms": 1,
+      "provider_ms": 2,
+      "complete_ms": 3
+    },
+    {
+      "request_id": "bench:0f6401e3cfd3",
+      "verb": "on",
+      "status": "succeeded",
+      "round_trip_ms": 4.6,
+      "hub_admit_ms": 0,
+      "provider_ms": 3,
+      "complete_ms": 3
+    },
+    {
+      "request_id": "bench:88744b495dab",
+      "verb": "off",
+      "status": "succeeded",
+      "round_trip_ms": 5.7,
+      "hub_admit_ms": 1,
+      "provider_ms": 3,
+      "complete_ms": 4
+    },
+    {
+      "request_id": "bench:b01d8b40ecbb",
+      "verb": "on",
+      "status": "succeeded",
+      "round_trip_ms": 4.8,
+      "hub_admit_ms": 1,
+      "provider_ms": 2,
+      "complete_ms": 3
+    },
+    {
+      "request_id": "bench:5d4b4fa08f35",
+      "verb": "off",
+      "status": "succeeded",
+      "round_trip_ms": 4.2,
+      "hub_admit_ms": 1,
+      "provider_ms": 2,
+      "complete_ms": 3
+    },
+    {
+      "request_id": "bench:93b199e236a4",
+      "verb": "on",
+      "status": "succeeded",
+      "round_trip_ms": 4.2,
+      "hub_admit_ms": 1,
+      "provider_ms": 2,
+      "complete_ms": 3
+    },
+    {
+      "request_id": "bench:4c45d5dca7b3",
+      "verb": "off",
+      "status": "succeeded",
+      "round_trip_ms": 4.3,
+      "hub_admit_ms": 0,
+      "provider_ms": 3,
+      "complete_ms": 3
+    },
+    {
+      "request_id": "bench:184778129478",
+      "verb": "on",
+      "status": "succeeded",
+      "round_trip_ms": 3.9,
+      "hub_admit_ms": 1,
+      "provider_ms": 2,
+      "complete_ms": 3
+    },
+    {
+      "request_id": "bench:bbb9949eb702",
+      "verb": "off",
+      "status": "succeeded",
+      "round_trip_ms": 4.1,
+      "hub_admit_ms": 0,
+      "provider_ms": 3,
+      "complete_ms": 3
+    },
+    {
+      "request_id": "bench:9ce42ee8c12f",
+      "verb": "on",
+      "status": "succeeded",
+      "round_trip_ms": 4.3,
+      "hub_admit_ms": 1,
+      "provider_ms": 2,
+      "complete_ms": 3
+    },
+    {
+      "request_id": "bench:e5540dfe9993",
+      "verb": "off",
+      "status": "succeeded",
+      "round_trip_ms": 4.3,
+      "hub_admit_ms": 0,
+      "provider_ms": 2,
+      "complete_ms": 2
+    },
+    {
+      "request_id": "bench:ae0afa1a18c2",
+      "verb": "on",
+      "status": "succeeded",
+      "round_trip_ms": 4.0,
+      "hub_admit_ms": 0,
+      "provider_ms": 3,
+      "complete_ms": 3
+    },
+    {
+      "request_id": "bench:786c37bd18e2",
+      "verb": "off",
+      "status": "succeeded",
+      "round_trip_ms": 4.0,
+      "hub_admit_ms": 0,
+      "provider_ms": 2,
+      "complete_ms": 2
+    }
+  ]
+}

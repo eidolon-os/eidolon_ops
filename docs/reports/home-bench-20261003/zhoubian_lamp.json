@@ -1,0 +1,201 @@
+{
+  "device": {
+    "device_id": "zhoubian:acc_zhoubian_demo.ATARS1Bj0001D83BDA303CD8.property.power1",
+    "name": "主卧吸顶灯",
+    "aliases": [],
+    "type": "switch",
+    "area_id": "master",
+    "provider": "zhoubian:acc_zhoubian_demo",
+    "provider_ref": "ATARS1Bj0001D83BDA303CD8.property.power1",
+    "traits": [
+      "on_off"
+    ],
+    "limits": null,
+    "source": "imported",
+    "overrides": [],
+    "synced_at_ms": 1790957515539,
+    "orphaned": false
+  },
+  "samples": [
+    {
+      "request_id": "bench:9f503e83ad5b",
+      "verb": "on",
+      "status": "delegated",
+      "round_trip_ms": 43.5,
+      "hub_admit_ms": 36,
+      "provider_ms": 6,
+      "complete_ms": 42
+    },
+    {
+      "request_id": "bench:d5218787bd15",
+      "verb": "off",
+      "status": "delegated",
+      "round_trip_ms": 39.1,
+      "hub_admit_ms": 36,
+      "provider_ms": 1,
+      "complete_ms": 37
+    },
+    {
+      "request_id": "bench:22a155d8cf12",
+      "verb": "on",
+      "status": "delegated",
+      "round_trip_ms": 48.1,
+      "hub_admit_ms": 45,
+      "provider_ms": 2,
+      "complete_ms": 47
+    },
+    {
+      "request_id": "bench:823845c706a8",
+      "verb": "off",
+      "status": "delegated",
+      "round_trip_ms": 35.4,
+      "hub_admit_ms": 32,
+      "provider_ms": 1,
+      "complete_ms": 34
+    },
+    {
+      "request_id": "bench:41a9ed4b5d3d",
+      "verb": "on",
+      "status": "delegated",
+      "round_trip_ms": 39.6,
+      "hub_admit_ms": 36,
+      "provider_ms": 2,
+      "complete_ms": 38
+    },
+    {
+      "request_id": "bench:50c020163f88",
+      "verb": "off",
+      "status": "delegated",
+      "round_trip_ms": 42.2,
+      "hub_admit_ms": 39,
+      "provider_ms": 2,
+      "complete_ms": 41
+    },
+    {
+      "request_id": "bench:398315210336",
+      "verb": "on",
+      "status": "delegated",
+      "round_trip_ms": 42.8,
+      "hub_admit_ms": 39,
+      "provider_ms": 2,
+      "complete_ms": 41
+    },
+    {
+      "request_id": "bench:cb2b0e0ed89b",
+      "verb": "off",
+      "status": "delegated",
+      "round_trip_ms": 44.6,
+      "hub_admit_ms": 39,
+      "provider_ms": 2,
+      "complete_ms": 41
+    },
+    {
+      "request_id": "bench:a178cb7a21ef",
+      "verb": "on",
+      "status": "delegated",
+      "round_trip_ms": 44.7,
+      "hub_admit_ms": 40,
+      "provider_ms": 3,
+      "complete_ms": 43
+    },
+    {
+      "request_id": "bench:87f0bbbbe10f",
+      "verb": "off",
+      "status": "delegated",
+      "round_trip_ms": 45.8,
+      "hub_admit_ms": 41,
+      "provider_ms": 3,
+      "complete_ms": 44
+    },
+    {
+      "request_id": "bench:c04d24f1a755",
+      "verb": "on",
+      "status": "delegated",
+      "round_trip_ms": 53.3,
+      "hub_admit_ms": 49,
+      "provider_ms": 2,
+      "complete_ms": 51
+    },
+    {
+      "request_id": "bench:6da117bb3763",
+      "verb": "off",
+      "status": "delegated",
+      "round_trip_ms": 49.4,
+      "hub_admit_ms": 45,
+      "provider_ms": 2,
+      "complete_ms": 47
+    },
+    {
+      "request_id": "bench:a0fd0b08bd4c",
+      "verb": "on",
+      "status": "delegated",
+      "round_trip_ms": 45.4,
+      "hub_admit_ms": 41,
+      "provider_ms": 2,
+      "complete_ms": 43
+    },
+    {
+      "request_id": "bench:a06ae77c7572",
+      "verb": "off",
+      "status": "delegated",
+      "round_trip_ms": 56.0,
+      "hub_admit_ms": 51,
+      "provider_ms": 3,
+      "complete_ms": 54
+    },
+    {
+      "request_id": "bench:cb4256b737e1",
+      "verb": "on",
+      "status": "delegated",
+      "round_trip_ms": 58.0,
+      "hub_admit_ms": 54,
+      "provider_ms": 2,
+      "complete_ms": 56
+    },
+    {
+      "request_id": "bench:20903d84c82f",
+      "verb": "off",
+      "status": "delegated",
+      "round_trip_ms": 48.9,
+      "hub_admit_ms": 45,
+      "provider_ms": 2,
+      "complete_ms": 47
+    },
+    {
+      "request_id": "bench:8f4997ad351f",
+      "verb": "on",
+      "status": "delegated",
+      "round_trip_ms": 52.8,
+      "hub_admit_ms": 48,
+      "provider_ms": 2,
+      "complete_ms": 50
+    },
+    {
+      "request_id": "bench:c5cb2d3342a4",
+      "verb": "off",
+      "status": "delegated",
+      "round_trip_ms": 56.3,
+      "hub_admit_ms": 52,
+      "provider_ms": 2,
+      "complete_ms": 54
+    },
+    {
+      "request_id": "bench:01252eca343b",
+      "verb": "on",
+      "status": "delegated",
+      "round_trip_ms": 52.2,
+      "hub_admit_ms": 47,
+      "provider_ms": 3,
+      "complete_ms": 50
+    },
+    {
+      "request_id": "bench:fb29c2eb55e5",
+      "verb": "off",
+      "status": "delegated",
+      "round_trip_ms": 56.8,
+      "hub_admit_ms": 51,
+      "provider_ms": 3,
+      "complete_ms": 54
+    }
+  ]
+}

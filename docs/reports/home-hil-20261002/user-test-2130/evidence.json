@@ -1,0 +1,1525 @@
+{
+  "collected_at": "2026-10-02T21:46:01.670974",
+  "journals": {
+    "eidolon-agent": [
+      {
+        "journal_us": "1790947856457556",
+        "message": "home interpretation turn=103d6ce1184d43da route=primary proposal={\"intent\":\"control\",\"target_status\":\"resolved\",\"targets\":[\"living.tv\"],\"action\":{\"trait\":\"on_off\",\"command\":\"on\",\"slots\":[]},\"mention\":null}"
+      },
+      {
+        "journal_us": "1790947856458820",
+        "message": "home stage turn=103d6ce1184d43da stage=understanding elapsed_ms=468.6"
+      },
+      {
+        "journal_us": "1790947856509633",
+        "message": "home stage turn=103d6ce1184d43da stage=execution elapsed_ms=26.2"
+      },
+      {
+        "journal_us": "1790947856511587",
+        "message": "home turn=103d6ce1184d43da session=esp32-a496b482-a793b185-00000001 companion=c_129153685f855ff3b2062301fb3ceda0 authority_ms=21 elapsed_ms=585 result={\"schema_version\":1,\"turn_id\":\"103d6ce1184d43da\",\"utterance\":\"打开电视。\",\"outcome\":\"executed\",\"message\":\"已打开电视\",\"candidates\":[],\"command\":null}"
+      },
+      {
+        "journal_us": "1790947856513282",
+        "message": "127.0.0.1:34622 - \"POST /api/admin/smarthome/command HTTP/1.1\" 200"
+      },
+      {
+        "journal_us": "1790947860925158",
+        "message": "home continuation turn=c03d4c9049fa42ab question=follow model=7b695ba8 probability=0.9958"
+      },
+      {
+        "journal_us": "1790947860927453",
+        "message": "home interpretation turn=c03d4c9049fa42ab route=laya_continuation"
+      },
+      {
+        "journal_us": "1790947860928722",
+        "message": "home stage turn=c03d4c9049fa42ab stage=continuation elapsed_ms=282.3"
+      },
+      {
+        "journal_us": "1790947860929866",
+        "message": "home stage turn=c03d4c9049fa42ab stage=understanding elapsed_ms=283.5"
+      },
+      {
+        "journal_us": "1790947860994983",
+        "message": "home stage turn=c03d4c9049fa42ab stage=execution elapsed_ms=30.9"
+      },
+      {
+        "journal_us": "1790947860995658",
+        "message": "home turn=c03d4c9049fa42ab session=esp32-a496b482-a793b185-00000001 companion=c_129153685f855ff3b2062301fb3ceda0 authority_ms=17 elapsed_ms=400 result={\"schema_version\":1,\"turn_id\":\"c03d4c9049fa42ab\",\"utterance\":\"调大音量20%。\",\"outcome\":\"executed\",\"message\":\"电视 音量已调到 70\",\"candidates\":[],\"command\":null}"
+      },
+      {
+        "journal_us": "1790947860996393",
+        "message": "127.0.0.1:34622 - \"POST /api/admin/smarthome/command HTTP/1.1\" 200"
+      },
+      {
+        "journal_us": "1790947864658926",
+        "message": "home continuation turn=40a3a324a609439d question=follow model=7b695ba8 probability=0.9934"
+      },
+      {
+        "journal_us": "1790947864659750",
+        "message": "home interpretation turn=40a3a324a609439d route=laya_continuation"
+      },
+      {
+        "journal_us": "1790947864660199",
+        "message": "home stage turn=40a3a324a609439d stage=continuation elapsed_ms=282.7"
+      },
+      {
+        "journal_us": "1790947864660793",
+        "message": "home stage turn=40a3a324a609439d stage=understanding elapsed_ms=283.3"
+      },
+      {
+        "journal_us": "1790947864716360",
+        "message": "home stage turn=40a3a324a609439d stage=execution elapsed_ms=28.6"
+      },
+      {
+        "journal_us": "1790947864717923",
+        "message": "home turn=40a3a324a609439d session=esp32-a496b482-a793b185-00000001 companion=c_129153685f855ff3b2062301fb3ceda0 authority_ms=21 elapsed_ms=399 result={\"schema_version\":1,\"turn_id\":\"40a3a324a609439d\",\"utterance\":\"关了它。\",\"outcome\":\"executed\",\"message\":\"已关闭电视\",\"candidates\":[],\"command\":null}"
+      },
+      {
+        "journal_us": "1790947864719622",
+        "message": "127.0.0.1:34622 - \"POST /api/admin/smarthome/command HTTP/1.1\" 200"
+      },
+      {
+        "journal_us": "1790947868966428",
+        "message": "home continuation turn=cdbf3e1c929c45d3 question=follow model=7b695ba8 probability=0.9651"
+      },
+      {
+        "journal_us": "1790947868966937",
+        "message": "home stage turn=cdbf3e1c929c45d3 stage=continuation elapsed_ms=283.9"
+      },
+      {
+        "journal_us": "1790947868967269",
+        "message": "home interpretation turn=cdbf3e1c929c45d3 route=llm reason=continuation_not_accepted"
+      },
+      {
+        "journal_us": "1790947869267300",
+        "message": "litellm_stream_first_chunk req=cdbf3e1c929c45d3 model=openai/deepseek-v4-flash connect_ms=264 raw_ttft_ms=298 idle_ms=-1 choices=1"
+      },
+      {
+        "journal_us": "1790947869592271",
+        "message": "litellm_timings req=cdbf3e1c929c45d3 model=openai/deepseek-v4-flash connect_ms=264 ttft_ms=623 raw_ttft_ms=298 raw_chunks_before_effective=1 idle_ms=-1 kind=tool_call"
+      },
+      {
+        "journal_us": "1790947869786541",
+        "message": "litellm_stream_summary req=cdbf3e1c929c45d3 model=openai/deepseek-v4-flash outcome=completed connect_ms=264 raw_ttft_ms=298 tool_ready_ms=804 finish_ms=804 stream_end_ms=818 close_ms=0 tokens_in=4232 tokens_out=93 cached_tokens_in=2304 configured_max_retries=2"
+      },
+      {
+        "journal_us": "1790947869787107",
+        "message": "home fallback turn=cdbf3e1c929c45d3 outcome=proposed intent=control target_status=resolved targets=('living.speaker',) action=('on_off', 'on')"
+      },
+      {
+        "journal_us": "1790947869787666",
+        "message": "home stage turn=cdbf3e1c929c45d3 stage=understanding elapsed_ms=1104.7"
+      },
+      {
+        "journal_us": "1790947869859913",
+        "message": "home stage turn=cdbf3e1c929c45d3 stage=execution elapsed_ms=23.9"
+      },
+      {
+        "journal_us": "1790947869860542",
+        "message": "home turn=cdbf3e1c929c45d3 session=esp32-a496b482-a793b185-00000001 companion=c_129153685f855ff3b2062301fb3ceda0 authority_ms=13 elapsed_ms=1228 result={\"schema_version\":1,\"turn_id\":\"cdbf3e1c929c45d3\",\"utterance\":\"开音箱。\",\"outcome\":\"executed\",\"message\":\"已打开智能音箱\",\"candidates\":[],\"command\":null}"
+      },
+      {
+        "journal_us": "1790947869861120",
+        "message": "127.0.0.1:34622 - \"POST /api/admin/smarthome/command HTTP/1.1\" 200"
+      },
+      {
+        "journal_us": "1790947873374671",
+        "message": "home continuation turn=584a55370f9342e4 question=follow model=7b695ba8 probability=0.9953"
+      },
+      {
+        "journal_us": "1790947873375650",
+        "message": "home interpretation turn=584a55370f9342e4 route=laya_continuation"
+      },
+      {
+        "journal_us": "1790947873375650",
+        "message": "home stage turn=584a55370f9342e4 stage=continuation elapsed_ms=301.4"
+      },
+      {
+        "journal_us": "1790947873376027",
+        "message": "home stage turn=584a55370f9342e4 stage=understanding elapsed_ms=301.7"
+      },
+      {
+        "journal_us": "1790947873422743",
+        "message": "home stage turn=584a55370f9342e4 stage=execution elapsed_ms=26.1"
+      },
+      {
+        "journal_us": "1790947873423347",
+        "message": "home turn=584a55370f9342e4 session=esp32-a496b482-a793b185-00000001 companion=c_129153685f855ff3b2062301fb3ceda0 authority_ms=16 elapsed_ms=401 result={\"schema_version\":1,\"turn_id\":\"584a55370f9342e4\",\"utterance\":\"关了它。\",\"outcome\":\"executed\",\"message\":\"已关闭智能音箱\",\"candidates\":[],\"command\":null}"
+      },
+      {
+        "journal_us": "1790947873423882",
+        "message": "127.0.0.1:34622 - \"POST /api/admin/smarthome/command HTTP/1.1\" 200"
+      },
+      {
+        "journal_us": "1790947878345248",
+        "message": "127.0.0.1:34622 - \"POST /api/admin/smarthome/session/end HTTP/1.1\" 204"
+      }
+    ],
+    "eidolon-channel": [
+      {
+        "journal_us": "1790947852503986",
+        "message": "2026-10-02 21:30:52,501 INFO agent_server [_on_session] config reloaded: llm=deepseek-v4-flash vad=firered_pvad stt=bailian tts=bailian"
+      },
+      {
+        "journal_us": "1790947852743498",
+        "message": "2026-10-02 21:30:52,742 INFO agent_server [Agent] starting room=eidolon-device-1e311dd3ae322f454a83a066 stt=bailian tts=bailian vad=firered_pvad"
+      },
+      {
+        "journal_us": "1790947853202412",
+        "message": "2026-10-02 21:30:53,137 INFO eidolon.livekit.plugins.vad.firered FireRedChat pVAD shared processor initialized"
+      },
+      {
+        "journal_us": "1790947853250555",
+        "message": "2026-10-02 21:30:53,249 INFO agent_server [lifecycle] session_started conversation_id=esp32-a496b482-a793b185-00000001 room=eidolon-device-1e311dd3ae322f454a83a066 sent"
+      },
+      {
+        "journal_us": "1790947853250555",
+        "message": "2026-10-02 21:30:53,249 INFO agent.session.idle [lifecycle][IdleWatchdog] armed room=eidolon-device-1e311dd3ae322f454a83a066 timeout=60s"
+      },
+      {
+        "journal_us": "1790947853444158",
+        "message": "2026-10-02 21:30:53,138 INFO eidolon.livekit.plugins.vad.firered PvadProcessor: loading ONNX model from /opt/eidolon/releases/rk3588-redeploy-20261002-1/eidolon_channel/.venv/lib/python3.13/site-packages/eidolon/livekit/plugins/vad/firered/resources/pvad.onnx (providers=['CPUExecutionProvider'])"
+      },
+      {
+        "journal_us": "1790947853870254",
+        "message": "2026-10-02 21:30:53,202 INFO eidolon.livekit.plugins.vad.firered PvadProcessor: ONNX model loaded successfully"
+      },
+      {
+        "journal_us": "1790947853870629",
+        "message": "2026-10-02 21:30:53,202 INFO eidolon.livekit.plugins.vad.firered FireRedChat pVAD ONNX model preloaded"
+      },
+      {
+        "journal_us": "1790947853870629",
+        "message": "2026-10-02 21:30:53,202 INFO agent_server [Agent] prewarm: FireRed pVAD loaded"
+      },
+      {
+        "journal_us": "1790947854515974",
+        "message": "2026-10-02 21:30:54,514 INFO eidolon.livekit.plugins.vad.firered VAD: start of speech"
+      },
+      {
+        "journal_us": "1790947855668860",
+        "message": "2026-10-02 21:30:55,665 INFO eidolon.livekit.plugins.vad.firered VAD: end of speech"
+      },
+      {
+        "journal_us": "1790947856516636",
+        "message": "2026-10-02 21:30:56,514 INFO httpx HTTP Request: POST http://127.0.0.1:8081/api/admin/smarthome/command \"HTTP/1.1 200 OK\""
+      },
+      {
+        "journal_us": "1790947856560972",
+        "message": "2026-10-02 21:30:56,559 INFO httpx HTTP Request: POST http://127.0.0.1:8767/v1/smarthome/result \"HTTP/1.1 200 OK\""
+      },
+      {
+        "journal_us": "1790947856561154",
+        "message": "2026-10-02 21:30:56,560 INFO eidolon.livekit.agent.smarthome smart-home turn=103d6ce1184d43da outcome=executed delivered"
+      },
+      {
+        "journal_us": "1790947858218104",
+        "message": "2026-10-02 21:30:58,215 INFO eidolon.livekit.plugins.vad.firered VAD: start of speech"
+      },
+      {
+        "journal_us": "1790947860421395",
+        "message": "2026-10-02 21:31:00,417 INFO eidolon.livekit.plugins.vad.firered VAD: end of speech"
+      },
+      {
+        "journal_us": "1790947861001868",
+        "message": "2026-10-02 21:31:01,000 INFO httpx HTTP Request: POST http://127.0.0.1:8081/api/admin/smarthome/command \"HTTP/1.1 200 OK\""
+      },
+      {
+        "journal_us": "1790947861053707",
+        "message": "2026-10-02 21:31:01,052 INFO httpx HTTP Request: POST http://127.0.0.1:8767/v1/smarthome/result \"HTTP/1.1 200 OK\""
+      },
+      {
+        "journal_us": "1790947861054106",
+        "message": "2026-10-02 21:31:01,053 INFO eidolon.livekit.agent.smarthome smart-home turn=c03d4c9049fa42ab outcome=executed delivered"
+      },
+      {
+        "journal_us": "1790947863359255",
+        "message": "2026-10-02 21:31:03,357 INFO eidolon.livekit.plugins.vad.firered VAD: start of speech"
+      },
+      {
+        "journal_us": "1790947864067133",
+        "message": "2026-10-02 21:31:04,065 INFO eidolon.livekit.plugins.vad.firered VAD: end of speech"
+      },
+      {
+        "journal_us": "1790947864723137",
+        "message": "2026-10-02 21:31:04,721 INFO httpx HTTP Request: POST http://127.0.0.1:8081/api/admin/smarthome/command \"HTTP/1.1 200 OK\""
+      },
+      {
+        "journal_us": "1790947864770027",
+        "message": "2026-10-02 21:31:04,768 INFO httpx HTTP Request: POST http://127.0.0.1:8767/v1/smarthome/result \"HTTP/1.1 200 OK\""
+      },
+      {
+        "journal_us": "1790947864770287",
+        "message": "2026-10-02 21:31:04,769 INFO eidolon.livekit.agent.smarthome smart-home turn=40a3a324a609439d outcome=executed delivered"
+      },
+      {
+        "journal_us": "1790947867350682",
+        "message": "2026-10-02 21:31:07,349 INFO eidolon.livekit.plugins.vad.firered VAD: start of speech"
+      },
+      {
+        "journal_us": "1790947868353629",
+        "message": "2026-10-02 21:31:08,351 INFO eidolon.livekit.plugins.vad.firered VAD: end of speech"
+      },
+      {
+        "journal_us": "1790947869863691",
+        "message": "2026-10-02 21:31:09,862 INFO httpx HTTP Request: POST http://127.0.0.1:8081/api/admin/smarthome/command \"HTTP/1.1 200 OK\""
+      },
+      {
+        "journal_us": "1790947869911876",
+        "message": "2026-10-02 21:31:09,910 INFO httpx HTTP Request: POST http://127.0.0.1:8767/v1/smarthome/result \"HTTP/1.1 200 OK\""
+      },
+      {
+        "journal_us": "1790947869912319",
+        "message": "2026-10-02 21:31:09,911 INFO eidolon.livekit.agent.smarthome smart-home turn=cdbf3e1c929c45d3 outcome=executed delivered"
+      },
+      {
+        "journal_us": "1790947871906259",
+        "message": "2026-10-02 21:31:11,903 INFO eidolon.livekit.plugins.vad.firered VAD: start of speech"
+      },
+      {
+        "journal_us": "1790947872659260",
+        "message": "2026-10-02 21:31:12,655 INFO eidolon.livekit.plugins.vad.firered VAD: end of speech"
+      },
+      {
+        "journal_us": "1790947873426209",
+        "message": "2026-10-02 21:31:13,425 INFO httpx HTTP Request: POST http://127.0.0.1:8081/api/admin/smarthome/command \"HTTP/1.1 200 OK\""
+      },
+      {
+        "journal_us": "1790947873469465",
+        "message": "2026-10-02 21:31:13,467 INFO httpx HTTP Request: POST http://127.0.0.1:8767/v1/smarthome/result \"HTTP/1.1 200 OK\""
+      },
+      {
+        "journal_us": "1790947873469900",
+        "message": "2026-10-02 21:31:13,469 INFO eidolon.livekit.agent.smarthome smart-home turn=584a55370f9342e4 outcome=executed delivered"
+      },
+      {
+        "journal_us": "1790947878327420",
+        "message": "2026-10-02 21:31:18,326 INFO livekit livekit::room:1794:livekit::room - Disconnected from room \"eidolon-device-1e311dd3ae322f454a83a066\" with reason: ParticipantRemoved"
+      },
+      {
+        "journal_us": "1790947878328222",
+        "message": "2026-10-02 21:31:18,327 INFO agent_server [lifecycle] session_end reason=user_left room=eidolon-device-1e311dd3ae322f454a83a066 not sent: the channel was already gone"
+      },
+      {
+        "journal_us": "1790947878328373",
+        "message": "2026-10-02 21:31:18,327 INFO agent_server [lifecycle] ending serving room=eidolon-device-1e311dd3ae322f454a83a066 agent=eidolon context=session closed remote_participants=2 remote_identities=['device-instance-d694b066b052cec0b813a2b699af99780c55b29796a9b6ce9fabe22299a2b795', 'channel-provider-eidolon-device-1e311dd3ae322f454a83a066'] local_identity=agent-AJ_qYSjUnRRsB3j"
+      },
+      {
+        "journal_us": "1790947878348356",
+        "message": "2026-10-02 21:31:18,346 INFO httpx HTTP Request: POST http://127.0.0.1:8081/api/admin/smarthome/session/end \"HTTP/1.1 204 No Content\""
+      },
+      {
+        "journal_us": "1790947881391013",
+        "message": "2026-10-02 21:31:21,389 INFO agent_server [lifecycle] session_end reason=user_left room=eidolon-device-1e311dd3ae322f454a83a066 not sent: the channel was already gone"
+      },
+      {
+        "journal_us": "1790947881391313",
+        "message": "2026-10-02 21:31:21,389 INFO agent_server [lifecycle] ending serving room=eidolon-device-1e311dd3ae322f454a83a066 agent=eidolon context=shutdown callback remote_participants=2 remote_identities=['device-instance-d694b066b052cec0b813a2b699af99780c55b29796a9b6ce9fabe22299a2b795', 'channel-provider-eidolon-device-1e311dd3ae322f454a83a066'] local_identity=agent-AJ_qYSjUnRRsB3j"
+      }
+    ],
+    "eidolon-channel-provider": [
+      {
+        "journal_us": "1790947850005251",
+        "message": "2026-10-02 21:30:50,005 INFO httpx HTTP Request: POST http://127.0.0.1:8082/api/smarthome/v1/snapshot \"HTTP/1.1 200 OK\""
+      },
+      {
+        "journal_us": "1790947852235538",
+        "message": "2026-10-02 21:30:52,235 INFO eidolon.channel_provider.livekit opened session on room=eidolon-device-1e311dd3ae322f454a83a066 agent=eidolon intent=user_initiated"
+      },
+      {
+        "journal_us": "1790947855043448",
+        "message": "2026-10-02 21:30:55,043 INFO httpx HTTP Request: POST http://127.0.0.1:8082/api/smarthome/v1/snapshot \"HTTP/1.1 200 OK\""
+      },
+      {
+        "journal_us": "1790947856548784",
+        "message": "2026-10-02 21:30:56,548 INFO httpx HTTP Request: POST http://127.0.0.1:8082/api/smarthome/v1/snapshot \"HTTP/1.1 200 OK\""
+      },
+      {
+        "journal_us": "1790947856559248",
+        "message": "2026-10-02 21:30:56,558 INFO aiohttp.access 127.0.0.1 \"POST /v1/smarthome/result HTTP/1.1\" 200 0.041240"
+      },
+      {
+        "journal_us": "1790947860092637",
+        "message": "2026-10-02 21:31:00,092 INFO httpx HTTP Request: POST http://127.0.0.1:8082/api/smarthome/v1/snapshot \"HTTP/1.1 200 OK\""
+      },
+      {
+        "journal_us": "1790947861041984",
+        "message": "2026-10-02 21:31:01,041 INFO httpx HTTP Request: POST http://127.0.0.1:8082/api/smarthome/v1/snapshot \"HTTP/1.1 200 OK\""
+      },
+      {
+        "journal_us": "1790947861052375",
+        "message": "2026-10-02 21:31:01,052 INFO aiohttp.access 127.0.0.1 \"POST /v1/smarthome/result HTTP/1.1\" 200 0.046748"
+      },
+      {
+        "journal_us": "1790947864749447",
+        "message": "2026-10-02 21:31:04,749 INFO httpx HTTP Request: POST http://127.0.0.1:8082/api/smarthome/v1/snapshot \"HTTP/1.1 200 OK\""
+      },
+      {
+        "journal_us": "1790947864768731",
+        "message": "2026-10-02 21:31:04,768 INFO aiohttp.access 127.0.0.1 \"POST /v1/smarthome/result HTTP/1.1\" 200 0.044955"
+      },
+      {
+        "journal_us": "1790947865126510",
+        "message": "2026-10-02 21:31:05,126 INFO httpx HTTP Request: POST http://127.0.0.1:8082/api/smarthome/v1/snapshot \"HTTP/1.1 200 OK\""
+      },
+      {
+        "journal_us": "1790947869901644",
+        "message": "2026-10-02 21:31:09,901 INFO httpx HTTP Request: POST http://127.0.0.1:8082/api/smarthome/v1/snapshot \"HTTP/1.1 200 OK\""
+      },
+      {
+        "journal_us": "1790947869910428",
+        "message": "2026-10-02 21:31:09,910 INFO aiohttp.access 127.0.0.1 \"POST /v1/smarthome/result HTTP/1.1\" 200 0.040928"
+      },
+      {
+        "journal_us": "1790947870164609",
+        "message": "2026-10-02 21:31:10,164 INFO httpx HTTP Request: POST http://127.0.0.1:8082/api/smarthome/v1/snapshot \"HTTP/1.1 200 OK\""
+      },
+      {
+        "journal_us": "1790947873451224",
+        "message": "2026-10-02 21:31:13,451 INFO httpx HTTP Request: POST http://127.0.0.1:8082/api/smarthome/v1/snapshot \"HTTP/1.1 200 OK\""
+      },
+      {
+        "journal_us": "1790947873466960",
+        "message": "2026-10-02 21:31:13,466 INFO aiohttp.access 127.0.0.1 \"POST /v1/smarthome/result HTTP/1.1\" 200 0.037760"
+      },
+      {
+        "journal_us": "1790947875200311",
+        "message": "2026-10-02 21:31:15,199 INFO httpx HTTP Request: POST http://127.0.0.1:8082/api/smarthome/v1/snapshot \"HTTP/1.1 200 OK\""
+      },
+      {
+        "journal_us": "1790947875315046",
+        "message": "2026-10-02 21:31:15,314 INFO eidolon.channel_provider.livekit closed session on room=eidolon-device-1e311dd3ae322f454a83a066 agent=eidolon conversation_ids=['esp32-a496b482-a793b185-00000001']"
+      },
+      {
+        "journal_us": "1790947880236605",
+        "message": "2026-10-02 21:31:20,236 INFO httpx HTTP Request: POST http://127.0.0.1:8082/api/smarthome/v1/snapshot \"HTTP/1.1 200 OK\""
+      }
+    ],
+    "eidolon-hub": [
+      {
+        "journal_us": "1790947850004081",
+        "message": "INFO:     127.0.0.1:46166 - \"POST /api/smarthome/v1/snapshot HTTP/1.1\" 200 OK"
+      },
+      {
+        "journal_us": "1790947855041722",
+        "message": "INFO:     127.0.0.1:49478 - \"POST /api/smarthome/v1/snapshot HTTP/1.1\" 200 OK"
+      },
+      {
+        "journal_us": "1790947855984350",
+        "message": "INFO:     127.0.0.1:49484 - \"POST /api/smarthome/v1/snapshot HTTP/1.1\" 200 OK"
+      },
+      {
+        "journal_us": "1790947856478047",
+        "message": "INFO:     127.0.0.1:49484 - \"POST /api/smarthome/v1/snapshot HTTP/1.1\" 200 OK"
+      },
+      {
+        "journal_us": "1790947856505650",
+        "message": "INFO:     127.0.0.1:49484 - \"POST /api/smarthome/v1/execute HTTP/1.1\" 200 OK"
+      },
+      {
+        "journal_us": "1790947856547683",
+        "message": "INFO:     127.0.0.1:49478 - \"POST /api/smarthome/v1/snapshot HTTP/1.1\" 200 OK"
+      },
+      {
+        "journal_us": "1790947860090727",
+        "message": "INFO:     127.0.0.1:49478 - \"POST /api/smarthome/v1/snapshot HTTP/1.1\" 200 OK"
+      },
+      {
+        "journal_us": "1790947860640838",
+        "message": "INFO:     127.0.0.1:49484 - \"POST /api/smarthome/v1/snapshot HTTP/1.1\" 200 OK"
+      },
+      {
+        "journal_us": "1790947860961584",
+        "message": "INFO:     127.0.0.1:49484 - \"POST /api/smarthome/v1/snapshot HTTP/1.1\" 200 OK"
+      },
+      {
+        "journal_us": "1790947860993108",
+        "message": "INFO:     127.0.0.1:49484 - \"POST /api/smarthome/v1/execute HTTP/1.1\" 200 OK"
+      },
+      {
+        "journal_us": "1790947861040762",
+        "message": "INFO:     127.0.0.1:49478 - \"POST /api/smarthome/v1/snapshot HTTP/1.1\" 200 OK"
+      },
+      {
+        "journal_us": "1790947864372352",
+        "message": "INFO:     127.0.0.1:49484 - \"POST /api/smarthome/v1/snapshot HTTP/1.1\" 200 OK"
+      },
+      {
+        "journal_us": "1790947864685082",
+        "message": "INFO:     127.0.0.1:49484 - \"POST /api/smarthome/v1/snapshot HTTP/1.1\" 200 OK"
+      },
+      {
+        "journal_us": "1790947864712091",
+        "message": "INFO:     127.0.0.1:49484 - \"POST /api/smarthome/v1/execute HTTP/1.1\" 200 OK"
+      },
+      {
+        "journal_us": "1790947864747776",
+        "message": "INFO:     127.0.0.1:49478 - \"POST /api/smarthome/v1/snapshot HTTP/1.1\" 200 OK"
+      },
+      {
+        "journal_us": "1790947865124481",
+        "message": "INFO:     127.0.0.1:49478 - \"POST /api/smarthome/v1/snapshot HTTP/1.1\" 200 OK"
+      },
+      {
+        "journal_us": "1790947868678029",
+        "message": "INFO:     127.0.0.1:49484 - \"POST /api/smarthome/v1/snapshot HTTP/1.1\" 200 OK"
+      },
+      {
+        "journal_us": "1790947869833471",
+        "message": "INFO:     127.0.0.1:49484 - \"POST /api/smarthome/v1/snapshot HTTP/1.1\" 200 OK"
+      },
+      {
+        "journal_us": "1790947869858186",
+        "message": "INFO:     127.0.0.1:49484 - \"POST /api/smarthome/v1/execute HTTP/1.1\" 200 OK"
+      },
+      {
+        "journal_us": "1790947869900738",
+        "message": "INFO:     127.0.0.1:49478 - \"POST /api/smarthome/v1/snapshot HTTP/1.1\" 200 OK"
+      },
+      {
+        "journal_us": "1790947870162783",
+        "message": "INFO:     127.0.0.1:49478 - \"POST /api/smarthome/v1/snapshot HTTP/1.1\" 200 OK"
+      },
+      {
+        "journal_us": "1790947873071265",
+        "message": "INFO:     127.0.0.1:49484 - \"POST /api/smarthome/v1/snapshot HTTP/1.1\" 200 OK"
+      },
+      {
+        "journal_us": "1790947873393461",
+        "message": "INFO:     127.0.0.1:49484 - \"POST /api/smarthome/v1/snapshot HTTP/1.1\" 200 OK"
+      },
+      {
+        "journal_us": "1790947873420898",
+        "message": "INFO:     127.0.0.1:49484 - \"POST /api/smarthome/v1/execute HTTP/1.1\" 200 OK"
+      },
+      {
+        "journal_us": "1790947873449785",
+        "message": "INFO:     127.0.0.1:49478 - \"POST /api/smarthome/v1/snapshot HTTP/1.1\" 200 OK"
+      },
+      {
+        "journal_us": "1790947875197455",
+        "message": "INFO:     127.0.0.1:49478 - \"POST /api/smarthome/v1/snapshot HTTP/1.1\" 200 OK"
+      },
+      {
+        "journal_us": "1790947880233688",
+        "message": "INFO:     127.0.0.1:44688 - \"POST /api/smarthome/v1/snapshot HTTP/1.1\" 200 OK"
+      }
+    ],
+    "eidolon-laya": [
+      {
+        "journal_us": "1790947856452251",
+        "message": "2026-10-02 21:30:56,452 INFO eidolon_laya systemone q=3 skipped=0 tokens=460 forward=435ms total=440ms truncated=-"
+      },
+      {
+        "journal_us": "1790947856452912",
+        "message": "2026-10-02 21:30:56,452 INFO aiohttp.access 127.0.0.1 [02/Oct/2026:21:30:56 +0800] \"POST /v1/systemone HTTP/1.1\" 200 1615 \"-\" \"python-httpx/0.28.1\""
+      },
+      {
+        "journal_us": "1790947860921478",
+        "message": "2026-10-02 21:31:00,921 INFO eidolon_laya systemone q=1 skipped=0 tokens=189 forward=270ms total=272ms truncated=-"
+      },
+      {
+        "journal_us": "1790947860922051",
+        "message": "2026-10-02 21:31:00,921 INFO aiohttp.access 127.0.0.1 [02/Oct/2026:21:31:00 +0800] \"POST /v1/systemone HTTP/1.1\" 200 756 \"-\" \"python-httpx/0.28.1\""
+      },
+      {
+        "journal_us": "1790947864656964",
+        "message": "2026-10-02 21:31:04,656 INFO eidolon_laya systemone q=1 skipped=0 tokens=196 forward=274ms total=276ms truncated=-"
+      },
+      {
+        "journal_us": "1790947864657550",
+        "message": "2026-10-02 21:31:04,657 INFO aiohttp.access 127.0.0.1 [02/Oct/2026:21:31:04 +0800] \"POST /v1/systemone HTTP/1.1\" 200 756 \"-\" \"python-httpx/0.28.1\""
+      },
+      {
+        "journal_us": "1790947868964481",
+        "message": "2026-10-02 21:31:08,964 INFO eidolon_laya systemone q=1 skipped=0 tokens=188 forward=272ms total=274ms truncated=-"
+      },
+      {
+        "journal_us": "1790947868965070",
+        "message": "2026-10-02 21:31:08,964 INFO aiohttp.access 127.0.0.1 [02/Oct/2026:21:31:08 +0800] \"POST /v1/systemone HTTP/1.1\" 200 754 \"-\" \"python-httpx/0.28.1\""
+      },
+      {
+        "journal_us": "1790947873372965",
+        "message": "2026-10-02 21:31:13,372 INFO eidolon_laya systemone q=1 skipped=0 tokens=192 forward=295ms total=296ms truncated=-"
+      },
+      {
+        "journal_us": "1790947873374217",
+        "message": "2026-10-02 21:31:13,373 INFO aiohttp.access 127.0.0.1 [02/Oct/2026:21:31:13 +0800] \"POST /v1/systemone HTTP/1.1\" 200 754 \"-\" \"python-httpx/0.28.1\""
+      }
+    ],
+    "eidolon-kernel": [],
+    "eidolon-system": [],
+    "eidolon-data": []
+  },
+  "schema": {
+    "kernel/kernel_device_mounts": [
+      [
+        0,
+        "device_id",
+        "TEXT",
+        0,
+        null,
+        1
+      ],
+      [
+        1,
+        "owner_id",
+        "TEXT",
+        1,
+        null,
+        0
+      ],
+      [
+        2,
+        "owner_domain_id",
+        "TEXT",
+        1,
+        null,
+        0
+      ],
+      [
+        3,
+        "owner_domain_generation",
+        "INTEGER",
+        1,
+        null,
+        0
+      ],
+      [
+        4,
+        "claim_generation",
+        "INTEGER",
+        1,
+        null,
+        0
+      ],
+      [
+        5,
+        "trust_epoch",
+        "INTEGER",
+        1,
+        null,
+        0
+      ],
+      [
+        6,
+        "revision",
+        "INTEGER",
+        1,
+        null,
+        0
+      ],
+      [
+        7,
+        "created_at",
+        "TEXT",
+        1,
+        null,
+        0
+      ],
+      [
+        8,
+        "updated_at",
+        "TEXT",
+        1,
+        null,
+        0
+      ],
+      [
+        9,
+        "request_id",
+        "TEXT",
+        1,
+        null,
+        0
+      ],
+      [
+        10,
+        "fingerprint",
+        "TEXT",
+        1,
+        null,
+        0
+      ],
+      [
+        11,
+        "active",
+        "INTEGER",
+        1,
+        null,
+        0
+      ]
+    ],
+    "kernel/kernel_body_assignments": [
+      [
+        0,
+        "body_endpoint_id",
+        "TEXT",
+        0,
+        null,
+        1
+      ],
+      [
+        1,
+        "device_id",
+        "TEXT",
+        1,
+        null,
+        0
+      ],
+      [
+        2,
+        "endpoint_id",
+        "TEXT",
+        1,
+        null,
+        0
+      ],
+      [
+        3,
+        "owner_id",
+        "TEXT",
+        1,
+        null,
+        0
+      ],
+      [
+        4,
+        "companion_id",
+        "TEXT",
+        0,
+        null,
+        0
+      ],
+      [
+        5,
+        "selection_provenance",
+        "TEXT",
+        1,
+        null,
+        0
+      ],
+      [
+        6,
+        "change_reason",
+        "TEXT",
+        0,
+        null,
+        0
+      ],
+      [
+        7,
+        "mode",
+        "TEXT",
+        1,
+        null,
+        0
+      ],
+      [
+        8,
+        "policy_refs_json",
+        "TEXT",
+        1,
+        null,
+        0
+      ],
+      [
+        9,
+        "revision",
+        "INTEGER",
+        1,
+        null,
+        0
+      ],
+      [
+        10,
+        "generation",
+        "INTEGER",
+        1,
+        null,
+        0
+      ],
+      [
+        11,
+        "created_at",
+        "TEXT",
+        1,
+        null,
+        0
+      ],
+      [
+        12,
+        "updated_at",
+        "TEXT",
+        1,
+        null,
+        0
+      ],
+      [
+        13,
+        "request_id",
+        "TEXT",
+        1,
+        null,
+        0
+      ],
+      [
+        14,
+        "fingerprint",
+        "TEXT",
+        1,
+        null,
+        0
+      ]
+    ],
+    "channel/provider/provider_operations": [
+      [
+        0,
+        "operation_id",
+        "TEXT",
+        1,
+        null,
+        7
+      ],
+      [
+        1,
+        "operation_kind",
+        "TEXT",
+        1,
+        null,
+        6
+      ],
+      [
+        2,
+        "request_fingerprint",
+        "TEXT",
+        1,
+        null,
+        0
+      ],
+      [
+        3,
+        "device_instance_id",
+        "TEXT",
+        1,
+        null,
+        1
+      ],
+      [
+        4,
+        "owner_domain_id",
+        "TEXT",
+        1,
+        null,
+        2
+      ],
+      [
+        5,
+        "owner_domain_generation",
+        "INTEGER",
+        1,
+        null,
+        3
+      ],
+      [
+        6,
+        "claim_generation",
+        "INTEGER",
+        1,
+        null,
+        4
+      ],
+      [
+        7,
+        "trust_epoch",
+        "INTEGER",
+        1,
+        null,
+        5
+      ],
+      [
+        8,
+        "owner_id",
+        "TEXT",
+        1,
+        "''",
+        0
+      ],
+      [
+        9,
+        "manifest_revision",
+        "TEXT",
+        1,
+        "''",
+        0
+      ],
+      [
+        10,
+        "adapter_name",
+        "TEXT",
+        1,
+        "''",
+        0
+      ],
+      [
+        11,
+        "handle_json",
+        "TEXT",
+        1,
+        "''",
+        0
+      ],
+      [
+        12,
+        "channel_id",
+        "TEXT",
+        1,
+        "''",
+        0
+      ],
+      [
+        13,
+        "response_json",
+        "TEXT",
+        1,
+        null,
+        0
+      ],
+      [
+        14,
+        "expires_at_ms",
+        "INTEGER",
+        1,
+        "0",
+        0
+      ],
+      [
+        15,
+        "status",
+        "TEXT",
+        1,
+        null,
+        0
+      ],
+      [
+        16,
+        "terminal_reason",
+        "TEXT",
+        0,
+        null,
+        0
+      ],
+      [
+        17,
+        "created_at_ms",
+        "INTEGER",
+        1,
+        null,
+        0
+      ],
+      [
+        18,
+        "updated_at_ms",
+        "INTEGER",
+        1,
+        null,
+        0
+      ]
+    ],
+    "hub/eidolon-hub/admission_command_results_v1": [
+      [
+        0,
+        "owner_domain_id",
+        "VARCHAR(128)",
+        1,
+        null,
+        1
+      ],
+      [
+        1,
+        "command_type",
+        "VARCHAR(96)",
+        1,
+        null,
+        2
+      ],
+      [
+        2,
+        "command_id",
+        "VARCHAR(128)",
+        1,
+        null,
+        3
+      ],
+      [
+        3,
+        "fingerprint",
+        "VARCHAR(71)",
+        1,
+        null,
+        0
+      ],
+      [
+        4,
+        "result_json",
+        "TEXT",
+        1,
+        null,
+        0
+      ],
+      [
+        5,
+        "occurred_at",
+        "DATETIME",
+        1,
+        null,
+        0
+      ]
+    ],
+    "hub/smarthome/virtual_devices": [
+      [
+        0,
+        "owner_id",
+        "TEXT",
+        1,
+        null,
+        1
+      ],
+      [
+        1,
+        "device_id",
+        "TEXT",
+        1,
+        null,
+        2
+      ],
+      [
+        2,
+        "device_type",
+        "TEXT",
+        1,
+        null,
+        0
+      ],
+      [
+        3,
+        "state_json",
+        "TEXT",
+        1,
+        null,
+        0
+      ],
+      [
+        4,
+        "updated_at_ms",
+        "INTEGER",
+        1,
+        null,
+        0
+      ]
+    ],
+    "eidolon-system/smarthome_devices": [
+      [
+        0,
+        "owner_id",
+        "VARCHAR(64)",
+        1,
+        null,
+        1
+      ],
+      [
+        1,
+        "device_id",
+        "VARCHAR(128)",
+        1,
+        null,
+        2
+      ],
+      [
+        2,
+        "name",
+        "VARCHAR(32)",
+        1,
+        null,
+        0
+      ],
+      [
+        3,
+        "aliases_json",
+        "JSON",
+        1,
+        "'[]'",
+        0
+      ],
+      [
+        4,
+        "device_type",
+        "VARCHAR(32)",
+        1,
+        null,
+        0
+      ],
+      [
+        5,
+        "area_id",
+        "VARCHAR(128)",
+        0,
+        null,
+        0
+      ],
+      [
+        6,
+        "provider",
+        "VARCHAR(128)",
+        1,
+        "'virtual'",
+        0
+      ],
+      [
+        7,
+        "provider_ref",
+        "VARCHAR(128)",
+        0,
+        null,
+        0
+      ],
+      [
+        8,
+        "position",
+        "INTEGER",
+        1,
+        null,
+        0
+      ],
+      [
+        9,
+        "created_at",
+        "DATETIME",
+        1,
+        "CURRENT_TIMESTAMP",
+        0
+      ],
+      [
+        10,
+        "updated_at",
+        "DATETIME",
+        1,
+        "CURRENT_TIMESTAMP",
+        0
+      ]
+    ],
+    "eidolon-system/companions": [
+      [
+        0,
+        "companion_id",
+        "VARCHAR(64)",
+        1,
+        null,
+        1
+      ],
+      [
+        1,
+        "owner_id",
+        "VARCHAR(64)",
+        1,
+        null,
+        0
+      ],
+      [
+        2,
+        "display_name",
+        "VARCHAR(128)",
+        1,
+        "''",
+        0
+      ],
+      [
+        3,
+        "kind",
+        "VARCHAR(32)",
+        1,
+        "'conversational'",
+        0
+      ],
+      [
+        4,
+        "lifecycle_state",
+        "VARCHAR(16)",
+        1,
+        "'active'",
+        0
+      ],
+      [
+        5,
+        "revision",
+        "INTEGER",
+        1,
+        "'1'",
+        0
+      ],
+      [
+        6,
+        "current_genome_id",
+        "VARCHAR(64)",
+        0,
+        null,
+        0
+      ],
+      [
+        7,
+        "default_memory_realm_id",
+        "VARCHAR(64)",
+        0,
+        null,
+        0
+      ],
+      [
+        8,
+        "profile_json",
+        "JSON",
+        1,
+        "'{}'",
+        0
+      ],
+      [
+        9,
+        "runtime_config_json",
+        "JSON",
+        1,
+        "'{}'",
+        0
+      ],
+      [
+        10,
+        "metadata_json",
+        "JSON",
+        1,
+        "'{}'",
+        0
+      ],
+      [
+        11,
+        "created_at",
+        "DATETIME",
+        1,
+        "CURRENT_TIMESTAMP",
+        0
+      ],
+      [
+        12,
+        "updated_at",
+        "DATETIME",
+        1,
+        "CURRENT_TIMESTAMP",
+        0
+      ]
+    ],
+    "agent/eidolon-agent/runtime_sessions": [
+      [
+        0,
+        "session_id",
+        "VARCHAR(128)",
+        1,
+        null,
+        1
+      ],
+      [
+        1,
+        "owner_id",
+        "VARCHAR(64)",
+        1,
+        null,
+        0
+      ],
+      [
+        2,
+        "companion_id",
+        "VARCHAR(64)",
+        1,
+        null,
+        0
+      ],
+      [
+        3,
+        "source_device_id",
+        "VARCHAR(128)",
+        0,
+        null,
+        0
+      ],
+      [
+        4,
+        "transport",
+        "VARCHAR(64)",
+        1,
+        null,
+        0
+      ],
+      [
+        5,
+        "status",
+        "VARCHAR(32)",
+        1,
+        null,
+        0
+      ],
+      [
+        6,
+        "metadata_json",
+        "JSON",
+        1,
+        null,
+        0
+      ],
+      [
+        7,
+        "started_at",
+        "DATETIME",
+        1,
+        null,
+        0
+      ],
+      [
+        8,
+        "last_seen_at",
+        "DATETIME",
+        1,
+        null,
+        0
+      ],
+      [
+        9,
+        "ended_at",
+        "DATETIME",
+        0,
+        null,
+        0
+      ],
+      [
+        10,
+        "created_at",
+        "DATETIME",
+        1,
+        null,
+        0
+      ],
+      [
+        11,
+        "updated_at",
+        "DATETIME",
+        1,
+        null,
+        0
+      ]
+    ],
+    "agent/eidolon-agent/turns": [
+      [
+        0,
+        "turn_id",
+        "VARCHAR(64)",
+        1,
+        null,
+        1
+      ],
+      [
+        1,
+        "conversation_id",
+        "VARCHAR(512)",
+        1,
+        null,
+        0
+      ],
+      [
+        2,
+        "seq",
+        "INTEGER",
+        1,
+        null,
+        0
+      ],
+      [
+        3,
+        "runtime_session_id",
+        "VARCHAR(128)",
+        0,
+        null,
+        0
+      ],
+      [
+        4,
+        "source_device_id",
+        "VARCHAR(128)",
+        0,
+        null,
+        0
+      ],
+      [
+        5,
+        "trigger",
+        "VARCHAR(32)",
+        1,
+        null,
+        0
+      ],
+      [
+        6,
+        "status",
+        "VARCHAR(32)",
+        1,
+        null,
+        0
+      ],
+      [
+        7,
+        "started_at",
+        "DATETIME",
+        1,
+        null,
+        0
+      ],
+      [
+        8,
+        "finished_at",
+        "DATETIME",
+        0,
+        null,
+        0
+      ],
+      [
+        9,
+        "trace_id",
+        "VARCHAR(64)",
+        0,
+        null,
+        0
+      ],
+      [
+        10,
+        "trace_json",
+        "JSON",
+        1,
+        null,
+        0
+      ],
+      [
+        11,
+        "metrics_json",
+        "JSON",
+        1,
+        null,
+        0
+      ],
+      [
+        12,
+        "metadata_json",
+        "JSON",
+        1,
+        null,
+        0
+      ]
+    ],
+    "agent/eidolon-agent/messages": [
+      [
+        0,
+        "message_id",
+        "VARCHAR(96)",
+        1,
+        null,
+        1
+      ],
+      [
+        1,
+        "turn_id",
+        "VARCHAR(64)",
+        1,
+        null,
+        0
+      ],
+      [
+        2,
+        "seq",
+        "INTEGER",
+        1,
+        null,
+        0
+      ],
+      [
+        3,
+        "role",
+        "VARCHAR(32)",
+        1,
+        null,
+        0
+      ],
+      [
+        4,
+        "content",
+        "TEXT",
+        1,
+        null,
+        0
+      ],
+      [
+        5,
+        "content_type",
+        "VARCHAR(64)",
+        1,
+        null,
+        0
+      ],
+      [
+        6,
+        "visibility",
+        "VARCHAR(32)",
+        1,
+        null,
+        0
+      ],
+      [
+        7,
+        "created_at",
+        "DATETIME",
+        1,
+        null,
+        0
+      ],
+      [
+        8,
+        "metadata_json",
+        "JSON",
+        1,
+        null,
+        0
+      ]
+    ]
+  },
+  "files": [
+    "/etc/eidolon/agent.yaml"
+  ],
+  "provider_identity": [
+    {
+      "operation_id": "channel-refresh-ccc6b529e97017ddc3400fd294d574192844923061ee085b",
+      "owner_id": "owner_129153685f855ff3b2062301fb3ceda0",
+      "device_instance_id": "device-instance-d694b066b052cec0b813a2b699af99780c55b29796a9b6ce9fabe22299a2b795",
+      "status": "active",
+      "room": "eidolon-device-1e311dd3ae322f454a83a066",
+      "session_application": "home.command.v1"
+    }
+  ],
+  "virtual_states": [
+    {
+      "owner_id": "owner_129153685f855ff3b2062301fb3ceda0",
+      "device_id": "living.tv",
+      "device_type": "media",
+      "state_json": "{\"muted\":false,\"on\":false,\"volume\":70}",
+      "updated_at_ms": 1790947864709
+    },
+    {
+      "owner_id": "owner_129153685f855ff3b2062301fb3ceda0",
+      "device_id": "living.speaker",
+      "device_type": "media",
+      "state_json": "{\"muted\":false,\"on\":false,\"volume\":20}",
+      "updated_at_ms": 1790947873417
+    }
+  ]
+}

@@ -1,0 +1,96 @@
+{
+  "laya_process": {},
+  "laya_cli": {
+    "--service": "smart_home",
+    "--config": "/opt/eidolon/current/eidolon_models/laya/deploy/services.toml"
+  },
+  "smart_home_rknn_config": {
+    "model_dir": "/var/lib/eidolon/models/laya-smart-home-c4-rknn-7b695ba8",
+    "placement": "1:128,256,384,512|2:128,256",
+    "speculative": true,
+    "max_pending": 1
+  },
+  "model_dir": "/var/lib/eidolon/models/laya-smart-home-c4-rknn-7b695ba8",
+  "package": {
+    "manifest.json": {
+      "sha256": "6f39cdf9a5135555b013aee3bf75c5f12f4a615046a6db4d4fc521af4e4144c8",
+      "data": {
+        "schema_version": 1,
+        "name": "laya-smart-home",
+        "source": {
+          "hub": "local",
+          "repo_id": "eidolon-laya-train/laya-smart-home",
+          "subfolder": "",
+          "revision": "7b695ba8",
+          "run_id": "c4",
+          "checkpoint": "/Users/manson/ai/eidolon/eidolon_models/laya/train/runs/c4/checkpoint"
+        },
+        "license": {
+          "checkpoint": "internal",
+          "base": "/Users/manson/ai/eidolon/eidolon_models/laya/models/laya-smart-home/45f3dedb/torch"
+        },
+        "runtime": {
+          "code": "laya (vendored, see src/eidolon_models_laya/vendor/laya/VENDOR_VERSION)",
+          "trained_max_len": 1024,
+          "head_max_len": 512,
+          "notes": "c4: r14 + continuation-laya-v1 (pick / follow); candidate per PLAN c4 verdict (accept + c-test)"
+        },
+        "torch": {
+          "dir": "torch",
+          "files": {
+            "model.safetensors": "7b695ba8f2e8a37f388eb118bcf065689d5f9c4480c8ba6677d05d8a2e91cb26",
+            "rl_agent_config.json": "15f04f0753ce226e90ff49762b1f29160e5cfd7af1ee5efe344a3ad57276f7a9",
+            "encoder/config.json": "fad4076bcae03044a509e35a2d36c1cdff482fd4c2d6e7c5d187bbc7d8b91590",
+            "tokenizer/tokenizer.json": "609d8f4c067cd3950f88594c5a802616cea245823836ef5848ee4fc40aab5b6f",
+            "tokenizer/tokenizer_config.json": "e8e6a37c189f9dd23976b86b3e1ddb6928472e9f87c94103a1aaff311f45f090"
+          }
+        },
+        "onnx": {
+          "dir": "onnx",
+          "file": "model.onnx",
+          "opset": 18,
+          "produced_by": "eidolon-laya export-onnx"
+        }
+      }
+    }
+  },
+  "rknn_files": [
+    {
+      "path": "npu/hidden_l256.rknn",
+      "sha256": "91928c2457ba85286aec1b75f9635c77c448734d9d444d8b225eba20fc1bdf8e"
+    },
+    {
+      "path": "npu/hidden_l128.rknn",
+      "sha256": "a2dbb0f2c5e892c735b58657005572006b5f34e6707345980cfd18fa75ef3e2d"
+    },
+    {
+      "path": "npu/hidden_l512.rknn",
+      "sha256": "4b9965af6f28fd484e85622b6fd0febce40cdc97ced280c67d0a0f7678f34643"
+    },
+    {
+      "path": "npu/hidden_l384.rknn",
+      "sha256": "27b9c39e293a423f52d774e3c6e435d38671afb804c8284034f44d7b12102d61"
+    }
+  ],
+  "support_sources": [
+    {
+      "release_path": "/opt/eidolon/releases/rk3588-redeploy-20261002-1/eidolon_sdk",
+      "revision": "c3756456d198719987baee240f6a2753206a08da",
+      "source_id": "eidolon_sdk",
+      "source_tree_sha256": "ceb15c42a86ba743659b98b6ed9c040be89d998413e5d790b17b6fbb115edcf3"
+    }
+  ],
+  "deployed_source_hashes": {
+    "eidolon_agent/eidolon_agent/infra/smarthome/laya_continuation.py": "bb36e67cee186d76c4d13c1419911b5dd3f529def07f29de2370727528c2416e",
+    "eidolon_agent/eidolon_agent/domain/smarthome/command.py": "47eb6f7adf7fe16495824f7ed81b475309a5f0b3e72aeedc39a066332710ea37",
+    "eidolon_channel/eidolon/livekit/agent/smarthome.py": "cdd8f0ac8e44f20dc619cc27a6dfe2226670bebda07477b139289ccbc3a7aa92",
+    "eidolon_hub/hub/smarthome/virtual.py": "9fd3e20d4aa1f79b025c28e34c7c8a8b8fe4732e1ee7ffd86720877be89f18b8"
+  },
+  "home_timeline_selected_rows": [],
+  "local_source_matches": {
+    "eidolon_agent/eidolon_agent/infra/smarthome/laya_continuation.py": true,
+    "eidolon_agent/eidolon_agent/domain/smarthome/command.py": true,
+    "eidolon_channel/eidolon/livekit/agent/smarthome.py": true,
+    "eidolon_hub/hub/smarthome/virtual.py": true
+  }
+}

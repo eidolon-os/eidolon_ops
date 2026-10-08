@@ -1,0 +1,204 @@
+{
+  "device": {
+    "device_id": "homeassistant:acc_ha_bench.light.kitchen_lights",
+    "name": "厨房灯",
+    "aliases": [],
+    "type": "light",
+    "area_id": null,
+    "provider": "homeassistant:acc_ha_bench",
+    "provider_ref": "light.kitchen_lights",
+    "traits": [
+      "on_off",
+      "level"
+    ],
+    "limits": null,
+    "source": "imported",
+    "overrides": [
+      "name"
+    ],
+    "synced_at_ms": 1791038944553,
+    "orphaned": false
+  },
+  "samples": [
+    {
+      "request_id": "bench:36a62b14d370",
+      "verb": "on",
+      "status": "succeeded",
+      "round_trip_ms": 39.8,
+      "hub_admit_ms": 36,
+      "provider_ms": 2,
+      "complete_ms": 38
+    },
+    {
+      "request_id": "bench:d76ed7fbf9dc",
+      "verb": "off",
+      "status": "succeeded",
+      "round_trip_ms": 41.3,
+      "hub_admit_ms": 38,
+      "provider_ms": 1,
+      "complete_ms": 40
+    },
+    {
+      "request_id": "bench:9950df7e4281",
+      "verb": "on",
+      "status": "succeeded",
+      "round_trip_ms": 78.8,
+      "hub_admit_ms": 39,
+      "provider_ms": 3,
+      "complete_ms": 42
+    },
+    {
+      "request_id": "bench:948e6078a6ae",
+      "verb": "off",
+      "status": "succeeded",
+      "round_trip_ms": 79.2,
+      "hub_admit_ms": 39,
+      "provider_ms": 2,
+      "complete_ms": 41
+    },
+    {
+      "request_id": "bench:6f2809d0ca51",
+      "verb": "on",
+      "status": "succeeded",
+      "round_trip_ms": 77.4,
+      "hub_admit_ms": 37,
+      "provider_ms": 2,
+      "complete_ms": 39
+    },
+    {
+      "request_id": "bench:7d317b388507",
+      "verb": "off",
+      "status": "succeeded",
+      "round_trip_ms": 75.8,
+      "hub_admit_ms": 38,
+      "provider_ms": 2,
+      "complete_ms": 40
+    },
+    {
+      "request_id": "bench:17786fb74c8b",
+      "verb": "on",
+      "status": "succeeded",
+      "round_trip_ms": 75.6,
+      "hub_admit_ms": 37,
+      "provider_ms": 2,
+      "complete_ms": 39
+    },
+    {
+      "request_id": "bench:525eb2b31a3f",
+      "verb": "off",
+      "status": "succeeded",
+      "round_trip_ms": 70.9,
+      "hub_admit_ms": 33,
+      "provider_ms": 3,
+      "complete_ms": 36
+    },
+    {
+      "request_id": "bench:76d962c1797f",
+      "verb": "on",
+      "status": "succeeded",
+      "round_trip_ms": 80.5,
+      "hub_admit_ms": 39,
+      "provider_ms": 2,
+      "complete_ms": 41
+    },
+    {
+      "request_id": "bench:aae24dd4eec6",
+      "verb": "off",
+      "status": "succeeded",
+      "round_trip_ms": 76.7,
+      "hub_admit_ms": 36,
+      "provider_ms": 2,
+      "complete_ms": 38
+    },
+    {
+      "request_id": "bench:12886ed7dfe0",
+      "verb": "on",
+      "status": "succeeded",
+      "round_trip_ms": 74.9,
+      "hub_admit_ms": 37,
+      "provider_ms": 2,
+      "complete_ms": 39
+    },
+    {
+      "request_id": "bench:57f528f1401c",
+      "verb": "off",
+      "status": "succeeded",
+      "round_trip_ms": 74.8,
+      "hub_admit_ms": 37,
+      "provider_ms": 1,
+      "complete_ms": 38
+    },
+    {
+      "request_id": "bench:cb1a327c32ac",
+      "verb": "on",
+      "status": "succeeded",
+      "round_trip_ms": 73.7,
+      "hub_admit_ms": 37,
+      "provider_ms": 2,
+      "complete_ms": 39
+    },
+    {
+      "request_id": "bench:ffa660721a7e",
+      "verb": "off",
+      "status": "succeeded",
+      "round_trip_ms": 73.8,
+      "hub_admit_ms": 37,
+      "provider_ms": 2,
+      "complete_ms": 39
+    },
+    {
+      "request_id": "bench:8d495b5e97de",
+      "verb": "on",
+      "status": "succeeded",
+      "round_trip_ms": 78.7,
+      "hub_admit_ms": 40,
+      "provider_ms": 2,
+      "complete_ms": 42
+    },
+    {
+      "request_id": "bench:d93ce73e6d6c",
+      "verb": "off",
+      "status": "succeeded",
+      "round_trip_ms": 71.5,
+      "hub_admit_ms": 35,
+      "provider_ms": 2,
+      "complete_ms": 37
+    },
+    {
+      "request_id": "bench:89d9ceeb1c0f",
+      "verb": "on",
+      "status": "succeeded",
+      "round_trip_ms": 81.2,
+      "hub_admit_ms": 41,
+      "provider_ms": 2,
+      "complete_ms": 43
+    },
+    {
+      "request_id": "bench:f967d00608fd",
+      "verb": "off",
+      "status": "succeeded",
+      "round_trip_ms": 66.4,
+      "hub_admit_ms": 31,
+      "provider_ms": 2,
+      "complete_ms": 33
+    },
+    {
+      "request_id": "bench:6182da87b4b5",
+      "verb": "on",
+      "status": "succeeded",
+      "round_trip_ms": 70.4,
+      "hub_admit_ms": 34,
+      "provider_ms": 2,
+      "complete_ms": 36
+    },
+    {
+      "request_id": "bench:839138b3aeb1",
+      "verb": "off",
+      "status": "succeeded",
+      "round_trip_ms": 70.0,
+      "hub_admit_ms": 35,
+      "provider_ms": 2,
+      "complete_ms": 37
+    }
+  ]
+}

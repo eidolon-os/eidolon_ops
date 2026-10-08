@@ -1,0 +1,207 @@
+{
+  "schema_version": 1,
+  "session_id": "esp32-a496b482-a793b185-00000001",
+  "turns": [
+    {
+      "index": 1,
+      "turn_id": "103d6ce1184d43da",
+      "utterance": "打开电视。",
+      "route": "primary",
+      "result": {
+        "schema_version": 1,
+        "turn_id": "103d6ce1184d43da",
+        "utterance": "打开电视。",
+        "outcome": "executed",
+        "message": "已打开电视",
+        "candidates": [],
+        "command": null
+      },
+      "continuation_probability": null,
+      "raw_model_http_output_recorded": false,
+      "command_reconstruction": {
+        "device_id": "living.tv",
+        "trait": "on_off",
+        "command": "on",
+        "params": {},
+        "evidence_level": "fixed_deployed_mapping_with_result_and_final_state_cross_check; not_saved_execute_HTTP_body"
+      },
+      "timings_ms": {
+        "laya_service_total": 440,
+        "understanding": 468.6,
+        "execution": 26.2,
+        "authority": 21,
+        "agent": 585,
+        "vad_to_final": 246,
+        "final_to_delivered": 649,
+        "vad_to_delivered": 895
+      },
+      "timestamps_cst": {
+        "vad_end": "2026-10-02 21:30:55,665",
+        "final_asr": "2026-10-02 21:30:55,911",
+        "server_delivered": "2026-10-02 21:30:56,560"
+      }
+    },
+    {
+      "index": 2,
+      "turn_id": "c03d4c9049fa42ab",
+      "utterance": "调大音量20%。",
+      "route": "laya_continuation",
+      "result": {
+        "schema_version": 1,
+        "turn_id": "c03d4c9049fa42ab",
+        "utterance": "调大音量20%。",
+        "outcome": "executed",
+        "message": "电视 音量已调到 70",
+        "candidates": [],
+        "command": null
+      },
+      "continuation_probability": 0.9958,
+      "raw_model_http_output_recorded": false,
+      "command_reconstruction": {
+        "device_id": "living.tv",
+        "trait": "volume",
+        "command": "step",
+        "params": {
+          "delta": 20
+        },
+        "evidence_level": "fixed_deployed_mapping_with_result_and_final_state_cross_check; not_saved_execute_HTTP_body"
+      },
+      "timings_ms": {
+        "laya_service_total": 272,
+        "continuation": 282.3,
+        "understanding": 283.5,
+        "execution": 30.9,
+        "authority": 17,
+        "agent": 400,
+        "vad_to_final": 172,
+        "final_to_delivered": 464,
+        "vad_to_delivered": 636
+      },
+      "timestamps_cst": {
+        "vad_end": "2026-10-02 21:31:00,417",
+        "final_asr": "2026-10-02 21:31:00,589",
+        "server_delivered": "2026-10-02 21:31:01,053"
+      }
+    },
+    {
+      "index": 3,
+      "turn_id": "40a3a324a609439d",
+      "utterance": "关了它。",
+      "route": "laya_continuation",
+      "result": {
+        "schema_version": 1,
+        "turn_id": "40a3a324a609439d",
+        "utterance": "关了它。",
+        "outcome": "executed",
+        "message": "已关闭电视",
+        "candidates": [],
+        "command": null
+      },
+      "continuation_probability": 0.9934,
+      "raw_model_http_output_recorded": false,
+      "command_reconstruction": {
+        "device_id": "living.tv",
+        "trait": "on_off",
+        "command": "off",
+        "params": {},
+        "evidence_level": "fixed_deployed_mapping_with_result_and_final_state_cross_check; not_saved_execute_HTTP_body"
+      },
+      "timings_ms": {
+        "laya_service_total": 276,
+        "continuation": 282.7,
+        "understanding": 283.3,
+        "execution": 28.6,
+        "authority": 21,
+        "agent": 399,
+        "vad_to_final": 248,
+        "final_to_delivered": 456,
+        "vad_to_delivered": 704
+      },
+      "timestamps_cst": {
+        "vad_end": "2026-10-02 21:31:04,065",
+        "final_asr": "2026-10-02 21:31:04,313",
+        "server_delivered": "2026-10-02 21:31:04,769"
+      }
+    },
+    {
+      "index": 4,
+      "turn_id": "cdbf3e1c929c45d3",
+      "utterance": "开音箱。",
+      "route": "llm",
+      "result": {
+        "schema_version": 1,
+        "turn_id": "cdbf3e1c929c45d3",
+        "utterance": "开音箱。",
+        "outcome": "executed",
+        "message": "已打开智能音箱",
+        "candidates": [],
+        "command": null
+      },
+      "continuation_probability": 0.9651,
+      "raw_model_http_output_recorded": false,
+      "command_reconstruction": {
+        "device_id": "living.speaker",
+        "trait": "on_off",
+        "command": "on",
+        "params": {},
+        "evidence_level": "fixed_deployed_mapping_with_result_and_final_state_cross_check; not_saved_execute_HTTP_body"
+      },
+      "timings_ms": {
+        "laya_service_total": 274,
+        "continuation": 283.9,
+        "understanding": 1104.7,
+        "execution": 23.9,
+        "authority": 13,
+        "agent": 1228,
+        "vad_to_final": 275,
+        "final_to_delivered": 1285,
+        "vad_to_delivered": 1560
+      },
+      "timestamps_cst": {
+        "vad_end": "2026-10-02 21:31:08,351",
+        "final_asr": "2026-10-02 21:31:08,626",
+        "server_delivered": "2026-10-02 21:31:09,911"
+      }
+    },
+    {
+      "index": 5,
+      "turn_id": "584a55370f9342e4",
+      "utterance": "关了它。",
+      "route": "laya_continuation",
+      "result": {
+        "schema_version": 1,
+        "turn_id": "584a55370f9342e4",
+        "utterance": "关了它。",
+        "outcome": "executed",
+        "message": "已关闭智能音箱",
+        "candidates": [],
+        "command": null
+      },
+      "continuation_probability": 0.9953,
+      "raw_model_http_output_recorded": false,
+      "command_reconstruction": {
+        "device_id": "living.speaker",
+        "trait": "on_off",
+        "command": "off",
+        "params": {},
+        "evidence_level": "fixed_deployed_mapping_with_result_and_final_state_cross_check; not_saved_execute_HTTP_body"
+      },
+      "timings_ms": {
+        "laya_service_total": 296,
+        "continuation": 301.4,
+        "understanding": 301.7,
+        "execution": 26.1,
+        "authority": 16,
+        "agent": 401,
+        "vad_to_final": 352,
+        "final_to_delivered": 462,
+        "vad_to_delivered": 814
+      },
+      "timestamps_cst": {
+        "vad_end": "2026-10-02 21:31:12,655",
+        "final_asr": "2026-10-02 21:31:13,007",
+        "server_delivered": "2026-10-02 21:31:13,469"
+      }
+    }
+  ]
+}

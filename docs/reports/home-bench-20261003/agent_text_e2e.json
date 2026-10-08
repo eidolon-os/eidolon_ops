@@ -1,0 +1,44 @@
+[
+  {
+    "utterance": "打开厨房灯",
+    "outcome": "executed",
+    "message": "已打开厨房灯",
+    "elapsed_ms": 135.5
+  },
+  {
+    "utterance": "关闭厨房灯",
+    "outcome": "executed",
+    "message": "已关闭厨房灯",
+    "elapsed_ms": 129.9
+  },
+  {
+    "utterance": "厨房灯调到70",
+    "outcome": "executed",
+    "message": "厨房灯 已调到 70%",
+    "elapsed_ms": 196.7
+  },
+  {
+    "utterance": "把书房空调调到24度",
+    "outcome": "executed",
+    "message": "书房空调 已设为 24°C",
+    "elapsed_ms": 189.3
+  },
+  {
+    "utterance": "书房空调调成制热",
+    "outcome": "executed",
+    "message": "书房空调 已切换到制热",
+    "elapsed_ms": 210.8
+  },
+  {
+    "utterance": "打开大厅窗帘",
+    "outcome": "executed",
+    "message": "已打开大厅窗帘",
+    "elapsed_ms": 199.7
+  },
+  {
+    "utterance": "关闭主卧吸顶灯",
+    "outcome": "executed",
+    "message": "主卧吸顶灯 已交给平台，平台回复：好的，为您关闭主卧吸顶灯",
+    "elapsed_ms": 140.8
+  }
+]
