@@ -615,6 +615,10 @@ Linux `SO_PEERCRED` 或 Darwin `getpeereid` / `LOCAL_PEERPID` 实现。两端 `a
 `status` 默认展示 Host LAN IP、全部非 loopback IPv4、每个服务的监听地址/端口、服务状态和异常建议；自动化需要完整 Evidence 时使用
 `./eidolon HOST status --json`。
 
+源码运行表示进程从工作树加载代码，**不表示 git commit/pull 会更新常驻进程**。修改 Python、提示词或其他与代码配套的资源后，交付必须包含受影响服务的正式重启和实际功能验收；PID 存活或 `/health` 为绿不能证明运行的是新协议。单服务代码更新使用下方入口；跨组件协议、依赖或生成配置变化使用整个 Host 的 `restart`，不要只刷新磁盘配置就宣称更新完成。
+
+Memory 的抽取提示词、配置、解析协议和 schema 在 worker 初始化时绑定为同一策略，运行中不热读新提示词。更新 Memory 抽取代码后执行 `./eidolon mac service restart memory-supervisor`（同时更新其 Realm 子进程），核对新 worker 的 `steward_policy_loaded` / `extractor_version`，再验证真实事件的决策、事实投影以及 Mobile 使用的记忆库/图谱接口。历史失败或空决策不会因重启自动恢复：必须定位原事件，按新的抽取版本经过现有消费链重处理；保留原身份与时间、删除 tombstone 和旧决策审计，不清库或直接补写事实。协议校验失败使用既有 NAK/DLQ 路径，不能当空记忆成功 ACK。
+
 **单个服务只有一条路**：`./eidolon HOST service restart SERVICE [--dry-run]`。它请该 Host 的 `eidolond`
 （服务 desired state 的唯一 writer）重启一个它管理的服务——Mac 上直接连本机的 `run/system.sock`，Pi 上由注入的
 host agent 在 Host 本机连接，不开新端口。`eidolond` 的拒绝（不认识的服务名、此 Host 上 `external`、迁移中、revision
