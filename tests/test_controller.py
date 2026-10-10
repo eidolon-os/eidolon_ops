@@ -1694,6 +1694,43 @@ def test_activation_delivers_what_the_release_declares_before_switching(
     assert phases.index("credential_convergence") < phases.index("activate")
 
 
+def test_the_installed_identity_is_observed_again_after_our_own_convergence(
+    setup_controller, monkeypatch
+) -> None:
+    """The guard against a Host changing under a deploy must not trip on the deploy.
+
+    Host-bound env files are part of the installed identity the preflight
+    observes, and the Host-layer refresh refuses if it moved since. The first
+    real run converged credentials into those very files and was refused by
+    its own write. The observation is retaken right after it.
+    """
+
+    controller, _runner, transport = setup_controller
+    controller.host_layer.app = _app()
+    transport.overrides["converge-secret-inputs"] = _SHORT_HOST
+    events: list[str] = []
+
+    def converge(*, apply):
+        events.append("converge")
+        return {"status": "converged", "host": {**_SHORT_HOST, "added": dict(_SHORT_HOST["missing"])}}
+
+    def observe():
+        events.append("observe")
+        return {"status": "observed"}
+
+    controller.releases._converge_credentials = converge
+    monkeypatch.setattr(controller.host_layer, "prepare_deployment", observe)
+    monkeypatch.setattr(
+        controller.host_layer,
+        "refresh_release",
+        lambda release_id, *, cutover_mode="reversible": events.append("refresh") or {"status": "refreshed"},
+    )
+
+    controller.deploy(release_id="r1", resume=True, activate=True)
+
+    assert events == ["observe", "converge", "observe", "refresh"]
+
+
 def test_a_convergence_that_leaves_a_key_missing_switches_nothing(setup_controller) -> None:
     controller, _runner, transport = setup_controller
     transport.overrides["converge-secret-inputs"] = _SHORT_HOST

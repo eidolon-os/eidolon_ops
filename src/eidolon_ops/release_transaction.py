@@ -149,6 +149,14 @@ class ReleaseTransaction:
             raise OperationsError(
                 f"credential convergence left the Host short of {detail}; nothing was switched"
             )
+        if self.host_layer.app is not None:
+            # The Host-bound env files are part of the installed identity the
+            # preflight observed, and the Host-layer refresh refuses to proceed
+            # if that identity moved since — which is right for a change made
+            # by anyone else, and was this very convergence on the first real
+            # run. So the observation is retaken right after our own write,
+            # and the guard keeps covering everything that happens after it.
+            converged["installed_identity"] = self.host_layer.prepare_deployment()
         phases.append({"phase": "credential_convergence", "result": converged})
 
     def _backup_before_barrier(self, release_id: str, phases: Journal) -> None:
