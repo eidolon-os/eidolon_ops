@@ -258,6 +258,18 @@ commit is refused. That is correct — a release id names one exact combination 
 
 4. Require `status=activated`, `doctor status=healthy`, then `app-ready status=app_ready`.
 
+A Host many releases behind is upgraded the same way; what used to be manual is part of the transaction:
+
+- Credentials the candidate declares and the Host lacks are listed in the prepare result
+  (`local.install_input_contract.will_add`) and converged by activation before anything switches —
+  additive, no separate `converge-inputs`/`restart`.
+- A release whose activation migrates persistent state (a new Data migration, a Bootstrap schema advance)
+  still needs `--cutover-mode forward-only`; the activator refuses it otherwise, at the prepare dry-run.
+  Such an activation first backs up the running release into `workspace.backup_root`
+  (default `.eidolon-ops/backups/before-<release>-<time>/`) and stops before the barrier if it cannot.
+- `backup`/`restore` describe the release the Host runs, read from the commits it recorded for that release,
+  not from this checkout — an older release is never asked for state a later commit declared.
+
 Activation is: sealed preflight → snapshot → quiesce → assets/links → start → 13 readiness → receipt. Failure runs
 exact snapshot restore. `--resume` never means “ignore a failed gate”; it skips only already-created bundle/upload/
 prepare and re-proves the sealed release. A degraded post-activation doctor or App-ready result also restores the

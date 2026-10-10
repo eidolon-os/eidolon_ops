@@ -265,11 +265,19 @@ class HostLayer:
                 raise OperationsError(str(exc)) from exc
         return payload
 
-    def state_payload(self) -> dict[str, object]:
-        """Resolve the selected revision's state before asking a Host to copy it."""
+    def state_payload(self, *, read_contract=None) -> dict[str, object]:
+        """Resolve a release's declared state before asking a Host to copy it.
+
+        ``read_contract`` names whose declaration that is. Copying what a Host
+        holds is a question about the release it runs, so backup and restore
+        pass a reader pinned to the commits that release shipped; without one
+        this is the selected revision, which is only the same thing when the
+        Host already runs it.
+        """
         topology = read_component_contracts(
             {source_id: source.path for source_id, source in self.config.sources.items()},
-            self.config.capabilities, read_contract=self._read_component_contract,
+            self.config.capabilities,
+            read_contract=read_contract or self._read_component_contract,
         )
         return {**self.target_payload(), "authority_inventory": topology.authority_payload()}
 

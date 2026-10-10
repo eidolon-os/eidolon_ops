@@ -73,6 +73,7 @@ remote_uv = "/usr/local/bin/uv"
 
 [workspace]
 bundle_root = "{tmp_path / "bundles"}"
+backup_root = "{tmp_path / "host-backups"}"
 release_cli = "{release_cli}"
 uv = "{local_uv}"
 python_index_url = "https://pypi.org/simple"

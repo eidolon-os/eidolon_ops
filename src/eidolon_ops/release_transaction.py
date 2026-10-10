@@ -8,7 +8,8 @@ does not leave the Host able to serve the App is put back.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from datetime import UTC, datetime
 from pathlib import Path
 
 from eidolon_ops.config import OperationsConfig, validate_release_id
@@ -62,6 +63,8 @@ class ReleaseTransaction:
         app_ready: Callable[[], dict[str, object]],
         authority_capability: Callable[..., dict[str, object] | None],
         confirm_authority_established: Callable[..., dict[str, object] | None],
+        converge_credentials: Callable[..., dict[str, object]] | None = None,
+        backup_running_release: Callable[..., dict[str, object]] | None = None,
         progress: ProgressSink | None = None,
     ) -> None:
         self.config = config
@@ -74,43 +77,108 @@ class ReleaseTransaction:
         self._app_ready = app_ready
         self._authority_capability = authority_capability
         self._confirm_authority_established = confirm_authority_established
+        self._converge_credentials = converge_credentials
+        self._backup_running_release = backup_running_release
         self.progress = progress
 
-    def _require_declared_credentials(self) -> dict[str, object]:
-        """Refuse to ship onto a Host that is short a declared credential.
+    def _declared_credentials(self) -> dict[str, object]:
+        """Which credentials this release declares and the Host does not hold.
 
         Asks the *Host*, not the workstation. The workstation's input set is the
-        source a Host is converged from and is checked when it is written and
-        when it is repaired; what decides whether this release will work is what
-        is in ``/etc/eidolon`` on the machine receiving it. Those two drift
-        independently — repairing the input set and delivering it are separate
-        operations — and the gap between them is where a fixed workstation and a
-        broken Host sat together for two weeks.
+        source a Host is converged from; what decides whether this release will
+        work is what is in ``/etc/eidolon`` on the machine receiving it. Those
+        two drift independently, and the gap between them is where a fixed
+        workstation and a broken Host sat together for two weeks.
 
-        Names the verb that fixes it. A gate that refuses without saying what to
-        run is a gate people learn to work around.
+        Reported, not refused. This used to stop the deploy and tell the
+        operator to converge and then restart — restart the *running* release,
+        which has no use for a credential only the candidate reads. Delivering
+        what a release declares is part of shipping it, so activation converges
+        these before it switches anything (additive: a value a Host holds is
+        never read or replaced), and the restart is the activation itself.
         """
 
         # Only what the question needs. A read of which keys a Host holds does
-        # not need the Host-layer payload, and asking for it would make this gate
-        # depend on deriving the Host identity — which is a different failure to
-        # report and one this check has no business raising.
+        # not need the Host-layer payload, and asking for it would make this
+        # depend on deriving the Host identity — a different failure to report.
         host = self.transport.run_agent(
             "converge-secret-inputs",
             {"declared": declared_secret_env_keys(), "apply": False},
             timeout=120,
         )
         outstanding = host.get("missing") or {}
-        if outstanding:
-            short = ", ".join(
-                f"{name} is missing {', '.join(keys)}" for name, keys in sorted(outstanding.items())
+        return {
+            "host": host,
+            "will_add": {name: list(keys) for name, keys in sorted(outstanding.items())},
+        }
+
+    def _converge_declared_credentials(
+        self, phases: Journal, declared: Mapping[str, object]
+    ) -> None:
+        """Give the Host what this release declares, before anything switches.
+
+        Converged into the running release's configuration, which ignores keys
+        it does not read; so a reversible activation that later restores the
+        previous release leaves that release working exactly as before. A Host
+        that already holds everything is left alone: staging the whole input
+        set onto it to deliver nothing is not free.
+        """
+
+        phases.begin("credential_convergence")
+        if not declared.get("will_add"):
+            phases.append(
+                {"phase": "credential_convergence", "result": {"status": "already_current"}}
             )
+            return
+        if self._converge_credentials is None:
+            raise OperationsError("this deployer has no credential convergence wired")
+        converged = self._converge_credentials(apply=True)
+        host = converged.get("host") if isinstance(converged, Mapping) else None
+        if not isinstance(host, Mapping):
+            raise OperationsError("credential convergence returned no Host report")
+        # `missing` is what the Host lacked when asked; `added` is what it was
+        # given. Short is whatever the first names and the second does not.
+        added = host.get("added") or {}
+        short = {
+            name: [key for key in keys if key not in (added.get(name) or [])]
+            for name, keys in (host.get("missing") or {}).items()
+        }
+        short = {name: keys for name, keys in short.items() if keys}
+        if short:
+            detail = ", ".join(f"{name}: {', '.join(keys)}" for name, keys in sorted(short.items()))
             raise OperationsError(
-                "this Host does not hold every credential the product declares "
-                f"({short}); run `converge-inputs --apply`, then `restart`, "
-                "before shipping a release that expects them"
+                f"credential convergence left the Host short of {detail}; nothing was switched"
             )
-        return {"host": host}
+        phases.append({"phase": "credential_convergence", "result": converged})
+
+    def _backup_before_barrier(self, release_id: str, phases: Journal) -> None:
+        """Copy the running release's state before a migration nothing can undo.
+
+        A forward-only activation starts a candidate that migrates persistent
+        state, and from that moment neither the snapshot nor a rollback brings
+        the old data back. Every mature updater takes this copy itself rather
+        than leaving it to a runbook line; one that is skipped is the one that
+        was needed. A copy that cannot be taken stops the activation here,
+        before the barrier, where stopping is still free.
+        """
+
+        phases.begin("pre_barrier_backup")
+        if self._backup_running_release is None:
+            raise OperationsError("this deployer has no running-release backup wired")
+        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        output = self.config.workspace.backup_root / f"before-{release_id}-{stamp}"
+        try:
+            captured = self._backup_running_release(output=output)
+        except OperationsError as exc:
+            raise OperationsError(
+                f"the running release could not be backed up before a forward-only "
+                f"activation ({exc}); nothing was switched"
+            ) from exc
+        if not isinstance(captured, Mapping) or captured.get("status") != "captured":
+            raise OperationsError(
+                "the running release backup returned no captured evidence; nothing was switched"
+            )
+        phases.append({"phase": "pre_barrier_backup", "result": captured})
 
     def deploy(
         self,
@@ -134,9 +202,9 @@ class ReleaseTransaction:
         # which is exactly what happened: two credentials were added to the
         # product on 2026-08-25 and the Host installed on 2026-08-10 could not be
         # given them, so every memory and conversation feature answered 503 while
-        # deploy after deploy reported success. Refusing here rather than warning,
-        # because a warning in a release log is a thing nobody reads twice.
-        local["install_input_contract"] = self._require_declared_credentials()
+        # deploy after deploy reported success. Said in the plan; delivered by
+        # activation before it switches anything (`_converge_declared_credentials`).
+        local["install_input_contract"] = self._declared_credentials()
         if self.host_layer.app is not None:
             local["installed_identity"] = self.host_layer.prepare_deployment()
         # Said before the bundle is sealed, not after something fails.
@@ -186,6 +254,12 @@ class ReleaseTransaction:
                     "phases": phases,
                     "next": "rerun with --resume --activate after reviewing previous_targets",
                 }
+            # Both before anything switches, in this order: the copy is of the
+            # state as it stood, and only then does the Host gain what the
+            # candidate declares.
+            if cutover_mode == "forward-only":
+                self._backup_before_barrier(release_id, phases)
+            self._converge_declared_credentials(phases, local["install_input_contract"])
             phases.begin("service_identities")
             identities = self.transport.run_agent(
                 "ensure-service-identities",

@@ -255,6 +255,12 @@ class WorkspaceConfig:
     #: A version and a digest decide what goes here; nothing outside Ops has to
     #: have built anything for a release to be sealable.
     toolchain_root: Path
+    #: Where a backup a deploy takes on its own lands: before a release whose
+    #: activation migrates persistent state, the only way back is a copy taken
+    #: before it, so it is taken without being asked. Durable for the same
+    #: reason the toolchain is — a copy kept in a directory the OS purges is
+    #: not a backup.
+    backup_root: Path
     #: An override for the pinned uv, for a workstation that must use its own.
     #: Absent means the pinned one, which is the case worth defaulting to: a
     #: path someone has to keep alive is not a pin.
@@ -452,7 +458,7 @@ def load_config(
             "python_http_retries",
             "python_concurrent_downloads",
         },
-        optional={"uv", "toolchain_root"},
+        optional={"uv", "toolchain_root", "backup_root"},
         label="workspace",
     )
     workspace = WorkspaceConfig(
@@ -464,6 +470,11 @@ def load_config(
             workspace_wire.get("toolchain_root", "../.eidolon-ops/toolchain"),
             base,
             "workspace.toolchain_root",
+        ),
+        backup_root=_durable_local_path(
+            workspace_wire.get("backup_root", "../.eidolon-ops/backups"),
+            base,
+            "workspace.backup_root",
         ),
         uv=(
             _durable_local_path(workspace_wire["uv"], base, "workspace.uv")

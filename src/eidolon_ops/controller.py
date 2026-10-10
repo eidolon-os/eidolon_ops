@@ -299,6 +299,8 @@ class EidolonPiController:
             app_ready=self.app_ready,
             authority_capability=self.authority_capability,
             confirm_authority_established=self.confirm_authority_established,
+            converge_credentials=self.converge_inputs,
+            backup_running_release=self.backup,
             progress=progress,
         )
 
@@ -2159,7 +2161,7 @@ class EidolonPiController:
         release_id = self._active_release("release_id")
         result = self.transport.run_agent(
             "backup",
-            {**self.host_layer.state_payload(), "release_id": release_id},
+            {**self._running_release_state(release_id), "release_id": release_id},
             timeout=900,
         )
         destination = output / f"{release_id}-{result['host_id']}"
@@ -2176,7 +2178,7 @@ class EidolonPiController:
         """Put a backup back, after proving it belongs to this Host."""
 
         self.preflight.validate_ssh_material()
-        state_payload = self.host_layer.state_payload()
+        state_payload = self._running_release_state(self._active_release("release_id"))
         manifest_path = source / "backup.json"
         if not manifest_path.is_file():
             raise OperationsError(f"backup manifest is missing: {manifest_path}")
@@ -2215,6 +2217,47 @@ class EidolonPiController:
             python=self.active_release_interpreter(),
             timeout=900,
         )
+
+    def _running_release_state(self, release_id: str) -> dict[str, object]:
+        """The state the release a Host runs declares, read from its own commits.
+
+        Not this checkout's declaration. Backup and restore copy what the
+        running release owns, and a Host is routinely many commits behind the
+        workstation: a Pi five weeks behind was asked to copy a database its
+        Hub had never created, because a later commit declared it — the one
+        backup an upgrade off that Host most needed was the one it refused.
+        The Host records the commits each activation shipped, and those
+        commits carry the declaration that was in force; that is what is read.
+
+        Fails closed when the Host cannot say: a release whose commits are not
+        recorded, or not present here, has a declaration nobody can read, and
+        guessing it from HEAD is the mistake this replaced.
+        """
+
+        report = self.transport.run_agent("status", self.host_layer.target_payload())
+        shipped = self._shipped_sources(report, release_id)
+        if shipped is None:
+            raise OperationsError(
+                f"the Host runs {release_id} but records no commits for it, so the "
+                "state that release declares cannot be read"
+            )
+        revisions: dict[str, str] = {}
+        for source_id in self.config.sources:
+            recorded = shipped.get(source_id)
+            revision = recorded.get("revision") if isinstance(recorded, Mapping) else None
+            if not isinstance(revision, str) or not revision:
+                raise OperationsError(
+                    f"the Host records no commit of {source_id} for {release_id}, so the "
+                    "state that release declares cannot be read"
+                )
+            revisions[source_id] = revision
+
+        def read_contract(source_id: str) -> str | None:
+            return self.preflight.sources.component_contract(
+                source_id, revision=revisions[source_id]
+            )
+
+        return self.host_layer.state_payload(read_contract=read_contract)
 
     def active_release_interpreter(self) -> str:
         """Ask the target which interpreter can drive its active release."""

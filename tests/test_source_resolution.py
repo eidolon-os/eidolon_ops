@@ -39,6 +39,42 @@ def test_contract_comes_from_pinned_commit_even_with_different_worktree(config, 
     path.unlink()
     assert resolver.component_contract("eidolon_hub") == "version = 'A'\n"
 
+
+def test_a_contract_can_be_read_at_the_commit_a_host_runs(config, tmp_path):
+    """What a running release owns was declared by the commits it shipped.
+
+    A Host runs an older commit than the one a run selects, and the newer
+    declaration names state the older release never created. Reading at the
+    Host's commit gives that release's own answer, and the two answers are
+    kept apart rather than one shadowing the other.
+    """
+
+    repo = tmp_path / "repository"
+    repo.mkdir()
+
+    def git(*args):
+        return subprocess.run(
+            ["git", "-C", str(repo), *args], check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+    git("init", "-q")
+    (repo / "ops").mkdir()
+    path = repo / "ops/component.toml"
+    path.write_text("authorities = ['hub']\n")
+    git("add", ".")
+    git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "old")
+    running = git("rev-parse", "HEAD")
+    path.write_text("authorities = ['hub', 'integration']\n")
+    git("add", ".")
+    git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "new")
+    selected = git("rev-parse", "HEAD")
+    declared = replace(config.sources["eidolon_hub"], path=repo, revision=selected)
+    resolver = SourceResolver(replace(config, sources={"eidolon_hub": declared}), SubprocessRunner())
+
+    assert resolver.component_contract("eidolon_hub") == "authorities = ['hub', 'integration']\n"
+    assert resolver.component_contract("eidolon_hub", revision=running) == "authorities = ['hub']\n"
+    assert resolver.component_contract("eidolon_hub") == "authorities = ['hub', 'integration']\n"
+
 HEADS = {source_id: f"{index:040x}" for index, source_id in enumerate(SOURCE_IDS, start=1)}
 
 

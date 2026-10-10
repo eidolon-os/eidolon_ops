@@ -40,6 +40,10 @@ from eidolon_ops.process import ProcessResult
 from eidolon_ops.readiness import HostKind, expected_facts
 from eidolon_ops.release_matrix import SYSTEMD_ASSET_CONTRACTS
 
+#: What the fake Host's active release shipped: other commits than the heads
+#: this checkout stands at, so a reader pinned to HEAD is caught.
+SHIPPED_REVISIONS = {source_id: f"{index:040x}" for index, source_id in enumerate(SOURCE_HEADS, start=101)}
+
 pytestmark = pytest.mark.component
 
 #: A Host answering every fact in the contract. Derived rather than written out
@@ -403,7 +407,19 @@ class FakeTransport:
                 "retained_running_release_ids": [],
             }
         values = {
-            "status": {"status": "observed"},
+            # The active release (r1, per `active-release`) and the commits it
+            # shipped, which are deliberately not this checkout's HEADs: a
+            # Host runs what it was given, and describing its state is a
+            # question about those commits.
+            "status": {
+                "status": "observed",
+                "release_sources": [
+                    {"release_id": "r1", "sources": {
+                        source_id: {"revision": revision}
+                        for source_id, revision in SHIPPED_REVISIONS.items()
+                    }},
+                ],
+            },
             "foundation-doctor": {"status": "healthy"},
             "foundation-install": {"status": "installed"},
             "app-ready": {"status": "app_ready", "checks": dict(ALL_FACTS_TRUE)},
@@ -614,6 +630,24 @@ def setup_controller(config):
     controller = EidolonPiController(config, runner, transport=transport)
     _stub_input_contract(controller)
     return controller, runner, transport
+
+
+def _record_contract_reads(controller: EidolonPiController) -> None:
+    """Answer contract reads from this tree, and remember at which commit.
+
+    The fake git these tests run does not hold the sibling repositories'
+    histories, so the bytes come from the working tree; what is asserted is
+    the revision a caller asked for, which is the whole of the behaviour.
+    """
+
+    reads: list[tuple[str, str | None]] = []
+
+    def read(source_id: str, revision: str | None = None) -> str | None:
+        reads.append((source_id, revision))
+        return _current_component_contract(source_id)
+
+    controller.preflight.sources.component_contract = read  # type: ignore[method-assign]
+    controller.contract_reads = reads  # type: ignore[attr-defined]
 
 
 def test_local_preflight_proves_exact_commits(config) -> None:
@@ -1134,6 +1168,7 @@ def test_deploy_resume_activate_skips_transfer(setup_controller) -> None:
     assert [phase["phase"] for phase in result["phases"]] == [
         "release_reclaim_prepare",
         "dry_run",
+        "credential_convergence",
         "service_identities",
         "activate",
         "converge_running_release",
@@ -1193,6 +1228,7 @@ def test_deploy_prestages_host_application_before_component_activation(
     assert [phase["phase"] for phase in result["phases"]] == [
         "release_reclaim_prepare",
         "dry_run",
+        "credential_convergence",
         "service_identities",
         "host_cutover_snapshot",
         "host_application",
@@ -1211,6 +1247,7 @@ def test_forward_only_activation_failure_requires_same_schema_fix_without_abort(
     setup_controller, monkeypatch
 ) -> None:
     controller, _runner, transport = setup_controller
+    _record_contract_reads(controller)
     controller.host_layer.app = _app()
     monkeypatch.setattr(
         controller.host_layer,
@@ -1245,6 +1282,7 @@ def test_forward_only_health_gate_failure_never_restores_old_interpreters(
     setup_controller, monkeypatch
 ) -> None:
     controller, _runner, transport = setup_controller
+    _record_contract_reads(controller)
     controller.host_layer.app = _app()
     original_run = transport.run
 
@@ -1313,6 +1351,7 @@ def test_forward_only_failure_before_barrier_restores_host_layer_and_aborts(
     setup_controller, monkeypatch
 ) -> None:
     controller, _runner, transport = setup_controller
+    _record_contract_reads(controller)
     controller.host_layer.app = _app()
     monkeypatch.setattr(
         controller.host_layer,
@@ -1586,43 +1625,146 @@ def test_deploy_refuses_existing_local_bundle(config) -> None:
         controller.deploy(release_id="r1", resume=False, activate=False)
 
 
-def test_deploy_refuses_a_host_short_of_a_declared_credential(
+_SHORT_HOST = {
+    "status": "planned",
+    "added": {},
+    "missing": {
+        "admin.env": ["EIDOLON_ADMIN_MEMORY_API_SERVICE_TOKEN"],
+        "memory.env": ["EIDOLON_MEMORY_API_TOKEN"],
+    },
+    "absent": [],
+    "applied": False,
+}
+
+
+def test_a_host_short_of_a_declared_credential_is_told_what_it_will_be_given(
     setup_controller,
 ) -> None:
     """The gate that was missing, and the two weeks it would have saved.
 
     Two credentials were added to the product on 2026-08-25. The Host installed
     on 2026-08-10 could not be given them, so every memory and conversation
-    feature answered 503 — while releases kept shipping onto it and reporting
-    success, because nothing on the deploy path ever asked whether the Host held
-    what the code it was receiving required.
-
-    Refused before anything is prepared or transferred, and the message names
-    the verb that fixes it: a gate that refuses without saying what to run is a
-    gate people learn to route around.
+    feature answered 503 while releases kept shipping onto it and reporting
+    success. Asked before anything is prepared; said in the plan; and nothing
+    is written by a run that only prepares.
     """
 
     controller, _runner, transport = setup_controller
-    transport.overrides["converge-secret-inputs"] = {
+    transport.overrides["converge-secret-inputs"] = _SHORT_HOST
+    converged: list[bool] = []
+    controller.releases._converge_credentials = lambda *, apply: converged.append(apply)
+
+    result = controller.deploy(release_id="r1", resume=False, activate=False)
+
+    assert result["status"] == "dry_run"
+    assert result["local"]["install_input_contract"]["will_add"] == {
+        "admin.env": ["EIDOLON_ADMIN_MEMORY_API_SERVICE_TOKEN"],
+        "memory.env": ["EIDOLON_MEMORY_API_TOKEN"],
+    }
+    assert converged == []
+
+
+def test_activation_delivers_what_the_release_declares_before_switching(
+    setup_controller,
+) -> None:
+    """Delivering a release's credentials is part of shipping it.
+
+    It used to stop and send the operator to converge and then restart the
+    *running* release, which has no use for a key only the candidate reads.
+    Now activation converges them — additively — before anything switches,
+    and the activation's own restart is the one that reads them.
+    """
+
+    controller, _runner, transport = setup_controller
+    transport.overrides["converge-secret-inputs"] = _SHORT_HOST
+    converged: list[bool] = []
+
+    def converge(*, apply):
+        converged.append(apply)
+        return {"status": "converged", "host": {**_SHORT_HOST, "added": dict(_SHORT_HOST["missing"])}}
+
+    controller.releases._converge_credentials = converge
+
+    result = controller.deploy(release_id="r1", resume=True, activate=True)
+
+    assert result["status"] == "activated"
+    assert converged == [True]
+    phases = [phase["phase"] for phase in result["phases"]]
+    assert phases.index("credential_convergence") < phases.index("service_identities")
+    assert phases.index("credential_convergence") < phases.index("activate")
+
+
+def test_a_convergence_that_leaves_a_key_missing_switches_nothing(setup_controller) -> None:
+    controller, _runner, transport = setup_controller
+    transport.overrides["converge-secret-inputs"] = _SHORT_HOST
+    controller.releases._converge_credentials = lambda *, apply: {
         "status": "planned",
-        "added": {},
-        "missing": {
-            "admin.env": ["EIDOLON_ADMIN_MEMORY_API_SERVICE_TOKEN"],
-            "memory.env": ["EIDOLON_MEMORY_API_TOKEN"],
-        },
-        "absent": [],
-        "applied": False,
+        "host": {**_SHORT_HOST, "added": {"admin.env": ["EIDOLON_ADMIN_MEMORY_API_SERVICE_TOKEN"]}},
     }
 
-    with pytest.raises(OperationsError) as refused:
-        controller.deploy(release_id="r1", resume=False, activate=True)
+    with pytest.raises(OperationsError, match=r"memory\.env: EIDOLON_MEMORY_API_TOKEN"):
+        controller.deploy(release_id="r1", resume=True, activate=True)
 
-    message = str(refused.value)
-    assert "EIDOLON_ADMIN_MEMORY_API_SERVICE_TOKEN" in message
-    assert "EIDOLON_MEMORY_API_TOKEN" in message
-    assert "converge-inputs --apply" in message
-    # Nothing was moved. The refusal is the whole operation.
-    assert not any(call[0] in {"guard-upload", "finalize-upload"} for call in transport.agent_calls)
+    assert not any(call[0] == "ensure-service-identities" for call in transport.agent_calls)
+
+
+def test_forward_only_activation_backs_up_the_running_release_first(
+    setup_controller, monkeypatch
+) -> None:
+    """A migration nothing can undo is preceded by the copy that can.
+
+    Taken without being asked, of the release the Host runs — described by the
+    commits it shipped, not this checkout — and before anything switches.
+    """
+
+    controller, _runner, transport = setup_controller
+    _record_contract_reads(controller)
+    controller.host_layer.app = _app()
+    monkeypatch.setattr(
+        controller.host_layer,
+        "refresh_release",
+        lambda release_id, *, cutover_mode="reversible": {"status": "refreshed"},
+    )
+
+    def stop_at_activation(*args, **kwargs):
+        raise RuntimeError("stopped at activation")
+
+    monkeypatch.setattr(controller.releases, "_activation_json", stop_at_activation)
+
+    with pytest.raises(RuntimeError, match="stopped at activation"):
+        controller.deploy(release_id="r2", resume=False, activate=True, cutover_mode="forward-only")
+
+    actions = [call[0] for call in transport.agent_calls]
+    assert actions.index("backup") < actions.index("ensure-service-identities")
+    # The candidate's own declarations are read at HEAD, unpinned; the backup's
+    # are the running release's, pinned to exactly what it shipped.
+    pinned = [read for read in controller.contract_reads if read[1] is not None]
+    assert sorted(pinned) == sorted(SHIPPED_REVISIONS.items())
+    backups = list(controller.config.workspace.backup_root.iterdir())
+    assert len(backups) == 1 and backups[0].name.startswith("before-r2-")
+    assert (backups[0] / "r1-ehost-0123456789abcdefabcd" / "backup.json").is_file()
+
+
+def test_a_backup_that_cannot_be_taken_stops_forward_only_before_the_barrier(
+    setup_controller,
+) -> None:
+    controller, _runner, transport = setup_controller
+    _record_contract_reads(controller)
+    transport.fail_actions["backup"] = OperationsError("authority snapshot failed: hub")
+
+    with pytest.raises(OperationsError, match="could not be backed up"):
+        controller.deploy(release_id="r2", resume=False, activate=True, cutover_mode="forward-only")
+
+    assert not any(call[0] == "ensure-service-identities" for call in transport.agent_calls)
+
+
+def test_a_reversible_activation_takes_no_backup(setup_controller) -> None:
+    controller, _runner, transport = setup_controller
+
+    result = controller.deploy(release_id="r1", resume=True, activate=True)
+
+    assert "pre_barrier_backup" not in [phase["phase"] for phase in result["phases"]]
+    assert not any(call[0] == "backup" for call in transport.agent_calls)
 
 
 def test_deploy_asks_the_host_rather_than_the_workstation(setup_controller) -> None:
@@ -2286,12 +2428,15 @@ def test_a_backup_is_taken_on_the_host_and_brought_here(setup_controller, tmp_pa
     """Left on the Host it would be lost with the Host."""
 
     controller, _runner, transport = setup_controller
-    controller.host_layer._read_component_contract = _current_component_contract
+    _record_contract_reads(controller)
     output = tmp_path / "backups"
 
     result = controller.backup(output=output)
 
     assert result["status"] == "captured"
+    # Described by the release it runs: every declaration was read at the
+    # commit that release shipped, none at this checkout's HEAD.
+    assert sorted(controller.contract_reads) == sorted(SHIPPED_REVISIONS.items())
     directory = output / "r1-ehost-0123456789abcdefabcd"
     assert result["local_directory"] == str(directory)
     assert transport.downloads == [("/var/tmp/eidolon-backup-r1", directory, True)]
@@ -2306,7 +2451,7 @@ def test_a_restore_names_what_it_will_replace_before_it_replaces_it(
     setup_controller, tmp_path: Path
 ) -> None:
     controller, _runner, transport = setup_controller
-    controller.host_layer._read_component_contract = _current_component_contract
+    _record_contract_reads(controller)
     source = tmp_path / "backup"
     source.mkdir()
     with pytest.raises(OperationsError, match="manifest is missing"):
