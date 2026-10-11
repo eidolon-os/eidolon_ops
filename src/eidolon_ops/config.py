@@ -88,6 +88,7 @@ PRODUCT_UNITS = (
     "eidolon-unit-applier.service",
     "eidolon-data.service",
     "eidolon-data-workspace.service",
+    "eidolon-hub-discovery.service",
     "eidolon-hub.service",
     "eidolon-kernel.service",
     "eidolon-local-api.service",

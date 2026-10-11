@@ -259,10 +259,8 @@ class HostApplicationMaterializer:
         return f"""\
 [Unit]
 Description=Eidolon Host-bound Hub TLS ingress
-After=network-online.target eidolon-hub.service
+After=network-online.target
 Wants=network-online.target
-Requires=eidolon-hub.service
-PartOf=eidolon-hub.service
 
 [Service]
 Type=simple
@@ -289,11 +287,9 @@ WantedBy=multi-user.target
 
     @staticmethod
     def _hub_service_override() -> str:
-        # The ingress declares PartOf=, which carries stop and restart downward
-        # but never start. Activation stopped the Hub, took the ingress with it,
-        # started the Hub again and left the LAN closed — the App gate saw a
-        # refused connection on the Hub port and rolled the release back. Wants=
-        # completes the pair, so whoever starts the Hub opens the LAN with it.
+        # Starting Hub also ensures its public endpoint is available. Ingress
+        # deliberately has no Requires/PartOf edge back to Hub: it must keep
+        # serving authenticated 503 responses during application recovery.
         #
         # The settings path repeats what the current unit already says by
         # default, and is kept for the one case where the unit does not say it:

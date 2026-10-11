@@ -20,6 +20,7 @@ _UNIT_SERVICES = {
     "eidolon-data.service": "data",
     "eidolon-data-workspace.service": "data-workspace",
     "eidolon-hub.service": "hub-api",
+    "eidolon-hub-discovery.service": "hub-discovery",
     "eidolon-hub-ingress.service": "hub-ingress",
     "eidolon-kernel.service": "kernel",
     "eidolon-local-api.service": "local-api",

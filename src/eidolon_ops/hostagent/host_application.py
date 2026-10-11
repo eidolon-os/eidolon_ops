@@ -32,11 +32,10 @@ from .primitives import TargetError
 #: so even uncontested it was the worse of the two answers on a Host with both
 #: Wi-Fi and Ethernet.
 #:
-#: Nothing replaced it, because nothing needed to: a phone reaches the Local
-#: API from the explicit ``local_api_base_urls`` in the commissioning endpoint
-#: document and dials each candidate, and falls back to reading that document
-#: over BLE — neither path needs the name to resolve, and neither needs the Hub
-#: to be up. So the entry is withdrawn from Hosts that still carry one.
+#: Discovery now has its own process, reusing that same publisher. It owns
+#: the address independently of Hub database startup; the API process disables
+#: its embedded publisher through the deployment's explicit ownership setting.
+#: Never restore the Avahi alias: a second publisher would recreate the conflict.
 _AVAHI_HOSTS = Path("/etc/avahi/hosts")
 _AVAHI_UNIT = "avahi-daemon.service"
 
@@ -113,6 +112,19 @@ def refresh_host_application(
         cutover_mode,
     )
     _validate_product_settings_compatibility(stage, release_id, cutover_mode)
+    primitives.checked(
+        "candidate Hub database startup validation",
+        (
+            "/usr/bin/env",
+            f"EIDOLON_HUB_SETTINGS_YAML={stage / 'hub.generated.yaml'}",
+            f"/opt/eidolon/releases/{release_id}/eidolon_hub/.venv/bin/python",
+            "-c",
+            "import asyncio; from hub.config import HubConfig; "
+            "from hub.composition.preflight import validate_startup; "
+            "asyncio.run(validate_startup(HubConfig.load()))",
+        ),
+        timeout=120,
+    )
     if preserved_context is not None and preserved_context != deployment_identity.observe({}):
         raise TargetError("installed identity changed during configuration validation")
     # A refresh is the deployment path for Host-owned contract changes, not

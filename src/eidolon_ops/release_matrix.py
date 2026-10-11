@@ -57,6 +57,12 @@ SYSTEMD_ASSET_CONTRACTS = (
     ),
     SystemdAssetContract(
         "eidolon_kernel",
+        "deploy/systemd/eidolon-hub-discovery.service",
+        "eidolon-hub-discovery.service",
+        "eidolon_hub",
+    ),
+    SystemdAssetContract(
+        "eidolon_kernel",
         "deploy/systemd/eidolon-hub.service",
         "eidolon-hub.service",
         "eidolon_hub",

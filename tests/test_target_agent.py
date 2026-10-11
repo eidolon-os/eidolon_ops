@@ -1905,6 +1905,28 @@ def test_a_window_with_no_deadline_is_reported_as_nothing_not_as_a_word(
     assert host_lifecycle.commissioning_code(payload)["expires_at"] is None
 
 
+def test_candidate_migration_failure_precedes_any_host_configuration_change(tmp_path, monkeypatch):
+    monkeypatch.setattr(contract, "VAR_TMP", tmp_path)
+    (tmp_path / "eidolon-secrets-r1").mkdir()
+    monkeypatch.setattr(host_application, "_validate_hub_settings_compatibility", lambda *_: None)
+    monkeypatch.setattr(host_application, "_validate_product_settings_compatibility", lambda *_: None)
+    changed = []
+    monkeypatch.setattr(contract, "ensure_host_path_contract", lambda *a, **k: changed.append(True))
+
+    def reject(label, command, **kwargs):
+        assert label == "candidate Hub database startup validation"
+        assert "/opt/eidolon/releases/r1/eidolon_hub/.venv/bin/python" in command
+        assert "validate_startup" in command[-1]
+        raise primitives.TargetError("candidate migration failed")
+
+    monkeypatch.setattr(primitives, "checked", reject)
+    with pytest.raises(primitives.TargetError, match="candidate migration failed"):
+        host_application.refresh_host_application({
+            "release_id": "r1", "units": list(contract.PRODUCT_UNITS),
+        })
+    assert changed == []
+
+
 def test_the_derived_host_layer_is_delivered_without_a_reinstall(tmp_path, monkeypatch) -> None:
     """An activation replaces components and leaves this layer as it found it.
 

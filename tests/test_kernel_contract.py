@@ -34,7 +34,7 @@ KERNEL_ROOT = Path(__file__).resolve().parents[2] / "eidolon_kernel"
 #: somebody moves this line after reading the diff. Move it in the same commit
 #: that adapts ``hostagent/contract.py`` to whatever changed, and never to
 #: silence a failure without reading what moved.
-REVIEWED_KERNEL_CONTRACT_COMMIT = "745aa12884b5dccad26252184e8fb90adac08bae"
+REVIEWED_KERNEL_CONTRACT_COMMIT = "007b9e18fda36c19b50b7ae9f47f1ab09a3dc03e"
 
 pytestmark = pytest.mark.contract
 
@@ -99,9 +99,9 @@ def test_first_install_prerequisites_match_kernel_descriptor(kernel_contract) ->
 def test_current_release_contract_counts_are_not_stale_document_counts(
     kernel_contract,
 ) -> None:
-    assert len(kernel_contract.system_assets) == 25
+    assert len(kernel_contract.system_assets) == 26
     assert len(kernel_contract.required_secrets) == 11
-    assert len(kernel_contract.affected_units) == 18
+    assert len(kernel_contract.affected_units) == 19
     assert len(kernel_contract.readiness) == 15
 
 

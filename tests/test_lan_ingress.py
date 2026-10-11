@@ -100,7 +100,8 @@ def test_serve_configures_tls_listener_and_relays_connection(monkeypatch) -> Non
     assert captured["served"] is True
 
 
-def test_listener_closes_client_when_upstream_is_unavailable(monkeypatch) -> None:
+@pytest.mark.parametrize("error", [OSError("unavailable"), asyncio.TimeoutError()])
+def test_listener_reports_retryable_unavailability(monkeypatch, error) -> None:
     captured: dict[str, object] = {}
 
     class Context:
@@ -118,14 +119,16 @@ def test_listener_closes_client_when_upstream_is_unavailable(monkeypatch) -> Non
 
         async def serve_forever(self) -> None:
             callback = captured["callback"]
-            await callback(asyncio.StreamReader(), Writer())
+            writer = Writer()
+            await callback(asyncio.StreamReader(), writer)
+            captured["writer"] = writer
 
     async def start_server(callback, *_args, **_kwargs) -> Server:
         captured["callback"] = callback
         return Server()
 
     async def unavailable(*_args, **_kwargs):
-        raise OSError("unavailable")
+        raise error
 
     monkeypatch.setattr(lan_ingress.ssl, "SSLContext", lambda _protocol: Context())
     monkeypatch.setattr(lan_ingress.asyncio, "start_server", start_server)
@@ -140,6 +143,14 @@ def test_listener_closes_client_when_upstream_is_unavailable(monkeypatch) -> Non
     )
 
     asyncio.run(lan_ingress._serve(arguments))
+
+
+    writer = captured["writer"]
+    assert writer.closed
+    response = b"".join(writer.chunks)
+    assert response.startswith(b"HTTP/1.1 503 Service Unavailable\r\n")
+    assert b"Retry-After: 10\r\n" in response
+    assert b"Cache-Control: no-store\r\n" in response
 
 
 def test_main_rejects_invalid_port_and_handles_interrupt(monkeypatch) -> None:

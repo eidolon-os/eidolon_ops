@@ -190,10 +190,11 @@ def test_starting_the_hub_opens_the_lan_with_it(config) -> None:
     override = assets.files["hub-service-override.conf"].decode()
     ingress = assets.files["hub-ingress.service"].decode()
     assert "Wants=eidolon-hub-ingress.service" in override
-    assert "PartOf=eidolon-hub.service" in ingress
+    assert "PartOf=" not in ingress
+    assert "Requires=eidolon-hub.service" not in ingress
     # Wants= carries no ordering, and the ingress orders itself after the Hub,
     # so the pair cannot deadlock systemd.
-    assert "After=network-online.target eidolon-hub.service" in ingress
+    assert "After=network-online.target\n" in ingress
 
 
 def test_a_renderer_cannot_write_a_field_the_table_does_not_declare() -> None:

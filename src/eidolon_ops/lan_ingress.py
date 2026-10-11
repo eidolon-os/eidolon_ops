@@ -206,13 +206,26 @@ async def _serve(arguments: argparse.Namespace) -> None:
         client_writer: asyncio.StreamWriter,
     ) -> None:
         try:
-            upstream_reader, upstream_writer = await asyncio.open_connection(
-                arguments.upstream_host,
-                arguments.upstream_port,
+            upstream_reader, upstream_writer = await asyncio.wait_for(
+                asyncio.open_connection(arguments.upstream_host, arguments.upstream_port),
+                timeout=5,
             )
-        except OSError:
-            client_writer.close()
-            await client_writer.wait_closed()
+        except (OSError, asyncio.TimeoutError):
+            # The authenticated Host endpoint is alive even when its upstream
+            # is starting or unavailable. Never turn that into a transport EOF.
+            try:
+                client_writer.write(
+                    b"HTTP/1.1 503 Service Unavailable\r\n"
+                    b"Retry-After: 10\r\nCache-Control: no-store\r\n"
+                    b"Content-Length: 0\r\nConnection: close\r\n\r\n"
+                )
+                await asyncio.wait_for(client_writer.drain(), timeout=5)
+            except (OSError, asyncio.TimeoutError):
+                pass
+            finally:
+                client_writer.close()
+                with suppress(OSError):
+                    await client_writer.wait_closed()
             return
         observed = _observed_host(client_writer)
         await asyncio.gather(
