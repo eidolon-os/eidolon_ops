@@ -116,6 +116,8 @@ def refresh_host_application(
         "candidate Hub database startup validation",
         (
             "/usr/bin/env",
+            *contract.HOST_ENV_VALUE.splitlines(),
+            "EIDOLON_HUB_ENV_FILE=/etc/eidolon/hub.env",
             f"EIDOLON_HUB_SETTINGS_YAML={stage / 'hub.generated.yaml'}",
             f"/opt/eidolon/releases/{release_id}/eidolon_hub/.venv/bin/python",
             "-c",

@@ -1915,6 +1915,9 @@ def test_candidate_migration_failure_precedes_any_host_configuration_change(tmp_
 
     def reject(label, command, **kwargs):
         assert label == "candidate Hub database startup validation"
+        assert set(contract.HOST_ENV_VALUE.splitlines()).issubset(command)
+        assert "EIDOLON_STATE_ROOT=/var/lib/eidolon" in command
+        assert "EIDOLON_HUB_ENV_FILE=/etc/eidolon/hub.env" in command
         assert "/opt/eidolon/releases/r1/eidolon_hub/.venv/bin/python" in command
         assert "validate_startup" in command[-1]
         raise primitives.TargetError("candidate migration failed")
