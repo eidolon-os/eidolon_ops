@@ -17,7 +17,7 @@ import uuid
 from collections.abc import Mapping
 from pathlib import Path
 
-from . import authority_state, contract, primitives
+from . import authority_state, contract, host_application, primitives
 from .primitives import TargetError
 
 _SCHEMA_VERSION = 1
@@ -259,6 +259,7 @@ def restore(payload: Mapping[str, object], *, root: Path = Path("/")) -> dict[st
         finally:
             temporary.unlink(missing_ok=True)
     primitives.checked("Host layer rollback systemd reload", ("/usr/bin/systemctl", "daemon-reload"))
+    host_application.converge_host_application(root)
     # A capability change rewrites host.env before component activation. The
     # component rollback starts the old manager while that candidate env is
     # still present; reload its restored declaration so removed model services

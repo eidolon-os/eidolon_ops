@@ -1905,6 +1905,28 @@ def test_a_window_with_no_deadline_is_reported_as_nothing_not_as_a_word(
     assert host_lifecycle.commissioning_code(payload)["expires_at"] is None
 
 
+def test_host_ingress_process_is_refreshed_before_readiness(tmp_path, monkeypatch):
+    unit = tmp_path / str(contract.HOST_APPLICATION_INPUTS["hub-ingress.service"][0]).lstrip("/")
+    unit.parent.mkdir(parents=True)
+    unit.write_text("[Service]\n")
+    events = []
+    monkeypatch.setattr(primitives, "checked", lambda label, command, **kwargs: events.append(command))
+    monkeypatch.setattr(host_application, "await_host_application", lambda *args: events.append("ready"))
+    assert host_application.converge_host_application(tmp_path) == ["eidolon-hub-ingress.service"]
+    assert events == [("/usr/bin/systemctl", "restart", "eidolon-hub-ingress.service"), "ready"]
+
+
+def test_host_ingress_convergence_failure_cannot_pass_readiness(tmp_path, monkeypatch):
+    unit = tmp_path / str(contract.HOST_APPLICATION_INPUTS["hub-ingress.service"][0]).lstrip("/")
+    unit.parent.mkdir(parents=True)
+    unit.write_text("[Service]\n")
+    def reject(*args, **kwargs):
+        raise primitives.TargetError("ingress failed")
+    monkeypatch.setattr(primitives, "checked", reject)
+    with pytest.raises(primitives.TargetError, match="ingress failed"):
+        host_application.converge_host_application(tmp_path)
+
+
 def test_candidate_migration_failure_precedes_any_host_configuration_change(tmp_path, monkeypatch):
     monkeypatch.setattr(contract, "VAR_TMP", tmp_path)
     (tmp_path / "eidolon-secrets-r1").mkdir()

@@ -319,6 +319,9 @@ def converge(
             "release convergence requires every current link to name one release; "
             f"the Host publishes {sorted(active) or 'none'}"
         )
+    from .host_application import converge_host_application
+
+    host_restarted = converge_host_application(root)
     before = observe(root=root)
     running_releases = holders(before)
     stale = set(running_releases).difference(active)
@@ -332,7 +335,7 @@ def converge(
         return {
             "status": "converged",
             "release_id": next(iter(active)),
-            "restarted": [],
+            "restarted": host_restarted,
             "running_releases": holders(before),
         }
     running = units_running(before, stale)
@@ -367,7 +370,7 @@ def converge(
     return {
         "status": "reconverged",
         "release_id": next(iter(active)),
-        "restarted": restarted,
+        "restarted": host_restarted + restarted,
         "stopped": retired,
         "stale_release_ids": sorted(stale),
         "running_releases": holders(after),

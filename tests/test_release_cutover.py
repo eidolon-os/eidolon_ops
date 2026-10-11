@@ -124,6 +124,10 @@ def test_reversible_cutover_restores_host_files_and_absence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _host(tmp_path)
+    ingress = _path(tmp_path, contract.INSTALL_INPUTS["hub-ingress.service"][0])
+    ingress.parent.mkdir(parents=True, exist_ok=True)
+    ingress.write_text("previous ingress\n")
+    monkeypatch.setattr(cutover.host_application, "await_host_application", lambda *args: None)
     captured = cutover.snapshot(
         {"release_id": "release-9", "cutover_mode": "reversible"}, root=tmp_path
     )
@@ -136,7 +140,7 @@ def test_reversible_cutover_restores_host_files_and_absence(
     monkeypatch.setattr(
         cutover.primitives,
         "checked",
-        lambda _operation, command: commands.append(command),
+        lambda _operation, command, **kwargs: commands.append(command),
     )
 
     restored = cutover.restore(_payload(captured), root=tmp_path)
@@ -144,8 +148,9 @@ def test_reversible_cutover_restores_host_files_and_absence(
     assert restored["status"] == "host_cutover_restored"
     assert settings.read_text() == "previous\n"
     assert not certificate.exists()
-    assert commands[-2:] == [
+    assert commands[-3:] == [
         ("/usr/bin/systemctl", "daemon-reload"),
+        ("/usr/bin/systemctl", "restart", "eidolon-hub-ingress.service"),
         ("/usr/bin/systemctl", "restart", "eidolond.service"),
     ]
 

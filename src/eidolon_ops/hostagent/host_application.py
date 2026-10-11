@@ -40,10 +40,31 @@ _AVAHI_HOSTS = Path("/etc/avahi/hosts")
 _AVAHI_UNIT = "avahi-daemon.service"
 
 #: The Host layer Ops owns on top of a release: it fronts the Hub on the LAN,
-#: so the Hub declares Wants= on it and nothing here starts it by hand.
+#: so the Hub declares Wants= on it. Release convergence refreshes its process
+#: explicitly because it intentionally no longer shares the Hub lifecycle.
 HOST_APPLICATION_UNIT = "eidolon-hub-ingress.service"
 
 HOST_APPLICATION_READY_SECONDS = 30.0
+
+
+def converge_host_application(root: Path = Path("/")) -> list[str]:
+    """Load the installed Host layer before a release or rollback is judged.
+
+    Its executable has a stable path outside release directories, so observing
+    component symlinks cannot detect an ingress process still holding old code.
+    One restart within the deployment transaction covers code, TLS and unit
+    changes, including a retry after an interrupted configuration refresh.
+    """
+    unit_path = contract.HOST_APPLICATION_INPUTS["hub-ingress.service"][0]
+    if not primitives.host_path(root, unit_path).is_file():
+        return []
+    primitives.checked(
+        "Host application runtime convergence",
+        ("/usr/bin/systemctl", "restart", HOST_APPLICATION_UNIT),
+        timeout=120,
+    )
+    await_host_application(primitives.run, root)
+    return [HOST_APPLICATION_UNIT]
 
 
 def _expected_ids(user: str, group: str) -> tuple[int, int]:

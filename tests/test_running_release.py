@@ -288,6 +288,20 @@ def test_converge_leaves_a_host_that_already_agrees_alone(
     }
 
 
+def test_converge_refreshes_stable_host_ingress_even_when_release_links_agree(tmp_path, monkeypatch):
+    from eidolon_ops.hostagent import host_application
+    _link(tmp_path, "new")
+    unit = tmp_path / contract.HOST_APPLICATION_INPUTS["hub-ingress.service"][0].relative_to("/")
+    unit.parent.mkdir(parents=True)
+    unit.write_text("[Service]\n")
+    calls = []
+    monkeypatch.setattr(primitives, "checked", lambda label, cmd, **kwargs: calls.append(cmd))
+    monkeypatch.setattr(host_application, "await_host_application", lambda *args: None)
+    result = runtime_release.converge(_payload(), root=tmp_path)
+    assert calls == [("/usr/bin/systemctl", "restart", "eidolon-hub-ingress.service")]
+    assert result["restarted"] == ["eidolon-hub-ingress.service"]
+
+
 def test_converge_restarts_only_the_unit_that_disagrees(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
