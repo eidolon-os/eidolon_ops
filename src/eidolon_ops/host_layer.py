@@ -11,7 +11,6 @@ from __future__ import annotations
 import os
 import tempfile
 from pathlib import Path
-from urllib.parse import urlsplit
 
 from eidolon_ops.component_contract import read_component_contracts
 from eidolon_ops.config import INSTALL_FILE_NAMES, OperationsConfig
@@ -37,7 +36,6 @@ from eidolon_ops.owner_domain_assets import HostAuthority
 from eidolon_ops.paths import AppAccess
 from eidolon_ops.private_inputs import INSTALL_DESTINATION_NAMES
 from eidolon_ops.readiness import product_payload
-from eidolon_ops.settings_overlay import OverlayAssignment
 from eidolon_ops.source_assets import PORTS
 from eidolon_ops.transport import SSHTransport
 
@@ -80,20 +78,21 @@ HOST_BOUND_INPUTS = frozenset({"local_api_env", "channel_env"})
 PRODUCT_SETTINGS_INPUTS = ("agent_settings", "channel_settings", "memory_settings")
 
 
-def local_participation_model_required(overlay: tuple[OverlayAssignment, ...]) -> bool:
-    """The fixture tunnel is a bench endpoint; only the local participation service needs a task gate."""
+def local_participation_model_required(capabilities: frozenset[str]) -> bool:
+    """Whether this Host runs the participation model, and so must keep it ready.
 
-    for assignment in overlay:
-        if assignment.document != "agent.yaml" or assignment.display != "participation.url":
-            continue
-        address = urlsplit(str(assignment.value))
-        if (
-            address.hostname in {"127.0.0.1", "localhost", "::1"}
-            and address.port == PORTS["laya_participation_api"]
-            and address.path == "/v1/participation/decide"
-        ):
-            return True
-    return False
+    Decided by what the Host declares it runs, not by where its Agent is pointed. An
+    address on loopback at the service's port says nothing about who answers there: it is
+    as much a forwarder to a remote model, a bench tunnel, or a placeholder for a remote
+    that does not exist yet. Reading readiness off that address made a Host that runs no
+    model — the Pi, by its own profile — report degraded for a model it was never meant
+    to have. The capability is what installs the unit, so it is the one statement that
+    the model is this Host's to keep ready; a model reached anywhere else is not.
+    """
+
+    from eidolon_ops.config import MODEL_ENDPOINTS
+
+    return MODEL_ENDPOINTS["laya_participation"].capability in capabilities
 
 
 class HostLayer:
@@ -202,7 +201,7 @@ class HostLayer:
 
         port_registry = self._port_registry()
         participation_model_required = local_participation_model_required(
-            self.config.settings_overlay
+            self.config.capabilities
         )
         payload: dict[str, object] = {
             "units": list(self.config.units),

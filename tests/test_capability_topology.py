@@ -589,21 +589,41 @@ def test_local_participation_route_requires_its_own_service_and_the_v2_path() ->
     )
 
 
-def test_only_local_model_route_enables_the_task_readiness_gate() -> None:
+def test_only_a_host_that_runs_the_model_gates_readiness_on_it() -> None:
+    """The Pi names a loopback placeholder for a remote model it does not run.
+
+    Its profile says so — no `local_laya_participation` — and its readiness must not
+    wait on a model nothing on it was meant to serve. Only a Host that declares the
+    capability installs the unit, and only that Host is held to it being ready.
+    """
+
     from eidolon_ops.host_layer import local_participation_model_required
-    from eidolon_ops.settings_overlay import OverlayAssignment, parse_path
 
-    def route(value: str):
-        return (OverlayAssignment(
-            "agent.yaml", parse_path("participation.url", label="agent.yaml"), value,
-        ),)
+    assert not local_participation_model_required(frozenset())
+    assert not local_participation_model_required(frozenset({"local_laya", "rknpu2"}))
+    assert local_participation_model_required(
+        frozenset({"rknpu2", "local_laya_participation"})
+    )
 
-    assert not local_participation_model_required(route(
-        "http://127.0.0.1:8772/v1/participation/decide",
-    ))
-    assert local_participation_model_required(route(
-        "http://127.0.0.1:8773/v1/participation/decide",
-    ))
+
+def test_the_pi_profile_reaches_a_model_it_does_not_run_and_is_not_gated_on_it() -> None:
+    """A loopback endpoint without the capability is an address, not a promise."""
+
+    from eidolon_ops.config import load_config
+    from eidolon_ops.host_layer import local_participation_model_required
+    from eidolon_ops.paths import load_host_profile
+
+    profile = load_host_profile(Path("config/hosts/pi5.example.toml"))
+    config = load_config(
+        profile.operations_config,
+        capabilities=profile.capabilities,
+        model_endpoints=profile.model_endpoints,
+        settings_overlay=profile.settings_overlay,
+    )
+    overlay = {(item.document, item.display): item.value for item in config.settings_overlay}
+    assert "local_laya_participation" not in config.capabilities
+    assert overlay[("agent.yaml", "participation.url")].startswith("http://127.0.0.1:")
+    assert not local_participation_model_required(config.capabilities)
 
 
 def test_the_local_board_backup_preserves_the_local_model_route() -> None:
