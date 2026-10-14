@@ -335,7 +335,7 @@ OBSERVERS: dict[str, Observer] = {
     # app rewords them this fails and points at the harness, which is the right
     # place for that argument to happen.
     "proposal_observed": _phone_shows("proposal_observed", "明确批准这次 Enrollment"),
-    "approval_recorded": _phone_shows("approval_recorded", "已批准，等待设备领取 Grant"),
+    "approval_recorded": _phone_shows("approval_recorded", "已批准，等待设备领取接入凭据"),
     "grant_ack_observed": _device_says("grant_ack_observed", r"claim-grants:collect|ClaimGrant"),
     "claim_active_observed": _phone_shows("claim_active_observed", "已接入"),
     "mount_active_observed": _phone_shows("mount_active_observed", "挂载 revision"),
