@@ -35,6 +35,10 @@ def _config_for_init(
             "BAILIAN_STT_API_KEY": "channel-stt-key",
             "BAILIAN_TTS_API_KEY": "channel-tts-key",
             "SENSETIME_STT_API_KEY": "optional-stt-key",
+            "LIZHENG_MUSIC_API_BASE_URL": "https://music.example.test",
+            "LIZHENG_MUSIC_API_CHANNEL": "channel-1",
+            "LIZHENG_MUSIC_API_MAC": "AA:BB:CC:DD",
+            "LIZHENG_MUSIC_API_AES_KEY": "0123456789abcdef",
         },
         "eidolon_memory": {"EIDOLON_MEMORY_LLM_API_KEY": "memory-provider-key"},
     }
@@ -176,6 +180,10 @@ def test_initializer_creates_one_private_consistent_input_set(config, tmp_path: 
     assert channel["LIVEKIT_API_SECRET"] == livekit["LIVEKIT_API_SECRET"]
     assert channel["OPENAI_LLM_API_KEY"] == "channel-llm-key"
     assert channel["SENSETIME_STT_API_KEY"] == "optional-stt-key"
+    assert channel["LIZHENG_MUSIC_API_BASE_URL"] == "https://music.example.test"
+    assert channel["LIZHENG_MUSIC_API_CHANNEL"] == "channel-1"
+    assert channel["LIZHENG_MUSIC_API_MAC"] == "AA:BB:CC:DD"
+    assert channel["LIZHENG_MUSIC_API_AES_KEY"] == "0123456789abcdef"
     assert "SENSETIME_TTS_API_KEY" not in channel
     assert (target / "bootstrap.env").read_bytes() == b""
     agent_settings = (target / "agent.yaml").read_text(encoding="utf-8")
@@ -857,7 +865,14 @@ def test_an_optional_channel_credential_is_neither_required_nor_repaired(
     assert "SENSETIME_TTS_API_KEY" not in _env(target / "channel.env")
 
     assert DECLARED_ENV_KEYS["channel.env"].optional == frozenset(
-        {"SENSETIME_STT_API_KEY", "SENSETIME_TTS_API_KEY"}
+        {
+            "SENSETIME_STT_API_KEY",
+            "SENSETIME_TTS_API_KEY",
+            "LIZHENG_MUSIC_API_BASE_URL",
+            "LIZHENG_MUSIC_API_CHANNEL",
+            "LIZHENG_MUSIC_API_MAC",
+            "LIZHENG_MUSIC_API_AES_KEY",
+        }
     )
     # Absent and present are both legal, and neither is a repair.
     assert add_missing_install_credentials(configured, apply=False)["added"] == {}
