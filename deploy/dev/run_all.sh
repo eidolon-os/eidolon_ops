@@ -187,6 +187,12 @@ sv_ctl_ready() {
   [[ -S "$SV_SOCK" ]] && "${VENV}/bin/supervisorctl" -c "$SV_CONF" version >/dev/null 2>&1
 }
 
+# A dead Unix socket pathname cannot be reused; probe before reclaiming it.
+# Never infer ownership from an old PID (it may have been recycled).
+sv_reclaim_abandoned_socket() {
+  "${VENV}/bin/python" -m eidolon_ops.supervisor_socket "$SV_SOCK"
+}
+
 # Print the PID reported by the live supervisord XML-RPC socket.
 sv_pid_from_ctl() {
   [[ -S "$SV_SOCK" ]] || return 1
@@ -269,10 +275,7 @@ do_sv_start() {
     fi
     return 0
   fi
-  if [[ -S "$SV_SOCK" ]] && ! sv_ctl_ready; then
-    error "supervisor socket is unavailable; refusing to replace an unverified listener: $SV_SOCK"
-    return 1
-  fi
+  sv_reclaim_abandoned_socket || return 1
   info "starting supervisord (conf $SV_CONF)"
   "${VENV}/bin/supervisord" -c "$SV_CONF"
   # supervisord daemonises immediately and writes the pid file.
@@ -290,10 +293,7 @@ do_sv_start() {
 do_sv_stop() {
   local pid
   if ! pid="$(sv_pid_from_ctl)"; then
-    if [[ -S "$SV_SOCK" ]]; then
-      error "supervisor socket is unavailable; refusing to infer process ownership from a pidfile"
-      return 1
-    fi
+    sv_reclaim_abandoned_socket || return 1
     info "supervisord not running"
     return 0
   fi
