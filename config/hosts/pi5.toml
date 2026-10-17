@@ -62,3 +62,19 @@ provides = []
 [model_endpoints]
 laya_smart_home = "http://127.0.0.1:8771"
 laya_participation = "http://127.0.0.1:8773/v1/participation/decide"
+
+# BOX-3 intent trial: the Channel implementation is shared with Mac; only this Host selects d3.
+[[settings.overlay]]
+document = "channel.yaml"
+path = "turn_policy.interrupt.intent_provider"
+value = "systemone"
+
+[[settings.overlay]]
+document = "channel.yaml"
+path = "turn_policy.interrupt.systemone.endpoint"
+value = "http://decider.yangtzeailab.com/d3/v1/systemone"
+
+[[settings.overlay]]
+document = "channel.yaml"
+path = "turn_policy.interrupt.systemone.model"
+value = "d3"
