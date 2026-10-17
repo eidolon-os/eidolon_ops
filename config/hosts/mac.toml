@@ -70,3 +70,19 @@ value = "$EIDOLON_STATE_ROOT/agent/smarthome/interpretation.jsonl"
 document = "hub.yaml"
 path = "smarthome.providers"
 value = "virtual,zhoubian,homeassistant"
+
+# Use the shared SystemOne implementation for interrupt intent, as on Pi5.
+[[settings.overlay]]
+document = "channel.yaml"
+path = "turn_policy.interrupt.intent_provider"
+value = "systemone"
+
+[[settings.overlay]]
+document = "channel.yaml"
+path = "turn_policy.interrupt.systemone.endpoint"
+value = "http://decider.yangtzeailab.com/d3/v1/systemone"
+
+[[settings.overlay]]
+document = "channel.yaml"
+path = "turn_policy.interrupt.systemone.model"
+value = "d3"
