@@ -78,3 +78,9 @@ value = "http://decider.yangtzeailab.com/d3/v1/systemone"
 document = "channel.yaml"
 path = "turn_policy.interrupt.systemone.model"
 value = "d3"
+
+# BOX-3 ASR trial: preserve the tested model when rendering this host's settings.
+[[settings.overlay]]
+document = "channel.yaml"
+path = "bailian_stt.model"
+value = "qwen-audio-3.1-asr-flash-streaming"
