@@ -423,6 +423,17 @@ def test_a_release_input_may_not_be_pinned_where_the_system_sweeps(
         load_config(config_path)
 
 
+def test_workstation_uv_pins_linux_x86_64_artifact() -> None:
+    from eidolon_ops.workstation_toolchain import WORKSTATION_UV
+
+    url, digest = WORKSTATION_UV.source("x86_64")
+
+    assert url.endswith(
+        "uv-0.11.15-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl"
+    )
+    assert digest == "98edf1bdaf82447014852051d93e3ee95012509c567bf057fd117e6bdbd9a807"
+
+
 def test_an_output_may_live_in_a_temporary_directory(config_path: Path) -> None:
     # A bundle is rebuilt from its inputs, so losing one costs a build and
     # nothing else. Only what a release must be able to find again is refused.

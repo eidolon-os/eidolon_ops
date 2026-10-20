@@ -80,9 +80,15 @@ WORKSTATION_UV = WorkstationArtifact(
             "48627f895a1569e576822e0a8416aa4797eb4a4551de21a4ad97b9b5819d/"
             "uv-0.11.15-py3-none-macosx_11_0_arm64.whl"
         ),
+        "x86_64": (
+            "https://files.pythonhosted.org/packages/d3/16/"
+            "fe392d618af6b00c064b3e718d585dcf791546a77c5123a5bec07ce53a0a/"
+            "uv-0.11.15-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl"
+        ),
     },
     digests={
         "arm64": "9accae33619a9166e5c48531deb455d672cfb89f9357a00975e669c76b0bd49f",
+        "x86_64": "98edf1bdaf82447014852051d93e3ee95012509c567bf057fd117e6bdbd9a807",
     },
     executable="uv",
 )
