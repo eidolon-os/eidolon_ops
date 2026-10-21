@@ -94,4 +94,4 @@ value = "cp_a17853b7b88e4b64b03c7f4094dc2fba"
 [[settings.overlay]]
 document = "channel.yaml"
 path = "voiceprint.observation_until"
-value = 1792605470
+value = "1792605470"
