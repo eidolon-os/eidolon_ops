@@ -36,7 +36,7 @@ from eidolon_ops.hostagent.hardware import verify_binding
 from eidolon_ops.hub_assets import HUB_SETTINGS_TEMPLATE as HUB_SETTINGS_TEMPLATE_CONTRACT
 from eidolon_ops.owner_domain_assets import HostAuthority
 from eidolon_ops.paths import AppAccess
-from eidolon_ops.process import ProcessResult
+from eidolon_ops.process import ProcessError, ProcessResult
 from eidolon_ops.readiness import HostKind, expected_facts
 from eidolon_ops.release_matrix import SYSTEMD_ASSET_CONTRACTS
 
@@ -239,6 +239,8 @@ class ControllerRunner:
         if command[-1:] == ("--version",) and command[0].endswith("/uv"):
             version = "uv 0.11.14" if self.wrong_uv_version else "uv 0.11.15"
             return ProcessResult(0, version + "\n", "")
+        if len(command) > 1 and command[1] == "verify-bundle":
+            return ProcessResult(0, '{"status":"verified"}', "")
         if len(command) > 1 and command[1] == "bundle":
             output = Path(command[3])
             cutover_mode = command[command.index("--cutover-mode") + 1]
@@ -271,7 +273,7 @@ class ControllerRunner:
                         f"model-{index}.bin",
                         f"model-{index}".encode(),
                     )
-                    for index in range(8)
+                    for index in range(7)
                 ],
             ]
             for artifact_id, kind, install_path, content in artifact_inputs:
@@ -1415,6 +1417,7 @@ def test_deploy_resume_revalidates_and_resumes_existing_bundle(setup_controller)
     result = controller.deploy(release_id="r1", resume=True, activate=False)
 
     assert result["phases"][0]["result"]["status"] == "reused_validated_bundle"
+    assert any(len(call) > 1 and call[1] == "verify-bundle" for call in runner.calls)
     assert transport.resumable_uploads == [
         (controller.config.workspace.bundle_root / "r1", "/var/tmp/eidolon-release-r1")
     ]
@@ -1440,6 +1443,21 @@ def test_deploy_skips_transfer_for_finalized_remote_bundle(setup_controller) -> 
     assert result["status"] == "dry_run"
     assert transport.resumable_uploads == []
     assert [call[0] for call in transport.agent_calls].count("finalize-upload") == 1
+
+
+def test_kernel_inventory_rejection_prevents_bundle_transfer(setup_controller, monkeypatch):
+    controller, runner, transport = setup_controller
+    original = runner.run
+
+    def reject_inventory(command, **kwargs):
+        if len(command) > 1 and command[1] == 'verify-bundle':
+            return ProcessResult(1, '', 'required model is missing')
+        return original(command, **kwargs)
+
+    monkeypatch.setattr(runner, 'run', reject_inventory)
+    with pytest.raises(ProcessError, match='required model is missing'):
+        controller.deploy(release_id='r1', resume=False, activate=False)
+    assert not transport.resumable_uploads
 
 
 def test_deploy_resume_rejects_existing_bundle_digest_drift(setup_controller) -> None:

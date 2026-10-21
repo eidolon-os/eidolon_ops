@@ -706,7 +706,7 @@ class BundleTransfer:
         ):
             raise OperationsError("existing bundle preparer digest drifted")
         artifacts = document.get("artifacts")
-        if not isinstance(artifacts, list) or len(artifacts) != 9:
+        if not isinstance(artifacts, list):
             raise OperationsError("existing bundle artifact set drifted")
         artifact_ids: set[str] = set()
         artifact_digests: set[str] = set()
@@ -761,7 +761,6 @@ class BundleTransfer:
         artifact_root = output / "artifacts/sha256"
         if (
             "python-dependencies" not in artifact_ids
-            or len(channel_paths) != 8
             or not artifact_root.is_dir()
             or artifact_root.is_symlink()
             or {path.name for path in artifact_root.iterdir()} != artifact_digests
@@ -778,6 +777,19 @@ class BundleTransfer:
             or dependencies.get("index_url") != self.config.workspace.python_index_url
         ):
             raise OperationsError("existing bundle Python dependency cache drifted")
+        # Kernel owns the required model inventory. Ops checks bytes and pinned
+        # release identity above, then asks the same verified release tool that
+        # built the bundle to enforce its inventory. Do not duplicate a count
+        # here: asset ownership can move between Channel and Models.
+        result = checked(
+            "canonical bundle verification",
+            self.runner.run(
+                (str(self.config.workspace.release_cli), "verify-bundle", str(output)),
+                timeout=300,
+            ),
+        )
+        if parse_json(result.stdout, "canonical bundle verification").get("status") != "verified":
+            raise OperationsError("canonical bundle verification did not confirm success")
         return file_sha256(manifest)
 
 
