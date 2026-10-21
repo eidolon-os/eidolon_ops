@@ -85,3 +85,13 @@ document = "channel.yaml"
 path = "bailian_stt.model"
 value = "qwen-audio-3.1-asr-flash-streaming"
 
+# Finite, non-enforcing voiceprint trial; expiration also clears in-memory evidence.
+[[settings.overlay]]
+document = "channel.yaml"
+path = "voiceprint.observation_companion_id"
+value = "cp_a17853b7b88e4b64b03c7f4094dc2fba"
+
+[[settings.overlay]]
+document = "channel.yaml"
+path = "voiceprint.observation_until"
+value = "1792605470"
