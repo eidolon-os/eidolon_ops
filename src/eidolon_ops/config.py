@@ -44,6 +44,7 @@ CAPABILITY_SOURCES: dict[str, tuple[str, ...]] = {
     "local_llm": ("eidolon_models",),
     "local_laya": ("eidolon_models",),
     "local_laya_participation": ("eidolon_models",),
+    "local_speaker_verification": ("eidolon_models",),
 }
 
 #: What a capability adds to the unit topology. This states the same thing each

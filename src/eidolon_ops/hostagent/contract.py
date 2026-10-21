@@ -46,7 +46,7 @@ PRODUCT_UNITS = (
 #: the agent is injected and imports nothing from the eidolon_ops package it
 #: came from; a test keeps it equal to eidolon_ops.capabilities.
 HOST_CAPABILITIES: frozenset[str] = frozenset(
-    {"rknpu2", "local_asr", "local_tts", "local_llm", "local_laya", "local_laya_participation"}
+    {"rknpu2", "local_asr", "local_tts", "local_llm", "local_laya", "local_laya_participation", "local_speaker_verification"}
 )
 
 #: What a capability adds to that. The agent's own copy, deliberately: it runs

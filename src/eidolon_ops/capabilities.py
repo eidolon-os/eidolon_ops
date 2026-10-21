@@ -42,6 +42,8 @@ HOST_CAPABILITIES: frozenset[str] = frozenset(
         #: service of its own beside the smart-home one — own unit, port, weights
         #: and settings — so either can be run, updated or rolled back alone.
         "local_laya_participation",
+        # Assets used by Channel; no new model daemon or per-device permission.
+        "local_speaker_verification",
     }
 )
 

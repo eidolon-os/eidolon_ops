@@ -452,10 +452,21 @@ class BundleTransfer:
                 f"{unit['id']}.service" for unit in contract.units
                 if unit.get("requires_capability") == capability
             )
-            if not capability or not units:
+            if not capability:
                 raise OperationsError(
                     f"deselected model {artifact.artifact_id} has no owning service"
                 )
+            if not units:
+                # A model may run inside a shared component (e.g. Channel), with
+                # no capability-owned daemon whose inactivity proves it is unused.
+                # Keep its fixed version for rollback instead of deleting live data
+                # or requiring a separate service merely to satisfy reclamation.
+                retired.append({
+                    "artifact": artifact.artifact_id,
+                    "status": "retained_shared_runtime",
+                    "destination": str(destination),
+                })
+                continue
             evidence = self.transport.run_agent(
                 "retire-component-artifact",
                 {

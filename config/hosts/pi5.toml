@@ -50,10 +50,10 @@ allow_insecure_livekit = true
 # install 输入的行为一致。
 setup_code_file = "../../.eidolon-ops/pi5/inputs/factory_setup_code"
 
-# This board has no NPU and runs no local model: its Laya calls go to wherever the
-# model endpoints say (none yet), and the Laya unit and weights are not installed.
+# Channel Provider runs the CPU speaker extractor; no separate model service.
+# This board has no NPU; Laya units and weights remain unselected.
 [capabilities]
-provides = []
+provides = ["local_speaker_verification"]
 
 # Where this board's callers reach the models it does not run. Placeholder until the remote
 # service exists: nothing on this board answers it, so IP-team decisions are unavailable and

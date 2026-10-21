@@ -584,7 +584,11 @@ def test_laya_only_retirement_selects_only_the_old_chat_model():
     # A smart-home-only Host also retires the participation model it does not run: the two Laya
     # services are selected by separate capabilities.
     retired = {payload["destination"]: payload["units"] for _action, payload in transfer.transport.calls}
-    assert result["artifacts"] == 2
+    # Shared-runtime voice weights have no dedicated daemon to stop; retain them.
+    assert result["artifacts"] == 3
+    assert next(x for x in result['detail'] if x['artifact'].startswith('campplus'))['status'] == (
+        'retained_shared_runtime'
+    )
     assert retired == {
         "/var/lib/eidolon/models/qwen3-1.7b": ["eidolon-llm.service"],
         "/var/lib/eidolon/models/laya-participation-p4-rknn-ae6718a4": ["eidolon-laya-participation.service"],

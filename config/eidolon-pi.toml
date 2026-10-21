@@ -116,10 +116,10 @@ units = [
 ]
 
 # The most a Host of this product may run locally. The Mac source run inherits it (Laya on
-# its GPU); the Pi 5 profiles narrow it to nothing (config/hosts/pi5*.toml), so a board
-# without an NPU neither installs the Laya unit nor carries its weights.
+# its GPU); Host profiles select what they run. Pi5 selects CPU speaker assets,
+# while the device-management HIL profile selects no local models.
 [capabilities]
-provides = ["local_laya"]
+provides = ["local_laya", "local_speaker_verification"]
 
 [data]
 system_database = "/var/lib/eidolon/eidolon-system.sqlite3"

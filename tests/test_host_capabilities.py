@@ -59,12 +59,16 @@ def test_a_host_cannot_declare_more_than_its_product_reviews(config_path: Path) 
         load_config(_with_laya(config_path), capabilities=frozenset({"local_laya", "rknpu2"}))
 
 
-def test_the_pi5_boards_run_no_local_model_and_the_mac_runs_laya() -> None:
-    for name in ("pi5", "pi5-device-management-hil"):
-        assert load_host_profile(_HOSTS / f"{name}.toml").capabilities == frozenset(), name
+def test_pi5_selects_shared_voice_assets_without_a_local_model_service() -> None:
+    assert load_host_profile(_HOSTS / 'pi5.toml').capabilities == frozenset({
+        'local_speaker_verification',
+    })
+    assert load_host_profile(_HOSTS / 'pi5-device-management-hil.toml').capabilities == frozenset()
     mac = load_host_profile(_HOSTS / "mac.toml")
-    assert mac.capabilities is None
-    assert "local_laya" in load_config(mac.operations_config).capabilities
+    assert mac.capabilities == frozenset({'local_laya'})
+    assert 'local_speaker_verification' not in load_config(
+        mac.operations_config, capabilities=mac.capabilities,
+    ).capabilities
 
 
 def _profile_with(tmp_path: Path, capabilities: str) -> Path:
