@@ -170,6 +170,8 @@ def initialize_install_inputs(
             "EIDOLON_AGENT_ADMIN_API_TOKEN": agent_admin_token,
             "EIDOLON_HUB_SMARTHOME_TOKEN": smarthome_token,
             "PAIRING_JWT_SECRET": pairing_token,
+            "EIDOLON_CHANNEL_PROVIDER_TOKEN": hub_provider_token,
+            "EIDOLON_CHANNEL_PROVIDER_URL": "http://127.0.0.1:8767",
         },
         "channel.env": {
             **channel_external,
@@ -381,6 +383,8 @@ DECLARED_ENV_KEYS: dict[str, EnvFileKeys] = {
             "EIDOLON_DATA_COMPANION_AUTHORITY_TOKEN",
             "EIDOLON_MEMORY_MCP_TOKEN",
             "PAIRING_JWT_SECRET",
+            "EIDOLON_CHANNEL_PROVIDER_TOKEN",
+            "EIDOLON_CHANNEL_PROVIDER_URL",
         }),
     ),
     "channel.env": EnvFileKeys(
@@ -714,9 +718,11 @@ def withdraw_rendered_fields(target: Path) -> list[str]:
 
     withdrawn: list[str] = []
     # This authority credential moved with device execution from Channel to Hub.
+    # The Agent's Channel Provider token was retired alongside it when the Agent
+    # had no directory/command contract to call, and is rendered again now that
+    # Channel publishes one.
     retired = {
         "channel.env": frozenset({"EIDOLON_DATA_WORKSPACE_AUTHORITY_TOKEN"}),
-        "agent.env": frozenset({"EIDOLON_CHANNEL_PROVIDER_TOKEN"}),
     }
     for name in sorted(HOST_RENDERED_ENV_KEYS.keys() | retired.keys()):
         rendered = HOST_RENDERED_ENV_KEYS.get(name, frozenset()) | retired.get(name, frozenset())
