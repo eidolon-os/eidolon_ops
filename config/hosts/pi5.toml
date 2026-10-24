@@ -84,3 +84,11 @@ value = "d3"
 document = "channel.yaml"
 path = "bailian_stt.model"
 value = "qwen-audio-3.1-asr-flash-streaming"
+
+# Device actuators: Channel now publishes the capability directory and command
+# contract the Agent was waiting for, so body_control can leave its blocked
+# default and project volume/brightness tools from what each body declares.
+[[settings.overlay]]
+document = "agent.yaml"
+path = "body_control.enabled"
+value = "true"
