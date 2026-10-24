@@ -150,8 +150,9 @@ def test_eidolond_health_uses_unix_socket(monkeypatch, tmp_path: Path) -> None:
     assert any(call[0] == "send" and b"GET /health " in call[1] for call in calls)
 
 
+@pytest.mark.parametrize("speaker_enabled", [False, True])
 def test_prepare_materializes_one_canonical_mac_product_contract(
-    monkeypatch, tmp_path: Path
+    monkeypatch, tmp_path: Path, speaker_enabled: bool
 ) -> None:
     revision = "a" * 40
     source_ids = (
@@ -163,6 +164,7 @@ def test_prepare_materializes_one_canonical_mac_product_contract(
         "eidolon_channel",
         "eidolon_memory",
         "eidolon_sdk",
+        "eidolon_models",
     )
     sources = {}
     for source_id in source_ids:
@@ -212,7 +214,8 @@ def test_prepare_materializes_one_canonical_mac_product_contract(
     profile = _product(tmp_path, foundation_mode="external").profile
     livekit = cast(Path, profile.external_livekit_config)
     livekit.write_text("keys:\n  shared-key: shared-secret\n", encoding="utf-8")
-    config = _FakeConfig(sources=sources, install_files={"data_env": inputs / "data.env"})
+    config = _FakeConfig(sources=sources, install_files={"data_env": inputs / "data.env"},
+        capabilities=frozenset({"local_speaker_verification"}) if speaker_enabled else frozenset())
 
     class Runner:
         def __init__(self) -> None:
@@ -269,6 +272,11 @@ def test_prepare_materializes_one_canonical_mac_product_contract(
     assert result["status"] == "prepared"
     root = profile.paths.config_root
     environment = (root / "product-source.env").read_text(encoding="utf-8")
+    model_dir = sources["eidolon_models"].path / "speaker_verification/campplus_zh_16k_common/624dcb0f"
+    if speaker_enabled:
+        assert f"EIDOLON_3DSPEAKER_MODEL_DIR={model_dir}\n" in environment
+    else:
+        assert "EIDOLON_3DSPEAKER_MODEL_DIR" not in environment
     assert "EIDOLON_ADMIN_API_PORT=9000\n" in environment
     assert "EIDOLON_PRODUCT_DATA_PORT=8084\n" in environment
     assert f"EIDOLON_APP_HUB_HOSTNAME={product._host_lan_identity().hub_hostname}\n" in environment

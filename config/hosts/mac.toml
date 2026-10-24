@@ -51,7 +51,8 @@ allow_insecure_livekit = true
 # Keep this Host's existing runtime selection explicit. Adding reviewed product
 # capabilities must not start a new model on the workstation implicitly.
 [capabilities]
-provides = ["local_laya"]
+# Channel Provider owns the shared CPU speaker extractor; no extra daemon.
+provides = ["local_laya", "local_speaker_verification"]
 
 # The Mac source run interprets home commands with Laya (its own MPS service; the address
 # follows from local_laya) and records every interpretation for offline evaluation. A product

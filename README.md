@@ -593,6 +593,14 @@ Owner 变更的权限边界；它的 state/runtime 目录均不与产品主进�
 ./eidolon mac service restart channel   # 单个服务：只经 eidolond（Mac 与 Pi 相同）
 ```
 
+Mac 源码 Host 选择 `local_speaker_verification` 时，生成配置会把
+`EIDOLON_3DSPEAKER_MODEL_DIR` 指向已配置 `eidolon_models` 工作树内的
+`speaker_verification/campplus_zh_16k_common/624dcb0f` 固定资产。Channel Provider
+继续校验该目录 manifest 并拥有共享 CPU 提取器；无需额外模型服务或复制到 Linux
+的 `/var/lib`。能力及生成环境变化应执行 `./eidolon mac restart`，并认证查询
+Provider 的 `/v1/voiceprints/readiness`，不能以普通 `/health` 代替模型就绪检查。
+模型就绪不自动开启 Companion 声纹限制，也不会导入其他 Host 的个人声纹档案。
+
 Mac 的控制服务从组件 `ops/component.toml` 及其服务资产生成到 Host 的 `supervisor.conf`；
 服务角色、环境、私有目录和依赖来自同一组件声明。Supervisor 只保留驱动专属的 worker 配置。
 Mac 源码 Host 的本地信任边界是源码目录拥有者：Supervisor 和所有服务都以该用户运行，
