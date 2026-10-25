@@ -234,6 +234,8 @@ def test_prepare_materializes_one_canonical_mac_product_contract(
                 return ProcessResult(0, command[-1].removesuffix("^{commit}") + "\n", "")
             if "show" in command:
                 target = command[-1]
+                if target.endswith("ops/component.toml"):
+                    return ProcessResult(0, (Path(__file__).resolve().parents[2] / "eidolon_models/ops/component.toml").read_text(), "")
                 if target.endswith("config/channel-provider.yaml"):
                     return ProcessResult(
                         0,
@@ -265,6 +267,9 @@ def test_prepare_materializes_one_canonical_mac_product_contract(
     monkeypatch.setattr(
         local_product_module, "validate_install_input_contract", lambda *_a, **_k: None
     )
+    from eidolon_ops import component_artifacts
+    carried = []
+    monkeypatch.setattr(component_artifacts, "ensure_workstation_artifact", lambda root, artifact, **kwargs: carried.append((root, artifact, kwargs)))
     product = LocalProductSource(profile, cast(Any, config), runner)
 
     result = product.prepare()
@@ -272,11 +277,11 @@ def test_prepare_materializes_one_canonical_mac_product_contract(
     assert result["status"] == "prepared"
     root = profile.paths.config_root
     environment = (root / "product-source.env").read_text(encoding="utf-8")
-    model_dir = sources["eidolon_models"].path / "speaker_verification/campplus_zh_16k_common/624dcb0f"
+    assert "EIDOLON_3DSPEAKER_MODEL_DIR" not in environment
+    assert len(carried) == int(speaker_enabled)
     if speaker_enabled:
-        assert f"EIDOLON_3DSPEAKER_MODEL_DIR={model_dir}\n" in environment
-    else:
-        assert "EIDOLON_3DSPEAKER_MODEL_DIR" not in environment
+        assert carried[0][0] == profile.paths.state_root
+        assert carried[0][2]["repositories"]["eidolon_models"] == (sources["eidolon_models"].path, revision)
     assert "EIDOLON_ADMIN_API_PORT=9000\n" in environment
     assert "EIDOLON_PRODUCT_DATA_PORT=8084\n" in environment
     assert f"EIDOLON_APP_HUB_HOSTNAME={product._host_lan_identity().hub_hostname}\n" in environment

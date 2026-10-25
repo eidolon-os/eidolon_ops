@@ -19,12 +19,14 @@ import hashlib
 import shutil
 import subprocess
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 from urllib.request import urlopen
 
+from eidolon_ops.component_contract import read_component_contracts
+from eidolon_ops.config import OperationsConfig
 from eidolon_ops.errors import OperationsError
 from eidolon_ops.hostagent.contract import HOST_MODEL_ROOT
 
@@ -32,6 +34,7 @@ __all__ = [
     "DIGEST_RECORD",
     "CarriedArtifact",
     "CarriedFile",
+    "capability_artifact",
     "carried_artifacts",
     "ensure_workstation_artifact",
     "host_artifact_root",
@@ -125,6 +128,46 @@ def host_artifact_root(artifact: CarriedArtifact) -> Path:
             f"install root outside {HOST_MODEL_ROOT}: {root}"
         )
     return root
+
+
+def capability_artifact(
+    config: OperationsConfig,
+    read_exact_file: Callable[[str, str, str], str],
+    *,
+    component_id: str,
+    capability: str,
+) -> CarriedArtifact | None:
+    """Resolve a single asset from the same pinned declaration used for delivery.
+
+    This is a capability selection, never a model/version table. Ambiguity is
+    an invalid release: adding another asset must not silently choose the first.
+    """
+    if capability not in config.capabilities:
+        return None
+    source = config.sources[component_id]
+    topology = read_component_contracts(
+        {component_id: source.path},
+        config.capabilities,
+        read_contract=lambda name: read_exact_file(name, source.revision, "ops/component.toml"),
+    )
+    ids = {
+        entry["id"]
+        for contract in topology.contracts
+        if contract.component_id == component_id
+        for entry in contract.artifacts
+        if entry.get("requires_capability") == capability
+    }
+    selected = [
+        a
+        for a in carried_artifacts(topology)
+        if a.component_id == component_id and a.artifact_id in ids
+    ]
+    if len(ids) != 1 or len(selected) != 1:
+        raise OperationsError(
+            f"{component_id} must declare exactly one populated artifact for {capability}"
+        )
+    host_artifact_root(selected[0])
+    return selected[0]
 
 
 def workstation_artifact_root(toolchain_root: Path, artifact: CarriedArtifact) -> Path:

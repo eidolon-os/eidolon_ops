@@ -15,7 +15,9 @@ reaching a cloud provider for speech, another running the models itself.
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 
+from eidolon_ops.component_artifacts import capability_artifact, host_artifact_root
 from eidolon_ops.config import OperationsConfig
 from eidolon_ops.errors import InstallInputError
 from eidolon_ops.settings_overlay import (
@@ -60,12 +62,46 @@ def product_settings(
         name: read_exact_file(source, config.sources[source].revision, "config/settings.yaml")
         for name, source in SETTINGS_DOCUMENTS
     }
+    speaker = capability_artifact(
+        config,
+        read_exact_file,
+        component_id="eidolon_models",
+        capability="local_speaker_verification",
+    )
+    model_path = ()
+    if speaker is not None:
+        if any(
+            a.document == "channel.yaml" and a.display == "voiceprint.model_dir"
+            for a in config.settings_overlay
+        ):
+            raise InstallInputError(
+                "voiceprint.model_dir is derived from the Models artifact, not a Host overlay"
+            )
+        for assignment in config.settings_overlay:
+            if (
+                assignment.document == "channel.yaml"
+                and assignment.display == "voiceprint.calibration_path"
+                and assignment.value
+                and not Path(assignment.value).is_absolute()
+                and assignment.value not in {file.path for file in speaker.files}
+            ):
+                raise InstallInputError(
+                    "relative voiceprint.calibration_path must be a file in the selected Models artifact"
+                )
+        model_path = (
+            OverlayAssignment(
+                "channel.yaml",
+                parse_path("voiceprint.model_dir", label="model asset"),
+                str(host_artifact_root(speaker)),
+            ),
+        )
     assignments = (
         *(
             OverlayAssignment(document, parse_path(path, label=document), value)
             for document, path, value in PRODUCT_OVERLAY
         ),
         *config.settings_overlay,
+        *model_path,
     )
     sources = dict(SETTINGS_DOCUMENTS)
     for assignment in assignments:

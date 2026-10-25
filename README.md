@@ -593,12 +593,16 @@ Owner 变更的权限边界；它的 state/runtime 目录均不与产品主进�
 ./eidolon mac service restart channel   # 单个服务：只经 eidolond（Mac 与 Pi 相同）
 ```
 
-Mac 源码 Host 选择 `local_speaker_verification` 时，生成配置会把
-`EIDOLON_3DSPEAKER_MODEL_DIR` 指向已配置 `eidolon_models` 工作树内的
-`speaker_verification/campplus_zh_16k_common/624dcb0f` 固定资产。Channel Provider
-继续校验该目录 manifest 并拥有共享 CPU 提取器；无需额外模型服务或复制到 Linux
-的 `/var/lib`。能力及生成环境变化应执行 `./eidolon mac restart`，并认证查询
-Provider 的 `/v1/voiceprints/readiness`，不能以普通 `/health` 代替模型就绪检查。
+Host 选择 `local_speaker_verification` 时，Ops 从所选 Models Git 提交的
+`ops/component.toml` 解析该能力唯一的已固定资产，将声明的 `install_root` 写入
+`channel.yaml:voiceprint.model_dir`。缺失或多义声明会在准备阶段失败，不选择第一个。
+该路径由交付结果拥有，Host overlay 不得覆盖它。
+Linux 使用已有资产传输；Mac 复用同一个校验与物化函数，将固定文件安装到 Host 的
+`state/models/`，并用既有 FHS 路径转换生成设置。两者都不直接读取 Models 工作树权重。
+资产目录以完整文件清单的摘要区分版本；更新保留旧目录，回退读取旧提交声明。
+Channel 不含模型版本目录兜底，也不再读取 `EIDOLON_3DSPEAKER_MODEL_DIR`。
+能力或设置变化执行 `./eidolon mac restart`（Linux 使用该 Host 的正式部署），并认证查询
+Provider `/v1/voiceprints/readiness`，不能以普通 `/health` 代替模型就绪检查。
 模型就绪不自动开启 Companion 声纹限制，也不会导入其他 Host 的个人声纹档案。
 
 组件配置的标准来源是所选 Git 提交中的 `config/settings.yaml`，不是
@@ -615,8 +619,11 @@ worker 的其他策略。Linux systemd 单元和 Mac 既有 Supervisor 启动声
 `settings/channel.yaml`；回归同时检查两种声明和实际生成的 Supervisor 配置。
 不再从 Mac overlay 单独派生 `EIDOLON_SPEAKER_CALIBRATION_PATH`，该旧变量不参与选择。
 撤销试验应删除 Host overlay（默认路径为空）并通过标准 `restart` 生效；这不更改
-Companion 的个人权限开关。模型判定文件的路径必须在目标 Host 上有效，Mac 本地路径
-不得作为 Pi5 的部署值。
+Companion 的个人权限开关。`calibration_path` 为相对路径时，只能引用所选模型包内的文件，
+由共享加载器在 `model_dir` 下解析，拒绝逃逸；绝对路径只用于已交付到目标 Host 的自定义制品。
+Mac 当前选择包内 `admission-controlled-trial.json`，不依赖个人工作区路径。
+该试验配置支持 1–5 个允许声音、1.5–30 秒的完整候选语音；不声称已校准。
+readiness 返回同一制品的能力限制，Mobile 提前展示并阻止超限开启；更换制品后需用户重新确认权限。
 
 Mac 的控制服务从组件 `ops/component.toml` 及其服务资产生成到 Host 的 `supervisor.conf`；
 服务角色、环境、私有目录和依赖来自同一组件声明。Supervisor 只保留驱动专属的 worker 配置。

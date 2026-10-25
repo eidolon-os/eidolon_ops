@@ -324,13 +324,6 @@ def profile_environment(
     }
     if profile.external_livekit_config is not None:
         values["EIDOLON_LIVEKIT_GENERATED_CONFIG"] = str(profile.external_livekit_config)
-    if "local_speaker_verification" in config.capabilities:
-        # Source Hosts use the same versioned Models asset as Linux delivery.
-        # Channel still verifies its manifest; no weights or model daemon here.
-        values["EIDOLON_3DSPEAKER_MODEL_DIR"] = str(
-            config.sources["eidolon_models"].path
-            / "speaker_verification/campplus_zh_16k_common/624dcb0f"
-        )
     return environment.serialize_ops(values, allow_empty=frozenset({"EIDOLON_HOST_CAPABILITIES"}))
 
 

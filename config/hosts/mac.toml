@@ -97,4 +97,4 @@ value = "d3"
 [[settings.overlay]]
 document = "channel.yaml"
 path = "voiceprint.calibration_path"
-value = "/Users/manson/ai/eidolon/eidolon_ops/config/hosts/mac-speaker-controlled-trial.json"
+value = "admission-controlled-trial.json"

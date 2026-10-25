@@ -150,6 +150,7 @@ class LocalProductSource:
             raise OperationsError(str(exc)) from exc
 
         paths = self.profile.paths
+        self._prepare_speaker_asset()
         self._make_roots()
         source_inputs = next(iter(self.config.install_files.values())).parent
         self._adopt_host_identity(source_inputs)
@@ -439,6 +440,21 @@ class LocalProductSource:
             directory.mkdir(parents=True, exist_ok=True)
         for directory in (paths.config_root, paths.config_root / "env", paths.config_root / "tls"):
             os.chmod(directory, 0o700)
+
+    def _prepare_speaker_asset(self) -> None:
+        """Use the release artifact materializer at the translated Host state root."""
+        from eidolon_ops.component_artifacts import capability_artifact, ensure_workstation_artifact
+
+        config = self.sources.resolved_config()
+        artifact = capability_artifact(
+            config, self._read_exact_file,
+            component_id="eidolon_models", capability="local_speaker_verification",
+        )
+        if artifact is not None:
+            ensure_workstation_artifact(
+                self.profile.paths.state_root, artifact,
+                repositories={name: (source.path, source.revision) for name, source in config.sources.items()},
+            )
 
     def _adopt_host_identity(self, source_inputs: Path) -> None:
         destination = self._host_identity_path()
