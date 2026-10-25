@@ -15,6 +15,36 @@ ROOT = Path(__file__).resolve().parents[1]
 ADMIN = ROOT.parent / "eidolon_admin"
 
 
+def test_channel_processes_share_the_declared_host_settings_on_source_and_systemd(tmp_path):
+    from eidolon_ops.source_runtime import service_values
+
+    channel = ROOT.parent / "eidolon_channel"
+    declaration = load_component_contract(channel, "eidolon_channel")
+    profile = _product(tmp_path, foundation_mode="external").profile
+    voice_input = next(i for i in declaration.inputs if i.name == "channel_settings")
+    assert set(voice_input.required_by) == {"eidolon-channel", "eidolon-channel-provider"}
+    # Channel still uses the source driver's worker declarations, unlike the
+    # control services above. Check the actual rendered result, not an empty
+    # source_services() collection that would make this test vacuously pass.
+    parser = configparser.ConfigParser(defaults={
+        "ENV_EIDOLON_PRODUCT_SETTINGS_ROOT": str(profile.paths.config_root / "settings"),
+    })
+    parser.read_string(render_supervisor(
+        (ROOT / "deploy/supervisor/product-source.conf").read_text(), (), "test-operator",
+        contracts=(declaration,),
+    ))
+    for unit_id, program in (
+        ("eidolon-channel-provider", "channel-provider"),
+        ("eidolon-channel", "channel-worker"),
+    ):
+        expected = str(profile.paths.config_root / "settings/channel.yaml")
+        assert f'EIDOLON_CHANNEL_SETTINGS_YAML="{expected}"' in parser[f"program:{program}"]["environment"]
+        unit = ROOT.parent / "eidolon_kernel/deploy/systemd" / f"{unit_id}.service"
+        assert "EIDOLON_CHANNEL_SETTINGS_YAML=/etc/eidolon/channel.yaml" in service_values(
+            unit.read_text()
+        )["Environment"]
+
+
 def _services(tmp_path):
     declaration = load_component_contract(ADMIN, "eidolon_admin")
     return declaration, source_services(

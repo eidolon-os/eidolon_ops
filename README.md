@@ -601,6 +601,23 @@ Mac 源码 Host 选择 `local_speaker_verification` 时，生成配置会把
 Provider 的 `/v1/voiceprints/readiness`，不能以普通 `/health` 代替模型就绪检查。
 模型就绪不自动开启 Companion 声纹限制，也不会导入其他 Host 的个人声纹档案。
 
+组件配置的标准来源是所选 Git 提交中的 `config/settings.yaml`，不是
+`settings.example.yaml` 或未提交文件。Host 差异只通过 `settings.overlay` 指定；
+Mac 和 Linux 共用 `product_settings()` 的严格渲染。缺失字段时，错误会标出
+组件、提交和模板路径，准备阶段就拒绝写入，不靠自动补键或手改生成文件继续部署。
+新增配置键需同步组件 schema 和正式模板，并遵守组件的跨版本兼容发布要求；
+Linux 可逆发布仍保留新旧解释器的配置兼容检查。
+
+声纹配置由 `channel.yaml:voiceprint.calibration_path` 提供。Provider 与 worker
+都在组件操作契约中声明依赖该文件，使用同一声纹节的加载与校验；Provider 不加载
+worker 的其他策略。Linux systemd 单元和 Mac 既有 Supervisor 启动声明都必须提供
+同一设置文件：Linux 为 `/etc/eidolon/channel.yaml`，Mac 为 Host 配置目录中的
+`settings/channel.yaml`；回归同时检查两种声明和实际生成的 Supervisor 配置。
+不再从 Mac overlay 单独派生 `EIDOLON_SPEAKER_CALIBRATION_PATH`，该旧变量不参与选择。
+撤销试验应删除 Host overlay（默认路径为空）并通过标准 `restart` 生效；这不更改
+Companion 的个人权限开关。模型判定文件的路径必须在目标 Host 上有效，Mac 本地路径
+不得作为 Pi5 的部署值。
+
 Mac 的控制服务从组件 `ops/component.toml` 及其服务资产生成到 Host 的 `supervisor.conf`；
 服务角色、环境、私有目录和依赖来自同一组件声明。Supervisor 只保留驱动专属的 worker 配置。
 Mac 源码 Host 的本地信任边界是源码目录拥有者：Supervisor 和所有服务都以该用户运行，

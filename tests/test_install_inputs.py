@@ -276,6 +276,35 @@ def test_initializer_fails_closed_on_exact_settings_drift(config, tmp_path: Path
     assert not next(iter(configured.install_files.values())).parent.exists()
 
 
+def test_missing_host_setting_identifies_exact_component_revision(config, tmp_path):
+    from eidolon_ops.settings_overlay import OverlayAssignment, parse_path
+
+    configured = replace(
+        _config_for_init(config, tmp_path),
+        settings_overlay=(OverlayAssignment(
+            "channel.yaml", parse_path("voiceprint.calibration_path", label="test"),
+            "/private/host-trial.json",
+        ),),
+    )
+    configured = replace(configured, sources={
+        **configured.sources,
+        "eidolon_channel": replace(configured.sources["eidolon_channel"], revision="a" * 40),
+    })
+    # A working-tree template containing the key cannot repair the selected
+    # Git object. The same exact-revision renderer serves source and remote Hosts.
+    checkout = configured.sources["eidolon_channel"].path / "config/settings.yaml"
+    checkout.write_text("voiceprint:\n  calibration_path: ''\n")
+    with pytest.raises(InstallInputError) as failed:
+        initialize_install_inputs(configured, _settings_reader)
+    message = str(failed.value)
+    assert "voiceprint.calibration_path" in message
+    assert "eidolon_channel" in message
+    assert configured.sources["eidolon_channel"].revision in message
+    assert "config/settings.yaml" in message
+    assert "/private/host-trial.json" not in message
+    assert not next(iter(configured.install_files.values())).parent.exists()
+
+
 def test_initializer_refuses_partial_existing_directory(config, tmp_path: Path) -> None:
     configured = _config_for_init(config, tmp_path)
     target = next(iter(configured.install_files.values())).parent

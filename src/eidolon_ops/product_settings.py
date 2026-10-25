@@ -60,9 +60,15 @@ def product_settings(
         name: read_exact_file(source, config.sources[source].revision, "config/settings.yaml")
         for name, source in SETTINGS_DOCUMENTS
     }
-    for document, path, value in PRODUCT_OVERLAY:
-        documents[document] = _assign(documents[document], document, path, value)
-    for assignment in config.settings_overlay:
+    assignments = (
+        *(
+            OverlayAssignment(document, parse_path(path, label=document), value)
+            for document, path, value in PRODUCT_OVERLAY
+        ),
+        *config.settings_overlay,
+    )
+    sources = dict(SETTINGS_DOCUMENTS)
+    for assignment in assignments:
         if assignment.document == "hub.yaml":
             # Hub's settings are rendered from Hub's own template by hub_assets,
             # which applies these assignments itself.
@@ -71,12 +77,17 @@ def product_settings(
             raise InstallInputError(
                 f"settings overlay names an unrendered document: {assignment.document}"
             )
-        documents[assignment.document] = _apply(documents[assignment.document], assignment)
+        try:
+            documents[assignment.document] = _apply(documents[assignment.document], assignment)
+        except InstallInputError as exc:
+            source = sources[assignment.document]
+            revision = config.sources[source].revision
+            raise InstallInputError(
+                f"{exc}; template={source}@{revision}:config/settings.yaml. "
+                "Update the component template and select its Git revision; "
+                "uncommitted files and settings.example.yaml are not deployment inputs."
+            ) from exc
     return documents
-
-
-def _assign(text: str, document: str, path: str, value: str) -> str:
-    return _apply(text, OverlayAssignment(document, parse_path(path, label=document), value))
 
 
 def _apply(text: str, assignment: OverlayAssignment) -> str:
