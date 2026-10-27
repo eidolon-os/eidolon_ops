@@ -64,3 +64,12 @@ value = "laya"
 document = "agent.yaml"
 path = "smarthome.interpretation_record_path"
 value = "$EIDOLON_STATE_ROOT/agent/smarthome/interpretation.jsonl"
+
+# Optional capabilities add their repositories to the selected release.
+[capabilities]
+provides = []
+
+# Source-run hosts may pin reviewed sibling checkouts, including eidolon_models
+# when a local-model capability is selected. Each entry needs path and may pin
+# an exact 40-hex revision; leave empty to use the operations configuration.
+[source_overrides]

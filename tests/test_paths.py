@@ -694,3 +694,15 @@ def test_a_declaration_that_could_be_read_two_ways_is_refused(
 ) -> None:
     with pytest.raises(HostProfileError, match=because):
         load_host_profile(_declaring(tmp_path, networks))
+
+
+def test_source_host_can_pin_capability_model_repository(tmp_path: Path) -> None:
+    script = tmp_path / "run.sh"
+    script.write_text("#!/bin/sh\n")
+    model = tmp_path / "models"
+    profile = load_host_profile(_write_mac_profile(tmp_path, script=script, overrides=(
+        '[capabilities]\nprovides = ["local_speaker_verification"]\n'
+        f'[source_overrides.eidolon_models]\npath = "{model}"\nrevision = "{"a" * 40}"\n'
+    )))
+    assert profile.source_overrides["eidolon_models"].path == model
+    assert profile.source_overrides["eidolon_models"].revision == "a" * 40

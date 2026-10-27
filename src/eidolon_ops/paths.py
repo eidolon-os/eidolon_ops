@@ -23,6 +23,7 @@ from typing import Any, Literal
 from eidolon_ops.capabilities import require_known_capability
 from eidolon_ops.config import (
     SOURCE_IDS,
+    CAPABILITY_SOURCES,
     ConfigurationError,
     SourceConfig,
     settings_overlay_of,
@@ -653,7 +654,10 @@ def _source_overrides(value: object | None, *, base: Path) -> Mapping[str, Sourc
     if value is None:
         return MappingProxyType({})
     document = _table(value, "source_overrides")
-    unknown = set(document).difference(SOURCE_IDS)
+    # Optional model repositories are valid pins too. The resolved operations
+    # config still rejects overrides for capabilities this Host did not select.
+    known_sources = set(SOURCE_IDS).union(*CAPABILITY_SOURCES.values())
+    unknown = set(document).difference(known_sources)
     if unknown:
         raise HostProfileError(
             "source_overrides contains unknown source: " + ", ".join(sorted(unknown))
