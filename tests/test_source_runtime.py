@@ -39,6 +39,8 @@ def test_channel_processes_share_the_declared_host_settings_on_source_and_system
     ):
         expected = str(profile.paths.config_root / "settings/channel.yaml")
         assert f'EIDOLON_CHANNEL_SETTINGS_YAML="{expected}"' in parser[f"program:{program}"]["environment"]
+        provider_settings = str(profile.paths.config_root / "settings/channel-provider.yaml")
+        assert f'EIDOLON_CHANNEL_PROVIDER_SETTINGS_YAML="{provider_settings}"' in parser[f"program:{program}"]["environment"]
         unit = ROOT.parent / "eidolon_kernel/deploy/systemd" / f"{unit_id}.service"
         assert "EIDOLON_CHANNEL_SETTINGS_YAML=/etc/eidolon/channel.yaml" in service_values(
             unit.read_text()
