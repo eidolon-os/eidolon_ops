@@ -32,7 +32,7 @@ bootstrap_state_root = "~/ai/eidolon/.eidolon/mac-product/bootstrap/state"
 bootstrap_runtime_root = "~/ai/eidolon/.eidolon/mac-product/bootstrap/run"
 
 [adapter]
-lifecycle_script = "../../deploy/dev/run_all.sh"
+lifecycle_script = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_ops/deploy/dev/run_all.sh"
 operations_config = "../eidolon-pi.toml"
 foundation_mode = "external"
 external_livekit_config = "~/ai/eidolon/.eidolon/mac-product/run/livekit/livekit.generated.yaml"
@@ -42,17 +42,41 @@ external_livekit_config = "~/ai/eidolon/.eidolon/mac-product/run/livekit/livekit
 setup_code_file = "../../.eidolon-ops/mac/inputs/factory_setup_code"
 hub_https_port = 8443
 allow_insecure_livekit = true
-# Person management acceptance uses the reviewed Data/Memory commits while
-# their main worktrees contain a separate, unfinished memory extension.
-# These persistent worktrees live with this Host, not under temporary storage.
-# Remove these overrides when that extension is independently ready to run.
+# This acceptance runtime uses clean sibling checkouts and their own locked
+# environments. Editable SDK/Data/contracts dependencies therefore resolve to
+# this same reviewed set, not the main worktrees' unfinished memory extension.
+# Update these source selections together when accepting the next revision.
 
 [source_overrides.eidolon_data]
-path = "../../../.eidolon/mac-product/sources/person-20261027/eidolon_data"
-revision = "cf8680192014d67cd1bbcd4f92dbb4c6cf32e159"
+path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_data"
+revision = "a6545f3d8641f095003e22161fe8c9a60876315d"
+
+[source_overrides.eidolon_sdk]
+path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_sdk"
+revision = "1ef713f592f4161cb86a46b43efc79c497b67b64"
+
+[source_overrides.eidolon_admin]
+path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_admin"
+revision = "1f0829b79876bed38557791803a8b8a9a49ed0f1"
+
+[source_overrides.eidolon_kernel]
+path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_kernel"
+revision = "1d7deaf2ff6d109b4782af16adae3896e862df3d"
+
+[source_overrides.eidolon_hub]
+path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_hub"
+revision = "7c63353646cf51022dff5991c77aa81abbc8fa61"
+
+[source_overrides.eidolon_agent]
+path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_agent"
+revision = "a387469e9942a4de517a03021b2de024ba236f1c"
+
+[source_overrides.eidolon_channel]
+path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_channel"
+revision = "0a523648f08abef0b37099c5430b9dab4d502661"
 
 [source_overrides.eidolon_memory]
-path = "../../../.eidolon/mac-product/sources/person-20261027/eidolon_memory"
+path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_memory"
 revision = "ec9cdc1248452328190495dfd25b47b1c89a568d"
 
 # Keep this Host's existing runtime selection explicit. Adding reviewed product
