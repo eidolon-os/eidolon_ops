@@ -73,7 +73,7 @@ revision = "922892f65a2edf8cd4edc6555e73642ca24c9665"
 
 [source_overrides.eidolon_channel]
 path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_channel"
-revision = "201b7e6c12b21ca8a94690863b0c85bc69790d79"
+revision = "4af8137c8faa75d56e2d6031050dcf792676598f"
 
 [source_overrides.eidolon_memory]
 path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_memory"
@@ -127,3 +127,10 @@ value = "http://decider.yangtzeailab.com/d3/v1/systemone"
 document = "channel.yaml"
 path = "turn_policy.interrupt.systemone.model"
 value = "d3"
+
+# Measured local enrolled-audio inference: 327-348 ms. Recognition starts at
+# final ASR evidence; bound the remaining wait without queuing late results.
+[[settings.overlay]]
+document = "channel.yaml"
+path = "voiceprint.recognition_wait_ms"
+value = "400"
