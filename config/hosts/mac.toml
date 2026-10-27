@@ -69,7 +69,7 @@ revision = "7c63353646cf51022dff5991c77aa81abbc8fa61"
 
 [source_overrides.eidolon_agent]
 path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_agent"
-revision = "344418c6a14f28d9e66be9af53b72f8c99e1c09d"
+revision = "0ec6a13e64b81dc78ccedf6f6bb0a6935b8eead3"
 
 [source_overrides.eidolon_channel]
 path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_channel"
@@ -83,7 +83,7 @@ revision = "470eecb764007102464b91b69307adb36ac48935"
 # capabilities must not start a new model on the workstation implicitly.
 [source_overrides.eidolon_models]
 path = "../../../.eidolon/worktrees/conversation-person-20261027/eidolon_models"
-revision = "a4061bdade2a5c78be754e53ffe90ceb668237a7"
+revision = "7823c49d9597fb234e6ce6997ac47bd92516448f"
 
 [capabilities]
 # Channel Provider owns the shared CPU speaker extractor; no extra daemon.
