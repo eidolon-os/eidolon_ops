@@ -53,7 +53,7 @@ revision = "3cfe41f24f34c03daf4a819a196e237670ce818e"
 
 [source_overrides.eidolon_sdk]
 path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_sdk"
-revision = "2f12aae777496bef3121986304829f0cb84d1d44"
+revision = "9dc18a53a32379ca01a393e0a9dd0bbe373ccfa6"
 
 [source_overrides.eidolon_admin]
 path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_admin"
@@ -69,11 +69,11 @@ revision = "7c63353646cf51022dff5991c77aa81abbc8fa61"
 
 [source_overrides.eidolon_agent]
 path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_agent"
-revision = "922892f65a2edf8cd4edc6555e73642ca24c9665"
+revision = "344418c6a14f28d9e66be9af53b72f8c99e1c09d"
 
 [source_overrides.eidolon_channel]
 path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_channel"
-revision = "e8ae4caf34482fee6cb46a19ce69165e9c602d6c"
+revision = "94e6b2809bb1a6b183cae6c7b2cedde44b80da06"
 
 [source_overrides.eidolon_memory]
 path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_memory"
@@ -83,7 +83,7 @@ revision = "470eecb764007102464b91b69307adb36ac48935"
 # capabilities must not start a new model on the workstation implicitly.
 [source_overrides.eidolon_models]
 path = "../../../.eidolon/worktrees/conversation-person-20261027/eidolon_models"
-revision = "6930bc1264abba1fe3a6d36a8d2a75a2c99dbbb4"
+revision = "a4061bdade2a5c78be754e53ffe90ceb668237a7"
 
 [capabilities]
 # Channel Provider owns the shared CPU speaker extractor; no extra daemon.
