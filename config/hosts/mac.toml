@@ -73,7 +73,7 @@ revision = "922892f65a2edf8cd4edc6555e73642ca24c9665"
 
 [source_overrides.eidolon_channel]
 path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_channel"
-revision = "4af8137c8faa75d56e2d6031050dcf792676598f"
+revision = "e8ae4caf34482fee6cb46a19ce69165e9c602d6c"
 
 [source_overrides.eidolon_memory]
 path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_memory"
