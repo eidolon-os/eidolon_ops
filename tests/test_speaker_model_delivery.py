@@ -142,5 +142,5 @@ def test_generated_channel_settings_follow_model_pin_and_reserve_delivery_path()
             "not-delivered.json",
         ),
     )
-    with pytest.raises(InstallInputError, match="selected Models artifact"):
+    with pytest.raises(InstallInputError, match="voiceprint.calibration_path"):
         product_settings(cfg, read)

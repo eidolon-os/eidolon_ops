@@ -92,9 +92,3 @@ value = "http://decider.yangtzeailab.com/d3/v1/systemone"
 document = "channel.yaml"
 path = "turn_policy.interrupt.systemone.model"
 value = "d3"
-
-# Temporary, uncalibrated conversation acceptance; remove this overlay to revoke.
-[[settings.overlay]]
-document = "channel.yaml"
-path = "voiceprint.calibration_path"
-value = "admission-controlled-trial.json"

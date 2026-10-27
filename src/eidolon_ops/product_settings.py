@@ -15,7 +15,6 @@ reaching a cloud provider for speech, another running the models itself.
 from __future__ import annotations
 
 from collections.abc import Callable
-from pathlib import Path
 
 from eidolon_ops.component_artifacts import capability_artifact, host_artifact_root
 from eidolon_ops.config import OperationsConfig
@@ -77,17 +76,6 @@ def product_settings(
             raise InstallInputError(
                 "voiceprint.model_dir is derived from the Models artifact, not a Host overlay"
             )
-        for assignment in config.settings_overlay:
-            if (
-                assignment.document == "channel.yaml"
-                and assignment.display == "voiceprint.calibration_path"
-                and assignment.value
-                and not Path(assignment.value).is_absolute()
-                and assignment.value not in {file.path for file in speaker.files}
-            ):
-                raise InstallInputError(
-                    "relative voiceprint.calibration_path must be a file in the selected Models artifact"
-                )
         model_path = (
             OverlayAssignment(
                 "channel.yaml",
