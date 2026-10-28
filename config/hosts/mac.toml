@@ -49,15 +49,15 @@ allow_insecure_livekit = true
 
 [source_overrides.eidolon_data]
 path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_data"
-revision = "3cfe41f24f34c03daf4a819a196e237670ce818e"
+revision = "d21e9946183566ecd006623266a0bcac281001aa"
 
 [source_overrides.eidolon_sdk]
 path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_sdk"
-revision = "9dc18a53a32379ca01a393e0a9dd0bbe373ccfa6"
+revision = "bc2af3e1bad33fbb1337a2c0ab61952475e96d08"
 
 [source_overrides.eidolon_admin]
 path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_admin"
-revision = "1f0829b79876bed38557791803a8b8a9a49ed0f1"
+revision = "a28cca8faf64534f9108cc0ff6d5211a386cc168"
 
 [source_overrides.eidolon_kernel]
 path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_kernel"
@@ -69,15 +69,15 @@ revision = "7c63353646cf51022dff5991c77aa81abbc8fa61"
 
 [source_overrides.eidolon_agent]
 path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_agent"
-revision = "0ec6a13e64b81dc78ccedf6f6bb0a6935b8eead3"
+revision = "7b5840e7dc462431dae0d76c3d70ec3dac36f89e"
 
 [source_overrides.eidolon_channel]
 path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_channel"
-revision = "94e6b2809bb1a6b183cae6c7b2cedde44b80da06"
+revision = "a5617ea126585d73d5adf573b364585ef98365c9"
 
 [source_overrides.eidolon_memory]
 path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_memory"
-revision = "470eecb764007102464b91b69307adb36ac48935"
+revision = "0f4ce744a9d522565cd4f3d201d75c4be396e466"
 
 # Keep this Host's existing runtime selection explicit. Adding reviewed product
 # capabilities must not start a new model on the workstation implicitly.
