@@ -49,7 +49,7 @@ allow_insecure_livekit = true
 
 [source_overrides.eidolon_data]
 path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_data"
-revision = "d21e9946183566ecd006623266a0bcac281001aa"
+revision = "f9ee6d82324e32c0007bc464428f74991ede5ff8"
 
 [source_overrides.eidolon_sdk]
 path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_sdk"
