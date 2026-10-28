@@ -49,15 +49,15 @@ allow_insecure_livekit = true
 
 [source_overrides.eidolon_data]
 path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_data"
-revision = "f9ee6d82324e32c0007bc464428f74991ede5ff8"
+revision = "de788f0b3f5e9ce4f794e4b51378aea00dddf4d5"
 
 [source_overrides.eidolon_sdk]
 path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_sdk"
-revision = "bc2af3e1bad33fbb1337a2c0ab61952475e96d08"
+revision = "795f744d8205123489890448f62942f48d8992ef"
 
 [source_overrides.eidolon_admin]
 path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_admin"
-revision = "a28cca8faf64534f9108cc0ff6d5211a386cc168"
+revision = "64ada58336fd6ecededcb0254ff03389eef2c08a"
 
 [source_overrides.eidolon_kernel]
 path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_kernel"
@@ -69,7 +69,7 @@ revision = "7c63353646cf51022dff5991c77aa81abbc8fa61"
 
 [source_overrides.eidolon_agent]
 path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_agent"
-revision = "7b5840e7dc462431dae0d76c3d70ec3dac36f89e"
+revision = "a97386b21644894f8bb3701aa3440ba0ccbaa999"
 
 [source_overrides.eidolon_channel]
 path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_channel"
