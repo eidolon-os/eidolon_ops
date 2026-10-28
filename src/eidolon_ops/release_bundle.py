@@ -23,6 +23,7 @@ from eidolon_ops.component_artifacts import (
 from eidolon_ops.component_contract import read_component_contracts
 from eidolon_ops.config import SOURCE_IDS, OperationsConfig
 from eidolon_ops.errors import OperationsError
+from eidolon_ops.foundation import foundation_profile as _resolve_foundation_profile
 from eidolon_ops.process import ProcessRunner, checked
 from eidolon_ops.progress import Journal
 from eidolon_ops.source_resolution import SourceResolver
@@ -552,6 +553,14 @@ class BundleTransfer:
         extra = sorted(set(self.config.sources) - set(SOURCE_IDS))
         return (*SOURCE_IDS, *extra)
 
+    def _target_machine(self) -> str:
+        """The architecture this Host's reviewed foundation pins."""
+        return _resolve_foundation_profile(self.config.foundation_profile).architecture
+
+    def _target_platform(self) -> str:
+        """The uv Python platform string the dependency cache is resolved for."""
+        return f"{self._target_machine()}-manylinux_2_40"
+
     def _seal(self, output: Path, release_id: str, *, cutover_mode: str) -> dict[str, object]:
         command = [
             str(self.config.workspace.release_cli),
@@ -560,6 +569,7 @@ class BundleTransfer:
             str(output),
         ]
         command.extend(("--cutover-mode", cutover_mode))
+        command.extend(("--machine", self._target_machine()))
         # What this Host can do, so the release contract expects the same sets
         # Ops does. Told rather than inferred: the contract is validated on the
         # Host, before Ops' config exists there, so it has to be in the bundle.
@@ -758,7 +768,7 @@ class BundleTransfer:
             or dependencies.get("artifact_id") != "python-dependencies"
             or dependencies.get("uv_version") != "0.11.15"
             or dependencies.get("python_version") != "3.13"
-            or dependencies.get("platform") != "aarch64-manylinux_2_40"
+            or dependencies.get("platform") != self._target_platform()
             or dependencies.get("index_url") != self.config.workspace.python_index_url
         ):
             raise OperationsError("existing bundle Python dependency cache drifted")
