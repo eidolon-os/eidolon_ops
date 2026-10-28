@@ -1,0 +1,97 @@
+schema_version = 1
+
+[foundation]
+profile = "debian-trixie-amd64-v1"
+
+[host]
+user = "eidolon"
+# Bridged onto the workstation's Wi-Fi, the VM publishes its hostname over
+# mDNS like a board; Ops resolves it per run rather than pinning an address.
+hostname = "eidolon-x86-64.local"
+port = 22
+#identity_file = "/tmp/opencode/debian-vm/eidolon_vm_key"
+identity_file = "~/.ssh/id_ed25519"
+known_hosts_file = "../.eidolon-ops/x86-64/known_hosts"
+operator_keys_file = "eidolon-x86-64.operators"
+connect_timeout_seconds = 10
+remote_uv = "/usr/local/bin/uv"
+require_wired_release_upload = false
+
+[workspace]
+bundle_root = "~/eidolon/release-bundles"
+release_cli = "../../eidolon_kernel/.venv/bin/eidolon-release"
+uv = "/home/f0rrest/.local/bin/uv"
+python_index_url = "https://pypi.org/simple"
+python_http_timeout_seconds = 120
+python_http_retries = 8
+python_concurrent_downloads = 4
+
+[sources.eidolon_kernel]
+path = "../../eidolon_kernel"
+
+[sources.eidolon_data]
+path = "../../eidolon_data"
+
+[sources.eidolon_hub]
+path = "../../eidolon_hub"
+
+[sources.eidolon_admin]
+path = "../../eidolon_admin"
+
+[sources.eidolon_agent]
+path = "../../eidolon_agent"
+
+[sources.eidolon_channel]
+path = "../../eidolon_channel"
+
+[sources.eidolon_memory]
+path = "../../eidolon_memory"
+
+[sources.eidolon_sdk]
+path = "../../eidolon_sdk"
+
+[services]
+units = [
+  "eidolon-bootstrapd.service",
+  "eidolond.service",
+  "eidolon-unit-applier.socket",
+  "eidolon-unit-applier.service",
+  "eidolon-data.service",
+  "eidolon-data-workspace.service",
+  "eidolon-hub-discovery.service",
+  "eidolon-hub.service",
+  "eidolon-kernel.service",
+  "eidolon-local-api.service",
+  "eidolon-lifecycle-workflow.service",
+  "eidolon-admin.service",
+  "eidolon-nats.service",
+  "eidolon-livekit.service",
+  "eidolon-memory-embedder.service",
+  "eidolon-memory-supervisor.service",
+  "eidolon-memory-discovery.service",
+  "eidolon-agent.service",
+  "eidolon-channel-provider.service",
+  "eidolon-channel.service",
+]
+
+[data]
+system_database = "/var/lib/eidolon/eidolon-system.sqlite3"
+object_store = "/var/lib/eidolon/objects"
+bootstrap_database = "/var/lib/eidolon-bootstrap/bootstrap.sqlite3"
+deployment_evidence = "/var/lib/eidolon/deployments"
+
+[install.files]
+data_env = "../.eidolon-ops/x86-64/inputs/data.env"
+hub_env = "../.eidolon-ops/x86-64/inputs/hub.env"
+kernel_env = "../.eidolon-ops/x86-64/inputs/kernel.env"
+admin_env = "../.eidolon-ops/x86-64/inputs/admin.env"
+local_api_env = "../.eidolon-ops/x86-64/inputs/local-api.env"
+bootstrap_env = "../.eidolon-ops/x86-64/inputs/bootstrap.env"
+host_identity = "../.eidolon-ops/x86-64/inputs/host_identity.ed25519"
+agent_env = "../.eidolon-ops/x86-64/inputs/agent.env"
+channel_env = "../.eidolon-ops/x86-64/inputs/channel.env"
+memory_env = "../.eidolon-ops/x86-64/inputs/memory.env"
+livekit_env = "../.eidolon-ops/x86-64/inputs/livekit.env"
+agent_settings = "../.eidolon-ops/x86-64/inputs/agent.yaml"
+channel_settings = "../.eidolon-ops/x86-64/inputs/channel.yaml"
+memory_settings = "../.eidolon-ops/x86-64/inputs/memory.yaml"

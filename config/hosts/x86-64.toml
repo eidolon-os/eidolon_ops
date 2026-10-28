@@ -1,0 +1,34 @@
+schema_version = 1
+
+[host]
+id = "eidolon-x86-64"
+platform = "linux"
+
+[execution]
+transport = "ssh"
+supervisor = "systemd"
+packages = "apt"
+identity = "service-accounts"
+
+[paths]
+install_root = "/opt/eidolon"
+current_root = "/opt/eidolon/current"
+config_root = "/etc/eidolon"
+state_root = "/var/lib/eidolon"
+runtime_root = "/run/eidolon"
+log_root = "/var/log/eidolon"
+cache_root = "/var/cache/eidolon"
+bootstrap_state_root = "/var/lib/eidolon-bootstrap"
+bootstrap_runtime_root = "/run/eidolon-bootstrap"
+
+[adapter]
+operations_config = "../eidolon-x86-64.toml"
+
+[app]
+hub_https_port = 9443
+allow_insecure_livekit = true
+
+# A generic x86_64 VM has no NPU and runs no local model: it reaches a provider
+# for speech, so no Laya / ASR / LLM / TTS unit or weights are installed.
+[capabilities]
+provides = []
