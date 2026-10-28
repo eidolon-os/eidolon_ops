@@ -78,8 +78,23 @@ APT_PACKAGES = (
     "xz-utils",
 )
 
+#: The same reviewed set without bluez, for a Host that has no Bluetooth radio
+#: and therefore runs no Bluetooth daemon for the package to serve.
+APT_PACKAGES_NO_BLUETOOTH = tuple(
+    package for package in APT_PACKAGES if package != "bluez"
+)
+
 FOUNDATION_SERVICES = (
     "bluetooth.service",
+    "NetworkManager.service",
+    "avahi-daemon.service",
+)
+
+#: A generic x86_64 machine — a VM or a server — has no Bluetooth radio to run
+#: bluetooth.service, so its reviewed foundation does not demand one. The
+#: boards keep the three-service set because BLE device onboarding is part of
+#: what they are.
+FOUNDATION_SERVICES_NO_BLUETOOTH = (
     "NetworkManager.service",
     "avahi-daemon.service",
 )
@@ -170,8 +185,66 @@ FOUNDATION_ARTIFACTS = (
         sha256="fff4078c5def658577f92c88db7db3bc0072924bfb93fe52c1e744a54e94abb8",
         kind="node-tar",
         executable="node",
+        top_level="node-v22.23.2-linux-arm64",
     ),
 )
+
+#: The same four prebuilt binaries, for a generic Debian trixie x86_64
+#: machine. Each digest was fetched from the same supplier as the aarch64 pin,
+#: not carried across: the nats-server and livekit-server digests are the
+#: release assets' own sha256, the uv wheel is the one the workstation
+#: toolchain already pins for x86_64, and node is nodejs.org's published
+#: checksum for linux-x64.
+FOUNDATION_ARTIFACTS_X86_64 = (
+    FoundationArtifact(
+        artifact_id="nats-server",
+        version="2.14.0",
+        url="https://api.github.com/repos/nats-io/nats-server/releases/assets/409045571",
+        sha256="3d8b74dfad39af184c765a6dd120441ed1c648d6672eddf6b304f222661251b8",
+        kind="tar-binary",
+        executable="nats-server",
+    ),
+    FoundationArtifact(
+        artifact_id="livekit-server",
+        version="1.11.0",
+        url="https://api.github.com/repos/livekit/livekit/releases/assets/398737304",
+        sha256="3e76ed51ecdfefc3005e4257095dccd1ccc8f8b77517d9f2353de7906650b68b",
+        kind="tar-binary",
+        executable="livekit-server",
+    ),
+    FoundationArtifact(
+        artifact_id="uv",
+        version="0.11.15",
+        url=(
+            "https://files.pythonhosted.org/packages/d3/16/"
+            "fe392d618af6b00c064b3e718d585dcf791546a77c5123a5bec07ce53a0a/"
+            "uv-0.11.15-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl"
+        ),
+        sha256="98edf1bdaf82447014852051d93e3ee95012509c567bf057fd117e6bdbd9a807",
+        kind="pip-wheel",
+        executable="uv",
+    ),
+    FoundationArtifact(
+        artifact_id="node",
+        version="22.23.2",
+        url="https://nodejs.org/dist/v22.23.2/node-v22.23.2-linux-x64.tar.xz",
+        sha256="d60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307",
+        kind="node-tar",
+        executable="node",
+        top_level="node-v22.23.2-linux-x64",
+    ),
+)
+
+#: What ``uname -m`` may say for each profile architecture, the primary name
+#: first. Linux reports ``aarch64`` and ``x86_64``; containers and some tools
+#: report the Debian/RPM names ``arm64`` and ``amd64``, so a profile accepts
+#: its own spelling and that alias, and nothing else. This belongs to the
+#: architecture rather than to a board, which is why it is a lookup and not a
+#: field every profile repeats.
+ARCHITECTURE_ALIASES: dict[str, tuple[str, ...]] = {
+    "aarch64": ("arm64",),
+    "x86_64": ("amd64",),
+}
 
 
 #: What a capability adds to the artifacts above.
@@ -464,9 +537,63 @@ UBUNTU_2604_RK3588 = FoundationProfile(
 )
 
 
+#: A generic Debian trixie on x86_64 — a VM or an Intel/AMD machine — rather
+#: than a board. No /proc/device-tree/model exists there, so the hardware gate
+#: is dropped and the OS gate is the whole check. Debian trixie ships
+#: Python 3.13, so no interpreter is carried. The same four prebuilt binaries,
+#: pinned at their x86_64 builds.
+DEBIAN_TRIXIE_X86_64 = FoundationProfile(
+    id="debian-trixie-amd64-v1",
+    display_name="Debian trixie on x86_64",
+    architecture="x86_64",
+    os_ids=("debian",),
+    os_versions=("13",),
+    hardware_model_match=None,
+    hardware_display_name=None,
+    #: The floor is measured, not the box's label: the 4 GiB test machine
+    #: reports 3996220 kB (3.81 GiB), and the product's steady state with the
+    #: channel worker included is 2.3 GiB. 3 GiB leaves the same kind of
+    #: headroom below what is actually visible that the boards do.
+    minimum_memory_kib=3145728,
+    minimum_disk_kib=12582912,
+    minimum_memory_label="3 GiB-class RAM",
+    minimum_disk_label="12 GiB free disk",
+    apt_suite="trixie",
+    #: No raspberrypi archive on a machine that is not a Pi; the two Debian
+    #: stanzas are the whole archive set.
+    apt_mirrors={
+        "debian": APT_MIRRORS["debian"],
+        "security": APT_MIRRORS["security"],
+    },
+    apt_sources=(
+        AptSource(
+            uris=APT_MIRRORS["debian"],
+            suites="{suite} {suite}-updates",
+            components="main contrib non-free non-free-firmware",
+            signed_by="/usr/share/keyrings/debian-archive-keyring.pgp",
+        ),
+        AptSource(
+            uris=APT_MIRRORS["security"],
+            suites="{suite}-security",
+            components="main contrib non-free non-free-firmware",
+            signed_by="/usr/share/keyrings/debian-archive-keyring.pgp",
+        ),
+    ),
+    apt_packages=APT_PACKAGES_NO_BLUETOOTH,
+    bootstrap_packages=BOOTSTRAP_PACKAGES,
+    services=FOUNDATION_SERVICES_NO_BLUETOOTH,
+    journal_persistence=JOURNAL_PERSISTENCE,
+    journal_persistence_content=JOURNAL_PERSISTENCE_CONTENT,
+    cpu_governor=None,
+    python_version=None,
+    artifacts=FOUNDATION_ARTIFACTS_X86_64,
+)
+
+
 #: Every board Ops will install onto, by the id a host config names.
 FOUNDATION_PROFILES: dict[str, FoundationProfile] = {
-    profile.id: profile for profile in (RASPBERRY_PI_OS_TRIXIE, UBUNTU_2604_RK3588)
+    profile.id: profile
+    for profile in (RASPBERRY_PI_OS_TRIXIE, UBUNTU_2604_RK3588, DEBIAN_TRIXIE_X86_64)
 }
 
 
@@ -597,6 +724,9 @@ def python_bootstrap_script(
         else ""
     )
     sources = _apt_sources(profile)
+    architecture_gate = "|".join(
+        (profile.architecture, *ARCHITECTURE_ALIASES.get(profile.architecture, ()))
+    )
     return f"""#!/bin/sh
 set -eu
 if [ \"$(uname -s)\" != Linux ]; then
@@ -604,7 +734,7 @@ if [ \"$(uname -s)\" != Linux ]; then
   exit 1
 fi
 case \"$(uname -m)\" in
-  {profile.architecture}|arm64) ;;
+  {architecture_gate}) ;;
   *) echo 'foundation bootstrap requires {profile.architecture}' >&2; exit 1 ;;
 esac
 if [ ! -r /etc/os-release ]; then

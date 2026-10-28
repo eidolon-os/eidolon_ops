@@ -316,6 +316,7 @@ def test_node_archive_is_safely_extracted(monkeypatch, tmp_path: Path) -> None:
         "sha256": "0" * 64,
         "kind": "node-tar",
         "executable": "node",
+        "top_level": f"node-v{version}-linux-arm64",
     }
 
     host_foundation_install.install_node(artifact)

@@ -84,6 +84,10 @@ FOUNDATION_PACKAGES = (
     "xz-utils",
 )
 
+FOUNDATION_PACKAGES_NO_BLUETOOTH = tuple(
+    package for package in FOUNDATION_PACKAGES if package != "bluez"
+)
+
 #: The Pi OS default keeps the journal in RAM, so a Host forgets why anything
 #: went wrong the moment it restarts. Overridden here, bounded, because a
 #: product that cannot account for its own failures cannot be supported. The
@@ -110,6 +114,11 @@ MaxRetentionSec=30day
 
 FOUNDATION_SERVICES = (
     "bluetooth.service",
+    "NetworkManager.service",
+    "avahi-daemon.service",
+)
+
+FOUNDATION_SERVICES_NO_BLUETOOTH = (
     "NetworkManager.service",
     "avahi-daemon.service",
 )
@@ -151,6 +160,7 @@ FOUNDATION_ARTIFACTS = (
         "sha256": "fff4078c5def658577f92c88db7db3bc0072924bfb93fe52c1e744a54e94abb8",
         "kind": "node-tar",
         "executable": "node",
+        "top_level": "node-v22.23.2-linux-arm64",
     },
 )
 
@@ -168,6 +178,55 @@ CPYTHON_3_13_AARCH64 = {
     "sha256": "01ce0ce9189feaead3298abf10d4efe998c55a489b3d5d38ca4f83dda7e7977e",
     "kind": "python-tar",
     "executable": "python3.13",
+}
+
+#: The same four prebuilt binaries at their x86_64 builds. The agent's own
+#: copy, held equal to Ops's by a test.
+FOUNDATION_ARTIFACTS_X86_64 = (
+    {
+        "artifact_id": "nats-server",
+        "version": "2.14.0",
+        "url": "https://api.github.com/repos/nats-io/nats-server/releases/assets/409045571",
+        "sha256": "3d8b74dfad39af184c765a6dd120441ed1c648d6672eddf6b304f222661251b8",
+        "kind": "tar-binary",
+        "executable": "nats-server",
+    },
+    {
+        "artifact_id": "livekit-server",
+        "version": "1.11.0",
+        "url": "https://api.github.com/repos/livekit/livekit/releases/assets/398737304",
+        "sha256": "3e76ed51ecdfefc3005e4257095dccd1ccc8f8b77517d9f2353de7906650b68b",
+        "kind": "tar-binary",
+        "executable": "livekit-server",
+    },
+    {
+        "artifact_id": "uv",
+        "version": "0.11.15",
+        "url": (
+            "https://files.pythonhosted.org/packages/d3/16/"
+            "fe392d618af6b00c064b3e718d585dcf791546a77c5123a5bec07ce53a0a/"
+            "uv-0.11.15-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl"
+        ),
+        "sha256": "98edf1bdaf82447014852051d93e3ee95012509c567bf057fd117e6bdbd9a807",
+        "kind": "pip-wheel",
+        "executable": "uv",
+    },
+    {
+        "artifact_id": "node",
+        "version": "22.23.2",
+        "url": "https://nodejs.org/dist/v22.23.2/node-v22.23.2-linux-x64.tar.xz",
+        "sha256": "d60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307",
+        "kind": "node-tar",
+        "executable": "node",
+        "top_level": "node-v22.23.2-linux-x64",
+    },
+)
+
+#: What ``uname -m`` may say for each profile architecture. Held equal to
+#: Ops's copy by a test, for the same reason every other table here is.
+ARCHITECTURE_ALIASES: dict[str, tuple[str, ...]] = {
+    "aarch64": ("arm64",),
+    "x86_64": ("amd64",),
 }
 
 
@@ -300,8 +359,44 @@ UBUNTU_2604_RK3588 = AgentFoundationProfile(
     artifacts=(*FOUNDATION_ARTIFACTS, CPYTHON_3_13_AARCH64),
 )
 
+DEBIAN_TRIXIE_X86_64 = AgentFoundationProfile(
+    id="debian-trixie-amd64-v1",
+    architecture="x86_64",
+    os_ids=("debian",),
+    os_versions=("13",),
+    hardware_model_prefix=None,
+    minimum_memory_kib=3 * 1024 * 1024,
+    minimum_disk_kib=12 * 1024 * 1024,
+    apt_mirrors={
+        "debian": "https://mirror.nju.edu.cn/debian/",
+        "security": "https://mirror.nju.edu.cn/debian-security/",
+    },
+    apt_suite="trixie",
+    apt_sources=(
+        AptSource(
+            uris="https://mirror.nju.edu.cn/debian/",
+            suites="{suite} {suite}-updates",
+            components="main contrib non-free non-free-firmware",
+            signed_by="/usr/share/keyrings/debian-archive-keyring.pgp",
+        ),
+        AptSource(
+            uris="https://mirror.nju.edu.cn/debian-security/",
+            suites="{suite}-security",
+            components="main contrib non-free non-free-firmware",
+            signed_by="/usr/share/keyrings/debian-archive-keyring.pgp",
+        ),
+    ),
+    apt_packages=FOUNDATION_PACKAGES_NO_BLUETOOTH,
+    services=FOUNDATION_SERVICES_NO_BLUETOOTH,
+    journal_persistence=JOURNAL_PERSISTENCE,
+    journal_persistence_content=JOURNAL_PERSISTENCE_CONTENT,
+    python_version=None,
+    artifacts=FOUNDATION_ARTIFACTS_X86_64,
+)
+
 FOUNDATION_PROFILES: dict[str, AgentFoundationProfile] = {
-    profile.id: profile for profile in (RASPBERRY_PI_OS_TRIXIE, UBUNTU_2604_RK3588)
+    profile.id: profile
+    for profile in (RASPBERRY_PI_OS_TRIXIE, UBUNTU_2604_RK3588, DEBIAN_TRIXIE_X86_64)
 }
 
 
@@ -486,7 +581,8 @@ def foundation_platform_checks(
         free_bytes = 0
     return {
         "linux": platform.system().lower() == "linux",
-        "supported_architecture": machine in {profile.architecture, "arm64"},
+        "supported_architecture": machine
+        in {profile.architecture, *ARCHITECTURE_ALIASES.get(profile.architecture, ())},
         "supported_hardware": profile.hardware_model_prefix is None
         or model.startswith(profile.hardware_model_prefix),
         "supported_os": os_id in profile.os_ids,

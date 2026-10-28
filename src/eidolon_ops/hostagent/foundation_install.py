@@ -145,7 +145,7 @@ def safe_node_member(member: tarfile.TarInfo, top: str) -> bool:
 
 def install_node(artifact: Mapping[str, str]) -> None:
     archive_path = download_verified(artifact)
-    top = f"node-v{artifact['version']}-linux-arm64"
+    top = artifact["top_level"]
     destination = foundation.LOCAL_LIB / top
     if not destination.is_dir():
         with tempfile.TemporaryDirectory(prefix="eidolon-node-", dir=foundation.LOCAL_LIB) as raw:
