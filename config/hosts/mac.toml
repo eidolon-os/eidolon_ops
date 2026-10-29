@@ -57,7 +57,7 @@ revision = "e41945b3820ed2ad952dbf54c73aa531dfe8e401"
 
 [source_overrides.eidolon_admin]
 path = "../../../.eidolon/mac-product/sources/person-release-20261029/eidolon_admin"
-revision = "271ad6bcd21578141b69e6893c8a729697c07633"
+revision = "56db46e9b9cbd4492948582817d6eeeeb635b497"
 
 [source_overrides.eidolon_kernel]
 path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_kernel"
