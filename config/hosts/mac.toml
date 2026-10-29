@@ -44,20 +44,20 @@ hub_https_port = 8443
 allow_insecure_livekit = true
 # This acceptance runtime uses clean sibling checkouts and their own locked
 # environments. Editable SDK/Data/contracts dependencies therefore resolve to
-# this same reviewed set, not the main worktrees' unfinished memory extension.
+# this same reviewed set, the same accepted Person contracts.
 # Update these source selections together when accepting the next revision.
 
 [source_overrides.eidolon_data]
-path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_data"
-revision = "9a8f1b9e4ed9449118a17050177267e7460b6aa6"
+path = "../../../.eidolon/mac-product/sources/person-release-20261029/eidolon_data"
+revision = "f8e2cf3f247780082a0c246554d89a406d2b16e9"
 
 [source_overrides.eidolon_sdk]
-path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_sdk"
-revision = "44dd77c7b5c67e22355ae83c98cc916f01f3b4ea"
+path = "../../../.eidolon/mac-product/sources/person-release-20261029/eidolon_sdk"
+revision = "e41945b3820ed2ad952dbf54c73aa531dfe8e401"
 
 [source_overrides.eidolon_admin]
-path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_admin"
-revision = "b208123c14a6e0f5218948894f9c469fff8193d9"
+path = "../../../.eidolon/mac-product/sources/person-release-20261029/eidolon_admin"
+revision = "271ad6bcd21578141b69e6893c8a729697c07633"
 
 [source_overrides.eidolon_kernel]
 path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_kernel"
@@ -68,16 +68,16 @@ path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon
 revision = "7c63353646cf51022dff5991c77aa81abbc8fa61"
 
 [source_overrides.eidolon_agent]
-path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_agent"
-revision = "a97386b21644894f8bb3701aa3440ba0ccbaa999"
+path = "../../../.eidolon/mac-product/sources/person-release-20261029/eidolon_agent"
+revision = "ac205fcfb48128024883b4d1254d04907d04b692"
 
 [source_overrides.eidolon_channel]
-path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_channel"
-revision = "a5617ea126585d73d5adf573b364585ef98365c9"
+path = "../../../.eidolon/mac-product/sources/person-release-20261029/eidolon_channel"
+revision = "ad786962425ac29a853c59080ba82ee3f8002f6d"
 
 [source_overrides.eidolon_memory]
-path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_memory"
-revision = "6f8638fb11067d017a9173e63a33315679f42b26"
+path = "../../../.eidolon/mac-product/sources/person-release-20261029/eidolon_memory"
+revision = "70e4b5db1b4953da8dfe86ee562235f25e3e803e"
 
 # Keep this Host's existing runtime selection explicit. Adding reviewed product
 # capabilities must not start a new model on the workstation implicitly.
@@ -130,7 +130,3 @@ value = "d3"
 
 # Measured local enrolled-audio inference: 327-348 ms. Recognition starts at
 # final ASR evidence; bound the remaining wait without queuing late results.
-[[settings.overlay]]
-document = "channel.yaml"
-path = "voiceprint.recognition_wait_ms"
-value = "400"
