@@ -48,8 +48,8 @@ allow_insecure_livekit = true
 # Update these source selections together when accepting the next revision.
 
 [source_overrides.eidolon_data]
-path = "../../../.eidolon/mac-product/sources/team-ux-20261030/eidolon_data"
-revision = "3f45f6d3eb6278a5fbac1540292267ca0fbf527f"
+path = "../../../eidolon_data"
+revision = "4e2bb525234ef789a1b3acfc44f75e8263d265fb"
 
 [source_overrides.eidolon_sdk]
 path = "../../../.eidolon/mac-product/sources/team-ux-20261030/eidolon_sdk"
