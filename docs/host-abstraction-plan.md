@@ -339,3 +339,9 @@ settings 夹具是扁平的——`log_level` 在顶层、没有 `observability` 
 `artifacts` 是给 git 装不下的东西的——在这个组件上指的是 RKNN/RKLLM 模型
 （Qwen3-1.7B 2.3 GB、CosyVoice2 1.6 GB）。那两个**没有声明**，因为还没有
 可指向、可校验的固定位置；写上没有摘要的 artifact 等于给发布一个它兑现不了的承诺。
+
+### 2026-10-30：源码 Host 复用独立模型制品
+
+Mac Laya 不再默认读取检出目录下的权重。Models 声明 Torch 的显式制品，source preparation 按能力、实际后端和 services.toml 中的固定模型目录解析唯一制品，复用 `ensure_workstation_artifact` 的逐文件校验、缺失准备与已有资源复用；远程 participation 跳过本地权重。NPU 的原能力交付路径保持不变，显式制品不会被普通交付误带上。
+
+源码 Host 使用现有 `EIDOLON_STATE_ROOT` 映射模型目录，不新增机器专属路径或第二套下载/缓存机制。源码检出应禁用自动 LFS smudge，模型按固定提交提取。验收条件是未展开模型的源码也能完成准备与启动，重复准备不重写校验正确的文件；损坏或缺失仍由原制品校验处理。清理仅针对已被替代且不被运行或保留回滚引用的源码副本，不清除未核对的模型缓存。

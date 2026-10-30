@@ -114,8 +114,8 @@ def test_laya_release_is_capability_selected_and_versioned() -> None:
     assert not any(item.artifact_id.startswith("laya-smart-home") for item in without)
     with_laya = _declared(frozenset({"local_laya"}))
     laya = [item for item in with_laya if item.artifact_id.startswith("laya-smart-home")]
-    # One format: the NPU graphs. A Host without rknpu2 runs no Laya, so nothing CPU-side is pinned.
-    assert [item.install_root.name for item in laya] == ["laya-smart-home-c4-rknn-7b695ba8"]
+    # Capability delivery keeps the NPU format; source-selected Torch artifacts are explicit.
+    assert len(laya) == 1 and "rknn" in laya[0].install_root.name
     (model,) = laya
     assert {item.path for item in model.files} >= {
         "manifest.json", "librknnrt.so", "npu/hidden_l512.rknn", "npu/tok_emb_fp16.npy",

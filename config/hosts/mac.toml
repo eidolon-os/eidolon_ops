@@ -32,7 +32,7 @@ bootstrap_state_root = "~/ai/eidolon/.eidolon/mac-product/bootstrap/state"
 bootstrap_runtime_root = "~/ai/eidolon/.eidolon/mac-product/bootstrap/run"
 
 [adapter]
-lifecycle_script = "../../../.eidolon/mac-product/sources/team-runtime-20261030/eidolon_ops/deploy/dev/run_all.sh"
+lifecycle_script = "../../../.eidolon/mac-product/sources/model-assets-20261030/eidolon_ops/deploy/dev/run_all.sh"
 operations_config = "../eidolon-pi.toml"
 foundation_mode = "external"
 external_livekit_config = "~/ai/eidolon/.eidolon/mac-product/run/livekit/livekit.generated.yaml"
@@ -68,8 +68,8 @@ path = "../../../.eidolon/mac-product/sources/team-ux-20261030/eidolon_hub"
 revision = "7c63353646cf51022dff5991c77aa81abbc8fa61"
 
 [source_overrides.eidolon_agent]
-path = "../../../.eidolon/mac-product/sources/team-ux-20261030/eidolon_agent"
-revision = "ba2f405930ff5921bf9c2330c975d33f022d47db"
+path = "../../../.eidolon/mac-product/sources/team-discussion-20261030/eidolon_agent"
+revision = "41d5ae15f240b014c518c4a93001125c6f6b396a"
 
 [source_overrides.eidolon_channel]
 path = "../../../.eidolon/mac-product/sources/team-ux-20261030/eidolon_channel"
@@ -82,8 +82,8 @@ revision = "70e4b5db1b4953da8dfe86ee562235f25e3e803e"
 # Keep this Host's existing runtime selection explicit. Adding reviewed product
 # capabilities must not start a new model on the workstation implicitly.
 [source_overrides.eidolon_models]
-path = "../../../.eidolon/mac-product/sources/team-ux-20261030/eidolon_models"
-revision = "7f93b1a5b8f56fae9e264f58df22844863bfed9d"
+path = "../../../.eidolon/mac-product/sources/model-assets-20261030/eidolon_models"
+revision = "c76777b7cb801451804b24777463af3b87b09d75"
 
 [capabilities]
 # Channel Provider owns the shared CPU speaker extractor; no extra daemon.

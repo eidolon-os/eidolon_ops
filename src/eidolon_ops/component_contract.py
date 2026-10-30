@@ -215,7 +215,7 @@ class ComponentContract:
     def artifacts(self) -> tuple[dict[str, Any], ...]:
         return tuple(self.document.get("artifacts", ()))
 
-    def select(self, capabilities: frozenset[str]) -> ComponentContract:
+    def select(self, capabilities: frozenset[str], *, include_explicit_artifacts: bool = False) -> ComponentContract:
         """This contract as it applies to a Host offering ``capabilities``.
 
         Entries asking for something the Host does not have are dropped here
@@ -234,6 +234,8 @@ class ComponentContract:
                 entry
                 for entry in entries
                 if _selected(entry, capabilities, self.component_id, section)
+                and (section != "artifacts" or include_explicit_artifacts
+                     or entry.get("activation", "capability") != "explicit")
             ]
         kept = {unit["id"] for unit in document.get("units", ())}
         if kept != set(self.unit_ids):

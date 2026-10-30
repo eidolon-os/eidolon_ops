@@ -462,6 +462,13 @@
             },
             "uniqueItems": true,
             "description": "Additional capabilities required together with requires_capability."
+          },
+          "activation": {
+            "enum": [
+              "capability",
+              "explicit"
+            ],
+            "description": "Explicit artifacts are materialized only when an active runtime references their install_root; ordinary capability delivery excludes them."
           }
         }
       }

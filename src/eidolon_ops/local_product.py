@@ -150,7 +150,7 @@ class LocalProductSource:
             raise OperationsError(str(exc)) from exc
 
         paths = self.profile.paths
-        self._prepare_speaker_asset()
+        self._prepare_model_assets()
         self._make_roots()
         source_inputs = next(iter(self.config.install_files.values())).parent
         self._adopt_host_identity(source_inputs)
@@ -441,7 +441,7 @@ class LocalProductSource:
         for directory in (paths.config_root, paths.config_root / "env", paths.config_root / "tls"):
             os.chmod(directory, 0o700)
 
-    def _prepare_speaker_asset(self) -> None:
+    def _prepare_model_assets(self) -> None:
         """Use the release artifact materializer at the translated Host state root."""
         from eidolon_ops.component_artifacts import capability_artifact, ensure_workstation_artifact
 
@@ -450,7 +450,20 @@ class LocalProductSource:
             config, self._read_exact_file,
             component_id="eidolon_models", capability="local_speaker_verification",
         )
-        if artifact is not None:
+        artifacts = [artifact] if artifact is not None else []
+        if {"local_laya", "local_laya_participation"} & config.capabilities:
+            from eidolon_ops.source_model_artifacts import runtime_model_artifacts
+            source = config.sources["eidolon_models"]
+            declaration = load_component_contract(source.path, "eidolon_models")
+            if declaration is None:
+                raise OperationsError("Models must declare its model artifacts")
+            artifacts.extend(runtime_model_artifacts(
+                declaration,
+                self._read_exact_file("eidolon_models", source.revision, "laya/deploy/services.toml"),
+                config.capabilities,
+                participation_upstream_url=self.profile.participation_upstream_url,
+            ))
+        for artifact in artifacts:
             ensure_workstation_artifact(
                 self.profile.paths.state_root, artifact,
                 repositories={name: (source.path, source.revision) for name, source in config.sources.items()},

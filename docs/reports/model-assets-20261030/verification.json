@@ -1,0 +1,52 @@
+{
+  "date": "2026-10-30",
+  "release": {
+    "eidolon_models": {
+      "base": "a5f9ba6b442794961800317d1a57a365c8304c1d",
+      "path": "/Users/manson/ai/eidolon/.eidolon/mac-product/sources/model-assets-20261030/eidolon_models",
+      "revision": "c76777b7cb801451804b24777463af3b87b09d75"
+    },
+    "eidolon_ops": {
+      "base": "2eba9a54eebb604d508ba59536b76051babc874b",
+      "path": "/Users/manson/ai/eidolon/.eidolon/mac-product/sources/model-assets-20261030/eidolon_ops",
+      "revision": "a4e5056a83070435b3c9513d5db82bbe1ba05069"
+    }
+  },
+  "validation": {
+    "ops_tests_passed": 85,
+    "models_tests_passed": 31,
+    "model_preparation": {
+      "id": "laya-smart-home-c10-torch-e8254243",
+      "path": "/Users/manson/ai/eidolon/.eidolon/mac-product/state/models/laya-smart-home-c10-torch-e8254243",
+      "files": 6,
+      "verified_reuse": true,
+      "code_checkout_has_models": false
+    },
+    "restart_status": "healthy",
+    "app_status": "app_ready",
+    "smart_home_ready": {
+      "status": "ready",
+      "backend": "torch"
+    },
+    "participation_policy": "d3-team-discussion-v3",
+    "source_checkout": "full checkout with unexpanded LFS pointer files, no sparse directory whitelist",
+    "source_weight_bytes": 135
+  },
+  "cleanup": {
+    "removed_clean_checkouts": [
+      ".eidolon/mac-product/sources/team-runtime-20261030/eidolon_models",
+      ".eidolon/mac-product/sources/team-ux-20261030/eidolon_models"
+    ],
+    "free_space_before_approx_GiB": 11,
+    "free_space_after_approx_GiB": 30,
+    "retained": "current source release, previous team-discussion Models release, Git/LFS objects and personal data"
+  },
+  "previous_release_pair": {
+    "models": {
+      "path": "../../../.eidolon/mac-product/sources/team-discussion-20261030/eidolon_models",
+      "revision": "a5f9ba6b442794961800317d1a57a365c8304c1d"
+    },
+    "ops_lifecycle": "../../../.eidolon/mac-product/sources/team-runtime-20261030/eidolon_ops/deploy/dev/run_all.sh"
+  },
+  "rollback_note": "Ops and Models operational contracts must be switched as a compatible pair; prior source resources are retained. No rollback operation was performed."
+}
