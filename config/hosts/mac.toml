@@ -72,8 +72,8 @@ path = "../../../.eidolon/mac-product/sources/person-release-20261029/eidolon_ag
 revision = "ac205fcfb48128024883b4d1254d04907d04b692"
 
 [source_overrides.eidolon_channel]
-path = "../../../.eidolon/mac-product/sources/person-release-20261029/eidolon_channel"
-revision = "ad786962425ac29a853c59080ba82ee3f8002f6d"
+path = "../../../.eidolon/mac-product/sources/person-release-20261029/eidolon_channel-64723b7"
+revision = "64723b7456d259420ab0be2128e6963589640ba9"
 
 [source_overrides.eidolon_memory]
 path = "../../../.eidolon/mac-product/sources/person-release-20261029/eidolon_memory"
