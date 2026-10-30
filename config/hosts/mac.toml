@@ -52,12 +52,12 @@ path = "../../../.eidolon/mac-product/sources/person-release-20261029/eidolon_da
 revision = "f8e2cf3f247780082a0c246554d89a406d2b16e9"
 
 [source_overrides.eidolon_sdk]
-path = "../../../.eidolon/mac-product/sources/person-release-20261029/eidolon_sdk"
-revision = "e41945b3820ed2ad952dbf54c73aa531dfe8e401"
+path = "../../../.eidolon/mac-product/sources/voice-capture-20261030/eidolon_sdk"
+revision = "4399d8c2e72af334a4f850b6213600053c91e741"
 
 [source_overrides.eidolon_admin]
-path = "../../../.eidolon/mac-product/sources/person-release-20261029/eidolon_admin"
-revision = "56db46e9b9cbd4492948582817d6eeeeb635b497"
+path = "../../../.eidolon/mac-product/sources/voice-capture-20261030/eidolon_admin"
+revision = "9606b0969d39f11711f3c240aa2250bf5ec09b10"
 
 [source_overrides.eidolon_kernel]
 path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_kernel"
@@ -72,8 +72,8 @@ path = "../../../.eidolon/mac-product/sources/person-release-20261029/eidolon_ag
 revision = "ac205fcfb48128024883b4d1254d04907d04b692"
 
 [source_overrides.eidolon_channel]
-path = "../../../.eidolon/mac-product/sources/person-release-20261029/eidolon_channel-64723b7"
-revision = "64723b7456d259420ab0be2128e6963589640ba9"
+path = "../../../.eidolon/mac-product/sources/voice-capture-20261030/eidolon_channel"
+revision = "7ad8dbb9b0bee7576271076178865789113b2fc9"
 
 [source_overrides.eidolon_memory]
 path = "../../../.eidolon/mac-product/sources/person-release-20261029/eidolon_memory"
