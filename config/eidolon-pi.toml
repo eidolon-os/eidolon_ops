@@ -113,13 +113,14 @@ units = [
   "eidolon-channel-provider.service",
   "eidolon-channel.service",
   "eidolon-laya.service",
+  "eidolon-laya-participation.service",
 ]
 
 # The most a Host of this product may run locally. The Mac source run inherits it (Laya on
 # its GPU); Host profiles select what they run. Pi5 selects CPU speaker assets,
 # while the device-management HIL profile selects no local models.
 [capabilities]
-provides = ["local_laya", "local_speaker_verification"]
+provides = ["local_laya", "local_speaker_verification", "local_laya_participation"]
 
 [data]
 system_database = "/var/lib/eidolon/eidolon-system.sqlite3"

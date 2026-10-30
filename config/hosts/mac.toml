@@ -32,7 +32,7 @@ bootstrap_state_root = "~/ai/eidolon/.eidolon/mac-product/bootstrap/state"
 bootstrap_runtime_root = "~/ai/eidolon/.eidolon/mac-product/bootstrap/run"
 
 [adapter]
-lifecycle_script = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_ops/deploy/dev/run_all.sh"
+lifecycle_script = "../../../.eidolon/mac-product/sources/team-runtime-20261030/eidolon_ops/deploy/dev/run_all.sh"
 operations_config = "../eidolon-pi.toml"
 foundation_mode = "external"
 external_livekit_config = "~/ai/eidolon/.eidolon/mac-product/run/livekit/livekit.generated.yaml"
@@ -48,32 +48,32 @@ allow_insecure_livekit = true
 # Update these source selections together when accepting the next revision.
 
 [source_overrides.eidolon_data]
-path = "../../../.eidolon/mac-product/sources/person-release-20261029/eidolon_data"
-revision = "f8e2cf3f247780082a0c246554d89a406d2b16e9"
+path = "../../../.eidolon/mac-product/sources/team-runtime-20261030/eidolon_data"
+revision = "5c590facc6bb434225403a3daaeac953c9e08aca"
 
 [source_overrides.eidolon_sdk]
-path = "../../../.eidolon/mac-product/sources/voice-capture-20261030/eidolon_sdk"
-revision = "4399d8c2e72af334a4f850b6213600053c91e741"
+path = "../../../.eidolon/mac-product/sources/team-runtime-20261030/eidolon_sdk"
+revision = "ea88a1a0899725883649666a211d5a0064097326"
 
 [source_overrides.eidolon_admin]
-path = "../../../.eidolon/mac-product/sources/voice-capture-20261030/eidolon_admin"
-revision = "9606b0969d39f11711f3c240aa2250bf5ec09b10"
+path = "../../../.eidolon/mac-product/sources/team-runtime-20261030/eidolon_admin"
+revision = "b4523a11c3931969afabb5507c9c0a66baccf5bd"
 
 [source_overrides.eidolon_kernel]
-path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_kernel"
+path = "../../../.eidolon/mac-product/sources/team-runtime-20261030/eidolon_kernel"
 revision = "1d7deaf2ff6d109b4782af16adae3896e862df3d"
 
 [source_overrides.eidolon_hub]
-path = "../../../.eidolon/mac-product/sources/owned-voiceprints-20261027/eidolon_hub"
+path = "../../../.eidolon/mac-product/sources/team-runtime-20261030/eidolon_hub"
 revision = "7c63353646cf51022dff5991c77aa81abbc8fa61"
 
 [source_overrides.eidolon_agent]
-path = "../../../.eidolon/mac-product/sources/person-release-20261029/eidolon_agent"
-revision = "ac205fcfb48128024883b4d1254d04907d04b692"
+path = "../../../.eidolon/mac-product/sources/team-runtime-20261030/eidolon_agent"
+revision = "b110452ed6e6b79c0ade0c67d8b3b5770f3f706f"
 
 [source_overrides.eidolon_channel]
-path = "../../../.eidolon/mac-product/sources/voice-capture-20261030/eidolon_channel"
-revision = "7ad8dbb9b0bee7576271076178865789113b2fc9"
+path = "../../../.eidolon/mac-product/sources/team-runtime-20261030/eidolon_channel"
+revision = "c50b4ce5e2b22763812ba46b4034a80f1acaa19d"
 
 [source_overrides.eidolon_memory]
 path = "../../../.eidolon/mac-product/sources/person-release-20261029/eidolon_memory"
@@ -82,12 +82,12 @@ revision = "70e4b5db1b4953da8dfe86ee562235f25e3e803e"
 # Keep this Host's existing runtime selection explicit. Adding reviewed product
 # capabilities must not start a new model on the workstation implicitly.
 [source_overrides.eidolon_models]
-path = "../../../.eidolon/worktrees/conversation-person-20261027/eidolon_models"
-revision = "7823c49d9597fb234e6ce6997ac47bd92516448f"
+path = "../../../.eidolon/mac-product/sources/team-runtime-20261030/eidolon_models"
+revision = "b299bbeb4e5063869bb3b682f00381dbb3c0f59b"
 
 [capabilities]
 # Channel Provider owns the shared CPU speaker extractor; no extra daemon.
-provides = ["local_laya", "local_speaker_verification"]
+provides = ["local_laya", "local_speaker_verification", "local_laya_participation"]
 
 # The Mac source run interprets home commands with Laya (its own MPS service; the address
 # follows from local_laya) and records every interpretation for offline evaluation. A product
@@ -130,3 +130,8 @@ value = "d3"
 
 # Measured local enrolled-audio inference: 327-348 ms. Recognition starts at
 # final ASR evidence; bound the remaining wait without queuing late results.
+
+# Remote participation is explicitly authorized for this Host acceptance.
+# Ops owns the existing Models participation service; no HIL process dependency.
+[participation]
+upstream_url = "http://decider.yangtzeailab.com/d3/v1/systemone"

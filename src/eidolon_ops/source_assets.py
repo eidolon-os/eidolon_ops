@@ -322,6 +322,8 @@ def profile_environment(
         "EIDOLON_SOURCE_CHANNEL": str(config.sources["eidolon_channel"].path),
         "EIDOLON_SOURCE_MEMORY": str(config.sources["eidolon_memory"].path),
     }
+    if "eidolon_models" in config.sources:
+        values["EIDOLON_SOURCE_MODELS"] = str(config.sources["eidolon_models"].path)
     if profile.external_livekit_config is not None:
         values["EIDOLON_LIVEKIT_GENERATED_CONFIG"] = str(profile.external_livekit_config)
     return environment.serialize_ops(values, allow_empty=frozenset({"EIDOLON_HOST_CAPABILITIES"}))

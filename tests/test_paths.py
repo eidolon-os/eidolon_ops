@@ -706,3 +706,18 @@ def test_source_host_can_pin_capability_model_repository(tmp_path: Path) -> None
     )))
     assert profile.source_overrides["eidolon_models"].path == model
     assert profile.source_overrides["eidolon_models"].revision == "a" * 40
+
+
+def test_remote_participation_is_explicit_and_uses_existing_service(tmp_path):
+    script = tmp_path / 'run.sh'
+    profile_path = _write_mac_profile(tmp_path, script=script, overrides='''
+[capabilities]
+provides = ["local_laya_participation"]
+[participation]
+upstream_url = "https://models.example/d3/v1/systemone"
+''')
+    profile = load_host_profile(profile_path)
+    assert profile.environment()['EIDOLON_PARTICIPATION_UPSTREAM_URL'] == 'https://models.example/d3/v1/systemone'
+    profile_path.write_text(profile_path.read_text().replace('provides = ["local_laya_participation"]', 'provides = []'))
+    with pytest.raises(HostProfileError, match='requires local_laya_participation'):
+        load_host_profile(profile_path)

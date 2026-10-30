@@ -65,8 +65,8 @@ def test_pi5_selects_shared_voice_assets_without_a_local_model_service() -> None
     })
     assert load_host_profile(_HOSTS / 'pi5-device-management-hil.toml').capabilities == frozenset()
     mac = load_host_profile(_HOSTS / "mac.toml")
-    assert mac.capabilities == frozenset({'local_laya'})
-    assert 'local_speaker_verification' not in load_config(
+    assert mac.capabilities == frozenset({'local_laya', 'local_speaker_verification', 'local_laya_participation'})
+    assert 'local_speaker_verification' in load_config(
         mac.operations_config, capabilities=mac.capabilities,
     ).capabilities
 
@@ -176,14 +176,14 @@ def _repository_host(name: str):
 def test_the_repository_hosts_reach_their_models_where_they_should() -> None:
     expected = {
         "rk3588": {"laya_smart_home": _HOME, "laya_participation": _LOCAL},
-        "mac": {"laya_smart_home": _HOME, "laya_participation": ""},
+        "mac": {"laya_smart_home": _HOME, "laya_participation": _LOCAL},
         "pi5": {"laya_smart_home": _HOME, "laya_participation": _LOCAL},  # placeholders
         "pi5-device-management-hil": {"laya_smart_home": _HOME, "laya_participation": _LOCAL},
     }
     for name, endpoints in expected.items():
         config = _repository_host(name)
         assert config.model_endpoints == endpoints, name
-        assert ("local_laya_participation" in config.capabilities) == (name == "rk3588"), name
+        assert ("local_laya_participation" in config.capabilities) == (name in {"rk3588", "mac"}), name
 
 
 def test_each_host_keeps_its_own_home_interpretation() -> None:

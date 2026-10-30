@@ -597,6 +597,13 @@ def _selected(
     component_id: str,
     section: str,
 ) -> bool:
+    prerequisites = entry.get("requires_capabilities", [])
+    if not isinstance(prerequisites, list):
+        raise OperationsError("requires_capabilities must be an array")
+    for prerequisite in prerequisites:
+        require_known_capability(prerequisite, label=f"{component_id} {section}")
+    if not set(prerequisites) <= capabilities:
+        return False
     wanted = entry.get("requires_capability")
     if wanted is None:
         return True

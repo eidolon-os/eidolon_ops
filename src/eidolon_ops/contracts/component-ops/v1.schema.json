@@ -454,6 +454,14 @@
                 }
               }
             }
+          },
+          "requires_capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "uniqueItems": true,
+            "description": "Additional capabilities required together with requires_capability."
           }
         }
       }

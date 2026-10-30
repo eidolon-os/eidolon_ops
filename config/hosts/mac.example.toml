@@ -73,3 +73,8 @@ provides = []
 # when a local-model capability is selected. Each entry needs path and may pin
 # an exact 40-hex revision; leave empty to use the operations configuration.
 [source_overrides]
+
+# Optional remote backend of the local participation service. Enable capability
+# local_laya_participation explicitly and set a reviewed upstream to use it.
+[participation]
+# upstream_url = "https://models.example/d3/v1/systemone"

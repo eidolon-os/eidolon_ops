@@ -220,3 +220,19 @@ def test_privileged_path_expansion_keeps_the_configuration_owner(tmp_path, monke
     assert (
         operator_paths.expand_operator_path("~/host/state", tmp_path) == owner_home / "host/state"
     )
+
+
+def test_remote_participation_reuses_unit_without_npu_weights():
+    models = load_component_contract(ROOT.parent / 'eidolon_models', 'eidolon_models')
+    selected = models.select(frozenset({'local_laya_participation'}))
+    assert [u['id'] for u in selected.units] == ['eidolon-laya-participation']
+    assert not selected.artifacts
+    npu = models.select(frozenset({'local_laya_participation', 'rknpu2'}))
+    assert any(a['id'].startswith('laya-participation-p4') for a in npu.artifacts)
+    parser = configparser.ConfigParser(interpolation=None)
+    parser.read_string(render_supervisor(
+        (ROOT / 'deploy/supervisor/product-source.conf').read_text(), (), 'test-operator',
+        contracts=(selected,),
+    ))
+    assert parser['program:laya-participation']['autorestart'] == 'true'
+    assert 'scripts/eidolon-laya-participation serve' in parser['program:laya-participation']['command']

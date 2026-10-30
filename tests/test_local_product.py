@@ -87,7 +87,7 @@ def _product(tmp_path: Path, *, foundation_mode: str) -> LocalProductSource:
     identity = profile.paths.bootstrap_state_root / "host_identity.ed25519"
     identity.write_bytes(b"i" * 32)
     identity.chmod(0o600)
-    return LocalProductSource(profile, cast(Any, None), cast(Any, None))
+    return LocalProductSource(profile, cast(Any, SimpleNamespace(capabilities=frozenset())), cast(Any, None))
 
 
 def test_external_foundation_keeps_existing_nats_and_livekit_ports() -> None:

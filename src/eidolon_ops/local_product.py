@@ -629,6 +629,10 @@ class LocalProductSource:
             "agent": f"http://127.0.0.1:{ports['agent_http']}/readyz",
             "channel-provider": f"http://127.0.0.1:{ports['channel_provider']}/health",
         }
+        if "local_laya_participation" in self.config.capabilities:
+            endpoints["laya-participation"] = (
+                f"http://127.0.0.1:{ports['laya_participation_api']}/participation/readyz"
+            )
         socket_path = self.profile.paths.runtime_root / "system.sock"
         control_sockets = {
             Path(value)

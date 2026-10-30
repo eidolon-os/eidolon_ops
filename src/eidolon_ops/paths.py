@@ -235,6 +235,7 @@ class HostProfile:
     #: The remote endpoint of each model task this machine does not run itself, by task name.
     model_endpoints: Mapping[str, str] = field(default_factory=lambda: MappingProxyType({}))
     #: Settings this machine asks for beyond its operations config's, in its [[settings.overlay]].
+    participation_upstream_url: str = ""
     settings_overlay: tuple = ()
     execution: HostExecution | None = None
 
@@ -259,6 +260,8 @@ class HostProfile:
                 "EIDOLON_EXECUTION_IDENTITY": str(self.execution.identity),
             }
         )
+        if self.participation_upstream_url:
+            values["EIDOLON_PARTICIPATION_UPSTREAM_URL"] = self.participation_upstream_url
         if self.foundation_mode is not None:
             values["EIDOLON_FOUNDATION_MODE"] = self.foundation_mode
         if self.management_networks:
@@ -327,7 +330,7 @@ def load_host_profile(path: Path) -> HostProfile:
     except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
         raise HostProfileError(f"host profile is unreadable: {resolved}") from exc
     allowed_root = {
-        "schema_version", "host", "paths", "adapter", "app", "source_overrides", "capabilities",
+        "schema_version", "host", "paths", "adapter", "app", "source_overrides", "capabilities", "participation",
         "model_endpoints", "settings", "execution",
     }
     if not {"schema_version", "host", "paths", "adapter"}.issubset(document) or not set(
@@ -409,6 +412,24 @@ def load_host_profile(path: Path) -> HostProfile:
         raise HostProfileError("source_overrides are available only for source-run hosts")
     app = _app_access(document.get("app"), base=base)
     capabilities = _profile_capabilities(document.get("capabilities"))
+    participation = _table(document.get("participation", {}), "participation")
+    if set(participation) - {"upstream_url"}:
+        raise HostProfileError("participation accepts only upstream_url")
+    upstream = participation.get("upstream_url", "")
+    if not isinstance(upstream, str):
+        raise HostProfileError("participation.upstream_url must be a string")
+    if upstream:
+        from urllib.parse import urlsplit
+        address = urlsplit(upstream)
+        if (address.scheme not in {"http", "https"} or not address.hostname
+                or address.username or address.password or address.query or address.fragment
+                or not address.path.endswith("/v1/systemone")
+                or any(c.isspace() for c in upstream)):
+            raise HostProfileError("participation.upstream_url must be a SystemOne URL")
+        if not capabilities or "local_laya_participation" not in capabilities:
+            raise HostProfileError("participation.upstream_url requires local_laya_participation")
+        if "rknpu2" in capabilities:
+            raise HostProfileError("remote participation and the local NPU backend are exclusive")
     model_endpoints = _profile_model_endpoints(document.get("model_endpoints"))
     try:
         # The same shape as the operations config's [[settings.overlay]], checked the same way.
@@ -429,6 +450,7 @@ def load_host_profile(path: Path) -> HostProfile:
         app=app,
         source_overrides=source_overrides,
         capabilities=capabilities,
+        participation_upstream_url=upstream,
         model_endpoints=model_endpoints,
         settings_overlay=settings_overlay,
         execution=execution,
