@@ -49,15 +49,15 @@ allow_insecure_livekit = true
 
 [source_overrides.eidolon_data]
 path = "../../../eidolon_data"
-revision = "4e2bb525234ef789a1b3acfc44f75e8263d265fb"
+revision = "ed8b888a3d8491816a80d9baf28902fce9a25f4d"
 
 [source_overrides.eidolon_sdk]
-path = "../../../.eidolon/mac-product/sources/team-ux-20261030/eidolon_sdk"
-revision = "24bba53a38b1d4944ca4798eabfeee062189263a"
+path = "../../../.eidolon/mac-product/sources/voice-selection-20261031/eidolon_sdk"
+revision = "7bd917788adfeb9cf9db8a7988b5d86a2ce28e99"
 
 [source_overrides.eidolon_admin]
-path = "../../../.eidolon/mac-product/sources/team-ux-20261030/eidolon_admin"
-revision = "6e95a33710e4df383d5f083fb0bc604d43a99541"
+path = "../../../.eidolon/mac-product/sources/voice-selection-20261031/eidolon_admin"
+revision = "1dfcbd424f5ca7788f8015b6abf035efc67008d3"
 
 [source_overrides.eidolon_kernel]
 path = "../../../.eidolon/mac-product/sources/team-ux-20261030/eidolon_kernel"
@@ -72,8 +72,8 @@ path = "../../../.eidolon/mac-product/sources/team-discussion-20261030/eidolon_a
 revision = "41d5ae15f240b014c518c4a93001125c6f6b396a"
 
 [source_overrides.eidolon_channel]
-path = "../../../.eidolon/mac-product/sources/team-ux-20261030/eidolon_channel"
-revision = "c50b4ce5e2b22763812ba46b4034a80f1acaa19d"
+path = "../../../.eidolon/mac-product/sources/voice-selection-20261031/eidolon_channel"
+revision = "4da0ec1edaa059154b27261db7682b369f6f36e1"
 
 [source_overrides.eidolon_memory]
 path = "../../../.eidolon/mac-product/sources/person-release-20261029/eidolon_memory"
