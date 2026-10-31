@@ -39,22 +39,20 @@ def _models() -> str:
 def test_the_speaker_artifact_carries_everything_channel_opens() -> None:
     confirmed = require_consumed_files(*_release(_models()))
     files = confirmed[f"eidolon_channel<-eidolon_models:{CAPABILITY}"]
-    assert "recognition-controlled-trial.json" in files
+    assert {"identity-policy.json", "identity-backend.json", "identity-cohort.npz"} <= set(files)
     assert "campplus_cn_common.bin" in files
 
 
-def test_an_artifact_without_the_recognition_policy_is_refused() -> None:
-    """What c76777b did to the declaration, and nothing refused."""
+@pytest.mark.parametrize("name", ["identity-policy.json", "identity-backend.json", "identity-cohort.npz"])
+def test_an_artifact_without_an_identity_file_is_refused(name) -> None:
+    """What c76777b did to the recognition policy's declaration, and nothing refused."""
 
     dropped = re.sub(
-        r'\[\[artifacts\.files\]\]\npath = "recognition-controlled-trial\.json"\n[^\[]*',
-        "",
-        _models(),
+        r'\[\[artifacts\.files\]\]\npath = "' + re.escape(name) + r'"\n[^\[]*', "", _models()
     )
-    assert "recognition-controlled-trial.json" not in dropped
+    assert name not in dropped
     with pytest.raises(
-        OperationsError,
-        match=r"eidolon_channel reads recognition-controlled-trial\.json from campplus-zh-16k-",
+        OperationsError, match=r"eidolon_channel reads " + re.escape(name) + r" from campplus-zh-16k-"
     ):
         require_consumed_files(*_release(dropped))
 
@@ -66,12 +64,3 @@ def test_a_capability_this_host_does_not_offer_asks_nothing() -> None:
 def test_reading_from_a_component_the_release_lacks_is_refused() -> None:
     with pytest.raises(OperationsError, match="does not include"):
         require_consumed_files(*_release(_models(), sources=("eidolon_channel",)))
-
-
-def test_an_artifact_without_the_cohort_its_policy_names_is_refused() -> None:
-    dropped = re.sub(
-        r'\[\[artifacts\.files\]\]\npath = "impostor-cohort\.npz"\n[^\[]*', "", _models()
-    )
-    assert "impostor-cohort.npz" not in dropped
-    with pytest.raises(OperationsError, match=r"eidolon_channel reads impostor-cohort\.npz"):
-        require_consumed_files(*_release(dropped))
