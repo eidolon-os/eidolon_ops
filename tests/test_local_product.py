@@ -261,6 +261,11 @@ def test_prepare_materializes_one_canonical_mac_product_contract(
             return ProcessResult(0, "", "")
 
     runner = Runner()
+    # The release-set rules have their own tests (test_release_set.py); this
+    # one is about what prepare renders from a set that already passed them.
+    monkeypatch.setattr(LocalProductSource, "require_release_set", lambda self: {
+        "root": str(tmp_path / "sources"), "eidolon_ops": "c" * 40, "libraries": {},
+    })
     monkeypatch.setattr(LocalProductSource, "source_services", lambda self: ())
     monkeypatch.setattr(LocalProductSource, "source_contracts", lambda self: ())
     profile.path.write_text("test profile")
@@ -755,6 +760,7 @@ def test_product_source_revision_and_generated_inputs_fail_closed(
     product = _product(tmp_path, foundation_mode="external")
     product.config = _one_source(source, None)
     product.runner = cast(Any, _WorktreeRunner("b" * 40))
+    monkeypatch.setattr(LocalProductSource, "require_release_set", lambda self: {})
 
     # Reading a file at a revision this run did not resolve must fail: the
     # release matrix and the settings overlay both read by revision, and a

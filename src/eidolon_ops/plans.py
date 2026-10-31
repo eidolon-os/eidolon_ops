@@ -531,6 +531,26 @@ def logs(host_id: str) -> Plan:
     )
 
 
+def release_set(host_id: str, *, apply: bool) -> Plan:
+    return Plan(
+        operation="release-set",
+        host_id=host_id,
+        steps=_steps(
+            ("plan", "choose each source's commit on main and check it moves forward"),
+            *(
+                (
+                    ("build", "create the release root: worktrees and their environments"),
+                    ("libraries", "prove every environment imports the root's own libraries"),
+                    ("profile", "point the Host profile at the root and commit it"),
+                )
+                if apply else ()
+            ),
+        ),
+        requires_flags=frozenset() if apply else frozenset(),
+        touches=frozenset({ActionKind.CONFIG, ActionKind.CODE}) if apply else frozenset(),
+    )
+
+
 def source_profile(host_id: str, operation: str) -> Plan:
     return Plan(
         operation=f"debug {operation}",

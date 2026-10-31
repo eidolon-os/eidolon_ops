@@ -303,11 +303,13 @@ def test_pi_adapter_delegates_every_remote_capability(monkeypatch, tmp_path: Pat
             app=None,
             progress=None,
             allow_dirty=False,
+            allow_regression=None,
         ) -> None:
             assert isinstance(config, Config)
             assert app is None
             assert progress is None
             calls.append(("allow_dirty", {"value": allow_dirty}))
+            calls.append(("allow_regression", {"value": allow_regression}))
 
         def _result(self, name, values=None):
             calls.append((name, values or {}))

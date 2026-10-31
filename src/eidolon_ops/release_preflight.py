@@ -59,6 +59,7 @@ class ReleasePreflight:
         git: str,
         sources: SourceResolver | None = None,
         allow_dirty: bool = False,
+        allow_regression: str | None = None,
     ) -> None:
         self.config = config
         self.runner = runner
@@ -66,7 +67,10 @@ class ReleasePreflight:
         #: Shared with everything else in this operation that needs to know
         #: which commit a source ships — the bundle seal, the resumed-bundle
         #: check, the Host provenance record. One resolution, one answer.
-        self.sources = sources or SourceResolver(config, runner, git=git, allow_dirty=allow_dirty)
+        self.sources = sources or SourceResolver(
+            config, runner, git=git, allow_dirty=allow_dirty,
+            allow_regression=allow_regression,
+        )
 
     def validate_ssh_material(self) -> None:
         validate_private_local_file(self.config.host.identity_file, label="host.identity_file")
@@ -150,8 +154,17 @@ class ReleasePreflight:
                 f"pinned local uv must be 0.11.15, got: {local_uv_version or 'no version'}"
             )
         source_evidence = self._source_evidence()
+        consumed_files = None
         if require_clean_sources:
             self.sources.require_clean()
+            self.sources.require_on_trunk()
+            from eidolon_ops.component_artifacts import require_consumed_files
+
+            consumed_files = require_consumed_files(
+                self.sources.resolved_config(),
+                self.sources.component_contract,
+                self.read_exact_source_file,
+            )
         # After resolution, because it asks which commit the Kernel checkout is
         # on and that is now a question with one answer instead of a declaration.
         release_contract = self._release_tool_contract(release_cli)
@@ -177,6 +190,7 @@ class ReleasePreflight:
             # without translating between two vocabularies.
             "source_provenance": self.sources.provenance(),
             "source_selection": self.sources.selection(),
+            "consumed_files": consumed_files,
             "release_matrix": release_matrix,
             "ssh": {
                 "target": self.config.host.target,

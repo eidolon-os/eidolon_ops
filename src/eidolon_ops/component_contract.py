@@ -157,6 +157,12 @@ class ComponentContract:
         )
 
     @property
+    def consumes(self) -> tuple[dict[str, Any], ...]:
+        """Files this component reads out of another component's artifact."""
+
+        return tuple(self.document.get("consumes", ()))
+
+    @property
     def ports(self) -> dict[str, dict[str, Any]]:
         return dict(self.document.get("ports", {}))
 

@@ -110,15 +110,20 @@ def build_adapter(
     *,
     revision_overrides: tuple[str, ...] = (),
     allow_dirty: bool = False,
+    allow_regression: str | None = None,
     progress: ProgressSink | None = None,
 ) -> HostAdapter:
     """Assemble the adapter this profile describes."""
 
     platform = PLATFORM_PROFILES[profile.platform]
     if profile.source_run:
-        return _source_adapter(profile, runner, platform, revision_overrides, progress)
+        return _source_adapter(
+            profile, runner, platform, revision_overrides, progress,
+            allow_regression=allow_regression,
+        )
     return _product_adapter(
-        profile, runner, platform, revision_overrides, progress, allow_dirty=allow_dirty
+        profile, runner, platform, revision_overrides, progress,
+        allow_dirty=allow_dirty, allow_regression=allow_regression,
     )
 
 
@@ -128,6 +133,8 @@ def _source_adapter(
     platform: PlatformProfile,
     revision_overrides: tuple[str, ...],
     progress: ProgressSink | None = None,
+    *,
+    allow_regression: str | None = None,
 ) -> HostAdapter:
     transport = LocalTransport(
         runner,
@@ -137,7 +144,9 @@ def _source_adapter(
     supervisor = SupervisordSupervisor(
         profile,
         transport,
-        _product_factory(profile, runner, revision_overrides),
+        _product_factory(
+            profile, runner, revision_overrides, allow_regression=allow_regression
+        ),
         progress,
     )
     return HostAdapter(
@@ -159,6 +168,7 @@ def _product_adapter(
     progress: ProgressSink | None = None,
     *,
     allow_dirty: bool = False,
+    allow_regression: str | None = None,
 ) -> HostAdapter:
     config_path = profile.operations_config
     if config_path is None:
@@ -177,6 +187,7 @@ def _product_adapter(
         app=profile.app,
         progress=progress,
         allow_dirty=allow_dirty,
+        allow_regression=allow_regression,
     )
     return HostAdapter(
         platform=platform,
@@ -193,6 +204,8 @@ def _product_factory(
     profile: HostProfile,
     runner: ProcessRunner,
     revision_overrides: tuple[str, ...],
+    *,
+    allow_regression: str | None = None,
 ) -> Callable[[], object]:
     def build() -> object:
         from eidolon_ops.local_product import LocalProductSource
@@ -210,7 +223,9 @@ def _product_factory(
             .with_source_overrides(profile.source_overrides)
             .with_revision_overrides(revision_overrides)
         )
-        return LocalProductSource(profile, config, runner)
+        return LocalProductSource(
+            profile, config, runner, allow_regression=allow_regression
+        )
 
     return build
 

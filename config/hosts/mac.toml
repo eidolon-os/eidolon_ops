@@ -46,7 +46,9 @@ allow_insecure_livekit = true
 # its repository's main, all under one snapshot root, so editable SDK, Data
 # and Memory contracts dependencies resolve inside that root and every process
 # imports the same revision. Data runs from the root too, not from its
-# development checkout. Select the next set as a new root, not repo by repo.
+# development checkout. Select the next set with `./eidolon mac release-set`,
+# which writes the paths below and the lifecycle script; prepare refuses a
+# hand-edited spread, a commit off main, or one that drops the last set's work.
 
 [source_overrides.eidolon_data]
 path = "../../../.eidolon/mac-product/sources/main-20261031/eidolon_data"

@@ -22,6 +22,15 @@ in exactly the state the incident above was invisible in.
 What is refused here is the one thing that really is an invariant about a single
 copy: a dirty worktree. A release is built from commits, so a working tree with
 uncommitted changes means the thing that was tested is not the thing that ships.
+
+Two more are refused, both learned on 2026-10-30, when a Host ran commits that
+were on no branch's history and a later selection silently dropped a feature an
+earlier one had shipped (conversation recognition, off for a day):
+
+- a commit that is not on its repository's ``main`` (``require_on_trunk``).
+  Work in progress reaches a Host merged and switched off, not on a branch;
+- a selection that drops commits the previous one ran
+  (``require_no_regression``), unless the operator names a reason.
 """
 
 from __future__ import annotations
@@ -37,6 +46,11 @@ from eidolon_ops.errors import OperationsError
 from eidolon_ops.process import ProcessRunner, checked
 
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
+
+#: The branch every commit a Host runs must be on. One name for every source
+#: repository; a repository whose trunk is called something else is a
+#: repository to rename, not a setting to add.
+TRUNK = "main"
 
 #: How much of a dirty worktree is worth naming in a refusal. Enough to
 #: recognize what was forgotten, bounded so a large refactor cannot turn one
@@ -55,7 +69,8 @@ class ResolvedSource:
     #: The commit the repository is on, which is normally the same thing.
     head: str
     #: ``None`` for a detached HEAD. Recorded, never required: which branch a
-    #: commit was reached from does not change what the commit contains.
+    #: commit was reached from does not change what the commit contains. What
+    #: is required is that ``main`` contains it (``require_on_trunk``).
     branch: str | None
     pinned: bool
     dirty: bool
@@ -108,11 +123,15 @@ class SourceResolver:
         *,
         git: str = "git",
         allow_dirty: bool = False,
+        allow_regression: str | None = None,
     ) -> None:
         self.config = config
         self.runner = runner
         self.git = git
         self.allow_dirty = allow_dirty
+        #: Why this run may drop commits the previous selection ran. A reason,
+        #: not a switch, because it is written into the evidence that says so.
+        self.allow_regression = allow_regression
         self._resolved: Mapping[str, ResolvedSource] | None = None
         self._resolved_config: OperationsConfig | None = None
         self._contracts: dict[tuple[str, str], str | None] = {}
@@ -317,6 +336,102 @@ class SourceResolver:
                     f"be its HEAD: {item.source_id} is on {item.head[:12]} but "
                     f"{item.revision[:12]} is pinned"
                 )
+
+    def require_on_trunk(self) -> None:
+        """Refuse to run a commit that is not on its repository's ``main``.
+
+        A Host is where work is accepted, so what runs there has to be
+        reproducible from the one branch everyone builds on. On 2026-10-30 the
+        Mac ran an Agent and a Models commit that no branch contained, and the
+        recognition policy lived only on a feature branch; anything built from
+        main afterwards could not carry it, and nothing said so.
+
+        There is deliberately no flag past this. Unfinished work is merged with
+        its setting off and selected by configuration, which keeps every
+        Host's code on the same history.
+        """
+
+        off: list[str] = []
+        for item in self.resolve().values():
+            answer = self.runner.run(
+                (
+                    self.git, "-C", str(item.path), "merge-base", "--is-ancestor",
+                    item.revision, f"refs/heads/{TRUNK}",
+                )
+            )
+            if answer.returncode == 1:
+                off.append(f"{item.source_id} {item.revision[:12]}")
+            elif answer.returncode != 0:
+                raise OperationsError(
+                    f"cannot tell whether {item.source_id} {item.revision[:12]} is on "
+                    f"{TRUNK}: {(answer.stderr or answer.stdout).strip() or 'git failed'}"
+                )
+        if off:
+            raise OperationsError(
+                f"a Host runs only commits on {TRUNK}, and these are not: "
+                + ", ".join(off)
+                + f". Merge them into {TRUNK} first (behind a setting that defaults "
+                "off if the work is unfinished), then select the merged commit"
+            )
+
+    def regressions_from(self, previous: Mapping[str, object]) -> dict[str, int]:
+        """Per source, how many commits the previous selection ran that this drops.
+
+        The other half of ``advance_from``: that one counts what is new, this
+        one what would disappear. Unanswerable comparisons (a commit this
+        checkout does not have) are left out, like ``advance_from`` does.
+        """
+
+        dropped: dict[str, int] = {}
+        for source_id, item in self.resolve().items():
+            record = previous.get(source_id)
+            before = record.get("revision") if isinstance(record, Mapping) else record
+            if not isinstance(before, str) or _COMMIT.fullmatch(before) is None:
+                continue
+            if before == item.revision:
+                continue
+            only_before, _only_now = self._distance(item.path, before, item.revision)
+            if only_before:
+                dropped[source_id] = only_before
+        return dropped
+
+    def require_no_regression(
+        self,
+        previous: Mapping[str, object],
+        *,
+        since: str,
+        also_dropped: Mapping[str, int] = MappingProxyType({}),
+    ) -> dict[str, object]:
+        """Refuse a selection that drops what the previous one ran.
+
+        Each task used to select its own commit per repository, and the last
+        one to deploy decided what ran: a selection made for one feature
+        quietly removed another feature's commits. Moving forward from the
+        previous selection makes that impossible without saying so; going back
+        on purpose takes ``allow_regression`` and is recorded with its reason.
+        """
+
+        dropped = {
+            **self.regressions_from(previous),
+            **{key: count for key, count in also_dropped.items() if count},
+        }
+        if not dropped:
+            return {"status": "forward", "since": since}
+        detail = ", ".join(
+            f"{source_id} -{count}" for source_id, count in sorted(dropped.items())
+        )
+        if self.allow_regression:
+            return {
+                "status": "regression_allowed",
+                "since": since,
+                "dropped": dict(sorted(dropped.items())),
+                "reason": self.allow_regression,
+            }
+        raise OperationsError(
+            f"this selection drops commits that {since} ran ({detail}). Select commits "
+            "that contain them — merge the newer work in rather than choosing an older "
+            "commit — or pass --allow-regression REASON to go back on purpose"
+        )
 
     # -- diagnosis -----------------------------------------------------------
 

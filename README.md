@@ -752,9 +752,34 @@ port 的组合推导），所以“这台 Host 能做什么”是问出来的，
 ./eidolon pi5 diagnose --output /absolute/path/to/report.tar.gz
 ```
 
-Mac 的 Host profile 可用严格的 `source_overrides.<source>` 指向一个干净、精确提交的本地 worktree；这只
-改变该 Mac source-run，不改变共用的 Pi release matrix。当前开发接入使用此机制运行 Admin，生产/Pi
-仍使用各自的 commit-pinned 发布输入。
+### Host 运行什么：主干 + 发布集
+
+2026-10-30，Mac 上 9 个仓分散在 5 个任务目录里运行：其中 2 个提交不在任何分支历史上，进程之间 import
+了两份不同的 SDK，Data 直接从开发工作树跑，一个任务选定的 Models 提交还删掉了另一个任务已经上线的识别
+策略。当时没有任何检查拦住，对话识别因此失效了一整天。下面几条规则都由 ops 强制执行，不靠约定：
+
+| 规则 | 拒绝什么 | 在哪里检查 |
+|---|---|---|
+| 主干唯一来源 | 提交不在该仓的 `main` 上（`git merge-base --is-ancestor <rev> main`）。这一条**没有**绕过开关：未完成的功能先合入 main，用默认关闭的配置控制，不从分支运行 | Mac `prepare`/`validate`；Pi 封包前（deploy/install） |
+| 单调前进 | 新的选择丢掉了上一次运行过的提交（含横向切换：新旧选择各有对方没有的提交）。确需回退时加全局参数 `--allow-regression 原因`，原因会写入发布记录 | Mac 与上次 `prepare` 的记录（`state/ops/release-set.json`）比较；Pi 与 Host 最近一次激活的 release 比较 |
+| 单一快照根 | 各个源码目录和 Ops 生命周期脚本不在同一个目录下 | Mac `prepare`/`validate` |
+| 依赖一致 | 快照根内任一 venv 加载的 `eidolon_sdk`、`eidolon_memory_contracts`、`eidolon_data` 不是该根内的那一份（直接询问每个解释器） | Mac `prepare`/`validate`。Pi 只有一份封包，天然只有一份依赖 |
+| 消费方声明文件 | 组件在 `[[consumes]]` 里声明的文件（例如 Channel 从声纹产物里读取的识别策略）不在所选产物中 | Mac `prepare`；Pi 封包前 |
+| profile 已提交 | Host profile 有未提交的改动 | Mac `prepare`/`validate` |
+| 能力就绪 | 选中的能力不可用，例如 `speaker_recognition_ready`（见上文 app-ready） | `app-ready` |
+
+Mac 的选择只通过一个入口变更：
+
+```bash
+./eidolon mac release-set                      # 计划：各仓取 main 的提交，并检查相对上一次是否只前进
+./eidolon mac release-set --apply              # 创建 sources/main-<日期>-<摘要>/、同步各 venv、核对依赖、改写并提交 mac.toml
+./eidolon mac release-set --pin eidolon_hub=<40hex> --apply   # 指定某仓的提交（仍必须在 main 上）
+./eidolon mac restart                          # 运行新的发布集；prepare 会把上面的规则再检查一遍
+```
+
+快照根按内容命名：再次选择同一套提交时会找到同一个根。只改动 Host profile 的 Ops 提交不算新的发布集。
+创建 worktree 时不拉取 LFS 内容，模型字节由产物物化器直接从 git 对象库读取，所以每个根只占几 GB，不再
+是 15 GB。旧的根不会被自动删除。Pi 的发布输入仍是各兄弟仓的 HEAD，但 HEAD 必须在 main 上。
 
 Mac product-source 在 canonical 7880 上直接管理 LiveKit 进程；`external` 表示复用已验证的二进制和
 凭据配置，不表示继续依赖旧 Admin supervisor。NATS 仍由 external foundation 提供并在启动前受健康门禁。

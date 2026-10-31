@@ -225,6 +225,7 @@ class ReleaseTransaction:
         # being explained. The same calculation that annotates that failure costs
         # one round trip here, where the answer can still change a decision.
         local["source_advance"] = self._advance_since_last_activation()
+        local["source_regression"] = self._require_no_regression()
         local["link"] = self._release_link_report()
         phases = Journal(self.progress)
         candidate_prepared = False
@@ -547,6 +548,22 @@ class ReleaseTransaction:
                 "Host activated. This combination has not run on it before."
             ),
         }
+
+    def _require_no_regression(self) -> dict[str, object]:
+        """Refuse a release that drops what this Host last activated.
+
+        Before anything is sealed. A Host with no history has nothing to lose,
+        and one that cannot answer is reported rather than trusted: the same
+        best effort the advance report above makes.
+        """
+
+        previous = self._last_activated_release()
+        if previous is None:
+            return {"status": "no_previous_release"}
+        release_id, sources = previous
+        return self.preflight.sources.require_no_regression(
+            sources, since=f"release {release_id}"
+        )
 
     def _last_activated_release(self) -> tuple[str, dict[str, object]] | None:
         try:

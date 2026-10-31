@@ -472,6 +472,38 @@
           }
         }
       }
+    },
+    "consumes": {
+      "description": "Files this component reads by name out of another component's artifact, per capability. Declared by the reader because only the reader knows what it opens; Ops refuses a release whose artifact does not carry them. Added after 2026-10-30, when a Models artifact stopped carrying the recognition policy Channel reads and nothing noticed until conversations had no speaker.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "capability",
+          "component",
+          "files"
+        ],
+        "properties": {
+          "capability": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{1,31}$"
+          },
+          "component": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{1,63}$"
+          },
+          "files": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[^/\\u0000][^\\u0000]*$"
+            }
+          }
+        }
+      }
     }
   }
 }

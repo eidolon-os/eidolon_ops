@@ -170,6 +170,57 @@ def capability_artifact(
     return selected[0]
 
 
+def require_consumed_files(
+    config: OperationsConfig,
+    contract_text: Callable[[str], str | None],
+    read_exact_file: Callable[[str, str, str], str],
+) -> dict[str, list[str]]:
+    """Every file a component opens out of a selected artifact is in that artifact.
+
+    The reader declares what it reads (``[[consumes]]``) because only the
+    reader knows; the artifact's owner declares what it carries. On 2026-10-30
+    those two lists disagreed by one file, the recognition policy, and the
+    disagreement surfaced as conversations with no speaker. Here it is a
+    refused release, naming both sides.
+    """
+
+    import tomllib
+
+    confirmed: dict[str, list[str]] = {}
+    lacking: list[str] = []
+    for consumer in sorted(config.sources):
+        text = contract_text(consumer)
+        if text is None:
+            continue
+        for entry in tomllib.loads(text).get("consumes", ()):
+            capability, owner = entry["capability"], entry["component"]
+            if capability not in config.capabilities:
+                continue
+            if owner not in config.sources:
+                raise OperationsError(
+                    f"{consumer} reads {capability} files from {owner}, which this release "
+                    "does not include"
+                )
+            artifact = capability_artifact(
+                config, read_exact_file, component_id=owner, capability=capability
+            )
+            carried = {item.path for item in artifact.files} if artifact else set()
+            missing = sorted(set(entry["files"]) - carried)
+            if missing:
+                name = artifact.artifact_id if artifact else f"{owner}'s {capability} artifact"
+                lacking.append(f"{consumer} reads {', '.join(missing)} from {name}")
+            else:
+                confirmed[f"{consumer}<-{owner}:{capability}"] = sorted(entry["files"])
+    if lacking:
+        raise OperationsError(
+            "a component would open files its selected artifact does not carry: "
+            + "; ".join(lacking)
+            + ". Declare them in the artifact's component contract, or select a "
+            "revision that does"
+        )
+    return confirmed
+
+
 def workstation_artifact_root(toolchain_root: Path, artifact: CarriedArtifact) -> Path:
     """Named by where it will land, so two pins cannot share a directory."""
 

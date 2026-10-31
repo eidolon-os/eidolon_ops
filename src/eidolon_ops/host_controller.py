@@ -38,12 +38,14 @@ class HostController:
         *,
         revision_overrides: tuple[str, ...] = (),
         allow_dirty: bool = False,
+        allow_regression: str | None = None,
         progress: ProgressSink | None = None,
     ) -> None:
         self.profile = profile
         self.runner = runner
         self.revision_overrides = revision_overrides
         self.allow_dirty = allow_dirty
+        self.allow_regression = allow_regression
         self.progress = progress
         self._adapter: HostAdapter | None = None
 
@@ -55,6 +57,7 @@ class HostController:
                 self.runner,
                 revision_overrides=self.revision_overrides,
                 allow_dirty=self.allow_dirty,
+                allow_regression=self.allow_regression,
                 progress=self.progress,
             )
         return self._adapter
@@ -309,6 +312,69 @@ class HostController:
             raise OperationsError(f"unsupported local profile: {profile_name}")
         report = adapter.supervisor.profile_operation(operation, arguments=arguments)
         return self._applied(plan, report)
+
+    def release_set(self, *, pins: tuple[str, ...] = (), apply: bool = False) -> Evidence:
+        """Select what this source run executes: one root, all from main (M3/M8).
+
+        Without ``apply``, says which commits the next set would be and whether
+        it moves forward from the set last prepared here. With it, creates the
+        root (worktrees and environments), proves every environment imports the
+        root's own libraries, and commits the profile naming it. Starting it is
+        ``restart``'s job, which checks all of this again.
+        """
+
+        from eidolon_ops import release_set as sets
+        from eidolon_ops.adapters.supervisord import PROFILE
+
+        plan = plans.release_set(self.profile.host_id, apply=apply)
+        self.adapter.require(Capability.SOURCE_PROFILE)
+        if not self.profile.source_run:
+            raise OperationsError("release-set selects a source run; a product Host ships HEAD")
+        product = self.adapter.supervisor._product()  # noqa: SLF001 - same adapter
+        current = {k: Path(v.path) for k, v in product.config.sources.items()}
+        current[sets.OPS_SOURCE] = self.profile.workspace_root
+        root = sets.require_one_root(
+            {k: v for k, v in current.items() if k != sets.OPS_SOURCE},
+            self.profile.workspace_root,
+        )
+        selection = sets.ReleaseSetSelection(
+            profile=self.profile.path,
+            repositories=current,
+            sources_root=root.parent,
+            runner=self.runner,
+        )
+        parsed: dict[str, str] = {}
+        for value in pins:
+            source_id, separator, revision = value.partition("=")
+            if not separator or source_id in parsed:
+                raise OperationsError("a release-set pin is one unique SOURCE=40HEX")
+            parsed[source_id] = revision
+        held = dict(product.sources.revisions())
+        held[sets.OPS_SOURCE] = sets.require_workspace_on_trunk(
+            self.runner, "git", self.profile.workspace_root
+        )
+        chosen = selection.plan(
+            parsed,
+            current=held,
+            previous=sets.read_record(self.profile.paths.state_root),
+            allow_regression=self.allow_regression,
+        )
+        report: dict[str, object] = {"status": "planned", "profile": PROFILE, **chosen}
+        if not apply:
+            return Evidence(plan=plan, outcome=Outcome.PLANNED, report=report)
+        built = selection.apply(chosen)
+        new_root = Path(str(chosen["root"]))
+        libraries = sets.require_one_library_set(
+            self.runner,
+            {k: new_root / k for k in chosen["revisions"] if k != sets.OPS_SOURCE},  # type: ignore[union-attr]
+            new_root / sets.OPS_SOURCE,
+        )
+        profile_state = selection.write_profile(chosen)
+        return self._applied(plan, {
+            **report, **built, "status": "selected", "profile_commit": profile_state,
+            "libraries": libraries,
+            "next": "./eidolon mac restart",
+        })
 
     # -- release and authority operations ------------------------------------
 

@@ -133,6 +133,7 @@ command_summary() {
     logs) printf '读取全部日志或指定服务日志' ;;
     commissioning-code) printf '生成手机 Setup/Commissioning Code' ;;
     debug) printf '源码 Host 的 prepare/validate/Web 诊断入口' ;;
+    release-set) printf '选择源码 Host 运行的发布集：一个快照根，全部取自 main（--apply 才创建并提交）' ;;
     provision) printf '按执行配置准备 Host 运行环境' ;;
     init-inputs) printf '首次生成产品私密输入和 Host Identity' ;;
     converge-inputs) printf '补齐新增凭据，不修改已有值' ;;
@@ -190,6 +191,7 @@ Eidolon 统一运维入口
 全局参数：
   --revision SOURCE=40HEX  本次操作临时固定一个源码提交；可重复
   --allow-dirty            允许从有未提交改动的仓库封装已提交的 HEAD
+  --allow-regression 原因  允许本次选择丢掉上一次运行过的提交（原因写入发布记录）
   -h, --help               显示帮助
 
 主机既可以写配置文件名（mac、pi5），也可以写唯一的 host.id 或 TOML 路径。
@@ -226,6 +228,15 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --allow-dirty)
+      GLOBAL_ARGS+=("$1")
+      shift
+      ;;
+    --allow-regression)
+      [[ $# -ge 2 ]] || die "--allow-regression 后需要原因"
+      GLOBAL_ARGS+=("$1" "$2")
+      shift 2
+      ;;
+    --allow-regression=*)
       GLOBAL_ARGS+=("$1")
       shift
       ;;

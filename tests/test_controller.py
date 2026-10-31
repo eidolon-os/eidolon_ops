@@ -2885,6 +2885,78 @@ def test_a_failed_deploy_names_how_far_each_repository_moved(config) -> None:
     assert "--dry-run" in message
 
 
+def _history(transport: FakeTransport) -> None:
+    transport.overrides["release-sources"] = {
+        "status": "observed",
+        "releases": [{
+            "release_id": "last-good",
+            "status": "activated",
+            "sources": {"eidolon_admin": {"revision": "e" * 40}},
+        }],
+    }
+
+
+class _AdminWentBack(ControllerRunner):
+    """`rev-list --left-right --count last...now`: two commits only the Host ran."""
+
+    def run(self, command, **kwargs):
+        command = tuple(command)
+        if "rev-list" in command and self._source(command) == "eidolon_admin":
+            return ProcessResult(0, "2\t0\n", "")
+        return super().run(command, **kwargs)
+
+
+def test_a_deploy_that_drops_what_the_host_runs_is_refused_before_sealing(config) -> None:
+    """2026-10-30: a selection for one task removed another task's feature."""
+
+    transport = FakeTransport()
+    _history(transport)
+    controller = EidolonPiController(config, _AdminWentBack(config), transport=transport)
+    _stub_input_contract(controller)
+
+    with pytest.raises(OperationsError, match=r"drops commits that release last-good ran \(eidolon_admin -2\)"):
+        controller.deploy(release_id="r1", resume=False, activate=False)
+    assert not any(action == "install" for action, *_ in transport.agent_calls)
+
+
+def test_a_deploy_from_a_branch_is_refused(config) -> None:
+    """A Pi release is each repository's HEAD; HEAD on a feature branch is refused."""
+
+    class HubOnABranch(ControllerRunner):
+        def run(self, command, **kwargs):
+            command = tuple(command)
+            if "merge-base" in command and self._source(command) == "eidolon_hub":
+                return ProcessResult(1, "", "")
+            return super().run(command, **kwargs)
+
+    transport = FakeTransport()
+    controller = EidolonPiController(config, HubOnABranch(config), transport=transport)
+    _stub_input_contract(controller)
+
+    with pytest.raises(OperationsError, match=r"only commits on main.*eidolon_hub"):
+        controller.deploy(release_id="r1", resume=False, activate=False)
+    assert not any(action == "install" for action, *_ in transport.agent_calls)
+
+
+def test_a_deliberate_regression_ships_and_says_why(config) -> None:
+    transport = FakeTransport()
+    _history(transport)
+    controller = EidolonPiController(
+        config, _AdminWentBack(config), transport=transport,
+        allow_regression="reproduce the 10-30 release",
+    )
+    _stub_input_contract(controller)
+
+    result = controller.deploy(release_id="r1", resume=False, activate=False)
+
+    assert result["local"]["source_regression"] == {
+        "status": "regression_allowed",
+        "since": "release last-good",
+        "dropped": {"eidolon_admin": 2},
+        "reason": "reproduce the 10-30 release",
+    }
+
+
 def test_a_failed_deploy_without_release_history_is_left_alone(config) -> None:
     """A diagnostic that cannot answer must not replace the real error."""
 

@@ -15,7 +15,7 @@ from urllib.parse import urlparse
 from cryptography import x509
 from cryptography.hazmat.primitives.asymmetric import ec
 
-from eidolon_ops import environment, lan_observation, probes, source_assets
+from eidolon_ops import environment, lan_observation, probes, release_set, source_assets
 from eidolon_ops.component_contract import load_component_contract
 from eidolon_ops.config import OperationsConfig
 from eidolon_ops.environment import EnvironmentFileError
@@ -94,12 +94,15 @@ class LocalProductSource:
         runner: ProcessRunner,
         *,
         git: str = "git",
+        allow_regression: str | None = None,
     ) -> None:
         self.profile = profile
         self.config = config
         self.runner = runner
         self.git = git
+        self.allow_regression = allow_regression
         self._sources: SourceResolver | None = None
+        self._release: dict[str, object] | None = None
 
     @property
     def sources(self) -> SourceResolver:
@@ -111,7 +114,10 @@ class LocalProductSource:
         """
 
         if self._sources is None:
-            self._sources = SourceResolver(self.config, self.runner, git=self.git)
+            self._sources = SourceResolver(
+                self.config, self.runner, git=self.git,
+                allow_regression=self.allow_regression,
+            )
         return self._sources
 
     # -- materialization -----------------------------------------------------
@@ -132,10 +138,60 @@ class LocalProductSource:
             services.extend(source_services(declaration, self.profile, source.path))
         return tuple(services)
 
+    def require_release_set(self) -> dict[str, object]:
+        """The source run is one committed set from main, importing one library set.
+
+        Once per operation: the library probe starts every environment's
+        interpreter, and ``prepare`` ends in ``validate``.
+        """
+
+        if self._release is None:
+            sources = {
+                source_id: Path(source.path) for source_id, source in self.config.sources.items()
+            }
+            workspace = self.profile.workspace_root
+            root = release_set.require_one_root(sources, workspace)
+            release_set.require_committed_profile(self.runner, self.git, self.profile.path)
+            self.sources.require_on_trunk()
+            ops_head = release_set.require_workspace_on_trunk(self.runner, self.git, workspace)
+            libraries = release_set.require_one_library_set(self.runner, sources, workspace)
+            self._release = {
+                "root": str(root),
+                release_set.OPS_SOURCE: ops_head,
+                "libraries": libraries,
+            }
+        return self._release
+
+    def _require_forward(self) -> dict[str, object]:
+        """The set about to run contains the one this Host last prepared."""
+
+        record = release_set.read_record(self.profile.paths.state_root)
+        if record is None:
+            return {"status": "no_previous_set"}
+        # The Ops checkout is not a configured source, but its lifecycle code
+        # runs the Host all the same, so it is held to the same rule.
+        ops_dropped = release_set.ops_dropped(
+            self.runner, self.git, self.profile.workspace_root,
+            before=record.get(release_set.OPS_SOURCE),
+            now=str(self.require_release_set()[release_set.OPS_SOURCE]),
+        )
+        return self.sources.require_no_regression(
+            record["sources"],
+            since=f"the release set this Host last prepared ({record.get('root')})",
+            also_dropped={release_set.OPS_SOURCE: ops_dropped},
+        )
+
     def prepare(self) -> dict[str, object]:
         if os.geteuid() == 0:
             raise OperationsError("source preparation must run as the workspace operator")
         self._validate_exact_worktrees()
+        release = self.require_release_set()
+        regression = self._require_forward()
+        from eidolon_ops.component_artifacts import require_consumed_files
+
+        consumed = require_consumed_files(
+            self.sources.resolved_config(), self.sources.component_contract, self._read_exact_file
+        )
         try:
             # ``refresh_derived`` because this Host tracks its checkouts' HEAD:
             # any commit to a component's own `config/settings.yaml` moves what
@@ -177,9 +233,17 @@ class LocalProductSource:
         )
         prepare_logs(self.profile, services)
         result = self.validate()
+        release_set.write_record(
+            paths.state_root,
+            root=Path(str(release["root"])),
+            sources=self.sources.revisions(),
+            workspace=str(release[release_set.OPS_SOURCE]),
+            regression=regression,
+        )
         return {
             **result,
             "status": "prepared",
+            "release_set": {**release, "regression": regression, "consumed_files": consumed},
             "source_count": len(self.config.sources),
             "generated_root": str(paths.config_root),
             **(
@@ -195,6 +259,7 @@ class LocalProductSource:
 
     def validate(self) -> dict[str, object]:
         self._validate_exact_worktrees()
+        self.require_release_set()
         root = self.profile.paths.config_root
         required = [
             *(root / "env" / name for name in source_assets.ENV_NAMES),

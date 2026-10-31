@@ -272,13 +272,17 @@ class EidolonPiController:
         app: AppAccess | None = None,
         progress: ProgressSink | None = None,
         allow_dirty: bool = False,
+        allow_regression: str | None = None,
     ) -> None:
         self.config = config
         self.runner = runner
         self.transport = transport or SSHTransport(config.host, runner)
         self.git = git
         self.progress = progress
-        self.preflight = ReleasePreflight(config, runner, git=git, allow_dirty=allow_dirty)
+        self.preflight = ReleasePreflight(
+            config, runner, git=git, allow_dirty=allow_dirty,
+            allow_regression=allow_regression,
+        )
         self.bundles = BundleTransfer(config, runner, self.transport, self.preflight.sources)
         self.host_layer = HostLayer(
             config,

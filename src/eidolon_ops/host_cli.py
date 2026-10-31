@@ -126,6 +126,9 @@ OPERATIONS: dict[str, Callable[[HostController, argparse.Namespace], object]] = 
     "debug": lambda controller, a: controller.local_profile(
         "product-source", a.profile_operation
     ),
+    "release-set": lambda controller, a: controller.release_set(
+        pins=tuple(a.pin), apply=a.apply
+    ),
     "logs": lambda controller, a: controller.logs(
         service=a.service, lines=a.lines, since=a.since
     ),
@@ -148,7 +151,8 @@ def operation_capability(name: str) -> Capability:
     aliases = {"start": Capability.LIFECYCLE, "stop": Capability.LIFECYCLE,
                "restart": Capability.LIFECYCLE, "pending": Capability.DEPLOY,
                "update": Capability.DEPLOY, "abandon": Capability.DEPLOY,
-               "debug": Capability.SOURCE_PROFILE, "service": Capability.SERVICE_RESTART}
+               "debug": Capability.SOURCE_PROFILE, "service": Capability.SERVICE_RESTART,
+               "release-set": Capability.SOURCE_PROFILE}
     return aliases[name] if name in aliases else Capability(name)
 
 
@@ -187,6 +191,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             SubprocessRunner(),
             revision_overrides=tuple(arguments.revision),
             allow_dirty=arguments.allow_dirty,
+            allow_regression=arguments.allow_regression,
             progress=ledger,
         )
         result = _dispatch(controller, arguments)
@@ -259,6 +264,14 @@ def _parser() -> argparse.ArgumentParser:
             "seal a release from repositories that have uncommitted changes. The "
             "changes are still not in it — only the committed HEAD ships — and the "
             "dirty state is recorded in the Host's release evidence"
+        ),
+    )
+    parser.add_argument(
+        "--allow-regression",
+        metavar="REASON",
+        help=(
+            "run a selection that drops commits the previous one ran. Refused "
+            "without it; the reason is recorded with the release"
         ),
     )
     operations = parser.add_subparsers(dest="operation", required=False)
@@ -477,6 +490,15 @@ def _parser() -> argparse.ArgumentParser:
     service.add_argument("service_action", choices=("restart",))
     service.add_argument("service_id", metavar="SERVICE")
     service.add_argument("--dry-run", action="store_true")
+    release = operations.add_parser(
+        "release-set",
+        help="select what a source run executes: one root, every source from main",
+    )
+    release.add_argument(
+        "--pin", action="append", default=[], metavar="SOURCE=40HEX",
+        help="take this commit (on main) instead of main's tip; repeatable",
+    )
+    release.add_argument("--apply", action="store_true")
     logs = operations.add_parser("logs")
     logs.add_argument("--service")
     logs.add_argument("--lines", type=int, default=200)

@@ -81,7 +81,7 @@ def fingerprint(message: str) -> str:
 #: this file did not know, so it wrote ``link=None`` for every deploy on the
 #: board and said nothing about it. An absent field that was supposed to explain
 #: slow runs is worse than no field: the ledger looked like it had answered.
-_CARRIED = ("release_id", "link", "source_advance")
+_CARRIED = ("release_id", "link", "source_advance", "source_regression")
 _NESTED = "local"
 
 
