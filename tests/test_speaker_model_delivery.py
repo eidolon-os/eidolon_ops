@@ -33,7 +33,10 @@ def test_selected_model_paths_follow_the_pinned_contract_not_worktree():
     contract = (ROOT / "eidolon_models/ops/component.toml").read_text()
     import tomllib
 
-    original = tomllib.loads(contract)["artifacts"][-1]["id"]
+    original = next(
+        a["id"] for a in tomllib.loads(contract)["artifacts"]
+        if a.get("requires_capability") == "local_speaker_verification"
+    )
     pinned = contract.replace(original, "review-future-model")
     cfg = SimpleNamespace(
         capabilities=frozenset({"local_speaker_verification"}),
