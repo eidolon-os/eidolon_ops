@@ -622,18 +622,7 @@ Mac 和 Linux 共用 `product_settings()` 的严格渲染。缺失字段时，�
 新增配置键需同步组件 schema 和正式模板，并遵守组件的跨版本兼容发布要求；
 Linux 可逆发布仍保留新旧解释器的配置兼容检查。
 
-声纹配置由 `channel.yaml:voiceprint.calibration_path` 提供。Provider 与 worker
-都在组件操作契约中声明依赖该文件，使用同一声纹节的加载与校验；Provider 不加载
-worker 的其他策略。Linux systemd 单元和 Mac 既有 Supervisor 启动声明都必须提供
-同一设置文件：Linux 为 `/etc/eidolon/channel.yaml`，Mac 为 Host 配置目录中的
-`settings/channel.yaml`；回归同时检查两种声明和实际生成的 Supervisor 配置。
-不再从 Mac overlay 单独派生 `EIDOLON_SPEAKER_CALIBRATION_PATH`，该旧变量不参与选择。
-撤销试验应删除 Host overlay（默认路径为空）并通过标准 `restart` 生效；这不更改
-Companion 的个人权限开关。`calibration_path` 为相对路径时，只能引用所选模型包内的文件，
-由共享加载器在 `model_dir` 下解析，拒绝逃逸；绝对路径只用于已交付到目标 Host 的自定义制品。
-Mac 当前选择包内 `admission-controlled-trial.json`，不依赖个人工作区路径。
-该试验配置支持 1–5 个允许声音、1.5–30 秒的完整候选语音；不声称已校准。
-readiness 返回同一制品的能力限制，Mobile 提前展示并阻止超限开启；更换制品后需用户重新确认权限。
+声纹识别只读 `channel.yaml:voiceprint.model_dir`。该路径由 Ops 指向 Models 为 `local_speaker_verification` 交付的产物，不接受 Host overlay。Channel 在组件契约的 `[[consumes]]` 里列出它从该目录读取的文件，缺任何一个，发布都会被拒绝；运行中识别是否可用，由就绪事实 `speaker_recognition_ready` 报告。旧的 `voiceprint.calibration_path` 与 `admission-controlled-trial.json` 已删除。
 
 Mac 的控制服务从组件 `ops/component.toml` 及其服务资产生成到 Host 的 `supervisor.conf`；
 服务角色、环境、私有目录和依赖来自同一组件声明。Supervisor 只保留驱动专属的 worker 配置。
