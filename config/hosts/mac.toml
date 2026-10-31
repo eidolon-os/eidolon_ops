@@ -32,7 +32,7 @@ bootstrap_state_root = "~/ai/eidolon/.eidolon/mac-product/bootstrap/state"
 bootstrap_runtime_root = "~/ai/eidolon/.eidolon/mac-product/bootstrap/run"
 
 [adapter]
-lifecycle_script = "../../../.eidolon/mac-product/sources/main-20261031-90b8f93e/eidolon_ops/deploy/dev/run_all.sh"
+lifecycle_script = "../../../.eidolon/mac-product/sources/main-20261031-fffd7ece/eidolon_ops/deploy/dev/run_all.sh"
 operations_config = "../eidolon-pi.toml"
 foundation_mode = "external"
 external_livekit_config = "~/ai/eidolon/.eidolon/mac-product/run/livekit/livekit.generated.yaml"
@@ -51,41 +51,41 @@ allow_insecure_livekit = true
 # hand-edited spread, a commit off main, or one that drops the last set's work.
 
 [source_overrides.eidolon_data]
-path = "../../../.eidolon/mac-product/sources/main-20261031-90b8f93e/eidolon_data"
+path = "../../../.eidolon/mac-product/sources/main-20261031-fffd7ece/eidolon_data"
 revision = "ed8b888a3d8491816a80d9baf28902fce9a25f4d"
 
 [source_overrides.eidolon_sdk]
-path = "../../../.eidolon/mac-product/sources/main-20261031-90b8f93e/eidolon_sdk"
+path = "../../../.eidolon/mac-product/sources/main-20261031-fffd7ece/eidolon_sdk"
 revision = "f40c19f641b83f120e0e13b35752039ac50f6eb2"
 
 [source_overrides.eidolon_admin]
-path = "../../../.eidolon/mac-product/sources/main-20261031-90b8f93e/eidolon_admin"
+path = "../../../.eidolon/mac-product/sources/main-20261031-fffd7ece/eidolon_admin"
 revision = "39c0228aedb4473b3bc37402c8de7b5899358057"
 
 [source_overrides.eidolon_kernel]
-path = "../../../.eidolon/mac-product/sources/main-20261031-90b8f93e/eidolon_kernel"
+path = "../../../.eidolon/mac-product/sources/main-20261031-fffd7ece/eidolon_kernel"
 revision = "1d7deaf2ff6d109b4782af16adae3896e862df3d"
 
 [source_overrides.eidolon_hub]
-path = "../../../.eidolon/mac-product/sources/main-20261031-90b8f93e/eidolon_hub"
+path = "../../../.eidolon/mac-product/sources/main-20261031-fffd7ece/eidolon_hub"
 revision = "480e69747210ee15106961339d5c2054509cda35"
 
 [source_overrides.eidolon_agent]
-path = "../../../.eidolon/mac-product/sources/main-20261031-90b8f93e/eidolon_agent"
+path = "../../../.eidolon/mac-product/sources/main-20261031-fffd7ece/eidolon_agent"
 revision = "6b59730647f76b7ac7dd9560926c78f0e57673d0"
 
 [source_overrides.eidolon_channel]
-path = "../../../.eidolon/mac-product/sources/main-20261031-90b8f93e/eidolon_channel"
-revision = "3da7d825d21e85d1738e7a41a796ad33d732ffa3"
+path = "../../../.eidolon/mac-product/sources/main-20261031-fffd7ece/eidolon_channel"
+revision = "e86532296c9216be73cdfec0301dfa11b1b7445b"
 
 [source_overrides.eidolon_memory]
-path = "../../../.eidolon/mac-product/sources/main-20261031-90b8f93e/eidolon_memory"
+path = "../../../.eidolon/mac-product/sources/main-20261031-fffd7ece/eidolon_memory"
 revision = "70e4b5db1b4953da8dfe86ee562235f25e3e803e"
 
 # Keep this Host's existing runtime selection explicit. Adding reviewed product
 # capabilities must not start a new model on the workstation implicitly.
 [source_overrides.eidolon_models]
-path = "../../../.eidolon/mac-product/sources/main-20261031-90b8f93e/eidolon_models"
+path = "../../../.eidolon/mac-product/sources/main-20261031-fffd7ece/eidolon_models"
 revision = "fa3af3221c964d12b11c248131c3609d387ed459"
 
 [capabilities]
