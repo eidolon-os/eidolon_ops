@@ -274,10 +274,13 @@ class _GitButNoUv(SubprocessRunner):
     def __init__(self) -> None:
         self.synced: list[tuple[tuple[str, ...], Path | None]] = []
         self.order: list[str] = []
+        self.smudge_skipped: dict[str, bool] = {}
 
     def run(self, command, **kwargs):
         if "worktree" in command:
             self.order.append("worktree")
+            env = kwargs.get("env") or {}
+            self.smudge_skipped[Path(command[-2]).name] = env.get("GIT_LFS_SKIP_SMUDGE") == "1"
         if tuple(command[:2]) == ("uv", "sync"):
             self.order.append("sync")
             self.synced.append((tuple(command), kwargs.get("cwd")))
@@ -317,6 +320,8 @@ def test_a_release_set_is_main_built_once_and_committed(tmp_path: Path) -> None:
     assert sorted(built["created"]) == ["eidolon_hub", "eidolon_ops"]
     assert _git(root / "eidolon_hub", "rev-parse", "HEAD") == tips["eidolon_hub"][1]
     assert ("uv", "sync", "--frozen", "--extra", "dev") in [c for c, _ in runner.synced]
+    # Only Models may hold LFS pointers; Channel loads its ONNX from its tree.
+    assert runner.smudge_skipped == {"eidolon_hub": False, "eidolon_ops": False}
     # Admin's environment resolves Memory's contracts from the root, so no
     # environment is synced before every checkout exists (first live run, 10-31).
     assert runner.order.index("sync") > max(i for i, s in enumerate(runner.order) if s == "worktree")
@@ -351,6 +356,10 @@ def test_a_release_set_refuses_to_drop_what_the_host_last_prepared(tmp_path: Pat
         {"eidolon_hub": tips["eidolon_hub"][0]}, previous=previous, allow_regression="bisect",
     )
     assert allowed["regression"]["status"] == "regression_allowed"
+
+
+def test_only_models_skips_lfs_content() -> None:
+    assert release_set.LFS_POINTERS_SUFFICE == frozenset({"eidolon_models"})
 
 
 def test_a_release_root_is_never_moved(tmp_path: Path) -> None:

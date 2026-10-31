@@ -778,8 +778,9 @@ Mac 的选择只通过一个入口变更：
 ```
 
 快照根按内容命名：再次选择同一套提交时会找到同一个根。只改动 Host profile 的 Ops 提交不算新的发布集。
-创建 worktree 时不拉取 LFS 内容，模型字节由产物物化器直接从 git 对象库读取，所以每个根只占几 GB，不再
-是 15 GB。旧的根不会被自动删除。Pi 的发布输入仍是各兄弟仓的 HEAD，但 HEAD 必须在 main 上。
+Models 的 worktree 不拉取 LFS 内容（模型字节由产物物化器直接从 git 对象库读取），所以每个根只占几 GB，
+不再是 15 GB。其他仓照常拉取：Channel 从自己的目录树直接加载 VAD 和断句 ONNX，10-31 曾因这两个文件只是
+LFS 指针而加载失败。旧的根不会被自动删除。Pi 的发布输入仍是各兄弟仓的 HEAD，但 HEAD 必须在 main 上。
 
 Mac product-source 在 canonical 7880 上直接管理 LiveKit 进程；`external` 表示复用已验证的二进制和
 凭据配置，不表示继续依赖旧 Admin supervisor。NATS 仍由 external foundation 提供并在启动前受健康门禁。

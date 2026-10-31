@@ -68,6 +68,11 @@ SOURCE_ENVIRONMENTS: Mapping[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
 }
 
 OPS_SOURCE = "eidolon_ops"
+#: Checkouts whose large files reach a Host only as artifacts, read from git's
+#: own store (`cat-file --filters`), so their worktree can hold LFS pointers:
+#: 11 GB less per root. Only Models: Channel loads its VAD and turn-detector
+#: ONNX straight from its tree, and pointers there failed both on 2026-10-31.
+LFS_POINTERS_SUFFICE = frozenset({"eidolon_models"})
 #: Where Host profiles live in the Ops repository. Committing a selection
 #: advances Ops ``main`` without changing any code a Host runs, so a commit that
 #: touches only these is not a reason to build a new root.
@@ -318,10 +323,8 @@ class ReleaseSetSelection:
                             self.git, "-C", str(self.repositories[source_id]),
                             "worktree", "add", "--detach", str(target), str(revision),
                         ),
-                        # Model bytes reach a Host as artifacts read from git's
-                        # own store (`cat-file --filters`), never from this
-                        # tree; smudging them here cost 11 GB per root.
-                        env={**os.environ, "GIT_LFS_SKIP_SMUDGE": "1"},
+                        env={**os.environ, "GIT_LFS_SKIP_SMUDGE": "1"}
+                        if source_id in LFS_POINTERS_SUFFICE else None,
                     ),
                 )
                 created.append(source_id)
