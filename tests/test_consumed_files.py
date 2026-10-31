@@ -66,3 +66,12 @@ def test_a_capability_this_host_does_not_offer_asks_nothing() -> None:
 def test_reading_from_a_component_the_release_lacks_is_refused() -> None:
     with pytest.raises(OperationsError, match="does not include"):
         require_consumed_files(*_release(_models(), sources=("eidolon_channel",)))
+
+
+def test_an_artifact_without_the_cohort_its_policy_names_is_refused() -> None:
+    dropped = re.sub(
+        r'\[\[artifacts\.files\]\]\npath = "impostor-cohort\.npz"\n[^\[]*', "", _models()
+    )
+    assert "impostor-cohort.npz" not in dropped
+    with pytest.raises(OperationsError, match=r"eidolon_channel reads impostor-cohort\.npz"):
+        require_consumed_files(*_release(dropped))
