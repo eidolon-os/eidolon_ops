@@ -24,6 +24,7 @@ from .primitives import TargetError
 READINESS_FACTS = (
     "backend_healthy",
     "participation_model_ready",
+    "speaker_recognition_ready",
     "lan_address_observed",
     "lan_name_resolves",
     "host_identity_material",
@@ -235,6 +236,26 @@ def channel_worker_report(worker: Mapping[str, object]) -> dict[str, object]:
         "dispatch_identity": identity is not None and identity.get("agent_name") == expected,
         "expected_agent_name": expected,
     }
+
+#: Provider states that resolve on their own once the model has loaded.
+SPEAKER_RECOGNITION_WARMING = frozenset({None, "model_not_started", "model_loading"})
+
+
+def speaker_recognition_state(provider_health: object) -> str | None:
+    """What the Channel Provider publishes about conversation recognition.
+
+    The worker reads the policy from the same model directory and turns
+    recognition off when it cannot; the Provider's health says which state that
+    is (``ready``, ``policy_missing``, ``model_loading``...). Read, not rebuilt.
+    """
+
+    if not isinstance(provider_health, Mapping):
+        return None
+    status = provider_health.get("speaker_recognition")
+    if not isinstance(status, Mapping):
+        return None
+    state = status.get("state")
+    return state if isinstance(state, str) else None
 
 def channel_worker_livekit_link(worker: Mapping[str, object]) -> dict[str, object]:
     """Whether the worker still holds the connection it is registered over.
@@ -509,6 +530,21 @@ def app_ready(payload: Mapping[str, object]) -> dict[str, object]:
         primitives.http_json("127.0.0.1", participation_port, "/participation/readyz")
         if participation_required else (None, None)
     )
+    recognition_required = payload.get("speaker_recognition_required", False)
+    provider_port = payload.get("channel_provider_port")
+    if type(recognition_required) is not bool or (
+        recognition_required and not primitives.is_port(provider_port)
+    ):
+        raise TargetError("speaker recognition readiness configuration is invalid")
+    # Settled like the worker: the Provider loads the model after it starts
+    # answering. Only warming waits; a missing policy answers at once.
+    recognition = primitives.settle(
+        lambda: {"state": speaker_recognition_state(
+            primitives.http_json("127.0.0.1", provider_port, "/health")[1]
+        )},
+        lambda report: report["state"] not in SPEAKER_RECOGNITION_WARMING,
+        seconds=budget.remaining(),
+    ) if recognition_required else {"state": None}
     checks = {
         "backend_healthy": all(
             value.get("ActiveState") == "active" and value.get("SubState") == "running"
@@ -525,6 +561,7 @@ def app_ready(payload: Mapping[str, object]) -> dict[str, object]:
             and isinstance(participation.get("policy_version"), str)
             and bool(participation["policy_version"])
         ),
+        "speaker_recognition_ready": not recognition_required or recognition["state"] == "ready",
         "lan_address_observed": address in app_contract.host_addresses(),
         # An address of this Host, not a particular one. Two things make the
         # stricter reading unmeasurable: a Host on Wi-Fi and Ethernet at once
@@ -638,6 +675,7 @@ def app_ready(payload: Mapping[str, object]) -> dict[str, object]:
         "channel_worker": {**channel, "livekit_link": link},
         "livekit_service": media_service,
         "participation_provider": participation if participation_required else None,
+        "speaker_recognition": recognition if recognition_required else None,
         "waiting": waiting,
         "resolution": sorted(resolved),
         "mdns": {

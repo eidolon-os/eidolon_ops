@@ -356,6 +356,64 @@ def test_local_ip_team_model_requires_task_specific_readiness(
     assert report["checks"]["participation_model_ready"] is True
 
 
+def test_a_host_providing_speaker_verification_requires_recognition_on(
+    monkeypatch, tmp_path: Path, bootstrap_socket: Path,
+) -> None:
+    """The policy left the model artifact and every fact here still read green.
+
+    Recognition is the Provider's to report; this reads it and settles only
+    while the model is still loading. A missing policy answers at once.
+    """
+
+    app = _app()
+    _healthy_probe(monkeypatch, app, tmp_path)
+    payload = _payload(app)
+    payload["speaker_recognition_required"] = True
+    payload["channel_provider_port"] = 8767
+    asked = []
+
+    def provider(recognition):
+        def answer(host, port, path):
+            asked.append((host, port, path))
+            return 200, {"status": "ok", "speaker_recognition": recognition}
+        return answer
+
+    monkeypatch.setattr(primitives, "http_json", provider({"state": "policy_missing"}))
+    report = probe.app_ready(payload)
+    assert report["status"] == "degraded"
+    assert [n for n, v in report["checks"].items() if not v] == ["speaker_recognition_ready"]
+    assert report["speaker_recognition"] == {"state": "policy_missing"}
+    assert asked[-1] == ("127.0.0.1", 8767, "/health")
+
+    monkeypatch.setattr(primitives, "http_json", provider(
+        {"state": "ready", "model_id": "campplus_zh_16k_common", "policy_version": "v2"}
+    ))
+    report = probe.app_ready(payload)
+    assert report["status"] == "app_ready"
+    assert report["checks"]["speaker_recognition_ready"] is True
+
+    payload["speaker_recognition_required"] = False
+    monkeypatch.setattr(primitives, "http_json", lambda *_a: (None, None))
+    assert probe.app_ready(payload)["checks"]["speaker_recognition_ready"] is True
+    assert probe.app_ready(payload)["speaker_recognition"] is None
+
+    payload["speaker_recognition_required"] = True
+    payload["channel_provider_port"] = "8767"
+    with pytest.raises(TargetError):
+        probe.app_ready(payload)
+
+
+def test_recognition_state_reads_only_what_the_provider_published() -> None:
+    assert probe.speaker_recognition_state(None) is None
+    assert probe.speaker_recognition_state({"status": "ok"}) is None
+    assert probe.speaker_recognition_state({"speaker_recognition": "ready"}) is None
+    assert probe.speaker_recognition_state({"speaker_recognition": {"state": 1}}) is None
+    assert probe.speaker_recognition_state(
+        {"speaker_recognition": {"state": "model_loading"}}
+    ) in probe.SPEAKER_RECOGNITION_WARMING
+    assert "policy_missing" not in probe.SPEAKER_RECOGNITION_WARMING
+
+
 def test_a_hub_that_cannot_admit_a_device_fails_the_gate(
     monkeypatch, tmp_path: Path, bootstrap_socket: Path
 ) -> None:

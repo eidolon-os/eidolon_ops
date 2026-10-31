@@ -606,6 +606,14 @@ def test_only_a_host_that_runs_the_model_gates_readiness_on_it() -> None:
     )
 
 
+def test_only_a_host_providing_speaker_verification_is_held_to_recognition() -> None:
+    from eidolon_ops.readiness import speaker_recognition_required
+
+    assert not speaker_recognition_required(frozenset())
+    assert not speaker_recognition_required(frozenset({"local_laya", "rknpu2"}))
+    assert speaker_recognition_required(frozenset({"local_speaker_verification"}))
+
+
 def test_the_pi_profile_reaches_a_model_it_does_not_run_and_is_not_gated_on_it() -> None:
     """A loopback endpoint without the capability is an address, not a promise."""
 

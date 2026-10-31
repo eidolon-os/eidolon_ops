@@ -84,6 +84,7 @@ class ReadinessFact(StrEnum):
 
     BACKEND_HEALTHY = "backend_healthy"
     PARTICIPATION_MODEL_READY = "participation_model_ready"
+    SPEAKER_RECOGNITION_READY = "speaker_recognition_ready"
     LAN_ADDRESS_OBSERVED = "lan_address_observed"
     LAN_NAME_RESOLVES = "lan_name_resolves"
     HOST_IDENTITY_MATERIAL = "host_identity_material"
@@ -159,6 +160,14 @@ READINESS_CONTRACT: tuple[ReadinessCheck, ...] = (
         HostKind.PRODUCT,
         ReadinessFact.PARTICIPATION_MODEL_READY,
         "a configured local IP-team provider serves participation v2 with model and policy versions",
+    ),
+    # Selected capabilities are readiness, not decoration. On 2026-10-30 the
+    # recognition policy left the model artifact, the worker turned recognition
+    # off without an error, and this Host still attested every fact it had.
+    _both(
+        ReadinessFact.SPEAKER_RECOGNITION_READY,
+        "a Host providing local_speaker_verification has conversation recognition on: "
+        "model loaded and a recognition policy naming its weights",
     ),
     _both(
         ReadinessFact.LAN_ADDRESS_OBSERVED,
@@ -359,6 +368,12 @@ def setup_readiness_evidence(report: object) -> dict[str, object]:
         "state": report.get("state"),
         "operation_id": report.get("operation_id"),
     }
+
+
+def speaker_recognition_required(capabilities: frozenset[str]) -> bool:
+    """Whether this Host runs conversation recognition, and so must keep it on."""
+
+    return "local_speaker_verification" in capabilities
 
 
 def expected_facts(kind: HostKind) -> tuple[str, ...]:

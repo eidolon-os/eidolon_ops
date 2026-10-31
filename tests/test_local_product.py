@@ -505,6 +505,34 @@ def test_app_ready_requires_device_reachable_contract(monkeypatch, tmp_path: Pat
         "service_id": "livekit", "runtime_state": "ready", "network_current": True,
     })
 
+    # A Host providing local_speaker_verification is ready only while
+    # conversation recognition is on, as the Provider's own health reports.
+    # 2026-10-30 this Host attested every fact with the policy missing.
+    setup_answer = {
+        "contract_version": "1",
+        "operation_id": "06607258-a650-5570-8c91-880e8f2fb9a9",
+        "state": "ready",
+    }
+
+    def provider_says(recognition):
+        return lambda url: (
+            {"status": "ok", "speaker_recognition": recognition}
+            if url.endswith("/health") else setup_answer
+        )
+
+    product.config.capabilities = frozenset({"local_speaker_verification"})
+    monkeypatch.setattr(probes, "http_json", provider_says({"state": "policy_missing"}))
+    off = product.app_ready()
+    assert off["status"] == "degraded"
+    assert [n for n, v in off["checks"].items() if not v] == ["speaker_recognition_ready"]
+    assert off["speaker_recognition"] == {"state": "policy_missing"}
+    monkeypatch.setattr(probes, "http_json", provider_says(
+        {"state": "ready", "model_id": "campplus_zh_16k_common", "policy_version": "v2"}
+    ))
+    assert product.app_ready()["status"] == "app_ready"
+    product.config.capabilities = frozenset()
+    monkeypatch.setattr(probes, "http_json", lambda _url: setup_answer)
+
     # A Local API still running the build it started with does not answer the
     # setup route at all. Same verdict as a Host whose halves disagree, because
     # a check that could not be made has not passed — and a different sentence,

@@ -35,7 +35,7 @@ from eidolon_ops.install_inputs import declared_credential_relationships
 from eidolon_ops.owner_domain_assets import HostAuthority
 from eidolon_ops.paths import AppAccess
 from eidolon_ops.private_inputs import INSTALL_DESTINATION_NAMES
-from eidolon_ops.readiness import product_payload
+from eidolon_ops.readiness import product_payload, speaker_recognition_required
 from eidolon_ops.source_assets import PORTS
 from eidolon_ops.transport import SSHTransport
 
@@ -226,6 +226,12 @@ class HostLayer:
             "port_registry": port_registry,
             "participation_model_required": participation_model_required,
             "participation_model_port": PORTS["laya_participation_api"],
+            # Same reasoning as participation: the capability installs it, so
+            # the capability is what makes it this Host's to keep ready.
+            "speaker_recognition_required": speaker_recognition_required(
+                self.config.capabilities
+            ),
+            "channel_provider_port": PORTS["channel_provider"],
             # Where memory's supervisor answers. A backup asks it for a
             # snapshot of each space rather than copying a palace the agent
             # does not understand, and the injected agent carries no YAML

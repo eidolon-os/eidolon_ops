@@ -166,6 +166,12 @@ LiveKit 已经不可接活：
 | `channel_worker_dispatch_identity` | worker 自己发布的 `/worker`：它注册的 agent 名就是产品 dispatch 的那个名字 |
 | `channel_worker_livekit_link` | 这台机器自己的进程与 socket 表：`eidolon-channel.service` cgroup 里确有进程持有到 LiveKit 信令端口的连接——即 worker 注册所依托的那条链路 |
 
+选中的能力同样是就绪的一部分。`speaker_recognition_ready` 只约束声明了 `local_speaker_verification`
+的 Host：它读取 Channel Provider `/health` 中自报的 `speaker_recognition.state`。Provider 与 worker 从同一个
+`voiceprint.model_dir` 读取识别策略，策略缺失、无法解析、或与已加载的权重不一致时报告相应状态，此时这一条
+为红。只在模型仍在加载时等待；状态是 `policy_missing` 时立即给出结论。2026-10-30 识别策略从模型产物中
+丢失，worker 静默关闭了识别，而当时的检查全绿；这一条就是为此增加的。
+
 Ops 只消费组件自报的健康事实和本机可观测状态，不去重建 `livekit-agents` 的内部状态。**LiveKit 自己
 对该注册的看法目前没有任何组件发布**，那一条应当由 Channel 的 Component Ops Contract（`[[units]].ready`）
 补齐，而不是在 Ops 里猜。

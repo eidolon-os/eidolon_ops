@@ -43,6 +43,7 @@ from eidolon_ops.hostagent.kernel_schema import (
     set_aside_suffix,
 )
 from eidolon_ops.hostagent.primitives import TargetError, file_sha256
+from eidolon_ops.hostagent.probe import SPEAKER_RECOGNITION_WARMING, speaker_recognition_state
 from eidolon_ops.hub_assets import (
     hub_settings_are_bound,
     hub_settings_template,
@@ -75,6 +76,7 @@ from eidolon_ops.readiness import (
     is_ready,
     setup_answer_is_settled,
     setup_readiness_evidence,
+    speaker_recognition_required,
 )
 from eidolon_ops.source_resolution import SourceResolver
 from eidolon_ops.source_runtime import render_supervisor, source_services
@@ -762,8 +764,19 @@ class LocalProductSource:
             self.profile.paths.runtime_root / "system.sock",
             "/api/system/v1/services/livekit",
         ) or {}
+        recognition_required = speaker_recognition_required(self.config.capabilities)
+        recognition = probes.settle(
+            lambda: {"state": speaker_recognition_state(probes.http_json(
+                f"http://127.0.0.1:{ports['channel_provider']}/health"
+            ))},
+            lambda report: report["state"] not in SPEAKER_RECOGNITION_WARMING,
+            seconds=DEFAULT_CHANNEL_SETTLE_SECONDS,
+        ) if recognition_required else {"state": None}
         checks = {
             str(ReadinessFact.BACKEND_HEALTHY): backend["status"] == "healthy",
+            str(ReadinessFact.SPEAKER_RECOGNITION_READY): (
+                not recognition_required or recognition["state"] == "ready"
+            ),
             # A declared address must still be one this Host has; a discovered
             # one is true by construction, so what carries meaning is whether
             # devices can find the Host under its published name.
@@ -829,6 +842,7 @@ class LocalProductSource:
             "lan_ipv4": address,
             "checks": checks,
             "channel_worker": channel,
+            "speaker_recognition": recognition if recognition_required else None,
             "setup": setup,
             "endpoints": {
                 "local_api": f"https://{address}:{ports['local_api']}",
