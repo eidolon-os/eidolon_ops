@@ -73,7 +73,7 @@ revision = "41d5ae15f240b014c518c4a93001125c6f6b396a"
 
 [source_overrides.eidolon_channel]
 path = "../../../.eidolon/mac-product/sources/voice-selection-20261031/eidolon_channel"
-revision = "4da0ec1edaa059154b27261db7682b369f6f36e1"
+revision = "f013085d52d4af8c41294672fbd9da347dec7439"
 
 [source_overrides.eidolon_memory]
 path = "../../../.eidolon/mac-product/sources/person-release-20261029/eidolon_memory"
