@@ -325,6 +325,10 @@ class ReleaseSetSelection:
                     ),
                 )
                 created.append(source_id)
+        # Second pass: an environment resolves editable siblings (Admin needs
+        # Memory's contracts), so every checkout has to exist before any sync.
+        for source_id in revisions:
+            target = root / source_id
             for inner, arguments in SOURCE_ENVIRONMENTS.get(source_id, ((".", ()),)):
                 directory = target / inner
                 checked(

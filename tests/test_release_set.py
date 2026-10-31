@@ -273,9 +273,13 @@ def test_the_record_round_trips(tmp_path: Path) -> None:
 class _GitButNoUv(SubprocessRunner):
     def __init__(self) -> None:
         self.synced: list[tuple[tuple[str, ...], Path | None]] = []
+        self.order: list[str] = []
 
     def run(self, command, **kwargs):
+        if "worktree" in command:
+            self.order.append("worktree")
         if tuple(command[:2]) == ("uv", "sync"):
+            self.order.append("sync")
             self.synced.append((tuple(command), kwargs.get("cwd")))
             return ProcessResult(0, "", "")
         return super().run(command, **kwargs)
@@ -313,6 +317,9 @@ def test_a_release_set_is_main_built_once_and_committed(tmp_path: Path) -> None:
     assert sorted(built["created"]) == ["eidolon_hub", "eidolon_ops"]
     assert _git(root / "eidolon_hub", "rev-parse", "HEAD") == tips["eidolon_hub"][1]
     assert ("uv", "sync", "--frozen", "--extra", "dev") in [c for c, _ in runner.synced]
+    # Admin's environment resolves Memory's contracts from the root, so no
+    # environment is synced before every checkout exists (first live run, 10-31).
+    assert runner.order.index("sync") > max(i for i, s in enumerate(runner.order) if s == "worktree")
     assert selection.write_profile(plan) == "committed"
     text = selection.profile.read_text()
     assert f'path = "../../../../sources/{root.name}/eidolon_hub"' in text
