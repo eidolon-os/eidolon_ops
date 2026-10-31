@@ -53,7 +53,7 @@ revision = "ed8b888a3d8491816a80d9baf28902fce9a25f4d"
 
 [source_overrides.eidolon_sdk]
 path = "../../../.eidolon/mac-product/sources/voice-selection-20261031/eidolon_sdk"
-revision = "7bd917788adfeb9cf9db8a7988b5d86a2ce28e99"
+revision = "f40c19f641b83f120e0e13b35752039ac50f6eb2"
 
 [source_overrides.eidolon_admin]
 path = "../../../.eidolon/mac-product/sources/voice-selection-20261031/eidolon_admin"
@@ -73,7 +73,7 @@ revision = "41d5ae15f240b014c518c4a93001125c6f6b396a"
 
 [source_overrides.eidolon_channel]
 path = "../../../.eidolon/mac-product/sources/voice-selection-20261031/eidolon_channel"
-revision = "b1260054a595fbce9b66ccd77bec24c8de2e4e16"
+revision = "b285bbf7fe687c166289ed9c3efd764fe52b79f6"
 
 [source_overrides.eidolon_memory]
 path = "../../../.eidolon/mac-product/sources/person-release-20261029/eidolon_memory"
