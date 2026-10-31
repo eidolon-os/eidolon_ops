@@ -107,6 +107,7 @@ class ReadinessFact(StrEnum):
     LIVEKIT_NETWORK_CURRENT = "livekit_network_current"
     CHANNEL_WORKER_HEALTHY = "channel_worker_healthy"
     CHANNEL_WORKER_DISPATCH_IDENTITY = "channel_worker_dispatch_identity"
+    CHANNEL_TURN_MODELS_LOADED = "channel_turn_models_loaded"
     CHANNEL_WORKER_LIVEKIT_LINK = "channel_worker_livekit_link"
     CLAIM_WINDOW_HONORED = "claim_window_honored"
 
@@ -227,6 +228,13 @@ READINESS_CONTRACT: tuple[ReadinessCheck, ...] = (
     _both(
         ReadinessFact.CHANNEL_WORKER_DISPATCH_IDENTITY,
         "that worker serves the agent name the product dispatches to",
+    ),
+    # The worker's `/` answers for the worker process; the VAD and turn
+    # detector load in its job processes, and on 2026-10-31 both failed there
+    # (LFS pointers) while `/` stayed 200. The worker publishes what they did.
+    _both(
+        ReadinessFact.CHANNEL_TURN_MODELS_LOADED,
+        "the worker's job processes loaded the VAD and end-of-turn models",
     ),
     _only(
         HostKind.PRODUCT,

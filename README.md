@@ -166,6 +166,10 @@ LiveKit 已经不可接活：
 | `channel_worker_dispatch_identity` | worker 自己发布的 `/worker`：它注册的 agent 名就是产品 dispatch 的那个名字 |
 | `channel_worker_livekit_link` | 这台机器自己的进程与 socket 表：`eidolon-channel.service` cgroup 里确有进程持有到 LiveKit 信令端口的连接——即 worker 注册所依托的那条链路 |
 
+`channel_turn_models_loaded` 读的是 worker 自己发布的 `$EIDOLON_RUNTIME_ROOT/channel/turn-models.json`。
+worker 启动时写 `pending`，每个 job 进程预热后写入 VAD 与断句模型是否加载成功。worker 的 `/` 只代表 worker
+进程本身：2026-10-31 这两个 ONNX 文件只是 LFS 指针，预热报错，而 `/` 仍然返回 200。
+
 选中的能力同样是就绪的一部分。`speaker_recognition_ready` 只约束声明了 `local_speaker_verification`
 的 Host：它读取 Channel Provider `/health` 中自报的 `speaker_recognition.state`。Provider 与 worker 从同一个
 `voiceprint.model_dir` 读取识别策略，策略缺失、无法解析、或与已加载的权重不一致时报告相应状态，此时这一条

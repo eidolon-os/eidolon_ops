@@ -114,6 +114,20 @@ def lifecycle_workflow_socket(monkeypatch):
         listener.close()
 
 
+@pytest.fixture(autouse=True)
+def turn_models(monkeypatch, tmp_path):
+    """The worker's published turn models, loaded unless a test says otherwise."""
+
+    path = tmp_path / "turn-models.json"
+    path.write_text(json.dumps({
+        "state": "loaded",
+        "vad": {"state": "loaded", "provider": "firered_pvad"},
+        "eot": {"state": "loaded", "provider": "firered"},
+    }))
+    monkeypatch.setattr(probe, "TURN_MODELS_STATUS", path)
+    return path
+
+
 #: The second address a Host on Wi-Fi and Ethernet at once has. The Hub
 #: publishes every interface address, because only the device knows which
 #: subnet it is on, so a correct Host answers with more than the one address
@@ -401,6 +415,37 @@ def test_a_host_providing_speaker_verification_requires_recognition_on(
     payload["channel_provider_port"] = "8767"
     with pytest.raises(TargetError):
         probe.app_ready(payload)
+
+
+def test_a_worker_whose_turn_models_failed_is_not_ready(
+    monkeypatch, tmp_path: Path, bootstrap_socket: Path, turn_models: Path,
+) -> None:
+    """2026-10-31: both ONNX files were LFS pointers and `/` still answered 200."""
+
+    app = _app()
+    _healthy_probe(monkeypatch, app, tmp_path)
+    turn_models.write_text(json.dumps({
+        "state": "failed",
+        "vad": {"state": "failed", "error": "INVALID_PROTOBUF"},
+        "eot": {"state": "failed", "error": "INVALID_PROTOBUF"},
+    }))
+
+    report = probe.app_ready(_payload(app))
+
+    assert report["status"] == "degraded"
+    assert [n for n, v in report["checks"].items() if not v] == ["channel_turn_models_loaded"]
+    assert report["turn_models"]["vad"]["error"] == "INVALID_PROTOBUF"
+
+
+def test_turn_models_report_reads_only_what_the_worker_published(tmp_path: Path) -> None:
+    path = tmp_path / "published-by-worker.json"
+    assert probe.turn_models_report(path) == {"state": "unpublished"}
+    path.write_text("{")
+    assert probe.turn_models_report(path) == {"state": "unpublished"}
+    path.write_text(json.dumps({"state": "pending"}))
+    assert probe.turn_models_report(path)["state"] in probe.TURN_MODELS_SETTLING
+    path.write_text(json.dumps({"state": "failed"}))
+    assert probe.turn_models_report(path)["state"] not in probe.TURN_MODELS_SETTLING
 
 
 def test_recognition_state_reads_only_what_the_provider_published() -> None:

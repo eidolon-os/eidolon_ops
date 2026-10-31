@@ -453,6 +453,9 @@ def test_app_ready_requires_device_reachable_contract(monkeypatch, tmp_path: Pat
         "Got a reply for service Eidolon Local API: Name now registered and active\n",
         encoding="utf-8",
     )
+    turn_models = product.profile.paths.runtime_root / "channel/turn-models.json"
+    turn_models.parent.mkdir(parents=True)
+    turn_models.write_text(json.dumps({"state": "loaded"}), encoding="utf-8")
     monkeypatch.setattr(product, "health", lambda: {"status": "healthy"})
     monkeypatch.setattr(
         probes,
@@ -537,6 +540,13 @@ def test_app_ready_requires_device_reachable_contract(monkeypatch, tmp_path: Pat
     assert product.app_ready()["status"] == "app_ready"
     product.config.capabilities = frozenset()
     monkeypatch.setattr(probes, "http_json", lambda _url: setup_answer)
+
+    # The worker's job processes could not load their turn models (10-31:
+    # LFS pointers); its own `/` still answers, this fact does not.
+    turn_models.write_text(json.dumps({"state": "failed"}), encoding="utf-8")
+    failed = product.app_ready()
+    assert [n for n, v in failed["checks"].items() if not v] == ["channel_turn_models_loaded"]
+    turn_models.write_text(json.dumps({"state": "loaded"}), encoding="utf-8")
 
     # A Local API still running the build it started with does not answer the
     # setup route at all. Same verdict as a Host whose halves disagree, because

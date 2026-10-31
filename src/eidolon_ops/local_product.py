@@ -43,7 +43,12 @@ from eidolon_ops.hostagent.kernel_schema import (
     set_aside_suffix,
 )
 from eidolon_ops.hostagent.primitives import TargetError, file_sha256
-from eidolon_ops.hostagent.probe import SPEAKER_RECOGNITION_WARMING, speaker_recognition_state
+from eidolon_ops.hostagent.probe import (
+    SPEAKER_RECOGNITION_WARMING,
+    TURN_MODELS_SETTLING,
+    speaker_recognition_state,
+    turn_models_report,
+)
 from eidolon_ops.hub_assets import (
     hub_settings_are_bound,
     hub_settings_template,
@@ -829,6 +834,13 @@ class LocalProductSource:
             self.profile.paths.runtime_root / "system.sock",
             "/api/system/v1/services/livekit",
         ) or {}
+        turn_models = probes.settle(
+            lambda: turn_models_report(
+                self.profile.paths.runtime_root / "channel/turn-models.json"
+            ),
+            lambda report: report["state"] not in TURN_MODELS_SETTLING,
+            seconds=DEFAULT_CHANNEL_SETTLE_SECONDS,
+        )
         recognition_required = speaker_recognition_required(self.config.capabilities)
         recognition = probes.settle(
             lambda: {"state": speaker_recognition_state(probes.http_json(
@@ -893,6 +905,7 @@ class LocalProductSource:
             str(ReadinessFact.CHANNEL_WORKER_DISPATCH_IDENTITY): bool(
                 channel["dispatch_identity"]
             ),
+            str(ReadinessFact.CHANNEL_TURN_MODELS_LOADED): turn_models["state"] == "loaded",
             str(ReadinessFact.CLAIM_WINDOW_HONORED): self._claim_window_honored(),
             str(ReadinessFact.DEVICE_REMOVAL_AVAILABLE): Path(source_assets.translate_fhs(
                 self.profile, "/run/eidolon-lifecycle/workflow.sock"
@@ -908,6 +921,7 @@ class LocalProductSource:
             "checks": checks,
             "channel_worker": channel,
             "speaker_recognition": recognition if recognition_required else None,
+            "turn_models": turn_models,
             "setup": setup,
             "endpoints": {
                 "local_api": f"https://{address}:{ports['local_api']}",

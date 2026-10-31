@@ -38,6 +38,7 @@ READINESS_FACTS = (
     "livekit_lan_reachable",
     "channel_worker_healthy",
     "channel_worker_dispatch_identity",
+    "channel_turn_models_loaded",
     "channel_worker_livekit_link",
     "bootstrap_preflight",
     "bootstrap_control_socket",
@@ -133,6 +134,8 @@ BOOTSTRAP_SOCKET = Path("/run/eidolon-bootstrap/control.sock")
 #: revoke a device by itself. The separation is real, which is why a workflow
 #: that is not listening takes the capability out of the product entirely.
 LIFECYCLE_WORKFLOW_SOCKET = Path("/run/eidolon-lifecycle/workflow.sock")
+#: What the Channel worker's job processes could load (VAD, end-of-turn).
+TURN_MODELS_STATUS = Path("/run/eidolon/channel/turn-models.json")
 REMOVAL_CAPABILITY_SOCKET = Path("/run/eidolon-removal-capability/broker.sock")
 
 MDNS_DEFINITION = Path("/etc/avahi/services/eidolon-local-api.service")
@@ -236,6 +239,27 @@ def channel_worker_report(worker: Mapping[str, object]) -> dict[str, object]:
         "dispatch_identity": identity is not None and identity.get("agent_name") == expected,
         "expected_agent_name": expected,
     }
+
+def turn_models_report(path: Path) -> dict[str, object]:
+    """What the worker published about its turn models, or ``unpublished``.
+
+    The worker writes ``pending`` when it starts and each job process replaces
+    it after prewarm, so a missing file or ``pending`` is still settling and
+    anything else is the answer.
+    """
+
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"state": "unpublished"}
+    if not isinstance(document, Mapping) or not isinstance(document.get("state"), str):
+        return {"state": "unpublished"}
+    return dict(document)
+
+
+#: Turn model states that resolve on their own once a job process has started.
+TURN_MODELS_SETTLING = frozenset({"unpublished", "pending"})
+
 
 #: Provider states that resolve on their own once the model has loaded.
 SPEAKER_RECOGNITION_WARMING = frozenset({None, "model_not_started", "model_loading"})
@@ -538,6 +562,11 @@ def app_ready(payload: Mapping[str, object]) -> dict[str, object]:
         raise TargetError("speaker recognition readiness configuration is invalid")
     # Settled like the worker: the Provider loads the model after it starts
     # answering. Only warming waits; a missing policy answers at once.
+    turn_models = primitives.settle(
+        lambda: turn_models_report(TURN_MODELS_STATUS),
+        lambda report: report["state"] not in TURN_MODELS_SETTLING,
+        seconds=budget.remaining(),
+    )
     recognition = primitives.settle(
         lambda: {"state": speaker_recognition_state(
             primitives.http_json("127.0.0.1", provider_port, "/health")[1]
@@ -613,6 +642,7 @@ def app_ready(payload: Mapping[str, object]) -> dict[str, object]:
         "livekit_lan_reachable": primitives.tcp_reachable(address, livekit_port),
         "channel_worker_healthy": bool(channel["healthy"]),
         "channel_worker_dispatch_identity": bool(channel["dispatch_identity"]),
+        "channel_turn_models_loaded": turn_models["state"] == "loaded",
         "channel_worker_livekit_link": bool(link["healthy"]),
         "bootstrap_preflight": preflight.get("ok") is True,
         "bootstrap_control_socket": BOOTSTRAP_SOCKET.is_socket(),
@@ -676,6 +706,7 @@ def app_ready(payload: Mapping[str, object]) -> dict[str, object]:
         "livekit_service": media_service,
         "participation_provider": participation if participation_required else None,
         "speaker_recognition": recognition if recognition_required else None,
+        "turn_models": turn_models,
         "waiting": waiting,
         "resolution": sorted(resolved),
         "mdns": {
