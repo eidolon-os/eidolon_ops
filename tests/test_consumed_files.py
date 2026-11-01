@@ -39,11 +39,11 @@ def _models() -> str:
 def test_the_speaker_artifact_carries_everything_channel_opens() -> None:
     confirmed = require_consumed_files(*_release(_models()))
     files = confirmed[f"eidolon_channel<-eidolon_models:{CAPABILITY}"]
-    assert {"identity-policy.json", "identity-backend.json", "identity-cohort.npz"} <= set(files)
+    assert {"identity-policy.json", "identity-backend.json", "identity-backend.npz"} <= set(files)
     assert "campplus_cn_common.bin" in files
 
 
-@pytest.mark.parametrize("name", ["identity-policy.json", "identity-backend.json", "identity-cohort.npz"])
+@pytest.mark.parametrize("name", ["identity-policy.json", "identity-backend.json", "identity-backend.npz"])
 def test_an_artifact_without_an_identity_file_is_refused(name) -> None:
     """What c76777b did to the recognition policy's declaration, and nothing refused."""
 
