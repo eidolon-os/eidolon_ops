@@ -67,6 +67,9 @@ SOURCE_ENVIRONMENTS: Mapping[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
     "eidolon_ops": ((".", ("--extra", "dev")),),
 }
 
+#: First-party code a Host process never imports, left out of compilation.
+FIRST_PARTY_UNCOMPILED = r"[/\\](\.venv|\.git|node_modules|tests?)[/\\]"
+
 OPS_SOURCE = "eidolon_ops"
 #: Checkouts whose large files reach a Host only as artifacts, read from git's
 #: own store (`cat-file --filters`), so their worktree can hold LFS pointers:
@@ -85,6 +88,19 @@ _IMPORT_PROBE = (
     "print(json.dumps({n: getattr(importlib.util.find_spec(n), 'origin', None) "
     "for n in %r}))"
 )
+
+
+def build_environment(environ: Mapping[str, str] | None = None) -> dict[str, str]:
+    """The operator's environment, minus what would make a build land elsewhere.
+
+    Ops itself runs under ``uv run``; its ``VIRTUAL_ENV`` is not the one being
+    built. ``PYTHON*`` come from whoever ran the command: a
+    ``PYTHONPYCACHEPREFIX`` would put the root's bytecode outside the root, and
+    an agent shell carries ``PYTHONDONTWRITEBYTECODE=1``.
+    """
+
+    source = os.environ if environ is None else environ
+    return {k: v for k, v in source.items() if k != "VIRTUAL_ENV" and not k.startswith("PYTHON")}
 
 
 def require_one_root(sources: Mapping[str, Path], workspace: Path) -> Path:
@@ -337,13 +353,29 @@ class ReleaseSetSelection:
                 checked(
                     f"release-set environment {source_id}/{inner}",
                     self.runner.run(
-                        ("uv", "sync", "--frozen", *arguments),
+                        ("uv", "sync", "--frozen", "--compile-bytecode", *arguments),
                         cwd=directory,
-                        # Ops itself runs under `uv run`; its environment is not this one.
-                        env={k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"},
+                        env=build_environment(),
                         timeout=900,
                     ),
                 )
+            # A root ships its bytecode. Without it every process compiles what it
+            # imports, and a Channel job process -- started for each conversation
+            # -- paid seconds of that before it could answer (11-01: 0.9 s of its
+            # imports with bytecode, 1.9 s without). `--compile-bytecode` covers
+            # the installed packages; the checkout's own code is editable, so it
+            # is compiled here, with the interpreter that will import it.
+            checked(
+                f"release-set bytecode {source_id}",
+                self.runner.run(
+                    (
+                        str(target / ".venv/bin/python"), "-m", "compileall", "-q",
+                        "-j", "0", "-x", FIRST_PARTY_UNCOMPILED, str(target),
+                    ),
+                    env=build_environment(),
+                    timeout=900,
+                ),
+            )
         return {"root": str(root), "created": created}
 
     def write_profile(self, plan: Mapping[str, object]) -> str:

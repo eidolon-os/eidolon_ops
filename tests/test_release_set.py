@@ -8,6 +8,7 @@ work, processes importing two SDKs, and a profile edited by hand.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from dataclasses import replace
 from pathlib import Path
@@ -275,6 +276,8 @@ class _GitButNoUv(SubprocessRunner):
         self.synced: list[tuple[tuple[str, ...], Path | None]] = []
         self.order: list[str] = []
         self.smudge_skipped: dict[str, bool] = {}
+        self.compiled: list[tuple[str, ...]] = []
+        self.environments: list[dict[str, str]] = []
 
     def run(self, command, **kwargs):
         if "worktree" in command:
@@ -284,6 +287,12 @@ class _GitButNoUv(SubprocessRunner):
         if tuple(command[:2]) == ("uv", "sync"):
             self.order.append("sync")
             self.synced.append((tuple(command), kwargs.get("cwd")))
+            self.environments.append(kwargs.get("env") or {})
+            return ProcessResult(0, "", "")
+        if tuple(command[1:3]) == ("-m", "compileall"):
+            self.order.append("compile")
+            self.compiled.append(tuple(command))
+            self.environments.append(kwargs.get("env") or {})
             return ProcessResult(0, "", "")
         return super().run(command, **kwargs)
 
@@ -319,7 +328,12 @@ def test_a_release_set_is_main_built_once_and_committed(tmp_path: Path) -> None:
     root = Path(str(plan["root"]))
     assert sorted(built["created"]) == ["eidolon_hub", "eidolon_ops"]
     assert _git(root / "eidolon_hub", "rev-parse", "HEAD") == tips["eidolon_hub"][1]
-    assert ("uv", "sync", "--frozen", "--extra", "dev") in [c for c, _ in runner.synced]
+    assert ("uv", "sync", "--frozen", "--compile-bytecode", "--extra", "dev") in [
+        c for c, _ in runner.synced
+    ]
+    # Every checkout's own (editable) code is compiled too, by its own interpreter.
+    assert sorted(Path(c[0]).parts[-4] for c in runner.compiled) == ["eidolon_hub", "eidolon_ops"]
+    assert all(c[-1] == str(root / Path(c[0]).parts[-4]) for c in runner.compiled)
     # Only Models may hold LFS pointers; Channel loads its ONNX from its tree.
     assert runner.smudge_skipped == {"eidolon_hub": False, "eidolon_ops": False}
     # Admin's environment resolves Memory's contracts from the root, so no
@@ -338,6 +352,27 @@ def test_a_release_set_is_main_built_once_and_committed(tmp_path: Path) -> None:
     assert again["root"] == plan["root"] and again["exists"] is True
     assert selection.apply(again)["created"] == []
     assert selection.write_profile(again) == "unchanged"
+
+
+def test_the_operators_interpreter_flags_do_not_reach_the_build(tmp_path: Path, monkeypatch) -> None:
+    # An agent shell carries PYTHONDONTWRITEBYTECODE=1; a cache prefix would put
+    # the root's bytecode outside the root (11-01).
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+    monkeypatch.setenv("PYTHONPYCACHEPREFIX", str(tmp_path / "elsewhere"))
+    monkeypatch.setenv("VIRTUAL_ENV", str(tmp_path / "ops-venv"))
+    selection, _repos, _tips, runner = _selection(tmp_path)
+    selection.apply(selection.plan())
+    assert runner.environments
+    for env in runner.environments:
+        assert not any(k.startswith("PYTHON") or k == "VIRTUAL_ENV" for k in env)
+        assert env["PATH"] == os.environ["PATH"]
+
+
+def test_build_environment_keeps_everything_else() -> None:
+    env = release_set.build_environment(
+        {"PATH": "/bin", "HOME": "/h", "PYTHONPATH": "/x", "VIRTUAL_ENV": "/v", "UV_CACHE_DIR": "/c"}
+    )
+    assert env == {"PATH": "/bin", "HOME": "/h", "UV_CACHE_DIR": "/c"}
 
 
 def test_a_release_set_refuses_a_pin_off_main(tmp_path: Path) -> None:

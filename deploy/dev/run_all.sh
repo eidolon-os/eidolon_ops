@@ -111,6 +111,18 @@ SV_PID="${VAR_DIR}/supervisord.pid"
 SV_SOCK="${VAR_DIR}/supervisor.sock"
 SV_PROFILE=""
 
+# Interpreter flags belong to whoever ran the command, not to the product it
+# starts. supervisord passes its own environment to every program, so an agent
+# shell's PYTHONDONTWRITEBYTECODE=1 reached each Channel job process (11-01);
+# PYTHONPATH or PYTHONHOME would change what they import. Programs that need a
+# PYTHON* variable set it in their own `environment=` line.
+drop_operator_python_env() {
+  local name
+  for name in $(compgen -e); do
+    if [[ "$name" == PYTHON* ]]; then unset "$name"; fi
+  done
+}
+
 
 configure_supervisor_profile() {
   local profile=$1
@@ -143,6 +155,7 @@ configure_supervisor_profile() {
       # Product children load the one reviewed per-service env set. Do not let
       # credentials inherited from an unrelated legacy shell/supervisor win.
       unset LIVEKIT_API_KEY LIVEKIT_API_SECRET
+      drop_operator_python_env
       EIDOLON_ADMIN_ROOT="$EIDOLON_SOURCE_ADMIN"
       WEB_DIR="${EIDOLON_ADMIN_ROOT}/web"
       WEB_PORT="${EIDOLON_ADMIN_WEB_PORT:-9001}"

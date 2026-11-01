@@ -232,3 +232,31 @@ def test_memory_38_source_profile_uses_a_fresh_storage_epoch() -> None:
     expected = "memory/mempalaces-v3.8"
     assert f'EIDOLON_MEMORY_PALACES_ROOT="%(ENV_EIDOLON_STATE_ROOT)s/{expected}"' in profile
     assert f'"${{EIDOLON_STATE_ROOT}}/{expected}"' in launcher
+
+
+def test_the_operators_python_flags_do_not_reach_the_product() -> None:
+    """supervisord hands its environment to every program it starts.
+
+    On 11-01 the Mac stack had been restarted from an agent shell, so every
+    Channel job process ran with PYTHONDONTWRITEBYTECODE=1 inherited from it.
+    """
+
+    launcher = (ROOT / "deploy/dev/run_all.sh").read_text(encoding="utf-8")
+    start = launcher.index("drop_operator_python_env() {")
+    function = launcher[start:launcher.index("\n}\n", start) + 2]
+    result = subprocess.run(
+        ("bash", "-c", f"set -euo pipefail\n{function}\ndrop_operator_python_env\nenv"),
+        env={
+            "PATH": os.environ["PATH"], "HOME": "/tmp", "EIDOLON_KEEP": "1",
+            "PYTHONDONTWRITEBYTECODE": "1", "PYTHONPATH": "/elsewhere",
+            "PYTHONPYCACHEPREFIX": "/cache",
+        },
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    names = {line.split("=", 1)[0] for line in result.stdout.splitlines() if "=" in line}
+    assert not {n for n in names if n.startswith("PYTHON")}
+    assert "EIDOLON_KEEP" in names
+    # The product-source profile drops them before supervisord is started.
+    profile = launcher[launcher.index("    product-source)"):]
+    assert profile.index("drop_operator_python_env") < profile.index('SV_CONF="$SV_PROFILE_CONF"')
