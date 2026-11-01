@@ -48,6 +48,7 @@ from eidolon_ops.hostagent.probe import (
     TURN_MODELS_SETTLING,
     speaker_recognition_state,
     turn_models_report,
+    warm_job_process_ready,
 )
 from eidolon_ops.hub_assets import (
     hub_settings_are_bound,
@@ -906,6 +907,7 @@ class LocalProductSource:
                 channel["dispatch_identity"]
             ),
             str(ReadinessFact.CHANNEL_TURN_MODELS_LOADED): turn_models["state"] == "loaded",
+            str(ReadinessFact.CHANNEL_WARM_JOB_PROCESS): warm_job_process_ready(turn_models),
             str(ReadinessFact.CLAIM_WINDOW_HONORED): self._claim_window_honored(),
             str(ReadinessFact.DEVICE_REMOVAL_AVAILABLE): Path(source_assets.translate_fhs(
                 self.profile, "/run/eidolon-lifecycle/workflow.sock"

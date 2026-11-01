@@ -108,6 +108,7 @@ class ReadinessFact(StrEnum):
     CHANNEL_WORKER_HEALTHY = "channel_worker_healthy"
     CHANNEL_WORKER_DISPATCH_IDENTITY = "channel_worker_dispatch_identity"
     CHANNEL_TURN_MODELS_LOADED = "channel_turn_models_loaded"
+    CHANNEL_WARM_JOB_PROCESS = "channel_warm_job_process"
     CHANNEL_WORKER_LIVEKIT_LINK = "channel_worker_livekit_link"
     CLAIM_WINDOW_HONORED = "claim_window_honored"
 
@@ -235,6 +236,15 @@ READINESS_CONTRACT: tuple[ReadinessCheck, ...] = (
     _both(
         ReadinessFact.CHANNEL_TURN_MODELS_LOADED,
         "the worker's job processes loaded the VAD and end-of-turn models",
+    ),
+    # Every conversation takes a warm job process and its replacement starts
+    # only then. On 11-01 building one cost ~10 s, mostly compiling transformers
+    # and torch from source, and the Host kept one: a second conversation
+    # within that window waited 8.6 s. Budgeted in CPU seconds, not wall time,
+    # so a Host still starting everything else is not read as a slow process.
+    _both(
+        ReadinessFact.CHANNEL_WARM_JOB_PROCESS,
+        "the worker keeps a warm job process, and building one stays within budget",
     ),
     _only(
         HostKind.PRODUCT,

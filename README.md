@@ -170,6 +170,12 @@ LiveKit 已经不可接活：
 worker 启动时写 `pending`，每个 job 进程预热后写入 VAD 与断句模型是否加载成功。worker 的 `/` 只代表 worker
 进程本身：2026-10-31 这两个 ONNX 文件只是 LFS 指针，预热报错，而 `/` 仍然返回 200。
 
+`channel_warm_job_process` 读同一个文件里每个 job 进程预热后写入的 `warm_processes`（worker 保持几个热进程）
+与 `ready_cpu_seconds`（这个进程从创建到预热完成耗用的 CPU 秒数），要求至少一个热进程、且 CPU 耗时不超过
+8 秒。每次对话都会占用一个热进程，替补要到那时才开始建；2026-11-01 建一个要约 10 秒（多半在从源码编译
+transformers 和 torch），而主机只留一个，于是两次对话前后脚开始时第二次干等了 8.6 秒。用 CPU 秒而不是墙钟，
+是因为整机刚启动时所有服务一起起，墙钟会把别人的耗时也算进来。墙钟耗时同样发布在 `ready_seconds` 里供查看。
+
 选中的能力同样是就绪的一部分。`speaker_recognition_ready` 只约束声明了 `local_speaker_verification`
 的 Host：它读取 Channel Provider `/health` 中自报的 `speaker_recognition.state`。Provider 与 worker 从同一个
 `voiceprint.model_dir` 读取识别策略，策略缺失、无法解析、或与已加载的权重不一致时报告相应状态，此时这一条

@@ -28,6 +28,9 @@ from eidolon_ops.probes import unix_http_health as _unix_http_health
 from eidolon_ops.process import ProcessResult, SubprocessRunner
 from eidolon_ops.source_schema import migrate_data_schema
 
+#: What a warmed Channel job process publishes (Channel `server._load_prewarm_models`).
+_WARM = {"state": "loaded", "ready_seconds": 1.6, "ready_cpu_seconds": 1.3, "warm_processes": 2}
+
 
 @pytest.fixture(autouse=True)
 def host_hardware(monkeypatch):
@@ -455,7 +458,7 @@ def test_app_ready_requires_device_reachable_contract(monkeypatch, tmp_path: Pat
     )
     turn_models = product.profile.paths.runtime_root / "channel/turn-models.json"
     turn_models.parent.mkdir(parents=True)
-    turn_models.write_text(json.dumps({"state": "loaded"}), encoding="utf-8")
+    turn_models.write_text(json.dumps(_WARM), encoding="utf-8")
     monkeypatch.setattr(product, "health", lambda: {"status": "healthy"})
     monkeypatch.setattr(
         probes,
@@ -543,10 +546,15 @@ def test_app_ready_requires_device_reachable_contract(monkeypatch, tmp_path: Pat
 
     # The worker's job processes could not load their turn models (10-31:
     # LFS pointers); its own `/` still answers, this fact does not.
-    turn_models.write_text(json.dumps({"state": "failed"}), encoding="utf-8")
+    turn_models.write_text(json.dumps({**_WARM, "state": "failed"}), encoding="utf-8")
     failed = product.app_ready()
     assert [n for n, v in failed["checks"].items() if not v] == ["channel_turn_models_loaded"]
-    turn_models.write_text(json.dumps({"state": "loaded"}), encoding="utf-8")
+    # Building a job process cost the ~10 s of 11-01: conversations that start
+    # together wait for it, and this Host says so instead of reading healthy.
+    turn_models.write_text(json.dumps({**_WARM, "ready_cpu_seconds": 10.2}), encoding="utf-8")
+    slow = product.app_ready()
+    assert [n for n, v in slow["checks"].items() if not v] == ["channel_warm_job_process"]
+    turn_models.write_text(json.dumps(_WARM), encoding="utf-8")
 
     # A Local API still running the build it started with does not answer the
     # setup route at all. Same verdict as a Host whose halves disagree, because

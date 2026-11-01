@@ -123,6 +123,7 @@ def turn_models(monkeypatch, tmp_path):
         "state": "loaded",
         "vad": {"state": "loaded", "provider": "firered_pvad"},
         "eot": {"state": "loaded", "provider": "firered"},
+        "ready_seconds": 1.6, "ready_cpu_seconds": 1.3, "warm_processes": 2,
     }))
     monkeypatch.setattr(probe, "TURN_MODELS_STATUS", path)
     return path
@@ -428,6 +429,8 @@ def test_a_worker_whose_turn_models_failed_is_not_ready(
         "state": "failed",
         "vad": {"state": "failed", "error": "INVALID_PROTOBUF"},
         "eot": {"state": "failed", "error": "INVALID_PROTOBUF"},
+        # A process that failed to load still says what building it cost.
+        "ready_seconds": 1.1, "ready_cpu_seconds": 0.9, "warm_processes": 2,
     }))
 
     report = probe.app_ready(_payload(app))
@@ -998,3 +1001,36 @@ def test_an_unreadable_host_profile_is_not_reported_as_a_broken_promise(
     host_env.mkdir()
 
     assert probe.claim_window_honored(tmp_path) is True
+
+
+@pytest.mark.parametrize(
+    ("published", "ready"),
+    [
+        ({"ready_cpu_seconds": 1.3, "warm_processes": 2}, True),
+        ({"ready_cpu_seconds": 8.0, "warm_processes": 1}, True),
+        # 11-01: ~10 s of compiling transformers and torch per job process.
+        ({"ready_cpu_seconds": 10.2, "warm_processes": 2}, False),
+        # A pinned pool of none: the first conversation always waits.
+        ({"ready_cpu_seconds": 1.3, "warm_processes": 0}, False),
+        # A worker that does not publish the figures says nothing either way.
+        ({}, False),
+        ({"ready_cpu_seconds": "1.3", "warm_processes": True}, False),
+    ],
+)
+def test_a_warm_job_process_within_budget_is_what_makes_the_fact(published, ready) -> None:
+    assert probe.warm_job_process_ready({"state": "loaded", **published}) is ready
+
+
+def test_a_slow_job_process_is_the_one_fact_that_fails(
+    monkeypatch, tmp_path: Path, bootstrap_socket: Path, turn_models: Path,
+) -> None:
+    app = _app()
+    _healthy_probe(monkeypatch, app, tmp_path)
+    document = json.loads(turn_models.read_text())
+    turn_models.write_text(json.dumps({**document, "ready_cpu_seconds": 10.2}))
+
+    report = probe.app_ready(_payload(app))
+
+    assert report["status"] == "degraded"
+    assert [n for n, v in report["checks"].items() if not v] == ["channel_warm_job_process"]
+    assert report["turn_models"]["ready_cpu_seconds"] == 10.2

@@ -39,6 +39,7 @@ READINESS_FACTS = (
     "channel_worker_healthy",
     "channel_worker_dispatch_identity",
     "channel_turn_models_loaded",
+    "channel_warm_job_process",
     "channel_worker_livekit_link",
     "bootstrap_preflight",
     "bootstrap_control_socket",
@@ -259,6 +260,26 @@ def turn_models_report(path: Path) -> dict[str, object]:
 
 #: Turn model states that resolve on their own once a job process has started.
 TURN_MODELS_SETTLING = frozenset({"unpublished", "pending"})
+
+#: CPU seconds a Channel job process may spend from creation to warm. Measured
+#: 11-01 on the Mac: ~1.3 without torch and with bytecode; ~10 before either.
+#: A Raspberry Pi needed ~21 s of wall time for the old import chain alone.
+JOB_PROCESS_READY_BUDGET_CPU_SECONDS = 8.0
+
+
+def warm_job_process_ready(report: Mapping[str, object]) -> bool:
+    """A warm job process is kept, and building the next one is within budget.
+
+    Read from what each job process publishes once warm. Absent figures are a
+    worker that does not publish them, which is not evidence of either.
+    """
+
+    warm = report.get("warm_processes")
+    cost = report.get("ready_cpu_seconds")
+    return (
+        type(warm) is int and warm >= 1
+        and type(cost) in (int, float) and 0 <= cost <= JOB_PROCESS_READY_BUDGET_CPU_SECONDS
+    )
 
 
 #: Provider states that resolve on their own once the model has loaded.
@@ -643,6 +664,7 @@ def app_ready(payload: Mapping[str, object]) -> dict[str, object]:
         "channel_worker_healthy": bool(channel["healthy"]),
         "channel_worker_dispatch_identity": bool(channel["dispatch_identity"]),
         "channel_turn_models_loaded": turn_models["state"] == "loaded",
+        "channel_warm_job_process": warm_job_process_ready(turn_models),
         "channel_worker_livekit_link": bool(link["healthy"]),
         "bootstrap_preflight": preflight.get("ok") is True,
         "bootstrap_control_socket": BOOTSTRAP_SOCKET.is_socket(),
