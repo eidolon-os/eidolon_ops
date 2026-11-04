@@ -92,6 +92,12 @@ revision = "2b3465953188650d36adaaaa5d98e2af77ee63be"
 # Channel Provider owns the shared CPU speaker extractor; no extra daemon.
 provides = ["local_laya", "local_speaker_verification", "local_laya_participation"]
 
+# Explicitly enabled for expression acceptance testing; uses Agent's rotating log retention.
+[[settings.overlay]]
+document = "agent.yaml"
+path = "observability.response_trace_enabled"
+value = "true"
+
 # The Mac source run interprets home commands with Laya (its own MPS service; the address
 # follows from local_laya) and records every interpretation for offline evaluation. A product
 # Host does neither unless its own configuration says so.
