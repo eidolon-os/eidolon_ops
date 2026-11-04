@@ -155,8 +155,9 @@ class AppAccess:
     #:
     #: The Host stays the authority — it re-checks the value and refuses one it
     #: would not have drawn itself. Nothing about the mechanism changes: the
-    #: code still opens one ordinary session that expires, is spent once, dies
-    #: after five wrong tries, and supersedes any window before it.
+    #: code still opens one ordinary window that is spent by one claim and
+    #: supersedes any window before it. Wrong tries never close it (ADR-0007);
+    #: the Host paces them per transport instead (ADR-0008).
     #: The literal, when the profile pins one inline. That spelling belongs to
     #: an example rather than a tracked profile — a code in a tracked file is a
     #: code everybody has — so it is validated while this file is being read,
