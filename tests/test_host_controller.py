@@ -10,7 +10,7 @@ from eidolon_ops import host as host_module
 from eidolon_ops.errors import OperationsError
 from eidolon_ops.host_controller import HostController
 from eidolon_ops.model import Capability, Outcome
-from eidolon_ops.paths import HostDriver, HostPaths, HostPlatform, HostProfile
+from eidolon_ops.paths import AppAccess, HostDriver, HostPaths, HostPlatform, HostProfile
 from eidolon_ops.process import ProcessError, ProcessResult
 
 
@@ -219,6 +219,37 @@ def test_local_controller_issues_a_commissioning_code(tmp_path: Path) -> None:
         "--code",
         "99999990",
     )
+
+
+def test_local_controller_names_the_profiles_pinned_code(tmp_path: Path) -> None:
+    # 2026-11-05: the Mac profile pins its development code in a file, yet
+    # `eidolon mac commissioning-code` sent no code and the Host drew a random
+    # one, superseding the window the phone was about to use.
+    pinned = tmp_path / "factory_setup_code"
+    pinned.write_text("99999990\n", encoding="utf-8")
+    profile = replace(
+        _profile(tmp_path),
+        app=AppAccess(
+            lan_ipv4=None,
+            hub_https_port=8443,
+            allow_insecure_livekit=True,
+            setup_code_file=pinned,
+        ),
+    )
+    controller = HostController(profile, Runner())
+    _with_product(controller, SimpleNamespace())
+
+    controller.commissioning_code()
+    assert controller.runner.calls[-1][0][-4:] == (
+        "product-source",
+        "commissioning-code",
+        "--code",
+        "99999990",
+    )
+
+    # A code named for one run still wins over the pinned one.
+    controller.commissioning_code(setup_code="40718256")
+    assert controller.runner.calls[-1][0][-2:] == ("--code", "40718256")
 
 
 def test_local_controller_rejects_missing_script_and_unavailable_capability(

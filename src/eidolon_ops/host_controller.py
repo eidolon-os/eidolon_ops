@@ -297,6 +297,8 @@ class HostController:
 
         plan = plans.commissioning_code(self.profile.host_id)
         self.adapter.require(Capability.COMMISSIONING_CODE)
+        if setup_code is None and self.profile.app is not None:
+            setup_code = self.profile.app.factory_setup_code()
         report = self.adapter.supervisor.commissioning_code(setup_code=setup_code)
         return self._applied(plan, report)
 
