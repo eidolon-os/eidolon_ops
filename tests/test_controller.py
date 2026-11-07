@@ -1115,7 +1115,7 @@ def test_deploy_uploads_only_release_artifacts_the_host_reports_missing(config) 
     assert len(guard[1]["artifacts"]) == 1
 
 
-def test_successful_deploy_removes_current_and_expired_local_bundles(
+def test_successful_deploy_preserves_unregistered_legacy_bundles(
     setup_controller,
 ) -> None:
     controller, _runner, _transport = setup_controller
@@ -1136,9 +1136,9 @@ def test_successful_deploy_removes_current_and_expired_local_bundles(
     assert cleanup["phase"] == "local_bundle_cleanup"
     assert cleanup["result"]["status"] == "cleaned"
     assert cleanup["result"]["current"]["status"] == "removed"
-    assert [item["path"] for item in cleanup["result"]["expired"]] == [str(expired)]
+    assert cleanup["result"]["expired"] == []
     assert not (root / "r1").exists()
-    assert not expired.exists()
+    assert expired.exists()
     assert recent.is_dir()
 
 
@@ -3710,3 +3710,137 @@ def test_the_host_layer_refresh_takes_its_staged_private_keys_back(config):
 def _current_component_contract(component_id):
     path = Path(__file__).resolve().parents[2] / component_id / "ops/component.toml"
     return path.read_text() if path.is_file() else None
+
+
+def test_failed_release_reclaims_expired_owned_partial_bundle(setup_controller):
+    from eidolon_ops.bundle_lifecycle import BundleLifecycle
+
+    controller, _runner, transport = setup_controller
+    root = controller.config.workspace.bundle_root
+    stale = root / "interrupted"
+    stale.mkdir(parents=True)
+    (stale / "partial.tar").write_bytes(b"partial")
+    lifecycle = BundleLifecycle(root)
+    lifecycle.write({"interrupted": {"state": "building", "updated_at": 1}})
+    transport.fail_remote_match = "prepare_target.py"
+    with pytest.raises(RuntimeError):
+        controller.deploy(release_id="r1", resume=False, activate=True)
+    assert not stale.exists()
+    assert (root / "r1").exists()
+    assert lifecycle.read()["r1"]["state"] == "failed"
+
+
+def test_expired_resume_bundle_is_excluded_from_entry_sweep(setup_controller):
+    from eidolon_ops.bundle_lifecycle import BundleLifecycle
+
+    controller, _runner, _transport = setup_controller
+    controller.deploy(release_id="r1", resume=False, activate=False)
+    lifecycle = BundleLifecycle(controller.config.workspace.bundle_root)
+    lifecycle.write({"r1": {"state": "failed", "updated_at": 1}})
+    result = controller.deploy(release_id="r1", resume=True, activate=True)
+    assert result["status"] == "activated"
+    assert lifecycle.read() == {}
+
+
+def test_bundle_root_lock_blocks_competing_transaction(setup_controller):
+    from eidolon_ops.bundle_lifecycle import BundleLifecycle
+
+    controller, runner, transport = setup_controller
+    lifecycle = BundleLifecycle(controller.config.workspace.bundle_root)
+    before = len(runner.calls)
+    with lifecycle.lock(), pytest.raises(OperationsError, match="another release"):
+        controller.deploy(release_id="r1", resume=False, activate=True)
+    assert len(runner.calls) == before
+    assert not transport.uploads
+    # Failure releases the lock too.
+    with lifecycle.lock():
+        pass
+
+
+def test_prepared_packages_are_protected_and_bounded(setup_controller):
+    from eidolon_ops.bundle_lifecycle import MAX_BUNDLES, BundleLifecycle
+
+    controller, _runner, transport = setup_controller
+    root = controller.config.workspace.bundle_root
+    root.mkdir(parents=True)
+    records = {}
+    for number in range(MAX_BUNDLES):
+        name = f"ready-{number}"
+        (root / name).mkdir()
+        records[name] = {"state": "prepared", "updated_at": 1}
+    lifecycle = BundleLifecycle(root)
+    lifecycle.write(records)
+    with pytest.raises(OperationsError, match="bundle limit"):
+        controller.deploy(release_id="new", resume=False, activate=False)
+    assert lifecycle.read() == records
+    assert not transport.uploads
+
+
+def test_bundle_minimum_space_gate_prevents_sealing(setup_controller, monkeypatch):
+    from collections import namedtuple
+
+    controller, _runner, transport = setup_controller
+    usage = namedtuple("Usage", "total used free")
+    monkeypatch.setattr("eidolon_ops.release_bundle.shutil.disk_usage", lambda _: usage(100, 99, 1))
+    with pytest.raises(OperationsError, match="insufficient workstation space"):
+        controller.deploy(release_id="r1", resume=False, activate=True)
+    assert not (controller.config.workspace.bundle_root / "r1").exists()
+    assert not transport.uploads
+
+
+def test_corrupt_registry_fails_closed(setup_controller):
+    controller, _runner, transport = setup_controller
+    root = controller.config.workspace.bundle_root
+    root.mkdir(parents=True)
+    (root / ".ops-bundles.json").write_text("broken")
+    with pytest.raises(OperationsError, match="safely read bundle registry"):
+        controller.deploy(release_id="r1", resume=False, activate=True)
+    assert not transport.uploads
+
+
+def test_owned_symlink_bundle_is_never_removed(setup_controller):
+    from eidolon_ops.bundle_lifecycle import BundleLifecycle
+
+    controller, _runner, _transport = setup_controller
+    root = controller.config.workspace.bundle_root
+    root.mkdir(parents=True)
+    outside = root.parent / "protected-data"
+    outside.mkdir()
+    (outside / "keep").write_text("keep")
+    (root / "stale").symlink_to(outside, target_is_directory=True)
+    lifecycle = BundleLifecycle(root)
+    lifecycle.write({"stale": {"state": "failed", "updated_at": 1}})
+    result = controller.deploy(release_id="r1", resume=False, activate=True)
+    assert result["local_bundle_reclamation"]["failures"]
+    assert (outside / "keep").read_text() == "keep"
+    assert (root / "stale").is_symlink()
+
+
+def test_abandon_releases_owned_prepared_package(setup_controller):
+    from eidolon_ops.bundle_lifecycle import BundleLifecycle
+
+    controller, _runner, _transport = setup_controller
+    controller.deploy(release_id="r1", resume=False, activate=False)
+    lifecycle = BundleLifecycle(controller.config.workspace.bundle_root)
+    assert lifecycle.read()["r1"]["state"] == "prepared"
+    result = controller.abandon(release_id="r1")
+    assert result["status"] == "abandoned"
+    assert not (lifecycle.root / "r1").exists()
+
+
+def test_successful_bundle_cleanup_is_retried_at_next_entry(setup_controller, monkeypatch):
+    from eidolon_ops.bundle_lifecycle import BundleLifecycle
+
+    controller, _runner, _transport = setup_controller
+    original = controller.bundles._remove_local_bundle
+    monkeypatch.setattr(controller.bundles, "_remove_local_bundle", lambda release_id: {
+        "status": "cleanup_failed", "path": str(controller.config.workspace.bundle_root / release_id),
+        "error": "busy",
+    })
+    controller.deploy(release_id="r1", resume=False, activate=True)
+    lifecycle = BundleLifecycle(controller.config.workspace.bundle_root)
+    assert lifecycle.read()["r1"]["state"] == "committed"
+    monkeypatch.setattr(controller.bundles, "_remove_local_bundle", original)
+    controller.deploy(release_id="r2", resume=False, activate=True)
+    assert not (lifecycle.root / "r1").exists()
+    assert lifecycle.read() == {}

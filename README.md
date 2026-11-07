@@ -551,10 +551,24 @@ release 新建独立 venv，不复用旧 release 环境。HTTPS index URL 与 uv
 之前失败，避免悄悄回退到 Wi-Fi/VPN。SSH
 强制 BatchMode、独立 key、`StrictHostKeyChecking=yes` 和显式 known_hosts。
 
-工作站 bundle 只服务于封装、断点续传和目标端 prepare：dry-run、失败和未完成事务会保留本地输出供
-`--resume` 使用；成功安装或激活在 Host 健康门禁和 release reclaim 提交后删除本次输出，并顺带清理
-超过 48 小时的旧输出。清理失败作为操作证据报告，但不会把已经成功的部署改判为失败。可复用的 uv
-cache 与 release artifact CAS 位于持久 toolchain root，不参与 bundle 清理。
+工作站 bundle 只服务于封装、断点续传和目标端 prepare，不承担永久备份。
+Ops 在 `bundle_root/.ops-bundles.json` 登记新建输出的状态，在整个 install/deploy 事务及 abandon
+期间持有同一 bundle root 的文件锁；竞争操作立即报错，避免回收正在构建、上传或恢复的包。
+
+- 安装或激活成功后立即回收本次输出；删除失败会记录证据，下次发布入口再次尝试。
+- 每次实际 install/deploy 开始时，回收登记过且超过 48 小时无事务更新的失败/中断输出，
+  包括未封印完成的半包；本次正在恢复的 ID 始终排除。进程被杀后留下的 building 状态也适用。
+- 完成 prepare/dry-run 的包标记为 prepared，等待显式激活或 abandon，不按过期失败包删除。
+  abandon 只有在 Host 确认放弃成功后才回收对应的本地登记输出。
+- 最多保留 8 个登记输出；达到上限时拒绝创建新包，要求先完成或放弃已有发布。
+  打包前至少需要 1 GiB 空闲空间。这是最低启动门槛，不是整个构建空间的准确估算。
+- 安装计划（不带 apply）不写登记、不回收。未登记的历史目录不自动接管；符号链接不递归删除。
+  登记损坏时停止新发布，避免猜测产物归属。清理失败不会把已成功的部署改判为失败。
+
+入口回收结果见 `local_bundle_reclamation`，成功后的回收结果仍见 `local_bundle_cleanup` phase。
+清理是操作触发的，不是后台定时任务；没有新操作时不会自动释放磁盘。
+可复用的 uv cache 与 release artifact CAS 位于持久 toolchain root，不参与 bundle 清理。
+源码运行模式的 release-set/worktree、运行数据和模型实验目录不属于此发布包策略。
 
 示例见 [`config/eidolon-pi.example.toml`](config/eidolon-pi.example.toml)。
 

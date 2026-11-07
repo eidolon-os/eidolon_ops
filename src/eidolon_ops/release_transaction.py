@@ -12,6 +12,7 @@ from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 
+from eidolon_ops.bundle_lifecycle import bundle_transaction
 from eidolon_ops.config import OperationsConfig, validate_release_id
 from eidolon_ops.errors import OperationsError
 from eidolon_ops.host_layer import HostLayer
@@ -188,6 +189,7 @@ class ReleaseTransaction:
             )
         phases.append({"phase": "pre_barrier_backup", "result": captured})
 
+    @bundle_transaction
     def deploy(
         self,
         *,
@@ -756,6 +758,7 @@ class ReleaseTransaction:
             "was restored"
         )
 
+    @bundle_transaction
     def install(
         self,
         *,

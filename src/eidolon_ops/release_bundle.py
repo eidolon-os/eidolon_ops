@@ -11,9 +11,9 @@ import json
 import os
 import shutil
 import tempfile
-import time
 from pathlib import Path
 
+from eidolon_ops.bundle_lifecycle import MAX_BUNDLES, BundleLifecycle
 from eidolon_ops.capabilities import HOST_CAPABILITIES
 from eidolon_ops.component_artifacts import (
     carried_artifacts,
@@ -47,12 +47,6 @@ _KEPT_DEPENDENCY_CACHE = "uv-cache"
 #: run on it are unprivileged and root's home is not theirs to enter.
 TARGET_PYTHON_INSTALL_DIR = "/usr/local/lib/eidolon-foundation/python"
 _RELEASE_ARTIFACT_STORE = "release-artifacts-v1"
-_BUNDLE_SHAPE = {
-    "bundle.json",
-    "prepare_target.py",
-    "artifacts",
-    "sources",
-}
 _UPLOAD_GUARD_STATES = {"ready_for_upload", "resume_upload", "ready_for_prepare"}
 
 # A sealed bundle coexists with its unpacked sources, environments and upload
@@ -95,9 +89,9 @@ class BundleTransfer:
         """Remove a terminal release output and expired resumable outputs.
 
         This is deliberately called only after the Host has committed a
-        successful install or activation.  Failed and dry-run transactions keep
-        their bundle for ``--resume``; they become eligible for the bounded
-        fallback sweep only after the retention window.
+        successful install, activation or explicit abandonment. Failed outputs
+        become eligible for the fallback sweep after the retention window;
+        prepared outputs wait for activation or abandonment.
 
         Cleanup is best effort.  A release that is healthy on the Host must not
         be reported as failed merely because its workstation output could not be
@@ -105,41 +99,19 @@ class BundleTransfer:
         """
 
         current = self._remove_local_bundle(release_id)
-        cutoff = (time.time() if now is None else now) - retention_seconds
-        expired: list[dict[str, object]] = []
-        failures: list[dict[str, str]] = []
+        failures = []
         if current["status"] == "cleanup_failed":
             failures.append({"path": str(current["path"]), "error": str(current["error"])})
-        root = self.config.workspace.bundle_root
+        expired = []
         try:
-            candidates = tuple(root.iterdir()) if root.is_dir() else ()
-        except OSError as exc:
-            failures.append({"path": str(root), "error": str(exc)})
-            candidates = ()
-        for candidate in candidates:
-            if (
-                candidate.name == release_id
-                or candidate.name.startswith(".")
-                or candidate.name == _KEPT_DEPENDENCY_CACHE
-                or candidate.is_symlink()
-                or not candidate.is_dir()
-                or not any((candidate / name).exists() for name in _BUNDLE_SHAPE)
-            ):
-                continue
-            try:
-                newest_mtime = candidate.lstat().st_mtime
-                for path in candidate.rglob("*"):
-                    newest_mtime = max(newest_mtime, path.lstat().st_mtime)
-            except OSError as exc:
-                failures.append({"path": str(candidate), "error": str(exc)})
-                continue
-            if newest_mtime > cutoff:
-                continue
-            result = self._remove_local_bundle(candidate.name)
-            if result["status"] == "removed":
-                expired.append(result)
-            elif result["status"] == "cleanup_failed":
-                failures.append({"path": str(result["path"]), "error": str(result["error"])})
+            swept = BundleLifecycle(self.config.workspace.bundle_root).sweep(
+                self._remove_local_bundle, exclude=release_id, now=now,
+                retention_seconds=retention_seconds,
+            )
+            expired = swept["expired"]
+            failures.extend(swept["failures"])
+        except (OSError, OperationsError) as exc:
+            failures.append({"path": str(self.config.workspace.bundle_root), "error": str(exc)})
         return {
             "status": "cleaned" if not failures else "cleanup_incomplete",
             "current": current,
@@ -189,6 +161,19 @@ class BundleTransfer:
                 "sha256": transfer_id,
             }
         else:
+            lifecycle = BundleLifecycle(self.config.workspace.bundle_root)
+            records = lifecycle.read()
+            if len(records) >= MAX_BUNDLES and release_id not in records:
+                raise OperationsError(
+                    f"local bundle limit ({MAX_BUNDLES}) reached; activate or abandon prepared releases"
+                )
+            free = shutil.disk_usage(output.parent).free
+            if free < _CAPACITY_RESERVE_BYTES:
+                raise OperationsError(
+                    f"insufficient workstation space: {free} bytes free; "
+                    f"at least {_CAPACITY_RESERVE_BYTES} bytes required before bundling"
+                )
+            lifecycle.mark(release_id, "building", create=True)
             bundle_result = self._seal(output, release_id, cutover_mode=cutover_mode)
             transfer_id = self.validate_existing(output, release_id, cutover_mode=cutover_mode)
         return bundle_result, transfer_id

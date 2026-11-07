@@ -342,10 +342,20 @@ class EidolonPiController:
         the current links reference, so an activated release is never touched.
         """
 
-        self.preflight.validate_ssh_material()
-        reclaimed = self.releases.bundles.reclaim(release_id, phase="abort")
-        self.releases.bundles.require_reclamation(reclaimed, "aborted")
-        return {"status": "abandoned", "release_id": release_id, "result": reclaimed}
+        from eidolon_ops.bundle_lifecycle import BundleLifecycle
+
+        release_id = validate_release_id(release_id)
+        lifecycle = BundleLifecycle(self.config.workspace.bundle_root)
+        with lifecycle.lock():
+            self.preflight.validate_ssh_material()
+            reclaimed = self.releases.bundles.reclaim(release_id, phase="abort")
+            self.releases.bundles.require_reclamation(reclaimed, "aborted")
+            cleanup = None
+            if release_id in lifecycle.read():
+                lifecycle.mark(release_id, "committed")
+                cleanup = self.bundles.cleanup_local_after_success(release_id)
+            return {"status": "abandoned", "release_id": release_id, "result": reclaimed,
+                    "local_bundle_cleanup": cleanup}
 
     def local_preflight(
         self, *, require_install_files: bool, require_clean_sources: bool = True
