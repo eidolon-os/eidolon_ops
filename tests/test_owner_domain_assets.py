@@ -82,7 +82,7 @@ def _resigned(material: Path, descriptor: bytes, **changes: object) -> bytes:
 def _issue_as_before_the_lifetime_policy(material: Path, descriptor: bytes) -> None:
     """Ten-year root and signer certificates and a one-year directory, same keys."""
 
-    def recertify(name: str, key_name: str, issuer_key_name: str) -> None:
+    def recertify(name: str, key_name: str, issuer_key_name: str, days: int) -> None:
         certificate = x509.load_pem_x509_certificate((material / name).read_bytes())
         key = serialization.load_pem_private_key((material / key_name).read_bytes(), None)
         issuer_key = serialization.load_pem_private_key(
@@ -95,19 +95,17 @@ def _issue_as_before_the_lifetime_policy(material: Path, descriptor: bytes) -> N
             .public_key(key.public_key())
             .serial_number(x509.random_serial_number())
             .not_valid_before(NOW - timedelta(minutes=5))
-            .not_valid_after(NOW + timedelta(days=3650))
+            .not_valid_after(NOW + timedelta(days=days))
         )
         for extension in certificate.extensions:
             builder = builder.add_extension(extension.value, critical=extension.critical)
         signed = builder.sign(issuer_key, hashes.SHA256())
         (material / name).write_bytes(signed.public_bytes(serialization.Encoding.PEM))
 
-    recertify("owner-domain-root-ca.pem", "owner-domain-root.key.pem", "owner-domain-root.key.pem")
-    recertify(
-        "authority-signing-certificate.pem",
-        "authority-signing.key.pem",
-        "owner-domain-root.key.pem",
-    )
+    root_key = "owner-domain-root.key.pem"
+    recertify("owner-domain-root-ca.pem", root_key, root_key, 3650)
+    recertify("authority-signing-certificate.pem", "authority-signing.key.pem", root_key, 3650)
+    recertify("hub.crt", "hub.key", root_key, 825)
     (material / "owner-domain-descriptor.json").write_bytes(
         _resigned(material, descriptor, expires_at=_zulu(NOW + timedelta(days=365)))
     )
@@ -346,6 +344,9 @@ def test_owner_trust_is_issued_for_the_device_lifetime(tmp_path: Path) -> None:
 
     assert root.not_valid_after_utc == NOW.replace(year=NOW.year + 99)
     assert signer.not_valid_after_utc == root.not_valid_after_utc
+    # Every client anchors on the root, so the TLS leaf lives as long as it.
+    leaf = x509.load_pem_x509_certificate(assets.tls_certificate)
+    assert leaf.not_valid_after_utc == root.not_valid_after_utc
     # RFC 5280 encodes validity from 2050 on as GeneralizedTime.
     assert b"\x18\x0f2125" in root.public_bytes(serialization.Encoding.DER)
     # A directory never outlives the delegation that signs it.
@@ -357,19 +358,25 @@ def test_ten_year_material_is_recertified_under_its_own_keys(tmp_path: Path) -> 
     root = tmp_path / "owner-domain"
     first = ensure_owner_domain_assets(root, identity, 8443, FRESH, now=NOW)
     _issue_as_before_the_lifetime_policy(root, first.descriptor)
-    kept = ("owner-domain-root.key.pem", "authority-signing.key.pem", "hub.key", "hub.crt")
+    kept = ("owner-domain-root.key.pem", "authority-signing.key.pem")
     before = {name: (root / name).read_bytes() for name in kept}
     later = NOW + timedelta(days=30)
 
     renewed = ensure_owner_domain_assets(root, identity, 8443, FRESH, now=later)
 
-    # Same keys, so the same Owner Domain and a TLS leaf that still chains.
+    # Same keys, so the same Owner Domain.
     assert renewed.owner_domain_id == first.owner_domain_id
     assert {name: (root / name).read_bytes() for name in kept} == before
     owner_root = x509.load_pem_x509_certificate(renewed.owner_root_certificate)
     signer = x509.load_pem_x509_certificate(renewed.authority_signing_certificate)
     assert owner_root.not_valid_after_utc == later.replace(year=later.year + 99)
     assert signer.not_valid_after_utc == owner_root.not_valid_after_utc
+    # The 825-day leaf is issued once more, for the lifetime, under the root.
+    leaf = x509.load_pem_x509_certificate(renewed.tls_certificate)
+    assert leaf.not_valid_after_utc == owner_root.not_valid_after_utc
+    public = owner_root.public_key()
+    assert isinstance(public, ec.EllipticCurvePublicKey)
+    public.verify(leaf.signature, leaf.tbs_certificate_bytes, ec.ECDSA(leaf.signature_hash_algorithm))
     directory = json.loads(renewed.descriptor)
     assert directory["directory_revision"] == json.loads(first.descriptor)["directory_revision"] + 1
     assert _instant(directory["expires_at"]) == signer.not_valid_after_utc

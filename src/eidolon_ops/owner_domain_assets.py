@@ -78,7 +78,9 @@ LEGACY_AUTHORITY_STATE = "owner-domain-state.json"
 #: §4.1.2.5 treats device certificates. A device installs the root, the signer
 #: and the directory once at commissioning and nothing renews them there, so
 #: the one-year directory this replaces only ever ended in devices losing their
-#: Owner. Matter and AWS IoT issue device trust the same way.
+#: Owner. Matter and AWS IoT issue device trust the same way. The Host TLS leaf
+#: lives under the same root for the same span: every client anchors on the
+#: root, so a leaf that expired only ever took the Host off the network.
 OWNER_TRUST_LIFETIME_YEARS = 99
 
 
@@ -341,16 +343,22 @@ def _bootstrap_document(lineage: Mapping[str, object], *, established: bool) -> 
     return (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
 
 
-def _lifetime_end(start: datetime) -> datetime:
+def _lifetime_end(start: datetime, *, within: x509.Certificate | None = None) -> datetime:
     year = start.year + OWNER_TRUST_LIFETIME_YEARS
     try:
-        return start.replace(year=year)
+        end = start.replace(year=year)
     except ValueError:  # 29 February, in a year that has none
-        return start.replace(year=year, day=28)
+        end = start.replace(year=year, day=28)
+    # Nothing outlives the certificate that vouches for it.
+    return end if within is None else min(end, within.not_valid_after_utc)
 
 
-def _issued_for_lifetime(certificate: x509.Certificate) -> bool:
-    return certificate.not_valid_after_utc >= _lifetime_end(certificate.not_valid_before_utc)
+def _issued_for_lifetime(
+    certificate: x509.Certificate, *, within: x509.Certificate | None = None
+) -> bool:
+    return certificate.not_valid_after_utc >= _lifetime_end(
+        certificate.not_valid_before_utc, within=within
+    )
 
 
 def _owner_root(root: Path, now: datetime) -> tuple[ec.EllipticCurvePrivateKey, x509.Certificate]:
@@ -427,7 +435,7 @@ def _directory_signer(
         key = _private_key(key_path)
         certificate = _certificate(certificate_path)
         _require_key_pair(key, certificate, "authority signer")
-        if _issued_for_lifetime(certificate):
+        if _issued_for_lifetime(certificate, within=root_certificate):
             return key, certificate
         # Same key, so every directory it signed still verifies.
         subject = certificate.subject
@@ -438,7 +446,7 @@ def _directory_signer(
         .public_key(key.public_key())
         .serial_number(x509.random_serial_number())
         .not_valid_before(now - timedelta(minutes=5))
-        .not_valid_after(_lifetime_end(now))
+        .not_valid_after(_lifetime_end(now, within=root_certificate))
         .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
         .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CODE_SIGNING]), critical=True)
         .add_extension(
@@ -499,13 +507,16 @@ def _host_tls(
         if names == [identity.hub_hostname]:
             if now < certificate.not_valid_before_utc:
                 raise OwnerDomainAssetError("existing Host TLS certificate is not yet valid")
-            if now < certificate.not_valid_after_utc:
+            if now < certificate.not_valid_after_utc and _issued_for_lifetime(
+                certificate, within=root_certificate
+            ):
                 return certificate_path.read_bytes(), key_path.read_bytes()
         elif len(names) != 1:
             raise OwnerDomainAssetError("existing Host TLS certificate SAN is invalid")
-        # A single different Host routing name denotes a Host replacement; an
-        # expired leaf denotes ordinary renewal. Both keep the Owner root and
-        # logical identity stable while issuing a new transport leaf below it.
+        # A single different Host routing name denotes a Host replacement; a
+        # leaf from the earlier 825-day policy is issued once more, for the
+        # lifetime. Every client anchors on the Owner root and none pins this
+        # leaf, so either keeps the Owner root and logical identity stable.
     key = ec.generate_private_key(ec.SECP256R1())
     certificate = (
         x509.CertificateBuilder()
@@ -514,7 +525,7 @@ def _host_tls(
         .public_key(key.public_key())
         .serial_number(x509.random_serial_number())
         .not_valid_before(now - timedelta(minutes=5))
-        .not_valid_after(now + timedelta(days=825))
+        .not_valid_after(_lifetime_end(now, within=root_certificate))
         .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
         .add_extension(x509.SubjectAlternativeName([x509.DNSName(identity.hub_hostname)]), False)
         .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=True)
