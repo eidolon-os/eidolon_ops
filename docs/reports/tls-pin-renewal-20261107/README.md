@@ -66,7 +66,7 @@
 ## 3. 代价和以后要注意的
 
 - **长期密钥一旦泄露，影响时间更长。** 如果 `hub.key` 或 Local API 的私钥泄露，只要不重签，攻击者就可以一直冒充 Hub 或 Local API。这和 Owner root、signer 私钥泄露是同一级别的事件，处理方式也一样：重置 Owner 或 Host，然后重新配网、重新配对。
-- **以后加 Apple 客户端时需要再做决定。** Apple 支持文档 103769 写的是"All TLS server certificates"，有效期必须不超过 825 天。到那时有两个选择：一是 iOS/macOS 客户端自己按 Owner root 或 SPKI 做校验，不走系统的 TLS 证书策略；二是把这两张证书降回 825 天以内，并由 Host 在 `start` 时自动续签。这一点会写进设计文档，作为已知的决策点。
+- **Apple 客户端：已决定（2026-11-07），两张证书保持 99 年。** Apple 支持文档 103769 写的是"All TLS server certificates"，有效期必须不超过 825 天。调研确认这条上限只由系统的 TLS 服务器信任策略施加，App 用基本 X.509 策略自行校验时不受它约束，Apple 也认可这种做法。所以 iOS/macOS 客户端和 Android 一样自己校验：Hub 只信 Owner root，并自行核对主机名和 EKU；Local API 比对 SPKI pin。不把证书降回 825 天，Host 也不加续签。前提是两条通道保持用 `.local` 名或局域网 IP 访问（不受 ATS 约束）。依据、出处和真机验证清单见 `eidolon_client_mobile/docs/reports/ios-trust-20261107/README.md`；设计文档 §3.6.1 已同步改写。
 
 ## 4. 实施（2026-11-07，已获确认，未提交）
 
@@ -78,7 +78,7 @@
   - 新增 `TLS_IDENTITY_LIFETIME_YEARS = 99`。生成证书的逻辑抽成 `_issue(host_id, private_key)`。
   - `load()` 发现证书有效期短于 99 年时，用原私钥重签，然后重新走一遍完整校验。这条逻辑放在有效期检查之前，所以已经过期的旧证书也会被重签，不会直接报错。
   - 新增测试 `server/tests/test_bootstrap_tls_identity.py`，4 个用例：新证书为 99 年；10 年期证书（未过期和已过期两种）都会用原密钥重签，SPKI、CN、SAN、0640 权限保持不变，再执行一次不会再写文件；属于别的 Host 的证书和不安全的文件权限照旧会被拒绝。
-- **设计文档 §3.6.1**：新增一条，写明 Host TLS 证书的长期策略、两个信任锚的分工，以及 Apple 客户端这个已知决策点。
+- **设计文档 §3.6.1**：新增一条，写明 Host TLS 证书的长期策略、两个信任锚的分工，以及 Apple 客户端这个已知决策点（2026-11-07 改为已决，见 §3）。
 
 生效时机：`./eidolon` 直接用 eidolon_ops 工作区的源码运行，所以下一次 Mac `restart` 时，`hub.crt` 会被重签成 99 年。admin 下次启动时（同样在 `restart` 里）会用原密钥重签 Local API 证书，SPKI 不变，手机不需要重新配对。
 
