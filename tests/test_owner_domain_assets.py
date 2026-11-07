@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from eidolon_sdk.device_foundation.v1.directory_tool import issue_descriptor
 
@@ -39,6 +40,77 @@ def _established(owner_domain_id: str, *, generation: int, state_id: str = "auth
 
 def _snapshot(root: Path) -> dict[str, tuple[bytes, int]]:
     return {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in root.iterdir()}
+
+
+def _instant(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def _zulu(value: datetime) -> str:
+    return value.isoformat().replace("+00:00", "Z")
+
+
+def _resigned(material: Path, descriptor: bytes, **changes: object) -> bytes:
+    """The same directory with ``changes``, signed by this material's signer."""
+
+    current = json.loads(descriptor)
+    source = {
+        name: current[name]
+        for name in (
+            "owner_domain_id",
+            "owner_domain_generation",
+            "directory_revision",
+            "descriptor_uri",
+            "endpoints",
+            "issued_at",
+            "expires_at",
+        )
+    }
+    signed = issue_descriptor(
+        {**source, "trust_epoch": 1, **changes},
+        owner_root_certificate_pem=(material / "owner-domain-root-ca.pem").read_text(
+            encoding="ascii"
+        ),
+        authority_signing_certificate_pem=(
+            material / "authority-signing-certificate.pem"
+        ).read_text(encoding="ascii"),
+        authority_private_key_pem=(material / "authority-signing.key.pem").read_bytes(),
+    )
+    return (json.dumps(signed.model_dump(mode="json"), indent=2) + "\n").encode()
+
+
+def _issue_as_before_the_lifetime_policy(material: Path, descriptor: bytes) -> None:
+    """Ten-year root and signer certificates and a one-year directory, same keys."""
+
+    def recertify(name: str, key_name: str, issuer_key_name: str) -> None:
+        certificate = x509.load_pem_x509_certificate((material / name).read_bytes())
+        key = serialization.load_pem_private_key((material / key_name).read_bytes(), None)
+        issuer_key = serialization.load_pem_private_key(
+            (material / issuer_key_name).read_bytes(), None
+        )
+        builder = (
+            x509.CertificateBuilder()
+            .subject_name(certificate.subject)
+            .issuer_name(certificate.issuer)
+            .public_key(key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(NOW - timedelta(minutes=5))
+            .not_valid_after(NOW + timedelta(days=3650))
+        )
+        for extension in certificate.extensions:
+            builder = builder.add_extension(extension.value, critical=extension.critical)
+        signed = builder.sign(issuer_key, hashes.SHA256())
+        (material / name).write_bytes(signed.public_bytes(serialization.Encoding.PEM))
+
+    recertify("owner-domain-root-ca.pem", "owner-domain-root.key.pem", "owner-domain-root.key.pem")
+    recertify(
+        "authority-signing-certificate.pem",
+        "authority-signing.key.pem",
+        "owner-domain-root.key.pem",
+    )
+    (material / "owner-domain-descriptor.json").write_bytes(
+        _resigned(material, descriptor, expires_at=_zulu(NOW + timedelta(days=365)))
+    )
 
 
 def test_offline_issuer_keeps_private_signers_off_the_host_bundle(tmp_path: Path) -> None:
@@ -265,54 +337,59 @@ def test_stale_descriptor_route_is_reissued_at_the_next_revision(tmp_path: Path)
     assert reissued["directory_revision"] == current["directory_revision"] + 1
 
 
-def test_a_descriptor_older_than_the_contract_is_reissued_not_refused(
-    tmp_path: Path,
-) -> None:
-    """The field this contract grew is a reason to reissue, never to stop.
+def test_owner_trust_is_issued_for_the_device_lifetime(tmp_path: Path) -> None:
+    identity = derive_host_lan_identity(b"a" * 32)
+    assets = ensure_owner_domain_assets(tmp_path / "owner-domain", identity, 8443, FRESH, now=NOW)
+    root = x509.load_pem_x509_certificate(assets.owner_root_certificate)
+    signer = x509.load_pem_x509_certificate(assets.authority_signing_certificate)
+    directory = json.loads(assets.descriptor)
 
-    Every Host that has ever been provisioned has a descriptor on disk. When the
-    signed document gained `descriptor_uri`, that stored copy stopped satisfying
-    the model, and this read reported it as invalid — so `deploy` failed on every
-    such Host, which is every Host in the field. The revision line is what must
-    be continued; which fields the previous document happened to carry is not.
-    """
+    assert root.not_valid_after_utc == NOW.replace(year=NOW.year + 99)
+    assert signer.not_valid_after_utc == root.not_valid_after_utc
+    # RFC 5280 encodes validity from 2050 on as GeneralizedTime.
+    assert b"\x18\x0f2125" in root.public_bytes(serialization.Encoding.DER)
+    # A directory never outlives the delegation that signs it.
+    assert _instant(directory["expires_at"]) == signer.not_valid_after_utc
 
+
+def test_ten_year_material_is_recertified_under_its_own_keys(tmp_path: Path) -> None:
     identity = derive_host_lan_identity(b"a" * 32)
     root = tmp_path / "owner-domain"
-    path = root / "owner-domain-descriptor.json"
-    ensure_owner_domain_assets(root, identity, 8443, FRESH, now=NOW)
+    first = ensure_owner_domain_assets(root, identity, 8443, FRESH, now=NOW)
+    _issue_as_before_the_lifetime_policy(root, first.descriptor)
+    kept = ("owner-domain-root.key.pem", "authority-signing.key.pem", "hub.key", "hub.crt")
+    before = {name: (root / name).read_bytes() for name in kept}
+    later = NOW + timedelta(days=30)
 
-    stored = json.loads(path.read_text(encoding="utf-8"))
-    superseded_revision = stored["directory_revision"]
-    del stored["descriptor_uri"]
-    path.write_text(json.dumps(stored), encoding="utf-8")
+    renewed = ensure_owner_domain_assets(root, identity, 8443, FRESH, now=later)
 
-    reissued = json.loads(
-        ensure_owner_domain_assets(
-            root, identity, 8443, FRESH, now=NOW + timedelta(minutes=1)
-        ).descriptor
-    )
-    assert reissued["descriptor_uri"] == (
-        identity.hub_origin(8443) + "/api/device-onboarding/v1/descriptor"
-    )
-    assert reissued["directory_revision"] == superseded_revision + 1
+    # Same keys, so the same Owner Domain and a TLS leaf that still chains.
+    assert renewed.owner_domain_id == first.owner_domain_id
+    assert {name: (root / name).read_bytes() for name in kept} == before
+    owner_root = x509.load_pem_x509_certificate(renewed.owner_root_certificate)
+    signer = x509.load_pem_x509_certificate(renewed.authority_signing_certificate)
+    assert owner_root.not_valid_after_utc == later.replace(year=later.year + 99)
+    assert signer.not_valid_after_utc == owner_root.not_valid_after_utc
+    directory = json.loads(renewed.descriptor)
+    assert directory["directory_revision"] == json.loads(first.descriptor)["directory_revision"] + 1
+    assert _instant(directory["expires_at"]) == signer.not_valid_after_utc
+
+    settled = _snapshot(root)
+    ensure_owner_domain_assets(root, identity, 8443, FRESH, now=later + timedelta(minutes=1))
+    assert _snapshot(root) == settled
 
 
 def test_existing_descriptor_corruption_fails_closed(tmp_path: Path) -> None:
     identity = derive_host_lan_identity(b"a" * 32)
     root = tmp_path / "owner-domain"
     ensure_owner_domain_assets(root, identity, 8443, FRESH, now=NOW)
-    (root / "owner-domain-descriptor.json").write_text("{}", encoding="utf-8")
 
-    # No Owner Domain named and no revision to continue: reissuing over this
-    # would either seize another Owner's directory or restart a revision line
-    # devices have already been told about.
-    with pytest.raises(OwnerDomainAssetError, match="another Owner Domain"):
-        ensure_owner_domain_assets(root, identity, 8443, FRESH, now=NOW)
-
-    (root / "owner-domain-descriptor.json").write_text("not json", encoding="utf-8")
-    with pytest.raises(OwnerDomainAssetError, match="unreadable"):
-        ensure_owner_domain_assets(root, identity, 8443, FRESH, now=NOW)
+    # Reissuing over a document this side cannot read would either seize another
+    # Owner's directory or restart a revision line devices have already seen.
+    for corrupt in ("{}", "not json"):
+        (root / "owner-domain-descriptor.json").write_text(corrupt, encoding="utf-8")
+        with pytest.raises(OwnerDomainAssetError, match="unreadable"):
+            ensure_owner_domain_assets(root, identity, 8443, FRESH, now=NOW)
 
 
 def test_existing_host_tls_corruption_fails_closed(tmp_path: Path) -> None:
@@ -458,7 +535,9 @@ def test_a_directory_at_a_generation_the_host_did_not_establish_is_its_own_incid
 
 
 def test_an_expired_directory_a_host_still_serves_is_adopted_and_reissued(tmp_path: Path) -> None:
-    identity, material, board, served = _board_serving(tmp_path)
+    identity, material, board, current = _board_serving(tmp_path)
+    # Directories were issued for one year before the lifetime policy.
+    served = _resigned(material, current, expires_at=_zulu(NOW + timedelta(days=365)))
     later = NOW + timedelta(days=400)
 
     renewed = ensure_owner_domain_assets(

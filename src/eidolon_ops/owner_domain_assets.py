@@ -74,6 +74,12 @@ OWNER_DOMAIN_MATERIAL_NAMES = frozenset(_MATERIAL_NAMES)
 #: :func:`retire_legacy_authority_state` removes it, because a file that looks
 #: authoritative and is not is where the next confident wrong answer comes from.
 LEGACY_AUTHORITY_STATE = "owner-domain-state.json"
+#: Owner trust lives as long as the devices that hold it, the way RFC 5280
+#: §4.1.2.5 treats device certificates. A device installs the root, the signer
+#: and the directory once at commissioning and nothing renews them there, so
+#: the one-year directory this replaces only ever ended in devices losing their
+#: Owner. Matter and AWS IoT issue device trust the same way.
+OWNER_TRUST_LIFETIME_YEARS = 99
 
 
 @dataclass(frozen=True, slots=True)
@@ -335,22 +341,40 @@ def _bootstrap_document(lineage: Mapping[str, object], *, established: bool) -> 
     return (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
 
 
+def _lifetime_end(start: datetime) -> datetime:
+    year = start.year + OWNER_TRUST_LIFETIME_YEARS
+    try:
+        return start.replace(year=year)
+    except ValueError:  # 29 February, in a year that has none
+        return start.replace(year=year, day=28)
+
+
+def _issued_for_lifetime(certificate: x509.Certificate) -> bool:
+    return certificate.not_valid_after_utc >= _lifetime_end(certificate.not_valid_before_utc)
+
+
 def _owner_root(root: Path, now: datetime) -> tuple[ec.EllipticCurvePrivateKey, x509.Certificate]:
     key_path = root / _ROOT_KEY
     certificate_path = root / _ROOT_CERTIFICATE
     present = key_path.is_file(), certificate_path.is_file()
     if any(present) and not all(present):
         raise OwnerDomainAssetError("Owner root material is incomplete")
-    if all(present):
+    new = not all(present)
+    if new:
+        key = ec.generate_private_key(ec.SECP256R1())
+        subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Eidolon Owner Domain Root")])
+    else:
         key = _private_key(key_path)
         certificate = _certificate(certificate_path)
         _require_key_pair(key, certificate, "Owner root")
         constraints = certificate.extensions.get_extension_for_class(x509.BasicConstraints).value
         if not constraints.ca:
             raise OwnerDomainAssetError("Owner root certificate is not a CA")
-        return key, certificate
-    key = ec.generate_private_key(ec.SECP256R1())
-    subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Eidolon Owner Domain Root")])
+        if _issued_for_lifetime(certificate):
+            return key, certificate
+        # Certified for ten years before the lifetime policy. The same key is
+        # the same Owner Domain, so only the certificate is issued again.
+        subject = certificate.subject
     certificate = (
         x509.CertificateBuilder()
         .subject_name(subject)
@@ -358,7 +382,7 @@ def _owner_root(root: Path, now: datetime) -> tuple[ec.EllipticCurvePrivateKey, 
         .public_key(key.public_key())
         .serial_number(x509.random_serial_number())
         .not_valid_before(now - timedelta(minutes=5))
-        .not_valid_after(now + timedelta(days=3650))
+        .not_valid_after(_lifetime_end(now))
         .add_extension(x509.BasicConstraints(ca=True, path_length=1), critical=True)
         .add_extension(
             x509.KeyUsage(
@@ -376,7 +400,8 @@ def _owner_root(root: Path, now: datetime) -> tuple[ec.EllipticCurvePrivateKey, 
         )
         .sign(key, hashes.SHA256())
     )
-    _write_key(key_path, key)
+    if new:
+        _write_key(key_path, key)
     write_private_file(certificate_path, certificate.public_bytes(serialization.Encoding.PEM))
     return key, certificate
 
@@ -392,24 +417,28 @@ def _directory_signer(
     present = key_path.is_file(), certificate_path.is_file()
     if any(present) and not all(present):
         raise OwnerDomainAssetError("authority signer material is incomplete")
-    if all(present):
+    new = not all(present)
+    if new:
+        key = ec.generate_private_key(ec.SECP256R1())
+        subject = x509.Name(
+            [x509.NameAttribute(NameOID.COMMON_NAME, "Eidolon Owner Directory Signer")]
+        )
+    else:
         key = _private_key(key_path)
         certificate = _certificate(certificate_path)
         _require_key_pair(key, certificate, "authority signer")
-        return key, certificate
-    key = ec.generate_private_key(ec.SECP256R1())
+        if _issued_for_lifetime(certificate):
+            return key, certificate
+        # Same key, so every directory it signed still verifies.
+        subject = certificate.subject
     certificate = (
         x509.CertificateBuilder()
-        .subject_name(
-            x509.Name(
-                [x509.NameAttribute(NameOID.COMMON_NAME, "Eidolon Owner Directory Signer")]
-            )
-        )
+        .subject_name(subject)
         .issuer_name(root_certificate.subject)
         .public_key(key.public_key())
         .serial_number(x509.random_serial_number())
         .not_valid_before(now - timedelta(minutes=5))
-        .not_valid_after(now + timedelta(days=3650))
+        .not_valid_after(_lifetime_end(now))
         .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
         .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CODE_SIGNING]), critical=True)
         .add_extension(
@@ -428,7 +457,8 @@ def _directory_signer(
         )
         .sign(root_key, hashes.SHA256())
     )
-    _write_key(key_path, key)
+    if new:
+        _write_key(key_path, key)
     write_private_file(certificate_path, certificate.public_bytes(serialization.Encoding.PEM))
     return key, certificate
 
@@ -548,47 +578,23 @@ def _directory(
         try:
             current = OwnerDomainDescriptor.model_validate_json(path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
-            # A document this Host wrote before the contract grew a field is not
-            # invalid — it is older, and the answer to older is to reissue it at
-            # the next revision. Refusing instead stops every deploy on a Host
-            # that has ever been provisioned, which is every Host in the field:
-            # adding `descriptor_uri` did exactly that until this read said so.
-            #
-            # What still cannot be salvaged is a document that does not name this
-            # Owner Domain, or that has no revision to continue from. Reissuing
-            # over either of those would either seize another Owner's directory
-            # or restart a revision line devices have already seen.
-            try:
-                superseded = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, ValueError) as unreadable:
-                raise OwnerDomainAssetError(
-                    "existing Owner Domain descriptor is unreadable"
-                ) from unreadable
-            if (
-                not isinstance(superseded, dict)
-                or superseded.get("owner_domain_id") != owner_domain_id
-                or not isinstance(superseded.get("directory_revision"), int)
-                or superseded["directory_revision"] < 1
-            ):
-                raise OwnerDomainAssetError(
-                    "existing Owner Domain descriptor names another Owner Domain "
-                    "or has no revision to continue"
-                ) from exc
-            revision = superseded["directory_revision"] + 1
-            current = None
-        if current is not None:
-            expected = [item.model_dump(mode="json") for item in current.endpoints]
-            if (
-                current.owner_domain_id == owner_domain_id
-                and current.owner_domain_generation == owner_domain_generation
-                and expected == endpoints
-                and current.descriptor_uri == descriptor_uri
-                and current.issued_at <= now < current.expires_at
-            ):
-                _validate_directory(current, root_certificate, signer_certificate, now)
-                return path.read_bytes()
-            if current.owner_domain_generation == owner_domain_generation:
-                revision = current.directory_revision + 1
+            # Reissuing over a document this side cannot read would either seize
+            # another Owner's directory or restart a revision line devices have
+            # already seen.
+            raise OwnerDomainAssetError("existing Owner Domain descriptor is unreadable") from exc
+        expected = [item.model_dump(mode="json") for item in current.endpoints]
+        if (
+            current.owner_domain_id == owner_domain_id
+            and current.owner_domain_generation == owner_domain_generation
+            and expected == endpoints
+            and current.descriptor_uri == descriptor_uri
+            and current.expires_at == signer_certificate.not_valid_after_utc
+            and current.issued_at <= now < current.expires_at
+        ):
+            _validate_directory(current, root_certificate, signer_certificate, now)
+            return path.read_bytes()
+        if current.owner_domain_generation == owner_domain_generation:
+            revision = current.directory_revision + 1
     source = {
         "owner_domain_id": owner_domain_id,
         "owner_domain_generation": owner_domain_generation,
@@ -597,7 +603,8 @@ def _directory(
         "descriptor_uri": descriptor_uri,
         "endpoints": endpoints,
         "issued_at": now.isoformat().replace("+00:00", "Z"),
-        "expires_at": (now + timedelta(days=365)).isoformat().replace("+00:00", "Z"),
+        # As long as the delegation that signs it, never longer.
+        "expires_at": signer_certificate.not_valid_after_utc.isoformat().replace("+00:00", "Z"),
     }
     descriptor = issue_descriptor(
         source,
