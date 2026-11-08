@@ -308,6 +308,7 @@ def test_every_flag_the_cli_offers_binds_to_the_real_controller_signature() -> N
         "rollback": {"release_id": "r-1", "snapshot": Path("/snap"), "apply": True},
         "diagnose": {"output": Path("/tmp/report.tar.gz")},
         "logs": {"service": None, "lines": 200, "since": None},
+        "release_set": {"pins": (), "apply": True, "reclaim": True},
     }
     for name, keywords in calls.items():
         signature = inspect.signature(getattr(HostController, name))

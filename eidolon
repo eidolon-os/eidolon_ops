@@ -133,7 +133,7 @@ command_summary() {
     logs) printf '读取全部日志或指定服务日志' ;;
     commissioning-code) printf '生成手机 Setup/Commissioning Code' ;;
     debug) printf '源码 Host 的 prepare/validate/Web 诊断入口' ;;
-    release-set) printf '选择源码 Host 运行的发布集：一个快照根，全部取自 main（--apply 才创建并提交）' ;;
+    release-set) printf '选择源码 Host 运行的发布集：一个快照根，全部取自 main（--apply 才创建并提交，并回收不再需要的旧根；--reclaim 只回收）' ;;
     provision) printf '按执行配置准备 Host 运行环境' ;;
     init-inputs) printf '首次生成产品私密输入和 Host Identity' ;;
     converge-inputs) printf '补齐新增凭据，不修改已有值' ;;

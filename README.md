@@ -788,12 +788,25 @@ Mac 的选择只通过一个入口变更：
 ./eidolon mac release-set --apply              # 创建 sources/main-<日期>-<摘要>/、同步各 venv、核对依赖、改写并提交 mac.toml
 ./eidolon mac release-set --pin eidolon_hub=<40hex> --apply   # 指定某仓的提交（仍必须在 main 上）
 ./eidolon mac restart                          # 运行新的发布集；prepare 会把上面的规则再检查一遍
+./eidolon mac release-set --reclaim            # 计划：哪些旧快照根不再需要
+./eidolon mac release-set --reclaim --apply    # 只回收旧快照根，不选择新的发布集
 ```
 
 快照根按内容命名：再次选择同一套提交时会找到同一个根。只改动 Host profile 的 Ops 提交不算新的发布集。
 Models 的 worktree 不拉取 LFS 内容（模型字节由产物物化器直接从 git 对象库读取），所以每个根只占几 GB，
 不再是 15 GB。其他仓照常拉取：Channel 从自己的目录树直接加载 VAD 和断句 ONNX，10-31 曾因这两个文件只是
-LFS 指针而加载失败。旧的根不会被自动删除。Pi 的发布输入仍是各兄弟仓的 HEAD，但 HEAD 必须在 main 上。
+LFS 指针而加载失败。Pi 的发布输入仍是各兄弟仓的 HEAD，但 HEAD 必须在 main 上。
+
+旧快照根由 `release-set` 回收：`--apply` 选定新发布集后顺带回收，`--reclaim --apply` 只回收。不带
+`--apply` 时只报告。以下几种根会保留：profile 选中的根、上一次 `prepare` 记录的根（两者在选择之后、
+`restart` 之前不是同一个），以及其余根里最新的一个，留作回退时直接复用。每个根按 worktree 逐个用
+`git worktree remove` 删除，各仓不会留下失效的 worktree 登记。以下情况拒绝回收并在报告里写明原因，不提供强制开关：
+
+- 有未提交改动：这是在发布快照里直接改的代码，应先提交到 main 或丢弃，再重新回收。
+- 有进程从这个根启动。
+- 根里有不是 worktree 的东西。
+
+回收失败不会把已经成功的选择改判为失败。删掉的根可以重新选择同一组提交来重建，只是要花时间。
 
 Mac product-source 在 canonical 7880 上直接管理 LiveKit 进程；`external` 表示复用已验证的二进制和
 凭据配置，不表示继续依赖旧 Admin supervisor。NATS 仍由 external foundation 提供并在启动前受健康门禁。

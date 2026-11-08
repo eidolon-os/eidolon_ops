@@ -127,7 +127,7 @@ OPERATIONS: dict[str, Callable[[HostController, argparse.Namespace], object]] = 
         "product-source", a.profile_operation
     ),
     "release-set": lambda controller, a: controller.release_set(
-        pins=tuple(a.pin), apply=a.apply
+        pins=tuple(a.pin), apply=a.apply, reclaim=a.reclaim
     ),
     "logs": lambda controller, a: controller.logs(
         service=a.service, lines=a.lines, since=a.since
@@ -497,6 +497,11 @@ def _parser() -> argparse.ArgumentParser:
     release.add_argument(
         "--pin", action="append", default=[], metavar="SOURCE=40HEX",
         help="take this commit (on main) instead of main's tip; repeatable",
+    )
+    release.add_argument(
+        "--reclaim", action="store_true",
+        help="select nothing; only remove release roots nothing selects, runs or keeps "
+        "for going back (with --apply)",
     )
     release.add_argument("--apply", action="store_true")
     logs = operations.add_parser("logs")

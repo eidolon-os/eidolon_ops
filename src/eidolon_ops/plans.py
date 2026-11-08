@@ -531,7 +531,23 @@ def logs(host_id: str) -> Plan:
     )
 
 
-def release_set(host_id: str, *, apply: bool) -> Plan:
+#: Removing a root is walked back by selecting the same commits again: roots are
+#: named by content and only clean ones are removed, so nothing is lost but time.
+_RECLAIM = ("reclaim", "remove release roots nothing selects, runs or keeps for going back")
+
+
+def release_set(host_id: str, *, apply: bool, reclaim: bool = False) -> Plan:
+    if reclaim:
+        return Plan(
+            operation="release-set --reclaim",
+            host_id=host_id,
+            steps=_steps(
+                ("plan", "find release roots nothing selects, runs or keeps for going back"),
+                *((_RECLAIM,) if apply else ()),
+            ),
+            destructive=DestructiveLevel.REVERSIBLE if apply else DestructiveLevel.NONE,
+            touches=frozenset({ActionKind.CODE}) if apply else frozenset(),
+        )
     return Plan(
         operation="release-set",
         host_id=host_id,
@@ -542,11 +558,13 @@ def release_set(host_id: str, *, apply: bool) -> Plan:
                     ("build", "create the release root: worktrees and their environments"),
                     ("libraries", "prove every environment imports the root's own libraries"),
                     ("profile", "point the Host profile at the root and commit it"),
+                    _RECLAIM,
                 )
                 if apply else ()
             ),
         ),
         requires_flags=frozenset() if apply else frozenset(),
+        destructive=DestructiveLevel.REVERSIBLE if apply else DestructiveLevel.NONE,
         touches=frozenset({ActionKind.CONFIG, ActionKind.CODE}) if apply else frozenset(),
     )
 

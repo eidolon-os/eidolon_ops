@@ -474,3 +474,129 @@ def test_an_uncommitted_profile_stops_a_source_run(tmp_path: Path) -> None:
     product.profile.path.write_text("[host]\nid = 'edited'\n")
     with pytest.raises(OperationsError, match="uncommitted changes"):
         product.require_release_set()
+
+
+# -- reclaiming roots ------------------------------------------------------------
+
+
+class _Processes(SubprocessRunner):
+    """Real git; ``ps`` answers with whatever the test says is running."""
+
+    def __init__(self) -> None:
+        self.running: list[str] = []
+
+    def run(self, command, **kwargs):
+        if command[0] == "ps":
+            return ProcessResult(0, "".join(f"{4000 + i} {c}\n" for i, c in enumerate(self.running)), "")
+        return super().run(command, **kwargs)
+
+
+def _roots(tmp_path: Path, *names: str):
+    """Release roots made the way ``apply`` makes them: detached worktrees of main."""
+
+    repos = {}
+    for source_id in ("eidolon_hub", "eidolon_ops"):
+        repos[source_id] = tmp_path / "checkouts" / source_id
+        repos[source_id].mkdir(parents=True)
+        _git(repos[source_id], "init", "-q", "-b", "main")
+        (repos[source_id] / ".gitignore").write_text(".venv/\n")
+        (repos[source_id] / "a.txt").write_text("a")
+        _git(repos[source_id], "add", ".")
+        _git(repos[source_id], *_IDENTITY, "commit", "-qm", "a")
+    sources = tmp_path / "sources"
+    for name in names:  # oldest first
+        for source_id, repo in repos.items():
+            target = sources / name / source_id
+            _git(repo, "worktree", "add", "-q", "--detach", str(target), "main")
+            # An environment is ignored, and goes with its worktree.
+            (target / ".venv/bin").mkdir(parents=True)
+            (target / ".venv/bin/python").write_text("")
+    runner = _Processes()
+    return release_set.ReleaseRootReclamation(sources_root=sources, runner=runner), repos, runner
+
+
+def _worktrees(repo: Path) -> list[str]:
+    return [
+        Path(line.split(" ", 1)[1]).parent.name
+        for line in _git(repo, "worktree", "list", "--porcelain").splitlines()
+        if line.startswith("worktree ") and Path(line.split(" ", 1)[1]) != repo
+    ]
+
+
+A, B, C, D = (f"main-2026110{i}-{i}{i}{i}{i}{i}{i}{i}{i}" for i in range(1, 5))
+
+
+def test_roots_nothing_needs_leave_through_git(tmp_path: Path) -> None:
+    reclamation, repos, _runner = _roots(tmp_path, A, B, C, D)
+    sources = reclamation.sources_root
+    (sources / "scratch").mkdir()  # not a release root: never looked at
+    plan = reclamation.plan([(sources / D, "selected"), (sources / B, "last_prepared")])
+    # The newest of the rest is kept to go back to; only the oldest goes.
+    assert plan == {
+        "kept": {B: ["last_prepared"], C: ["rollback"], D: ["selected"]},
+        "reclaim": [A],
+        "refused": {},
+    }
+    result = reclamation.apply(plan)
+    assert result["removed"] == [A] and result["failures"] == []
+    assert not (sources / A).exists() and (sources / "scratch").is_dir()
+    for repo in repos.values():
+        # Each repository forgets the worktree; nothing is left to prune.
+        assert sorted(_worktrees(repo)) == [B, C, D]
+
+
+def test_one_root_both_selected_and_prepared_says_both(tmp_path: Path) -> None:
+    reclamation, _repos, _runner = _roots(tmp_path, A, B)
+    sources = reclamation.sources_root
+    plan = reclamation.plan([
+        (sources / B, "selected"), (tmp_path / "sources/../sources" / B, "last_prepared"),
+    ])
+    assert plan["kept"] == {A: ["rollback"], B: ["selected", "last_prepared"]}
+    assert plan["reclaim"] == []
+
+
+def test_a_root_holding_hand_edits_is_refused_until_they_are_gone(tmp_path: Path) -> None:
+    # 11-04: a root held edits made in the release itself, not on main.
+    reclamation, repos, _runner = _roots(tmp_path, A, B, C)
+    sources = reclamation.sources_root
+    (sources / A / "eidolon_hub/a.txt").write_text("edited in the release")
+    (sources / A / "eidolon_hub/new.py").write_text("")
+    kept = [(sources / C, "selected")]
+    plan = reclamation.plan(kept)
+    assert plan["reclaim"] == []
+    refusal = plan["refused"][A]
+    assert refusal["reason"] == "uncommitted_changes"
+    assert refusal["changes"] == {"eidolon_hub": [" M a.txt", "?? new.py"]}
+    assert reclamation.apply(plan)["removed"] == []
+    assert (sources / A / "eidolon_ops").is_dir()
+    _git(sources / A / "eidolon_hub", "checkout", "-q", "--", "a.txt")
+    (sources / A / "eidolon_hub/new.py").unlink()
+    assert reclamation.apply(reclamation.plan(kept))["removed"] == [A]
+    assert sorted(_worktrees(repos["eidolon_hub"])) == [B, C]
+
+
+def test_a_root_a_process_was_started_from_is_refused(tmp_path: Path) -> None:
+    reclamation, _repos, runner = _roots(tmp_path, A, B, C)
+    sources = reclamation.sources_root.resolve()
+    plan = reclamation.plan([(sources / C, "selected")])
+    assert plan["reclaim"] == [A]
+    # Started between the plan and its application: checked again, refused.
+    runner.running = [f"{sources / A}/eidolon_hub/.venv/bin/python -m hub"]
+    result = reclamation.apply(plan)
+    assert result["removed"] == []
+    assert result["refused"][A] == {"reason": "running", "pids": ["4000"]}
+    assert (sources / A).is_dir()
+
+
+def test_anything_but_worktrees_keeps_a_root(tmp_path: Path) -> None:
+    reclamation, _repos, _runner = _roots(tmp_path, A, B, C)
+    sources = reclamation.sources_root
+    (sources / A / "notes.txt").write_text("")
+    plan = reclamation.plan([(sources / C, "selected")])
+    assert plan["refused"][A] == {"reason": "not_worktrees", "entries": ["notes.txt"]}
+
+
+def test_a_reclamation_plan_names_only_release_roots(tmp_path: Path) -> None:
+    reclamation, _repos, _runner = _roots(tmp_path, A)
+    with pytest.raises(OperationsError, match="malformed"):
+        reclamation.apply({"reclaim": ["../checkouts"]})

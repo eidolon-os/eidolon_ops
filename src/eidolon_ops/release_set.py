@@ -31,7 +31,8 @@ import hashlib
 import json
 import os
 import re
-from collections.abc import Mapping
+import shutil
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -39,7 +40,7 @@ from types import MappingProxyType
 
 from eidolon_ops.errors import OperationsError
 from eidolon_ops.private_files import atomic_private_file
-from eidolon_ops.process import ProcessRunner, checked
+from eidolon_ops.process import ProcessError, ProcessRunner, checked
 from eidolon_ops.source_resolution import TRUNK
 
 #: Libraries more than one process imports, and the checkout each must come
@@ -494,6 +495,169 @@ class ReleaseSetSelection:
         ))
         if answer.returncode != 0:
             raise OperationsError(f"{source_id} {revision[:12]} is not on {TRUNK}")
+
+
+# -- reclaiming roots -----------------------------------------------------------
+
+#: Roots kept besides the one the profile selects and the one this Host last
+#: prepared: the newest others, so going back one set finds its root instead of
+#: building it again (worktrees, environments, bytecode: minutes).
+KEPT_FOR_ROLLBACK = 1
+#: Uncommitted paths reported per worktree; the refusal names the rest by count.
+_CHANGES_SHOWN = 20
+
+
+@dataclass(frozen=True, slots=True)
+class ReleaseRootReclamation:
+    """Remove the release roots nothing selects, runs or keeps for going back.
+
+    ``ReleaseSetSelection.apply`` creates a root per selection and nothing
+    removed one: on 2026-11-08 the Mac held six, 5 GB each. A root is a set of
+    linked worktrees, so it leaves through ``git worktree remove``; deleting the
+    directory would leave each repository listing worktrees that are gone.
+    Refused, never forced:
+
+    - uncommitted changes: code edited in a release instead of on main (one
+      11-04 root held a hand-made copy of what main got 36 minutes later).
+      Commit it to main or discard it, then reclaim again;
+    - a running process started from the root;
+    - anything in the root that is not a worktree.
+    """
+
+    sources_root: Path
+    runner: ProcessRunner
+    git: str = "git"
+
+    def plan(self, kept: Iterable[tuple[Path, str]]) -> dict[str, object]:
+        """Which roots stay and why, which go, and which are refused."""
+
+        named: dict[Path, list[str]] = {}
+        for path, reason in kept:
+            reasons = named.setdefault(Path(path).resolve(), [])
+            if reason not in reasons:
+                reasons.append(reason)
+        roots = self._roots()
+        others = [root for root in roots if root not in named]
+        others.sort(key=_created, reverse=True)
+        report_kept = {root.name: named[root] for root in roots if root in named}
+        report_kept.update({root.name: ["rollback"] for root in others[:KEPT_FOR_ROLLBACK]})
+        processes = self._processes()
+        reclaim: list[str] = []
+        refused: dict[str, object] = {}
+        for root in others[KEPT_FOR_ROLLBACK:]:
+            refusal = self._refusal(root, processes)
+            if refusal:
+                refused[root.name] = refusal
+            else:
+                reclaim.append(root.name)
+        return {"kept": report_kept, "reclaim": sorted(reclaim), "refused": refused}
+
+    def apply(self, plan: Mapping[str, object]) -> dict[str, object]:
+        """Remove what the plan reclaims, checking each root again just before."""
+
+        names = plan.get("reclaim")
+        if not isinstance(names, list) or any(
+            not isinstance(name, str) or _SET_NAME.fullmatch(name) is None for name in names
+        ):
+            raise OperationsError("release-root reclamation plan is malformed")
+        free_before = shutil.disk_usage(self.sources_root).free
+        processes = self._processes()
+        removed: list[str] = []
+        refused: dict[str, object] = dict(plan.get("refused") or {})  # type: ignore[call-overload]
+        failures: list[dict[str, str]] = []
+        for name in names:
+            root = self.sources_root.resolve() / name
+            if not root.is_dir():
+                continue
+            refusal = self._refusal(root, processes)
+            if refusal:
+                refused[name] = refusal
+                continue
+            try:
+                for worktree in sorted(root.iterdir()):
+                    checked(
+                        f"remove release worktree {name}/{worktree.name}",
+                        self.runner.run(
+                            (self.git, "-C", str(worktree), "worktree", "remove", str(worktree)),
+                            timeout=900,
+                        ),
+                    )
+                root.rmdir()
+            except (OSError, ProcessError) as exc:
+                # The roots before this one are gone; say where this one stopped.
+                failures.append({"root": name, "error": str(exc)})
+                continue
+            removed.append(name)
+        return {
+            "removed": removed,
+            "refused": refused,
+            "failures": failures,
+            "free_bytes": {
+                "before": free_before,
+                "after": shutil.disk_usage(self.sources_root).free,
+            },
+        }
+
+    def _roots(self) -> list[Path]:
+        if not self.sources_root.is_dir():
+            return []
+        return sorted(
+            path.resolve() for path in self.sources_root.iterdir()
+            if path.is_dir() and not path.is_symlink() and _SET_NAME.fullmatch(path.name)
+        )
+
+    def _processes(self) -> list[tuple[str, str]]:
+        """Every process's id and command line, read once per plan or apply."""
+
+        listing = checked(
+            "running processes", self.runner.run(("ps", "axww", "-o", "pid=,command="))
+        ).stdout
+        processes = []
+        for line in listing.splitlines():
+            pid, _, command = line.strip().partition(" ")
+            if pid:
+                processes.append((pid, command))
+        return processes
+
+    def _refusal(self, root: Path, processes: list[tuple[str, str]]) -> dict[str, object]:
+        # A process names the root the way it was started: resolved, or not.
+        prefixes = {f"{root}/", f"{Path(os.path.abspath(self.sources_root)) / root.name}/"}
+        running = sorted(
+            pid for pid, command in processes if any(prefix in command for prefix in prefixes)
+        )
+        if running:
+            return {"reason": "running", "pids": running}
+        strays: list[str] = []
+        changes: dict[str, list[str]] = {}
+        for entry in sorted(root.iterdir()):
+            if entry.is_symlink() or not entry.is_dir() or not (entry / ".git").is_file():
+                strays.append(entry.name)
+                continue
+            answer = self.runner.run((self.git, "-C", str(entry), "status", "--porcelain"))
+            if answer.returncode != 0:
+                # A worktree git cannot read is not one it can remove cleanly.
+                strays.append(entry.name)
+                continue
+            status = answer.stdout.splitlines()
+            if status:
+                shown = status[:_CHANGES_SHOWN]
+                if len(status) > _CHANGES_SHOWN:
+                    shown.append(f"... {len(status) - _CHANGES_SHOWN} more")
+                changes[entry.name] = shown
+        if strays:
+            return {"reason": "not_worktrees", "entries": strays}
+        if changes:
+            return {
+                "reason": "uncommitted_changes",
+                "changes": changes,
+                "next": "commit these to main or discard them, then reclaim again",
+            }
+        return {}
+
+
+def _created(root: Path) -> float:
+    stat = root.stat()
+    return float(getattr(stat, "st_birthtime", stat.st_mtime))
 
 
 def set_digest(revisions: Mapping[str, str]) -> str:

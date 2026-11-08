@@ -315,7 +315,9 @@ class HostController:
         report = adapter.supervisor.profile_operation(operation, arguments=arguments)
         return self._applied(plan, report)
 
-    def release_set(self, *, pins: tuple[str, ...] = (), apply: bool = False) -> Evidence:
+    def release_set(
+        self, *, pins: tuple[str, ...] = (), apply: bool = False, reclaim: bool = False
+    ) -> Evidence:
         """Select what this source run executes: one root, all from main (M3/M8).
 
         Without ``apply``, says which commits the next set would be and whether
@@ -323,12 +325,17 @@ class HostController:
         root (worktrees and environments), proves every environment imports the
         root's own libraries, and commits the profile naming it. Starting it is
         ``restart``'s job, which checks all of this again.
+
+        Either way it also says which older roots nothing needs any more, and a
+        selection that was applied removes them. ``reclaim`` does only that.
         """
 
         from eidolon_ops import release_set as sets
         from eidolon_ops.adapters.supervisord import PROFILE
 
-        plan = plans.release_set(self.profile.host_id, apply=apply)
+        if reclaim and pins:
+            raise OperationsError("release-set --reclaim selects nothing; drop --pin")
+        plan = plans.release_set(self.profile.host_id, apply=apply, reclaim=reclaim)
         self.adapter.require(Capability.SOURCE_PROFILE)
         if not self.profile.source_run:
             raise OperationsError("release-set selects a source run; a product Host ships HEAD")
@@ -339,6 +346,28 @@ class HostController:
             {k: v for k, v in current.items() if k != sets.OPS_SOURCE},
             self.profile.workspace_root,
         )
+        previous = sets.read_record(self.profile.paths.state_root)
+        # What the profile names now, and what restart last prepared: usually
+        # one root, two between a selection and the restart that runs it.
+        prepared = (
+            [(Path(str(previous["root"])), "last_prepared")]
+            if previous is not None and previous.get("root") else []
+        )
+        kept = [(root, "selected"), *prepared]
+        reclamation = sets.ReleaseRootReclamation(sources_root=root.parent, runner=self.runner)
+        if reclaim:
+            reclaimable = reclamation.plan(kept)
+            if not apply:
+                return Evidence(plan=plan, outcome=Outcome.PLANNED, report={
+                    "status": "planned", "reclamation": reclaimable,
+                })
+            removal = reclamation.apply(reclaimable)
+            if removal["failures"]:
+                # A refusal is an answer; a removal that stopped halfway is not.
+                return Evidence(plan=plan, outcome=Outcome.DEGRADED, report={
+                    "status": "degraded", "reclamation": removal,
+                })
+            return self._applied(plan, {"status": "reclaimed", "reclamation": removal})
         selection = sets.ReleaseSetSelection(
             profile=self.profile.path,
             repositories=current,
@@ -358,23 +387,33 @@ class HostController:
         chosen = selection.plan(
             parsed,
             current=held,
-            previous=sets.read_record(self.profile.paths.state_root),
+            previous=previous,
             allow_regression=self.allow_regression,
         )
         report: dict[str, object] = {"status": "planned", "profile": PROFILE, **chosen}
+        new_root = Path(str(chosen["root"]))
         if not apply:
+            report["reclamation"] = reclamation.plan([*kept, (new_root, "chosen")])
             return Evidence(plan=plan, outcome=Outcome.PLANNED, report=report)
         built = selection.apply(chosen)
-        new_root = Path(str(chosen["root"]))
         libraries = sets.require_one_library_set(
             self.runner,
             {k: new_root / k for k in chosen["revisions"] if k != sets.OPS_SOURCE},  # type: ignore[union-attr]
             new_root / sets.OPS_SOURCE,
         )
         profile_state = selection.write_profile(chosen)
+        # The profile names the new root now; the one it named before is kept
+        # only while restart has it running, or as the newest to go back to.
+        kept = [(new_root, "selected"), *prepared]
+        try:
+            reclaimed: dict[str, object] = reclamation.apply(reclamation.plan(kept))
+        except (OperationsError, ProcessError, OSError) as exc:
+            # The selection stands; a root left behind is only disk.
+            reclaimed = {"error": str(exc)}
         return self._applied(plan, {
             **report, **built, "status": "selected", "profile_commit": profile_state,
             "libraries": libraries,
+            "reclamation": reclaimed,
             "next": "./eidolon mac restart",
         })
 
