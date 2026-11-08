@@ -1,0 +1,238 @@
+[
+  {
+    "target": "conversation-person-20261027",
+    "repo": "eidolon_agent",
+    "head": "0ec6a13e64b81dc78ccedf6f6bb0a6935b8eead3",
+    "retained_refs": [
+      "codex/conversation-person",
+      "main",
+      "ed_v0.3.1"
+    ]
+  },
+  {
+    "target": "conversation-person-20261027",
+    "repo": "eidolon_channel",
+    "head": "94e6b2809bb1a6b183cae6c7b2cedde44b80da06",
+    "retained_refs": [
+      "codex/conversation-person",
+      "main",
+      "ed_v0.3.1"
+    ]
+  },
+  {
+    "target": "conversation-person-20261027",
+    "repo": "eidolon_client_mobile",
+    "head": "6db7050b2392668694698d0024f9ea6a634c5655",
+    "retained_refs": [
+      "codex/conversation-person"
+    ]
+  },
+  {
+    "target": "conversation-person-20261027",
+    "repo": "eidolon_data",
+    "head": "3cfe41f24f34c03daf4a819a196e237670ce818e",
+    "retained_refs": [
+      "codex/conversation-person"
+    ]
+  },
+  {
+    "target": "conversation-person-20261027",
+    "repo": "eidolon_models",
+    "head": "7823c49d9597fb234e6ce6997ac47bd92516448f",
+    "retained_refs": [
+      "codex/conversation-person"
+    ]
+  },
+  {
+    "target": "conversation-person-20261027",
+    "repo": "eidolon_sdk",
+    "head": "9dc18a53a32379ca01a393e0a9dd0bbe373ccfa6",
+    "retained_refs": [
+      "codex/conversation-person",
+      "main",
+      "ed_v0.3.1"
+    ]
+  },
+  {
+    "target": "voice-capture-20261030",
+    "repo": "eidolon_admin",
+    "head": "9606b0969d39f11711f3c240aa2250bf5ec09b10",
+    "retained_refs": [
+      "archive/cleanup-20261030-voice-capture-20261030"
+    ]
+  },
+  {
+    "target": "voice-capture-20261030",
+    "repo": "eidolon_channel",
+    "head": "7ad8dbb9b0bee7576271076178865789113b2fc9",
+    "retained_refs": [
+      "archive/cleanup-20261030-voice-capture-20261030"
+    ]
+  },
+  {
+    "target": "voice-capture-20261030",
+    "repo": "eidolon_client_mobile",
+    "head": "aca6904c68f2e976c4c76aeb98fa20535fa2a858",
+    "retained_refs": [
+      "archive/cleanup-20261030-voice-capture-20261030"
+    ]
+  },
+  {
+    "target": "voice-capture-20261030",
+    "repo": "eidolon_sdk",
+    "head": "4399d8c2e72af334a4f850b6213600053c91e741",
+    "retained_refs": [
+      "archive/cleanup-20261030-voice-capture-20261030"
+    ]
+  },
+  {
+    "target": "owned-voiceprints-20261027",
+    "repo": "eidolon_admin",
+    "head": "b208123c14a6e0f5218948894f9c469fff8193d9",
+    "retained_refs": [
+      "archive/cleanup-20261030-voice-capture-20261030",
+      "main",
+      "ed_v0.3.1"
+    ]
+  },
+  {
+    "target": "owned-voiceprints-20261027",
+    "repo": "eidolon_agent",
+    "head": "a97386b21644894f8bb3701aa3440ba0ccbaa999",
+    "retained_refs": [
+      "main",
+      "ed_v0.3.1"
+    ]
+  },
+  {
+    "target": "owned-voiceprints-20261027",
+    "repo": "eidolon_channel",
+    "head": "a5617ea126585d73d5adf573b364585ef98365c9",
+    "retained_refs": [
+      "archive/cleanup-20261030-voice-capture-20261030",
+      "main",
+      "ed_v0.3.1"
+    ]
+  },
+  {
+    "target": "owned-voiceprints-20261027",
+    "repo": "eidolon_data",
+    "head": "9a8f1b9e4ed9449118a17050177267e7460b6aa6",
+    "retained_refs": [
+      "main",
+      "ed_v0.3.1"
+    ]
+  },
+  {
+    "target": "owned-voiceprints-20261027",
+    "repo": "eidolon_hub",
+    "head": "7c63353646cf51022dff5991c77aa81abbc8fa61",
+    "retained_refs": [
+      "main",
+      "ed_v0.2.10",
+      "ed_v0.2.11",
+      "ed_v0.2.12",
+      "ed_v0.2.13",
+      "ed_v0.3.0",
+      "ed_v0.3.1"
+    ]
+  },
+  {
+    "target": "owned-voiceprints-20261027",
+    "repo": "eidolon_kernel",
+    "head": "1d7deaf2ff6d109b4782af16adae3896e862df3d",
+    "retained_refs": [
+      "main",
+      "ed_v0.3.1"
+    ]
+  },
+  {
+    "target": "owned-voiceprints-20261027",
+    "repo": "eidolon_memory",
+    "head": "6f8638fb11067d017a9173e63a33315679f42b26",
+    "retained_refs": [
+      "main",
+      "ed_v0.3.1"
+    ]
+  },
+  {
+    "target": "owned-voiceprints-20261027",
+    "repo": "eidolon_ops",
+    "head": "03d0930ed702edb806f19de200b865dddd701020",
+    "retained_refs": [
+      "main",
+      "ed_v0.3.1"
+    ]
+  },
+  {
+    "target": "owned-voiceprints-20261027",
+    "repo": "eidolon_sdk",
+    "head": "44dd77c7b5c67e22355ae83c98cc916f01f3b4ea",
+    "retained_refs": [
+      "archive/cleanup-20261030-owned-voiceprints-20261027"
+    ]
+  },
+  {
+    "target": "team-lifecycle-20261030",
+    "repo": "eidolon_admin",
+    "head": "090503d81b87c33d8ef0a0458662001cd49e39cd",
+    "retained_refs": [
+      "archive/cleanup-20261030-team-lifecycle-20261030"
+    ]
+  },
+  {
+    "target": "team-lifecycle-20261030",
+    "repo": "eidolon_channel",
+    "head": "6fcc9420b1a07d415e36ea9abe0ffe70da49a78f",
+    "retained_refs": [
+      "archive/cleanup-20261030-team-lifecycle-20261030"
+    ]
+  },
+  {
+    "target": "team-lifecycle-20261030",
+    "repo": "eidolon_data",
+    "head": "5c590facc6bb434225403a3daaeac953c9e08aca",
+    "retained_refs": [
+      "archive/cleanup-20261030-team-lifecycle-20261030"
+    ]
+  },
+  {
+    "target": "team-lifecycle-20261030",
+    "repo": "eidolon_sdk",
+    "head": "a9c334cc234092b974d1598a3a5427d98679dd21",
+    "retained_refs": [
+      "archive/cleanup-20261030-team-lifecycle-20261030"
+    ]
+  },
+  {
+    "target": "person-20261027",
+    "repo": "eidolon_data",
+    "head": "cf8680192014d67cd1bbcd4f92dbb4c6cf32e159",
+    "retained_refs": [
+      "archive/cleanup-20261030-team-lifecycle-20261030",
+      "codex/conversation-person",
+      "codex/person-memory-validation-20261027",
+      "codex/person-owned-voiceprints",
+      "main",
+      "ed_v0.3.1"
+    ]
+  },
+  {
+    "target": "person-20261027",
+    "repo": "eidolon_memory",
+    "head": "ec9cdc1248452328190495dfd25b47b1c89a568d",
+    "retained_refs": [
+      "codex/person-memory-validation-20261027",
+      "main",
+      "ed_v0.2.10",
+      "ed_v0.2.11",
+      "ed_v0.2.12",
+      "ed_v0.2.13",
+      "ed_v0.2.7",
+      "ed_v0.2.8",
+      "ed_v0.2.9",
+      "ed_v0.3.0",
+      "ed_v0.3.1"
+    ]
+  }
+]

@@ -1,0 +1,24 @@
+{
+  "logs": [
+    {
+      "root": "/Users/manson/eidolon/logs",
+      "removed_files": 336,
+      "removed_bytes": 1960474264,
+      "preserved_open_old_files": 0
+    },
+    {
+      "root": "/Users/manson/ai/eidolon/.eidolon/mac-product/logs",
+      "removed_files": 111,
+      "removed_bytes": 1592032703,
+      "preserved_open_old_files": 13
+    },
+    {
+      "root": "/Users/manson/ai/eidolon/.dogfood-log-archives",
+      "removed_files": 115,
+      "removed_bytes": 1062676333,
+      "preserved_open_old_files": 0
+    }
+  ],
+  "free_before_bytes": 32163078144,
+  "free_after_bytes": 32159948800
+}
